@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# secrets
+backend/.env
+backend/chains.json
+mobile/.env
+*.pem
+*.key
+
+# backend
+backend/sfluv-backend
+backend/data/*.db
+backend/data/*.db-*
+
+# mobile
+mobile/node_modules
+mobile/.expo
+mobile/.next

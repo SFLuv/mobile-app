@@ -1,0 +1,32 @@
+{
+  "listen_addr": ":8088",
+  "db_path": "./data/sfluv.db",
+  "chains": {
+    "80094": {
+      "chain_id": 80094,
+      "rpc_url": "https://rpc.berachain.com",
+      "rpc_ws_url": "",
+      "entrypoint_address": "0x55Dea4A3e9051a4123d751Df28E9c7b14D8e7F7d",
+      "account_factory_address": "0x5F4C862c7F2B38D2A7f46aE950379A9678ac6185",
+      "token": {
+        "address": "0x881cad4f885c6701d8481c0ed347f6d35444ea7e",
+        "symbol": "SFLUV",
+        "decimals": 18
+      },
+      "paymasters": {
+        "0x9A5be02B65f9Aa00060cB8c951dAFaBAB9B860cd": {
+          "address": "0x9A5be02B65f9Aa00060cB8c951dAFaBAB9B860cd",
+          "entrypoint_address": "0x7079253c0358eF9Fd87E16488299Ef6e06F403B6",
+          "type": "cw",
+          "sponsor_private_key": ""
+        },
+        "0x8FF7A8b1abD5A455A86B02A9d049D6aFdB82411e": {
+          "address": "0x8FF7A8b1abD5A455A86B02A9d049D6aFdB82411e",
+          "entrypoint_address": "0x55Dea4A3e9051a4123d751Df28E9c7b14D8e7F7d",
+          "type": "cw",
+          "sponsor_private_key": ""
+        }
+      }
+    }
+  }
+}
