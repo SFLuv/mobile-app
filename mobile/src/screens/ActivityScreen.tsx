@@ -1,7 +1,8 @@
 import React from "react";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { AppContact, AppTransaction } from "../types/app";
-import { palette, radii, spacing } from "../theme";
+import { palette, radii, shadows, spacing } from "../theme";
 
 type Props = {
   transactions: AppTransaction[];
@@ -27,34 +28,46 @@ export function ActivityScreen({ transactions, contacts, activeAddress, refreshi
     <ScrollView
       contentContainerStyle={styles.container}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}
+      showsVerticalScrollIndicator={false}
     >
-      <Text style={styles.title}>Activity</Text>
-      <Text style={styles.subtitle}>Recent SFLUV transfers for your current wallet route.</Text>
+      <View style={styles.heroCard}>
+        <Text style={styles.title}>Activity</Text>
+        <Text style={styles.subtitle}>Track the latest SFLUV payments for the wallet you currently have selected.</Text>
+      </View>
 
       {transactions.length === 0 ? (
         <View style={styles.emptyCard}>
+          <Ionicons name="receipt-outline" size={22} color={palette.textMuted} />
           <Text style={styles.emptyTitle}>No transactions yet</Text>
-          <Text style={styles.emptyBody}>Your latest sends and receives will show up here.</Text>
+          <Text style={styles.emptyBody}>Your sends and receives will show up here after the first payment.</Text>
         </View>
       ) : (
         transactions.map((tx) => {
+          const incoming = tx.direction !== "send";
           const counterparty = tx.direction === "send" ? tx.to : tx.from;
           return (
-            <Pressable key={tx.id} style={styles.card}>
-              <View>
-                <Text style={styles.cardTitle}>{tx.direction === "send" ? "Sent" : "Received"}</Text>
+            <View key={tx.id} style={styles.card}>
+              <View style={[styles.iconWrap, incoming ? styles.iconReceive : styles.iconSend]}>
+                <Ionicons
+                  name={incoming ? "arrow-down" : "arrow-up"}
+                  size={16}
+                  color={incoming ? palette.success : palette.primaryStrong}
+                />
+              </View>
+              <View style={styles.cardBody}>
+                <Text style={styles.cardTitle}>{incoming ? "Money received" : "Money sent"}</Text>
                 <Text style={styles.cardMeta}>{resolveLabel(counterparty, contacts, activeAddress)}</Text>
                 <Text style={styles.cardMeta}>{new Date(tx.timestamp * 1000).toLocaleString()}</Text>
                 {tx.memo ? <Text style={styles.memo}>{tx.memo}</Text> : null}
               </View>
               <View style={styles.amountWrap}>
-                <Text style={[styles.amount, tx.direction === "send" ? styles.amountSend : styles.amountReceive]}>
-                  {tx.direction === "send" ? "-" : "+"}
+                <Text style={[styles.amount, incoming ? styles.amountReceive : styles.amountSend]}>
+                  {incoming ? "+" : "-"}
                   {tx.amountFormatted}
                 </Text>
                 <Text style={styles.currency}>SFLUV</Text>
               </View>
-            </Pressable>
+            </View>
           );
         })
       )}
@@ -64,39 +77,52 @@ export function ActivityScreen({ transactions, contacts, activeAddress, refreshi
 
 const styles = StyleSheet.create({
   container: {
-    padding: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
     gap: spacing.md,
-    paddingBottom: 110,
+    paddingBottom: 120,
   },
-  title: {
-    color: palette.text,
-    fontSize: 24,
-    fontWeight: "800",
-  },
-  subtitle: {
-    color: palette.textMuted,
-    lineHeight: 20,
-  },
-  emptyCard: {
+  heroCard: {
     backgroundColor: palette.surface,
-    borderRadius: radii.md,
+    borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: palette.border,
     padding: spacing.lg,
+    gap: spacing.xs,
+    ...shadows.soft,
+  },
+  title: {
+    color: palette.text,
+    fontSize: 28,
+    fontWeight: "900",
+    letterSpacing: -0.4,
+  },
+  subtitle: {
+    color: palette.textMuted,
+    lineHeight: 21,
+  },
+  emptyCard: {
+    backgroundColor: palette.surface,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: palette.border,
+    padding: spacing.xl,
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    ...shadows.soft,
   },
   emptyTitle: {
     color: palette.text,
-    fontWeight: "800",
+    fontWeight: "900",
     fontSize: 18,
   },
   emptyBody: {
     color: palette.textMuted,
-    marginTop: 6,
     lineHeight: 20,
   },
   card: {
     backgroundColor: palette.surface,
-    borderRadius: radii.md,
+    borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: palette.border,
     padding: spacing.md,
@@ -104,37 +130,57 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     gap: spacing.md,
+    ...shadows.soft,
+  },
+  iconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconReceive: {
+    backgroundColor: "#def3ea",
+  },
+  iconSend: {
+    backgroundColor: palette.primarySoft,
+  },
+  cardBody: {
+    flex: 1,
+    gap: 3,
   },
   cardTitle: {
     color: palette.text,
-    fontWeight: "800",
+    fontWeight: "900",
     fontSize: 16,
   },
   cardMeta: {
     color: palette.textMuted,
-    marginTop: 4,
+    fontSize: 13,
   },
   memo: {
     color: palette.text,
-    marginTop: 8,
+    marginTop: 6,
     fontStyle: "italic",
   },
   amountWrap: {
     alignItems: "flex-end",
+    gap: 2,
   },
   amount: {
     fontSize: 17,
     fontWeight: "900",
   },
   amountSend: {
-    color: palette.danger,
+    color: palette.primaryStrong,
   },
   amountReceive: {
     color: palette.success,
   },
   currency: {
     color: palette.textMuted,
-    marginTop: 4,
+    marginTop: 2,
     fontSize: 12,
+    fontWeight: "700",
   },
 });

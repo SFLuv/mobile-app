@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,10 +12,12 @@ import {
   View,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import * as Clipboard from "expo-clipboard";
+import { Ionicons } from "@expo/vector-icons";
 import { AmountUnit, SendResult } from "../services/smartWallet";
 import { parseTransferQR } from "../utils/qr";
 import { AppContact } from "../types/app";
-import { palette, radii, spacing } from "../theme";
+import { palette, radii, shadows, spacing } from "../theme";
 
 type Props = {
   contacts: AppContact[];
@@ -33,6 +36,12 @@ function shortAddress(address: string): string {
   return `${address.slice(0, 8)}...${address.slice(-6)}`;
 }
 
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean).slice(0, 2);
+  if (parts.length === 0) return "?";
+  return parts.map((part) => part[0]?.toUpperCase() ?? "").join("");
+}
+
 export function SendScreen({ contacts, onPrepareSend }: Props) {
   const [recipientInput, setRecipientInput] = useState("");
   const [amountInput, setAmountInput] = useState("");
@@ -46,7 +55,7 @@ export function SendScreen({ contacts, onPrepareSend }: Props) {
   const filteredContacts = useMemo(() => {
     const query = recipientInput.trim().toLowerCase();
     if (!query) {
-      return contacts.filter((contact) => contact.isFavorite).slice(0, 4);
+      return contacts.filter((contact) => contact.isFavorite).slice(0, 6);
     }
     return contacts
       .filter((contact) => {
@@ -55,8 +64,10 @@ export function SendScreen({ contacts, onPrepareSend }: Props) {
           contact.address.toLowerCase().includes(query)
         );
       })
-      .slice(0, 5);
+      .slice(0, 6);
   }, [contacts, recipientInput]);
+
+  const resolvedAmount = (parsed?.amount ?? amountInput).trim();
 
   const openScanner = async () => {
     const status = permission?.status;
@@ -70,6 +81,15 @@ export function SendScreen({ contacts, onPrepareSend }: Props) {
     setScannerOpen(true);
   };
 
+  const pasteClipboard = async () => {
+    const value = (await Clipboard.getStringAsync()).trim();
+    if (!value) {
+      Alert.alert("Clipboard empty", "Copy an address or payment QR value first.");
+      return;
+    }
+    setRecipientInput(value);
+  };
+
   const send = async () => {
     if (isSending) {
       return;
@@ -80,7 +100,6 @@ export function SendScreen({ contacts, onPrepareSend }: Props) {
       return;
     }
 
-    const resolvedAmount = (parsed.amount ?? amountInput).trim();
     if (!resolvedAmount) {
       Alert.alert("Missing amount", "Enter an amount in SFLUV or scan a QR with a preset amount.");
       return;
@@ -109,96 +128,105 @@ export function SendScreen({ contacts, onPrepareSend }: Props) {
 
   return (
     <View style={styles.flex}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>Send SFLUV</Text>
-        <Text style={styles.subtitle}>
-          Start with a saved contact, paste an address, or scan any supported QR.
-        </Text>
+      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <View style={styles.topActionRow}>
+          <View style={styles.toolRow}>
+            <Pressable style={styles.toolButton} onPress={openScanner}>
+              <Ionicons name="scan" size={18} color={palette.primaryStrong} />
+            </Pressable>
+            <Pressable style={styles.toolButton} onPress={() => void pasteClipboard()}>
+              <Ionicons name="clipboard-outline" size={18} color={palette.primaryStrong} />
+            </Pressable>
+          </View>
+        </View>
 
         <View style={styles.card}>
-          <Text style={styles.label}>Recipient</Text>
+          <Text style={styles.sectionLabel}>Recipient</Text>
           <TextInput
-            style={[styles.input, styles.addressInput]}
+            style={styles.recipientInput}
             value={recipientInput}
             onChangeText={setRecipientInput}
-            placeholder="Contact name, 0x address, or EIP-681 QR"
+            placeholder="Contact or wallet address"
             autoCapitalize="none"
             autoCorrect={false}
             multiline
+            returnKeyType="done"
+            blurOnSubmit
           />
 
           {filteredContacts.length > 0 ? (
-            <View style={styles.contactList}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.contactRow}>
               {filteredContacts.map((contact) => (
                 <Pressable
                   key={contact.id}
                   style={styles.contactChip}
                   onPress={() => setRecipientInput(contact.address)}
                 >
-                  <Text style={styles.contactName}>{contact.name}</Text>
-                  <Text style={styles.contactAddress}>{shortAddress(contact.address)}</Text>
+                  <View style={styles.contactAvatar}>
+                    <Text style={styles.contactAvatarText}>{initials(contact.name)}</Text>
+                  </View>
+                  <Text style={styles.contactName} numberOfLines={1}>{contact.name}</Text>
                 </Pressable>
               ))}
+            </ScrollView>
+          ) : null}
+
+          {parsed ? (
+            <View style={styles.validRecipientRow}>
+              <Ionicons name="checkmark-circle" size={16} color={palette.success} />
+              <Text style={styles.validRecipientText}>Ready to pay {shortAddress(parsed.recipient)}</Text>
             </View>
           ) : null}
         </View>
 
-        <View style={styles.row}>
-          <View style={[styles.card, styles.cardHalf]}>
-            <Text style={styles.label}>Amount</Text>
+        <View style={styles.amountCard}>
+          <View style={styles.amountRow}>
+            <Text style={styles.currencyPrefix}>$</Text>
             <TextInput
-              style={styles.input}
+              style={styles.amountInput}
               value={amountInput}
               onChangeText={setAmountInput}
               placeholder="0.00"
-              keyboardType="decimal-pad"
+              keyboardType={Platform.select({ ios: "decimal-pad", android: "numeric" })}
+              returnKeyType="done"
+              blurOnSubmit
             />
-          </View>
-
-          <View style={[styles.card, styles.cardHalf]}>
-            <Text style={styles.label}>Memo</Text>
-            <TextInput
-              style={styles.input}
-              value={memoInput}
-              onChangeText={setMemoInput}
-              placeholder="Optional note"
-            />
+            <Text style={styles.amountToken}>SFLUV</Text>
           </View>
         </View>
 
-        {parsed ? (
-          <View style={styles.preview}>
-            <Text style={styles.previewTitle}>Review</Text>
-            <Text style={styles.previewText}>Recipient: {shortAddress(parsed.recipient)}</Text>
-            <Text style={styles.previewText}>
-              Amount ({parsed.amount ? "wei" : "SFLUV"}): {(parsed.amount ?? amountInput).trim() || "not set"}
-            </Text>
-            {(memoInput.trim() || parsed.memo) ? (
-              <Text style={styles.previewText}>Memo: {memoInput.trim() || parsed.memo}</Text>
-            ) : null}
-          </View>
-        ) : null}
-
-        <View style={styles.actionRow}>
-          <Pressable
-            style={[styles.secondaryButton, isSending ? styles.disabled : undefined]}
-            onPress={openScanner}
-            disabled={isSending}
-          >
-            <Text style={styles.secondaryButtonText}>Scan QR</Text>
-          </Pressable>
-
-          <Pressable
-            style={[styles.primaryButton, isSending ? styles.disabled : undefined]}
-            onPress={send}
-            disabled={isSending}
-          >
-            <Text style={styles.primaryButtonText}>Send</Text>
-          </Pressable>
+        <View style={styles.card}>
+          <Text style={styles.sectionLabel}>Add a note</Text>
+          <TextInput
+            style={styles.noteInput}
+            value={memoInput}
+            onChangeText={setMemoInput}
+            placeholder="What's this for?"
+            returnKeyType="done"
+            blurOnSubmit
+          />
         </View>
 
-        {scannerOpen ? (
-          <View style={styles.scannerWrap}>
+        <Pressable
+          style={[styles.sendButton, isSending ? styles.sendButtonDisabled : undefined]}
+          onPress={send}
+          disabled={isSending}
+        >
+          <Text style={styles.sendButtonText}>{isSending ? "Sending..." : "Send money"}</Text>
+          <Ionicons name="arrow-forward" size={18} color={palette.white} />
+        </Pressable>
+      </ScrollView>
+
+      <Modal visible={scannerOpen} animationType="slide" onRequestClose={() => setScannerOpen(false)}>
+        <View style={styles.scannerScreen}>
+          <View style={styles.scannerHeader}>
+            <Text style={styles.scannerTitle}>Scan payment QR</Text>
+            <Pressable style={styles.scannerClose} onPress={() => setScannerOpen(false)}>
+              <Ionicons name="close" size={22} color={palette.primaryStrong} />
+            </Pressable>
+          </View>
+
+          <View style={styles.scannerFrame}>
             <CameraView
               style={StyleSheet.absoluteFillObject}
               barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
@@ -218,8 +246,9 @@ export function SendScreen({ contacts, onPrepareSend }: Props) {
               }}
             />
           </View>
-        ) : null}
-      </ScrollView>
+          <Text style={styles.scannerHint}>Point your camera at any supported SFLUV payment QR.</Text>
+        </View>
+      </Modal>
 
       <Modal visible={isSending} transparent animationType="fade">
         <View style={styles.sendingOverlay}>
@@ -227,7 +256,7 @@ export function SendScreen({ contacts, onPrepareSend }: Props) {
             <ActivityIndicator size="large" color={palette.primary} />
             <Text style={styles.sendingTitle}>Confirming transaction...</Text>
             <Text style={styles.sendingText}>
-              Submitting the user operation and waiting for on-chain confirmation.
+              Sponsoring gas, submitting the user operation, and waiting for confirmation.
             </Text>
           </View>
         </View>
@@ -239,159 +268,226 @@ export function SendScreen({ contacts, onPrepareSend }: Props) {
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   container: {
-    padding: spacing.lg,
-    gap: spacing.md,
-    paddingBottom: 80,
-  },
-  title: {
-    color: palette.text,
-    fontSize: 24,
-    fontWeight: "800",
-  },
-  subtitle: {
-    color: palette.textMuted,
-    lineHeight: 20,
-  },
-  row: {
-    flexDirection: "row",
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
     gap: spacing.sm,
+    paddingBottom: 96,
   },
-  cardHalf: {
-    flex: 1,
+  topActionRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    alignItems: "center",
+  },
+  toolRow: {
+    flexDirection: "row",
+    gap: spacing.xs,
+  },
+  toolButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: palette.white,
+    borderWidth: 1,
+    borderColor: palette.primary,
+    alignItems: "center",
+    justifyContent: "center",
   },
   card: {
     backgroundColor: palette.surface,
-    borderRadius: radii.md,
+    borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: palette.border,
     padding: 14,
     gap: 8,
+    ...shadows.soft,
   },
-  label: {
-    color: palette.textMuted,
+  sectionLabel: {
+    color: palette.primaryStrong,
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: "800",
     textTransform: "uppercase",
-    letterSpacing: 0.4,
+    letterSpacing: 0.7,
   },
-  input: {
-    backgroundColor: palette.white,
-    borderRadius: radii.sm,
+  recipientInput: {
+    minHeight: 54,
+    borderRadius: radii.md,
+    backgroundColor: palette.surfaceStrong,
     borderWidth: 1,
-    borderColor: palette.border,
-    color: palette.text,
-    paddingHorizontal: 12,
+    borderColor: palette.primary,
+    paddingHorizontal: 14,
     paddingVertical: 12,
-    fontSize: 15,
-  },
-  addressInput: {
-    minHeight: 64,
+    color: palette.text,
     textAlignVertical: "top",
+    fontSize: 15,
+    lineHeight: 20,
   },
-  contactList: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
+  contactRow: {
+    gap: spacing.sm,
+    paddingTop: 2,
   },
   contactChip: {
-    backgroundColor: palette.surfaceStrong,
-    borderRadius: radii.sm,
+    width: 72,
+    alignItems: "center",
+    gap: 6,
+  },
+  contactAvatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: palette.primarySoft,
     borderWidth: 1,
-    borderColor: palette.border,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    minWidth: 116,
+    borderColor: palette.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  contactAvatarText: {
+    color: palette.primaryStrong,
+    fontWeight: "900",
+    fontSize: 15,
   },
   contactName: {
     color: palette.text,
+    fontSize: 11,
     fontWeight: "700",
-    fontSize: 13,
   },
-  contactAddress: {
-    color: palette.textMuted,
-    fontSize: 12,
-    marginTop: 2,
+  validRecipientRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingTop: 4,
   },
-  preview: {
-    backgroundColor: palette.surfaceStrong,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: palette.border,
-    padding: 14,
+  validRecipientText: {
+    color: palette.success,
+    fontWeight: "700",
+  },
+  amountCard: {
+    backgroundColor: palette.surface,
+    borderRadius: radii.xl,
+    paddingVertical: 12,
+    paddingHorizontal: spacing.lg,
+    borderWidth: 1.5,
+    borderColor: palette.primary,
+    alignItems: "center",
+    ...shadows.card,
+  },
+  amountRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 6,
   },
-  previewTitle: {
-    color: palette.text,
-    fontWeight: "800",
-    fontSize: 14,
+  currencyPrefix: {
+    color: palette.primaryStrong,
+    fontSize: 20,
+    fontWeight: "900",
   },
-  previewText: {
+  amountInput: {
+    minWidth: 120,
+    color: palette.primaryStrong,
+    fontSize: 32,
+    fontWeight: "900",
+    textAlign: "center",
+    paddingVertical: 0,
+  },
+  amountToken: {
     color: palette.textMuted,
-  },
-  actionRow: {
-    flexDirection: "row",
-    gap: spacing.sm,
-  },
-  secondaryButton: {
-    flex: 1,
-    backgroundColor: palette.surfaceStrong,
-    borderColor: palette.borderStrong,
-    borderWidth: 1,
-    borderRadius: radii.md,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  secondaryButtonText: {
-    color: palette.text,
-    fontWeight: "700",
-  },
-  primaryButton: {
-    flex: 1,
-    backgroundColor: palette.primary,
-    borderRadius: radii.md,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  primaryButtonText: {
-    color: palette.white,
     fontWeight: "800",
+    fontSize: 12,
+    letterSpacing: 0.5,
   },
-  disabled: {
-    opacity: 0.7,
+  noteInput: {
+    borderRadius: radii.md,
+    backgroundColor: palette.surfaceStrong,
+    borderWidth: 1,
+    borderColor: palette.border,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: palette.text,
+    fontSize: 15,
   },
-  scannerWrap: {
-    marginTop: 4,
-    height: 320,
+  sendButton: {
+    minHeight: 58,
+    borderRadius: radii.pill,
+    backgroundColor: palette.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 10,
+    ...shadows.card,
+  },
+  sendButtonDisabled: {
+    opacity: 0.72,
+  },
+  sendButtonText: {
+    color: palette.white,
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  scannerScreen: {
+    flex: 1,
+    backgroundColor: palette.background,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xl,
+    gap: spacing.lg,
+  },
+  scannerHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  scannerTitle: {
+    color: palette.primaryStrong,
+    fontSize: 24,
+    fontWeight: "900",
+  },
+  scannerClose: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.surface,
+    borderWidth: 1,
+    borderColor: palette.primary,
+  },
+  scannerFrame: {
+    flex: 1,
+    minHeight: 360,
     borderRadius: radii.lg,
     overflow: "hidden",
-    borderWidth: 1,
-    borderColor: palette.borderStrong,
+    backgroundColor: palette.text,
+  },
+  scannerHint: {
+    color: palette.textMuted,
+    textAlign: "center",
+    paddingBottom: spacing.xl,
   },
   sendingOverlay: {
     flex: 1,
-    backgroundColor: "rgba(30,20,10,0.32)",
+    backgroundColor: palette.overlay,
     alignItems: "center",
     justifyContent: "center",
-    padding: spacing.lg,
+    paddingHorizontal: 28,
   },
   sendingCard: {
     width: "100%",
-    maxWidth: 360,
-    backgroundColor: palette.surface,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    maxWidth: 320,
+    backgroundColor: palette.white,
+    borderRadius: radii.lg,
+    padding: spacing.xl,
     alignItems: "center",
+    gap: spacing.sm,
+    ...shadows.card,
   },
   sendingTitle: {
     color: palette.text,
-    fontSize: 18,
-    fontWeight: "800",
-    marginTop: 12,
+    fontSize: 20,
+    fontWeight: "900",
+    textAlign: "center",
   },
   sendingText: {
     color: palette.textMuted,
     textAlign: "center",
-    marginTop: 6,
-    lineHeight: 19,
+    lineHeight: 20,
   },
 });

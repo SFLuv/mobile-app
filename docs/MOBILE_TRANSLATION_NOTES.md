@@ -125,6 +125,18 @@ For every new web feature:
   - `frontend/app/globals.css` in the web repo
 - Use the same background/card/primary/border palette first.
 - Then adapt spacing and component density for touch instead of copying desktop layout literally.
+- Current visual direction for the wallet shell:
+  - white-first surfaces with SFLUV coral used for outlines, emphasis, and primary actions
+  - warm charcoal only as a support neutral, not as a dominant brand color
+  - wallet switching should stay off the main home canvas when possible; use a focused chooser modal instead
+- For payment-heavy screens, prefer a single high-contrast hero card followed by one obvious primary action.
+- `Send` and `Receive` should feel like dedicated payment tools, not generic forms:
+  - quick actions first
+  - large amount typography
+  - contact suggestions embedded directly in the send flow
+  - keep the structure closer to a payment app sheet than a general settings form
+  - first-pass send surfaces should fit cleanly on one iPhone screen whenever possible; remove nonessential recap blocks before shrinking core actions
+  - if the app shell already shows the page title and wallet route, do not repeat that header inside the payment screen
 
 ## Known Gaps
 

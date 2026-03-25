@@ -1,20 +1,27 @@
 export const palette = {
-  background: "#faf7f5",
-  backgroundMuted: "#f2ece9",
+  background: "#f3efea",
+  backgroundMuted: "#ece5de",
   surface: "#ffffff",
-  surfaceStrong: "#f7f1ee",
+  surfaceMuted: "#f8f3ef",
+  surfaceStrong: "#f5efea",
   border: "#ded5cf",
-  borderStrong: "#d0c4bc",
-  primary: "#e86359",
-  primaryMuted: "#f7e2df",
-  accent: "#efe7e1",
-  text: "#242833",
-  textMuted: "#626a7a",
-  success: "#1d7a52",
+  borderStrong: "#cfc3ba",
+  primary: "#ef6d66",
+  primaryStrong: "#d95a53",
+  primarySoft: "#fde7e2",
+  primaryMuted: "#fde7e2",
+  navy: "#3a2c2f",
+  navyStrong: "#2d2124",
+  navySoft: "#f5eae7",
+  accent: "#efe6df",
+  text: "#201f24",
+  textMuted: "#6e6974",
+  success: "#178257",
   warning: "#a66a1f",
-  danger: "#cc4b42",
+  danger: "#cf4d43",
   white: "#ffffff",
-  shadow: "rgba(36, 40, 51, 0.12)",
+  overlay: "rgba(24, 19, 24, 0.34)",
+  shadow: "rgba(36, 24, 24, 0.12)",
 };
 
 export const spacing = {
@@ -23,11 +30,30 @@ export const spacing = {
   md: 16,
   lg: 20,
   xl: 28,
+  xxl: 36,
 };
 
 export const radii = {
-  sm: 10,
-  md: 16,
-  lg: 24,
+  sm: 12,
+  md: 18,
+  lg: 28,
+  xl: 36,
   pill: 999,
+};
+
+export const shadows = {
+  card: {
+    shadowColor: "#2d2124",
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 5,
+  },
+  soft: {
+    shadowColor: "#2d2124",
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
+  },
 };

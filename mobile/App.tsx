@@ -11,6 +11,8 @@ import {
   Text,
   View,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { StatusBar } from "expo-status-bar";
 import { ethers } from "ethers";
 import {
   PrivyProvider,
@@ -42,7 +44,7 @@ import {
   PonderSubscription,
   VerifiedEmail,
 } from "./src/types/app";
-import { palette, radii, spacing } from "./src/theme";
+import { palette, radii, shadows, spacing } from "./src/theme";
 
 type RuntimeState = {
   loading: boolean;
@@ -86,6 +88,22 @@ function shortAddress(value: string | undefined): string {
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
 }
 
+function routeLabelTone(routeID: "legacy" | "new") {
+  if (routeID === "new") {
+    return {
+      backgroundColor: palette.primarySoft,
+      color: palette.primaryStrong,
+      icon: "sparkles" as const,
+    };
+  }
+
+  return {
+    backgroundColor: palette.accent,
+    color: palette.text,
+    icon: "time" as const,
+  };
+}
+
 function describeAppBackendIssue(error: unknown): string {
   const message = (error as Error)?.message?.trim();
   if (!message) {
@@ -99,15 +117,22 @@ function describeAppBackendIssue(error: unknown): string {
 
 function BottomTab({
   label,
+  icon,
   active,
   onPress,
 }: {
   label: string;
+  icon: keyof typeof Ionicons.glyphMap;
   active: boolean;
   onPress: () => void;
 }) {
   return (
     <Pressable style={[styles.bottomTab, active ? styles.bottomTabActive : undefined]} onPress={onPress}>
+      <Ionicons
+        name={icon}
+        size={18}
+        color={active ? palette.primaryStrong : palette.textMuted}
+      />
       <Text style={[styles.bottomTabText, active ? styles.bottomTabTextActive : undefined]}>{label}</Text>
     </Pressable>
   );
@@ -153,11 +178,17 @@ function WalletAppShell({
   const [refreshingActivity, setRefreshingActivity] = useState(false);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [showMerchantApplication, setShowMerchantApplication] = useState(false);
+  const [showWalletChooser, setShowWalletChooser] = useState(false);
 
   const currentSubscription = useMemo(() => {
     if (!smartAddress) return undefined;
     return subscriptions.find((entry) => entry.address.toLowerCase() === smartAddress.toLowerCase());
   }, [smartAddress, subscriptions]);
+  const walletCandidates = runtime.discovery?.candidates ?? [];
+  const selectedCandidate = useMemo(
+    () => walletCandidates.find((candidate) => candidate.key === selectedCandidateKey) ?? walletCandidates[0],
+    [selectedCandidateKey, walletCandidates],
+  );
 
   const publicBackendClient = useMemo(
     () => backendClient ?? new AppBackendClient(async () => null),
@@ -282,147 +313,184 @@ function WalletAppShell({
 
   return (
     <SafeAreaView style={styles.safe}>
+      <StatusBar style="dark" />
+      <View style={styles.topBackdrop}>
+        <View style={styles.topOrbLarge} />
+        <View style={styles.topOrbSmall} />
+      </View>
+
       <View style={styles.topBar}>
-        <View>
-          <Text style={styles.brand}>SFLUV Wallet</Text>
+        <View style={styles.topTitleWrap}>
+          <Text style={styles.brandKicker}>SFLUV Wallet</Text>
+          <Text style={styles.brand}>{activeTitle}</Text>
           <Text style={styles.topMeta}>
-            {activeTitle}
             {selectedCandidateKey && runtime.discovery
-              ? ` • ${runtime.discovery.candidates.find((item) => item.key === selectedCandidateKey)?.route.label ?? "Wallet"}`
-              : ""}
+              ? runtime.discovery.candidates.find((item) => item.key === selectedCandidateKey)?.route.label ?? "Wallet"
+              : "Fast SFLUV payments"}
           </Text>
         </View>
         <View style={styles.topActions}>
           {showWalletPaneBack ? (
-            <Pressable style={styles.navButton} onPress={() => setWalletPane("home")}>
-              <Text style={styles.navButtonText}>Back</Text>
+            <Pressable style={styles.iconButton} onPress={() => setWalletPane("home")}>
+              <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
             </Pressable>
           ) : null}
           {onLogout ? (
-            <Pressable style={styles.logoutButton} onPress={onLogout}>
-              <Text style={styles.logoutText}>Logout</Text>
+            <Pressable style={styles.iconButton} onPress={onLogout}>
+              <Ionicons name="log-out-outline" size={18} color={palette.primaryStrong} />
             </Pressable>
           ) : null}
         </View>
       </View>
 
-      {loadingData ? (
-        <View style={styles.banner}>
-          <ActivityIndicator size="small" color={palette.primary} />
-          <Text style={styles.bannerText}>Syncing with the SFLUV app backend…</Text>
-        </View>
-      ) : null}
+      <View style={styles.contentShell}>
+        {loadingData ? (
+          <View style={styles.banner}>
+            <ActivityIndicator size="small" color={palette.primaryStrong} />
+            <Text style={styles.bannerText}>Syncing with the SFLUV app backend…</Text>
+          </View>
+        ) : null}
 
-      <View style={styles.content}>
-        {runtime.loading ? (
-          <View style={styles.centerState}>
-            <ActivityIndicator size="large" color={palette.primary} />
-            <Text style={styles.stateText}>Preparing your wallet…</Text>
-          </View>
-        ) : runtime.error ? (
-          <View style={styles.centerState}>
-            <Text style={styles.errorText}>{runtime.error}</Text>
-          </View>
-        ) : tab === "wallet" ? (
-          walletPane === "send" ? (
-            <SendScreen contacts={contacts} onPrepareSend={handleSend} />
-          ) : walletPane === "receive" ? (
-            <ReceiveScreen
-              accountAddress={smartAddress || runtime.discovery?.ownerAddress || ethers.constants.AddressZero}
-              chainId={mobileConfig.chainId}
-              tokenAddress={mobileConfig.tokenAddress}
+        <View style={styles.content}>
+          {runtime.loading ? (
+            <View style={styles.centerState}>
+              <ActivityIndicator size="large" color={palette.primary} />
+              <Text style={styles.stateText}>Preparing your wallet…</Text>
+            </View>
+          ) : runtime.error ? (
+            <View style={styles.centerState}>
+              <Text style={styles.errorText}>{runtime.error}</Text>
+            </View>
+          ) : tab === "wallet" ? (
+            walletPane === "send" ? (
+              <SendScreen contacts={contacts} onPrepareSend={handleSend} />
+            ) : walletPane === "receive" ? (
+              <ReceiveScreen
+                accountAddress={smartAddress || runtime.discovery?.ownerAddress || ethers.constants.AddressZero}
+                chainId={mobileConfig.chainId}
+                tokenAddress={mobileConfig.tokenAddress}
+              />
+            ) : (
+              <WalletHomeScreen
+                balance={smartBalance}
+                smartAddress={smartAddress}
+                ownerBadge={ownerBadge}
+                selectedRouteLabel={selectedCandidate?.route.label}
+                recentTransactions={transactions}
+                onOpenSend={() => setWalletPane("send")}
+                onOpenReceive={() => setWalletPane("receive")}
+                onOpenActivity={() => setTab("activity")}
+                onOpenWalletChooser={() => setShowWalletChooser(true)}
+                onMigrateLegacyToNew={onMigrateLegacyToNew}
+                showMigrateLegacyToNew={showMigrateLegacyToNew}
+                canMigrateLegacyToNew={canMigrateLegacyToNew}
+                migratingLegacyToNew={migratingLegacyToNew}
+                legacyBalance={legacyBalance}
+              />
+            )
+          ) : tab === "activity" ? (
+            <ActivityScreen
+              transactions={transactions}
+              contacts={contacts}
+              activeAddress={smartAddress}
+              refreshing={refreshingActivity}
+              onRefresh={async () => {
+                setRefreshingActivity(true);
+                try {
+                  await refreshWalletSurface();
+                } finally {
+                  setRefreshingActivity(false);
+                }
+              }}
             />
+          ) : tab === "map" ? (
+            <MapScreen locations={locations} />
           ) : (
-            <WalletHomeScreen
-              balance={smartBalance}
-              smartAddress={smartAddress}
-              ownerBadge={ownerBadge}
-              candidates={runtime.discovery?.candidates ?? []}
-              selectedCandidateKey={selectedCandidateKey}
-              recentTransactions={transactions}
-              onSelectCandidate={onSelectCandidate}
-              onOpenSend={() => setWalletPane("send")}
-              onOpenReceive={() => setWalletPane("receive")}
-              onOpenActivity={() => setTab("activity")}
-              onMigrateLegacyToNew={onMigrateLegacyToNew}
-              showMigrateLegacyToNew={showMigrateLegacyToNew}
-              canMigrateLegacyToNew={canMigrateLegacyToNew}
-              migratingLegacyToNew={migratingLegacyToNew}
-              legacyBalance={legacyBalance}
+            <SettingsScreen
+              user={appUser}
+              contacts={contacts}
+              locations={ownedLocations}
+              verifiedEmails={verifiedEmails}
+              notificationSubscription={currentSubscription}
+              activeWalletAddress={smartAddress}
+              syncNotice={syncNotice}
+              onOpenMerchantApplication={() => setShowMerchantApplication(true)}
+              onAddContact={async (name, address) => {
+                if (!backendClient) {
+                  throw new Error("Backend not configured.");
+                }
+                await backendClient.addContact(name, address);
+                const updatedContacts = await backendClient.getContacts();
+                setContacts(updatedContacts);
+              }}
+              onToggleFavorite={async (contact) => {
+                if (!backendClient) {
+                  throw new Error("Backend not configured.");
+                }
+                await backendClient.toggleFavorite(contact);
+                const updatedContacts = await backendClient.getContacts();
+                setContacts(updatedContacts);
+              }}
+              onDeleteContact={async (contactID) => {
+                if (!backendClient) {
+                  throw new Error("Backend not configured.");
+                }
+                await backendClient.deleteContact(contactID);
+                const updatedContacts = await backendClient.getContacts();
+                setContacts(updatedContacts);
+              }}
+              onEnableNotification={async (email, address) => {
+                if (!backendClient) {
+                  throw new Error("Backend not configured.");
+                }
+                await backendClient.enableNotification(email, address);
+                const updatedSubscriptions = await backendClient.getNotificationSubscriptions();
+                setSubscriptions(updatedSubscriptions);
+              }}
+              onDisableNotification={async (id) => {
+                if (!backendClient) {
+                  throw new Error("Backend not configured.");
+                }
+                await backendClient.disableNotification(id);
+                const updatedSubscriptions = await backendClient.getNotificationSubscriptions();
+                setSubscriptions(updatedSubscriptions);
+              }}
+              onLogout={() => {
+                onLogout?.();
+              }}
             />
-          )
-        ) : tab === "activity" ? (
-          <ActivityScreen
-            transactions={transactions}
-            contacts={contacts}
-            activeAddress={smartAddress}
-            refreshing={refreshingActivity}
-            onRefresh={async () => {
-              setRefreshingActivity(true);
-              try {
-                await refreshWalletSurface();
-              } finally {
-                setRefreshingActivity(false);
-              }
+          )}
+        </View>
+
+        <View style={styles.bottomDock}>
+          <BottomTab
+            label="Wallet"
+            icon={tab === "wallet" ? "wallet" : "wallet-outline"}
+            active={tab === "wallet"}
+            onPress={() => {
+              setTab("wallet");
+              setWalletPane("home");
             }}
           />
-        ) : tab === "map" ? (
-          <MapScreen locations={locations} />
-        ) : (
-          <SettingsScreen
-            user={appUser}
-            contacts={contacts}
-            locations={ownedLocations}
-            verifiedEmails={verifiedEmails}
-            notificationSubscription={currentSubscription}
-            activeWalletAddress={smartAddress}
-            syncNotice={syncNotice}
-            onOpenMerchantApplication={() => setShowMerchantApplication(true)}
-            onAddContact={async (name, address) => {
-              if (!backendClient) {
-                throw new Error("Backend not configured.");
-              }
-              await backendClient.addContact(name, address);
-              const updatedContacts = await backendClient.getContacts();
-              setContacts(updatedContacts);
-            }}
-            onToggleFavorite={async (contact) => {
-              if (!backendClient) {
-                throw new Error("Backend not configured.");
-              }
-              await backendClient.toggleFavorite(contact);
-              const updatedContacts = await backendClient.getContacts();
-              setContacts(updatedContacts);
-            }}
-            onDeleteContact={async (contactID) => {
-              if (!backendClient) {
-                throw new Error("Backend not configured.");
-              }
-              await backendClient.deleteContact(contactID);
-              const updatedContacts = await backendClient.getContacts();
-              setContacts(updatedContacts);
-            }}
-            onEnableNotification={async (email, address) => {
-              if (!backendClient) {
-                throw new Error("Backend not configured.");
-              }
-              await backendClient.enableNotification(email, address);
-              const updatedSubscriptions = await backendClient.getNotificationSubscriptions();
-              setSubscriptions(updatedSubscriptions);
-            }}
-            onDisableNotification={async (id) => {
-              if (!backendClient) {
-                throw new Error("Backend not configured.");
-              }
-              await backendClient.disableNotification(id);
-              const updatedSubscriptions = await backendClient.getNotificationSubscriptions();
-              setSubscriptions(updatedSubscriptions);
-            }}
-            onLogout={() => {
-              onLogout?.();
-            }}
+          <BottomTab
+            label="Activity"
+            icon={tab === "activity" ? "pulse" : "pulse-outline"}
+            active={tab === "activity"}
+            onPress={() => setTab("activity")}
           />
-        )}
+          <BottomTab
+            label="Map"
+            icon={tab === "map" ? "map" : "map-outline"}
+            active={tab === "map"}
+            onPress={() => setTab("map")}
+          />
+          <BottomTab
+            label="Settings"
+            icon={tab === "settings" ? "settings" : "settings-outline"}
+            active={tab === "settings"}
+            onPress={() => setTab("settings")}
+          />
+        </View>
       </View>
 
       {showMerchantApplication ? (
@@ -442,19 +510,59 @@ function WalletAppShell({
         </Modal>
       ) : null}
 
-      <View style={styles.bottomBar}>
-        <BottomTab
-          label="Wallet"
-          active={tab === "wallet"}
-          onPress={() => {
-            setTab("wallet");
-            setWalletPane("home");
-          }}
-        />
-        <BottomTab label="Activity" active={tab === "activity"} onPress={() => setTab("activity")} />
-        <BottomTab label="Map" active={tab === "map"} onPress={() => setTab("map")} />
-        <BottomTab label="Settings" active={tab === "settings"} onPress={() => setTab("settings")} />
-      </View>
+      <Modal
+        visible={showWalletChooser}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowWalletChooser(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setShowWalletChooser(false)}>
+          <Pressable style={styles.walletChooserCard} onPress={() => {}}>
+            <View style={styles.walletChooserHeader}>
+              <View>
+                <Text style={styles.walletChooserTitle}>Choose Wallet</Text>
+                <Text style={styles.walletChooserSubtitle}>Switch between your available wallet routes.</Text>
+              </View>
+              <Pressable style={styles.walletChooserClose} onPress={() => setShowWalletChooser(false)}>
+                <Ionicons name="close" size={20} color={palette.primaryStrong} />
+              </Pressable>
+            </View>
+
+            <ScrollView contentContainerStyle={styles.walletChooserList} showsVerticalScrollIndicator={false}>
+              {walletCandidates.map((candidate) => {
+                const active = candidate.key === selectedCandidateKey;
+                const tone = routeLabelTone(candidate.route.id);
+                return (
+                  <Pressable
+                    key={candidate.key}
+                    style={[styles.walletChooserOption, active ? styles.walletChooserOptionActive : undefined]}
+                    onPress={() => {
+                      onSelectCandidate(candidate.key);
+                      setShowWalletChooser(false);
+                    }}
+                  >
+                    <View style={styles.walletChooserOptionHeader}>
+                      <View style={[styles.walletChooserRouteChip, { backgroundColor: tone.backgroundColor }]}>
+                        <Ionicons name={tone.icon} size={12} color={tone.color} />
+                        <Text style={[styles.walletChooserRouteChipText, { color: tone.color }]}>
+                          {candidate.route.label}
+                        </Text>
+                      </View>
+                      {active ? (
+                        <View style={styles.walletChooserActiveBadge}>
+                          <Ionicons name="checkmark" size={12} color={palette.white} />
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text style={styles.walletChooserBalance}>{candidate.tokenBalance} SFLUV</Text>
+                    <Text style={styles.walletChooserAddress}>{shortAddress(candidate.accountAddress)}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -775,71 +883,97 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: palette.background,
   },
+  topBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: palette.background,
+  },
+  topOrbLarge: {
+    position: "absolute",
+    width: 240,
+    height: 240,
+    borderRadius: 120,
+    backgroundColor: "rgba(239,109,102,0.07)",
+    top: -90,
+    right: -20,
+  },
+  topOrbSmall: {
+    position: "absolute",
+    width: 170,
+    height: 170,
+    borderRadius: 85,
+    backgroundColor: "rgba(239,109,102,0.05)",
+    top: 60,
+    left: -40,
+  },
   topBar: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.sm,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.lg,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    borderBottomWidth: 1,
-    borderBottomColor: palette.border,
-    backgroundColor: palette.background,
+    gap: spacing.md,
+  },
+  topTitleWrap: {
+    flex: 1,
+    gap: 4,
+  },
+  brandKicker: {
+    color: palette.primaryStrong,
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
   },
   brand: {
-    color: palette.text,
-    fontSize: 26,
+    color: palette.primaryStrong,
+    fontSize: 30,
     fontWeight: "900",
+    letterSpacing: -0.5,
   },
   topMeta: {
     color: palette.textMuted,
-    marginTop: 2,
-  },
-  logoutButton: {
-    backgroundColor: palette.surface,
-    borderWidth: 1,
-    borderColor: palette.border,
-    borderRadius: radii.md,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
   },
   topActions: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: spacing.xs,
   },
-  navButton: {
-    backgroundColor: palette.accent,
+  iconButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: palette.white,
     borderWidth: 1,
-    borderColor: palette.border,
-    borderRadius: radii.md,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderColor: palette.primary,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  navButtonText: {
-    color: palette.text,
-    fontWeight: "800",
-  },
-  logoutText: {
-    color: palette.text,
-    fontWeight: "800",
+  contentShell: {
+    flex: 1,
+    backgroundColor: palette.background,
+    borderTopLeftRadius: radii.xl,
+    borderTopRightRadius: radii.xl,
+    overflow: "hidden",
   },
   banner: {
     marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
     marginBottom: spacing.sm,
-    backgroundColor: palette.surface,
+    backgroundColor: palette.primarySoft,
     borderRadius: radii.md,
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderWidth: 1,
-    borderColor: palette.border,
+    borderColor: "#f3c8c2",
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
   },
   bannerText: {
-    color: palette.textMuted,
+    color: palette.primaryStrong,
     flex: 1,
+    fontWeight: "700",
   },
   content: {
     flex: 1,
@@ -860,74 +994,168 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 20,
   },
-  bottomBar: {
+  bottomDock: {
     flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: spacing.md,
-    paddingTop: 10,
-    paddingBottom: 20,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.lg,
+    padding: 8,
+    borderRadius: radii.lg,
     backgroundColor: palette.surface,
-    borderTopWidth: 1,
-    borderTopColor: palette.border,
+    borderWidth: 1,
+    borderColor: palette.border,
+    ...shadows.card,
   },
   bottomTab: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: radii.md,
-    paddingVertical: 12,
+    paddingVertical: 10,
+    gap: 4,
   },
   bottomTabActive: {
-    backgroundColor: palette.primary,
+    backgroundColor: palette.primarySoft,
   },
   bottomTabText: {
     color: palette.textMuted,
-    fontWeight: "700",
-    fontSize: 12,
+    fontWeight: "800",
+    fontSize: 11,
   },
   bottomTabTextActive: {
-    color: palette.white,
+    color: palette.primaryStrong,
   },
   loginWrap: {
     flex: 1,
-    alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 28,
-    gap: 16,
+    gap: spacing.md,
   },
   loginBrand: {
-    color: palette.primary,
-    fontSize: 18,
+    color: palette.primaryStrong,
+    fontSize: 13,
     fontWeight: "800",
     textTransform: "uppercase",
-    letterSpacing: 0.8,
+    letterSpacing: 1.1,
   },
   loginTitle: {
-    color: palette.text,
-    fontSize: 30,
+    color: palette.primaryStrong,
+    fontSize: 38,
     fontWeight: "900",
-    textAlign: "center",
+    lineHeight: 42,
   },
   loginBody: {
     color: palette.textMuted,
-    textAlign: "center",
     lineHeight: 22,
-    maxWidth: 320,
+    maxWidth: 340,
   },
   loginButton: {
-    backgroundColor: palette.primary,
-    borderRadius: radii.md,
+    marginTop: spacing.sm,
+    backgroundColor: palette.white,
+    borderRadius: radii.pill,
     paddingHorizontal: 22,
-    paddingVertical: 14,
+    paddingVertical: 16,
     minWidth: 240,
     alignItems: "center",
+    justifyContent: "center",
   },
   loginButtonDisabled: {
     opacity: 0.7,
   },
   loginButtonText: {
-    color: palette.white,
+    color: palette.text,
+    fontWeight: "900",
+    fontSize: 16,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: palette.overlay,
+    justifyContent: "center",
+    paddingHorizontal: spacing.lg,
+  },
+  walletChooserCard: {
+    backgroundColor: palette.surface,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: palette.primary,
+    padding: spacing.lg,
+    maxHeight: "72%",
+    ...shadows.card,
+  },
+  walletChooserHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: spacing.md,
+  },
+  walletChooserTitle: {
+    color: palette.primaryStrong,
+    fontSize: 24,
+    fontWeight: "900",
+  },
+  walletChooserSubtitle: {
+    color: palette.textMuted,
+    marginTop: 4,
+  },
+  walletChooserClose: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1,
+    borderColor: palette.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.white,
+  },
+  walletChooserList: {
+    gap: spacing.sm,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xs,
+  },
+  walletChooserOption: {
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.surfaceMuted,
+    padding: spacing.md,
+    gap: 8,
+  },
+  walletChooserOptionActive: {
+    borderColor: palette.primary,
+    backgroundColor: palette.primarySoft,
+  },
+  walletChooserOptionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  walletChooserRouteChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: radii.pill,
+  },
+  walletChooserRouteChipText: {
+    fontSize: 12,
     fontWeight: "800",
-    fontSize: 15,
+  },
+  walletChooserActiveBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.primaryStrong,
+  },
+  walletChooserBalance: {
+    color: palette.text,
+    fontWeight: "900",
+    fontSize: 18,
+  },
+  walletChooserAddress: {
+    color: palette.textMuted,
+    fontSize: 13,
+    fontFamily: "Courier",
   },
 });
