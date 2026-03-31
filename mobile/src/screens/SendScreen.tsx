@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -15,9 +15,9 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
 import { AmountUnit, SendResult } from "../services/smartWallet";
-import { parseTransferQR } from "../utils/qr";
 import { AppContact } from "../types/app";
-import { palette, radii, shadows, spacing } from "../theme";
+import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
+import { parseSendTarget, parseSfluvUniversalLink, SfluvUniversalLink } from "../utils/universalLinks";
 
 type Props = {
   contacts: AppContact[];
@@ -27,6 +27,13 @@ type Props = {
     amountUnit: AmountUnit,
     memo: string,
   ) => Promise<SendResult>;
+  draft?: {
+    recipient: string;
+    amount?: string;
+    memo?: string;
+  } | null;
+  onDraftApplied?: () => void;
+  onOpenUniversalLink?: (link: SfluvUniversalLink) => void;
 };
 
 function shortAddress(address: string): string {
@@ -42,7 +49,9 @@ function initials(name: string): string {
   return parts.map((part) => part[0]?.toUpperCase() ?? "").join("");
 }
 
-export function SendScreen({ contacts, onPrepareSend }: Props) {
+export function SendScreen({ contacts, onPrepareSend, draft, onDraftApplied, onOpenUniversalLink }: Props) {
+  const { palette, shadows } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
   const [recipientInput, setRecipientInput] = useState("");
   const [amountInput, setAmountInput] = useState("");
   const [memoInput, setMemoInput] = useState("");
@@ -50,7 +59,17 @@ export function SendScreen({ contacts, onPrepareSend }: Props) {
   const [isSending, setIsSending] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
 
-  const parsed = useMemo(() => parseTransferQR(recipientInput), [recipientInput]);
+  const parsed = useMemo(() => parseSendTarget(recipientInput), [recipientInput]);
+
+  useEffect(() => {
+    if (!draft) {
+      return;
+    }
+    setRecipientInput(draft.recipient);
+    setAmountInput(draft.amount ?? "");
+    setMemoInput(draft.memo ?? "");
+    onDraftApplied?.();
+  }, [draft, onDraftApplied]);
 
   const filteredContacts = useMemo(() => {
     const query = recipientInput.trim().toLowerCase();
@@ -59,10 +78,7 @@ export function SendScreen({ contacts, onPrepareSend }: Props) {
     }
     return contacts
       .filter((contact) => {
-        return (
-          contact.name.toLowerCase().includes(query) ||
-          contact.address.toLowerCase().includes(query)
-        );
+        return contact.name.toLowerCase().includes(query) || contact.address.toLowerCase().includes(query);
       })
       .slice(0, 6);
   }, [contacts, recipientInput]);
@@ -85,6 +101,18 @@ export function SendScreen({ contacts, onPrepareSend }: Props) {
     const value = (await Clipboard.getStringAsync()).trim();
     if (!value) {
       Alert.alert("Clipboard empty", "Copy an address or payment QR value first.");
+      return;
+    }
+    const universalLink = parseSfluvUniversalLink(value);
+    if (universalLink?.type === "redeem") {
+      onOpenUniversalLink?.(universalLink);
+      return;
+    }
+    const parsedTarget = parseSendTarget(value);
+    if (parsedTarget) {
+      setRecipientInput(parsedTarget.recipient);
+      setAmountInput(parsedTarget.amount ?? "");
+      setMemoInput(parsedTarget.memo ?? "");
       return;
     }
     setRecipientInput(value);
@@ -110,7 +138,7 @@ export function SendScreen({ contacts, onPrepareSend }: Props) {
       const result = await onPrepareSend(
         parsed.recipient,
         resolvedAmount,
-        parsed.amount ? "wei" : "token",
+        parsed.amountUnit,
         memoInput.trim() || parsed.memo || "",
       );
 
@@ -147,6 +175,7 @@ export function SendScreen({ contacts, onPrepareSend }: Props) {
             value={recipientInput}
             onChangeText={setRecipientInput}
             placeholder="Contact or wallet address"
+            placeholderTextColor={palette.textMuted}
             autoCapitalize="none"
             autoCorrect={false}
             multiline
@@ -157,15 +186,13 @@ export function SendScreen({ contacts, onPrepareSend }: Props) {
           {filteredContacts.length > 0 ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.contactRow}>
               {filteredContacts.map((contact) => (
-                <Pressable
-                  key={contact.id}
-                  style={styles.contactChip}
-                  onPress={() => setRecipientInput(contact.address)}
-                >
+                <Pressable key={contact.id} style={styles.contactChip} onPress={() => setRecipientInput(contact.address)}>
                   <View style={styles.contactAvatar}>
                     <Text style={styles.contactAvatarText}>{initials(contact.name)}</Text>
                   </View>
-                  <Text style={styles.contactName} numberOfLines={1}>{contact.name}</Text>
+                  <Text style={styles.contactName} numberOfLines={1}>
+                    {contact.name}
+                  </Text>
                 </Pressable>
               ))}
             </ScrollView>
@@ -187,6 +214,7 @@ export function SendScreen({ contacts, onPrepareSend }: Props) {
               value={amountInput}
               onChangeText={setAmountInput}
               placeholder="0.00"
+              placeholderTextColor={palette.textMuted}
               keyboardType={Platform.select({ ios: "decimal-pad", android: "numeric" })}
               returnKeyType="done"
               blurOnSubmit
@@ -202,6 +230,7 @@ export function SendScreen({ contacts, onPrepareSend }: Props) {
             value={memoInput}
             onChangeText={setMemoInput}
             placeholder="What's this for?"
+            placeholderTextColor={palette.textMuted}
             returnKeyType="done"
             blurOnSubmit
           />
@@ -234,13 +263,19 @@ export function SendScreen({ contacts, onPrepareSend }: Props) {
                 if (!scannerOpen) {
                   return;
                 }
-                const scanned = parseTransferQR(result.data);
-                setRecipientInput(result.data);
-                if (scanned?.amount) {
-                  setAmountInput(scanned.amount);
+                const universalLink = parseSfluvUniversalLink(result.data);
+                if (universalLink?.type === "redeem") {
+                  onOpenUniversalLink?.(universalLink);
+                  setScannerOpen(false);
+                  return;
                 }
-                if (scanned?.memo) {
-                  setMemoInput(scanned.memo);
+                const scanned = parseSendTarget(result.data);
+                if (scanned) {
+                  setRecipientInput(scanned.recipient);
+                  setAmountInput(scanned.amount ?? "");
+                  setMemoInput(scanned.memo ?? "");
+                } else {
+                  setRecipientInput(result.data);
                 }
                 setScannerOpen(false);
               }}
@@ -265,229 +300,231 @@ export function SendScreen({ contacts, onPrepareSend }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  container: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    gap: spacing.sm,
-    paddingBottom: 96,
-  },
-  topActionRow: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    alignItems: "center",
-  },
-  toolRow: {
-    flexDirection: "row",
-    gap: spacing.xs,
-  },
-  toolButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: palette.white,
-    borderWidth: 1,
-    borderColor: palette.primary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  card: {
-    backgroundColor: palette.surface,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: palette.border,
-    padding: 14,
-    gap: 8,
-    ...shadows.soft,
-  },
-  sectionLabel: {
-    color: palette.primaryStrong,
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 0.7,
-  },
-  recipientInput: {
-    minHeight: 54,
-    borderRadius: radii.md,
-    backgroundColor: palette.surfaceStrong,
-    borderWidth: 1,
-    borderColor: palette.primary,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    color: palette.text,
-    textAlignVertical: "top",
-    fontSize: 15,
-    lineHeight: 20,
-  },
-  contactRow: {
-    gap: spacing.sm,
-    paddingTop: 2,
-  },
-  contactChip: {
-    width: 72,
-    alignItems: "center",
-    gap: 6,
-  },
-  contactAvatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: palette.primarySoft,
-    borderWidth: 1,
-    borderColor: palette.primary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  contactAvatarText: {
-    color: palette.primaryStrong,
-    fontWeight: "900",
-    fontSize: 15,
-  },
-  contactName: {
-    color: palette.text,
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  validRecipientRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingTop: 4,
-  },
-  validRecipientText: {
-    color: palette.success,
-    fontWeight: "700",
-  },
-  amountCard: {
-    backgroundColor: palette.surface,
-    borderRadius: radii.xl,
-    paddingVertical: 12,
-    paddingHorizontal: spacing.lg,
-    borderWidth: 1.5,
-    borderColor: palette.primary,
-    alignItems: "center",
-    ...shadows.card,
-  },
-  amountRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-  },
-  currencyPrefix: {
-    color: palette.primaryStrong,
-    fontSize: 20,
-    fontWeight: "900",
-  },
-  amountInput: {
-    minWidth: 120,
-    color: palette.primaryStrong,
-    fontSize: 32,
-    fontWeight: "900",
-    textAlign: "center",
-    paddingVertical: 0,
-  },
-  amountToken: {
-    color: palette.textMuted,
-    fontWeight: "800",
-    fontSize: 12,
-    letterSpacing: 0.5,
-  },
-  noteInput: {
-    borderRadius: radii.md,
-    backgroundColor: palette.surfaceStrong,
-    borderWidth: 1,
-    borderColor: palette.border,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    color: palette.text,
-    fontSize: 15,
-  },
-  sendButton: {
-    minHeight: 58,
-    borderRadius: radii.pill,
-    backgroundColor: palette.primary,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 10,
-    ...shadows.card,
-  },
-  sendButtonDisabled: {
-    opacity: 0.72,
-  },
-  sendButtonText: {
-    color: palette.white,
-    fontSize: 16,
-    fontWeight: "900",
-  },
-  scannerScreen: {
-    flex: 1,
-    backgroundColor: palette.background,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xl,
-    gap: spacing.lg,
-  },
-  scannerHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  scannerTitle: {
-    color: palette.primaryStrong,
-    fontSize: 24,
-    fontWeight: "900",
-  },
-  scannerClose: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: palette.surface,
-    borderWidth: 1,
-    borderColor: palette.primary,
-  },
-  scannerFrame: {
-    flex: 1,
-    minHeight: 360,
-    borderRadius: radii.lg,
-    overflow: "hidden",
-    backgroundColor: palette.text,
-  },
-  scannerHint: {
-    color: palette.textMuted,
-    textAlign: "center",
-    paddingBottom: spacing.xl,
-  },
-  sendingOverlay: {
-    flex: 1,
-    backgroundColor: palette.overlay,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 28,
-  },
-  sendingCard: {
-    width: "100%",
-    maxWidth: 320,
-    backgroundColor: palette.white,
-    borderRadius: radii.lg,
-    padding: spacing.xl,
-    alignItems: "center",
-    gap: spacing.sm,
-    ...shadows.card,
-  },
-  sendingTitle: {
-    color: palette.text,
-    fontSize: 20,
-    fontWeight: "900",
-    textAlign: "center",
-  },
-  sendingText: {
-    color: palette.textMuted,
-    textAlign: "center",
-    lineHeight: 20,
-  },
-});
+function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) {
+  return StyleSheet.create({
+    flex: { flex: 1 },
+    container: {
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.md,
+      gap: spacing.sm,
+      paddingBottom: 96,
+    },
+    topActionRow: {
+      flexDirection: "row",
+      justifyContent: "flex-end",
+      alignItems: "center",
+    },
+    toolRow: {
+      flexDirection: "row",
+      gap: spacing.xs,
+    },
+    toolButton: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      backgroundColor: palette.surfaceStrong,
+      borderWidth: 1,
+      borderColor: palette.primary,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    card: {
+      backgroundColor: palette.surface,
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      borderColor: palette.border,
+      padding: 14,
+      gap: 8,
+      ...shadows.soft,
+    },
+    sectionLabel: {
+      color: palette.primaryStrong,
+      fontSize: 12,
+      fontWeight: "800",
+      textTransform: "uppercase",
+      letterSpacing: 0.7,
+    },
+    recipientInput: {
+      minHeight: 54,
+      borderRadius: radii.md,
+      backgroundColor: palette.surfaceStrong,
+      borderWidth: 1,
+      borderColor: palette.primary,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      color: palette.text,
+      textAlignVertical: "top",
+      fontSize: 15,
+      lineHeight: 20,
+    },
+    contactRow: {
+      gap: spacing.sm,
+      paddingTop: 2,
+    },
+    contactChip: {
+      width: 72,
+      alignItems: "center",
+      gap: 6,
+    },
+    contactAvatar: {
+      width: 52,
+      height: 52,
+      borderRadius: 26,
+      backgroundColor: palette.primarySoft,
+      borderWidth: 1,
+      borderColor: palette.primary,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    contactAvatarText: {
+      color: palette.primaryStrong,
+      fontWeight: "900",
+      fontSize: 15,
+    },
+    contactName: {
+      color: palette.text,
+      fontSize: 11,
+      fontWeight: "700",
+    },
+    validRecipientRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingTop: 4,
+    },
+    validRecipientText: {
+      color: palette.success,
+      fontWeight: "700",
+    },
+    amountCard: {
+      backgroundColor: palette.surface,
+      borderRadius: radii.xl,
+      paddingVertical: 12,
+      paddingHorizontal: spacing.lg,
+      borderWidth: 1.5,
+      borderColor: palette.primary,
+      alignItems: "center",
+      ...shadows.card,
+    },
+    amountRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+    },
+    currencyPrefix: {
+      color: palette.primaryStrong,
+      fontSize: 20,
+      fontWeight: "900",
+    },
+    amountInput: {
+      minWidth: 120,
+      color: palette.primaryStrong,
+      fontSize: 32,
+      fontWeight: "900",
+      textAlign: "center",
+      paddingVertical: 0,
+    },
+    amountToken: {
+      color: palette.textMuted,
+      fontWeight: "800",
+      fontSize: 12,
+      letterSpacing: 0.5,
+    },
+    noteInput: {
+      borderRadius: radii.md,
+      backgroundColor: palette.surfaceStrong,
+      borderWidth: 1,
+      borderColor: palette.border,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      color: palette.text,
+      fontSize: 15,
+    },
+    sendButton: {
+      minHeight: 58,
+      borderRadius: radii.pill,
+      backgroundColor: palette.primary,
+      alignItems: "center",
+      justifyContent: "center",
+      flexDirection: "row",
+      gap: 10,
+      ...shadows.card,
+    },
+    sendButtonDisabled: {
+      opacity: 0.72,
+    },
+    sendButtonText: {
+      color: palette.white,
+      fontSize: 16,
+      fontWeight: "900",
+    },
+    scannerScreen: {
+      flex: 1,
+      backgroundColor: palette.background,
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.xl,
+      gap: spacing.lg,
+    },
+    scannerHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+    },
+    scannerTitle: {
+      color: palette.primaryStrong,
+      fontSize: 24,
+      fontWeight: "900",
+    },
+    scannerClose: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: palette.surface,
+      borderWidth: 1,
+      borderColor: palette.primary,
+    },
+    scannerFrame: {
+      flex: 1,
+      minHeight: 360,
+      borderRadius: radii.lg,
+      overflow: "hidden",
+      backgroundColor: palette.text,
+    },
+    scannerHint: {
+      color: palette.textMuted,
+      textAlign: "center",
+      paddingBottom: spacing.xl,
+    },
+    sendingOverlay: {
+      flex: 1,
+      backgroundColor: palette.overlay,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 28,
+    },
+    sendingCard: {
+      width: "100%",
+      maxWidth: 320,
+      backgroundColor: palette.surface,
+      borderRadius: radii.lg,
+      padding: spacing.xl,
+      alignItems: "center",
+      gap: spacing.sm,
+      ...shadows.card,
+    },
+    sendingTitle: {
+      color: palette.text,
+      fontSize: 20,
+      fontWeight: "900",
+      textAlign: "center",
+    },
+    sendingText: {
+      color: palette.textMuted,
+      textAlign: "center",
+      lineHeight: 20,
+    },
+  });
+}

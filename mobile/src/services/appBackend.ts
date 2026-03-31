@@ -6,6 +6,7 @@ import {
   AppOwnedLocation,
   AppTransaction,
   AppUser,
+  AppWallet,
   MerchantApplicationDraft,
   PonderSubscription,
   VerifiedEmail,
@@ -29,6 +30,18 @@ type GetUserResponse = {
     paypal_eth: string;
     last_redemption: number;
   };
+  wallets: Array<{
+    id?: number;
+    owner: string;
+    name: string;
+    is_eoa: boolean;
+    is_hidden: boolean;
+    is_redeemer: boolean;
+    is_minter: boolean;
+    eoa_address: string;
+    smart_address?: string | null;
+    smart_index?: number | null;
+  }>;
   contacts: Array<{
     id: number;
     owner: string;
@@ -70,9 +83,22 @@ type VerifiedEmailResponse = Array<{
 
 type PonderResponse = Array<{
   id: number;
-  email: string;
   address: string;
   type: string;
+  data?: string;
+}>;
+
+type WalletsResponse = Array<{
+  id?: number;
+  owner: string;
+  name: string;
+  is_eoa: boolean;
+  is_hidden: boolean;
+  is_redeemer: boolean;
+  is_minter: boolean;
+  eoa_address: string;
+  smart_address?: string | null;
+  smart_index?: number | null;
 }>;
 
 function endpoint(path: string): string {
@@ -107,6 +133,21 @@ function mapUser(input: GetUserResponse["user"]): AppUser {
   };
 }
 
+function mapWallet(input: WalletsResponse[number]): AppWallet {
+  return {
+    id: typeof input.id === "number" ? input.id : undefined,
+    owner: input.owner,
+    name: input.name,
+    isEoa: input.is_eoa,
+    isHidden: input.is_hidden,
+    isRedeemer: input.is_redeemer,
+    isMinter: input.is_minter,
+    eoaAddress: ethers.utils.getAddress(input.eoa_address),
+    smartAddress: input.smart_address ? ethers.utils.getAddress(input.smart_address) : undefined,
+    smartIndex: typeof input.smart_index === "number" ? input.smart_index : undefined,
+  };
+}
+
 function mapContact(input: GetUserResponse["contacts"][number]): AppContact {
   return {
     id: input.id,
@@ -118,10 +159,12 @@ function mapContact(input: GetUserResponse["contacts"][number]): AppContact {
 }
 
 function mapLocation(input: Record<string, unknown>): AppLocation {
+  const rawPayToAddress = asString(input.pay_to_address).trim();
   return {
     id: asNumber(input.id),
     googleId: asString(input.google_id),
     name: asString(input.name),
+    payToAddress: ethers.utils.isAddress(rawPayToAddress) ? ethers.utils.getAddress(rawPayToAddress) : undefined,
     description: asString(input.description),
     type: asString(input.type),
     street: asString(input.street),
@@ -194,6 +237,7 @@ export class AppBackendClient {
 
   async ensureUser(): Promise<{
     user: AppUser;
+    wallets: AppWallet[];
     contacts: AppContact[];
     locations: AppOwnedLocation[];
   }> {
@@ -213,9 +257,73 @@ export class AppBackendClient {
     const body = (await response.json()) as GetUserResponse;
     return {
       user: mapUser(body.user),
+      wallets: Array.isArray(body.wallets) ? body.wallets.map(mapWallet) : [],
       contacts: Array.isArray(body.contacts) ? body.contacts.map(mapContact) : [],
       locations: Array.isArray(body.locations) ? body.locations.map(mapOwnedLocation) : [],
     };
+  }
+
+  async getWallets(): Promise<AppWallet[]> {
+    const response = await this.authFetch("/wallets");
+    if (!response.ok) {
+      throw new Error("Unable to load wallets.");
+    }
+    const body = (await response.json()) as WalletsResponse;
+    return Array.isArray(body) ? body.map(mapWallet) : [];
+  }
+
+  async addWallet(wallet: AppWallet): Promise<void> {
+    const response = await this.authFetch("/wallets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: wallet.id ?? 0,
+        owner: wallet.owner,
+        name: wallet.name,
+        is_eoa: wallet.isEoa,
+        is_hidden: wallet.isHidden,
+        is_redeemer: wallet.isRedeemer,
+        is_minter: wallet.isMinter,
+        eoa_address: wallet.eoaAddress,
+        smart_address: wallet.smartAddress ?? null,
+        smart_index: typeof wallet.smartIndex === "number" ? wallet.smartIndex : null,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error("Unable to add wallet.");
+    }
+  }
+
+  async ensureLegacyWallets(ownerAddress: string, candidates: Array<{ smartIndex: number; accountAddress: string }>): Promise<void> {
+    const normalizedOwner = ethers.utils.getAddress(ownerAddress);
+    const existing = await this.getWallets();
+    const existingKeys = new Set(
+      existing
+        .filter((wallet) => !wallet.isEoa && wallet.smartAddress && typeof wallet.smartIndex === "number")
+        .map((wallet) => `${wallet.smartIndex}:${wallet.smartAddress?.toLowerCase()}`),
+    );
+
+    for (const candidate of candidates) {
+      const normalizedSmart = ethers.utils.getAddress(candidate.accountAddress);
+      const key = `${candidate.smartIndex}:${normalizedSmart.toLowerCase()}`;
+      if (existingKeys.has(key)) {
+        continue;
+      }
+
+      await this.addWallet({
+        id: 0,
+        owner: "",
+        name: `Wallet ${candidate.smartIndex + 1}`,
+        isEoa: false,
+        isHidden: false,
+        isRedeemer: false,
+        isMinter: false,
+        eoaAddress: normalizedOwner,
+        smartAddress: normalizedSmart,
+        smartIndex: candidate.smartIndex,
+      });
+      existingKeys.add(key);
+    }
   }
 
   async getContacts(): Promise<AppContact[]> {
@@ -262,6 +370,23 @@ export class AppBackendClient {
     }
   }
 
+  async updateContact(contact: AppContact): Promise<void> {
+    const response = await this.authFetch("/contacts", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: contact.id,
+        owner: contact.owner,
+        name: contact.name,
+        address: contact.address,
+        is_favorite: contact.isFavorite,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error("Unable to update contact.");
+    }
+  }
+
   async deleteContact(contactID: number): Promise<void> {
     const response = await this.authFetch(`/contacts?id=${contactID}`, {
       method: "DELETE",
@@ -278,6 +403,53 @@ export class AppBackendClient {
     }
     const body = (await response.json()) as PublicLocationsResponse;
     return Array.isArray(body.locations) ? body.locations.map(mapLocation) : [];
+  }
+
+  async redeemCode(code: string, address: string): Promise<void> {
+    const response = await fetch(endpoint("/redeem"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code,
+        address,
+      }),
+    });
+
+    if (response.ok) {
+      return;
+    }
+
+    const rawBody = (await response.text()).trim();
+    try {
+      const parsed = JSON.parse(rawBody) as { reason?: string; error?: string };
+      if (parsed.reason === "w9_required" || parsed.error === "w9_required") {
+        throw new Error("A W9 form is required before this reward can be redeemed.");
+      }
+      if (parsed.reason === "w9_pending" || parsed.error === "w9_pending") {
+        throw new Error("Your W9 form is still being processed. Try this QR code again once it is approved.");
+      }
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.message === "A W9 form is required before this reward can be redeemed." ||
+          error.message === "Your W9 form is still being processed. Try this QR code again once it is approved.")
+      ) {
+        throw error;
+      }
+    }
+
+    switch (rawBody) {
+      case "code not started":
+        throw new Error("This perk is not active yet.");
+      case "code expired":
+        throw new Error("This perk has expired.");
+      case "code redeemed":
+        throw new Error("This QR code has already been redeemed.");
+      case "user redeemed":
+        throw new Error("You have already redeemed this perk.");
+      default:
+        throw new Error("Unable to redeem this QR code right now.");
+    }
   }
 
   async getVerifiedEmails(): Promise<VerifiedEmail[]> {
@@ -307,9 +479,10 @@ export class AppBackendClient {
     const body = (await response.json()) as PonderResponse;
     return body.map((entry) => ({
       id: entry.id,
-      email: entry.email,
       address: entry.address,
       type: entry.type,
+      email: entry.type === "merchant" ? entry.data : undefined,
+      token: entry.type === "push" ? entry.data : undefined,
     }));
   }
 
@@ -328,6 +501,17 @@ export class AppBackendClient {
     const response = await this.authFetch(`/ponder?id=${id}`, { method: "DELETE" });
     if (!response.ok) {
       throw new Error("Unable to disable notifications.");
+    }
+  }
+
+  async syncPushNotifications(token: string, addresses: string[]): Promise<void> {
+    const response = await this.authFetch("/ponder/push", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, addresses }),
+    });
+    if (!response.ok) {
+      throw new Error("Unable to sync push notifications.");
     }
   }
 

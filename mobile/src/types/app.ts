@@ -1,5 +1,3 @@
-export type RouteID = "legacy" | "new";
-
 export interface AppUser {
   id: string;
   name: string;
@@ -18,6 +16,19 @@ export interface AppUser {
   lastRedemption: number;
 }
 
+export interface AppWallet {
+  id?: number;
+  owner: string;
+  name: string;
+  isEoa: boolean;
+  isHidden: boolean;
+  isRedeemer: boolean;
+  isMinter: boolean;
+  eoaAddress: string;
+  smartAddress?: string;
+  smartIndex?: number;
+}
+
 export interface AppContact {
   id: number;
   owner: string;
@@ -30,6 +41,7 @@ export interface AppLocation {
   id: number;
   googleId: string;
   name: string;
+  payToAddress?: string;
   description: string;
   type: string;
   street: string;
@@ -92,9 +104,10 @@ export interface VerifiedEmail {
 
 export interface PonderSubscription {
   id: number;
-  email: string;
   address: string;
   type: string;
+  token?: string;
+  email?: string;
 }
 
 export interface MerchantPlaceCandidate {

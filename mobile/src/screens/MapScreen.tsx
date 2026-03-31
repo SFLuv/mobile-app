@@ -11,10 +11,11 @@ import {
 } from "react-native";
 import MapView, { Marker, Region } from "react-native-maps";
 import { AppLocation } from "../types/app";
-import { palette, radii, spacing } from "../theme";
+import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 
 type Props = {
   locations: AppLocation[];
+  onPayLocation?: (location: AppLocation) => void;
 };
 
 type DisplayLocation = {
@@ -29,6 +30,18 @@ const INITIAL_REGION: Region = {
   latitudeDelta: 0.12,
   longitudeDelta: 0.12,
 };
+
+const DARK_MAP_STYLE = [
+  { elementType: "geometry", stylers: [{ color: "#18222a" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#b2bcc5" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#18222a" }] },
+  { featureType: "administrative", elementType: "geometry.stroke", stylers: [{ color: "#33414c" }] },
+  { featureType: "poi", elementType: "geometry", stylers: [{ color: "#202d36" }] },
+  { featureType: "road", elementType: "geometry", stylers: [{ color: "#26333d" }] },
+  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#31414c" }] },
+  { featureType: "transit", elementType: "geometry", stylers: [{ color: "#24313a" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#0f3a4a" }] },
+];
 
 function regionForLocations(locations: AppLocation[]): Region {
   if (locations.length === 0) {
@@ -98,7 +111,6 @@ function spreadLocationsForDisplay(locations: AppLocation[]): DisplayLocation[] 
 
     const seed = locations[index];
     const group = [seed];
-    const groupIndexes = [index];
     placed.add(index);
 
     for (let otherIndex = index + 1; otherIndex < locations.length; otherIndex++) {
@@ -109,7 +121,6 @@ function spreadLocationsForDisplay(locations: AppLocation[]): DisplayLocation[] 
       const candidate = locations[otherIndex];
       if (distanceMeters({ lat: seed.lat, lng: seed.lng }, { lat: candidate.lat, lng: candidate.lng }) <= proximityMeters) {
         group.push(candidate);
-        groupIndexes.push(otherIndex);
         placed.add(otherIndex);
       }
     }
@@ -142,30 +153,33 @@ function spreadLocationsForDisplay(locations: AppLocation[]): DisplayLocation[] 
   return output.sort((left, right) => left.location.id - right.location.id);
 }
 
-export function MapScreen({ locations }: Props) {
+function formatLocationSubtitle(location: AppLocation): string {
+  const pieces = [location.type, location.city].map((value) => value.trim()).filter(Boolean);
+  return pieces.join(" • ");
+}
+
+function compareLocations(left: AppLocation, right: AppLocation): number {
+  return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+}
+
+export function MapScreen({ locations, onPayLocation }: Props) {
+  const { palette, shadows, isDark } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
   const [query, setQuery] = useState("");
-  const [selectedType, setSelectedType] = useState("All");
   const [selectedLocation, setSelectedLocation] = useState<AppLocation | null>(null);
   const mapRef = useRef<MapView | null>(null);
   const [mapReady, setMapReady] = useState(false);
 
-  const locationTypes = useMemo(() => {
-    const unique = new Set<string>();
-    for (const location of locations) {
-      unique.add(location.type || "other");
-    }
-    return ["All", ...Array.from(unique).sort((left, right) => left.localeCompare(right))];
-  }, [locations]);
-
   const filteredLocations = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return locations.filter((location) => {
-      const matchesType = selectedType === "All" || location.type === selectedType;
-      const haystack = `${location.name} ${location.description} ${location.city}`.toLowerCase();
+    const matching = locations.filter((location) => {
+      const haystack = `${location.name} ${location.description} ${location.city} ${location.street}`.toLowerCase();
       const matchesQuery = normalized === "" || haystack.includes(normalized);
-      return matchesType && matchesQuery;
+      return matchesQuery;
     });
-  }, [locations, query, selectedType]);
+
+    return matching.sort(compareLocations);
+  }, [locations, query]);
 
   const displayLocations = useMemo(() => spreadLocationsForDisplay(filteredLocations), [filteredLocations]);
   const mapRegion = useMemo(
@@ -206,31 +220,15 @@ export function MapScreen({ locations }: Props) {
     <View style={styles.flex}>
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.title}>Merchant Map</Text>
-        <Text style={styles.subtitle}>Places that accept SFLUV.</Text>
+        <Text style={styles.subtitle}>Browse approved merchants and jump straight into a payment.</Text>
 
         <TextInput
           style={styles.input}
           value={query}
           onChangeText={setQuery}
           placeholder="Search merchants"
+          placeholderTextColor={palette.textMuted}
         />
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-          {locationTypes.map((type) => {
-            const active = type === selectedType;
-            return (
-              <Pressable
-                key={type}
-                style={[styles.filterChip, active ? styles.filterChipActive : undefined]}
-                onPress={() => setSelectedType(type)}
-              >
-                <Text style={[styles.filterChipText, active ? styles.filterChipTextActive : undefined]}>
-                  {type}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
 
         <View style={styles.mapWrap}>
           <MapView
@@ -242,6 +240,7 @@ export function MapScreen({ locations }: Props) {
             onMapReady={() => setMapReady(true)}
             toolbarEnabled={false}
             moveOnMarkerPress={false}
+            customMapStyle={isDark ? DARK_MAP_STYLE : undefined}
           >
             {displayLocations.map((entry) => (
               <Marker
@@ -249,7 +248,7 @@ export function MapScreen({ locations }: Props) {
                 coordinate={{ latitude: entry.latitude, longitude: entry.longitude }}
                 title={entry.location.name}
                 description={entry.location.description}
-                pinColor={palette.primary}
+                pinColor={entry.location.payToAddress ? palette.primary : palette.textMuted}
                 tracksViewChanges={false}
                 onPress={() => setSelectedLocation(entry.location)}
               />
@@ -257,16 +256,52 @@ export function MapScreen({ locations }: Props) {
           </MapView>
         </View>
 
+        <View style={styles.resultsHeader}>
+          <Text style={styles.resultsTitle}>
+            {filteredLocations.length} merchant{filteredLocations.length === 1 ? "" : "s"}
+          </Text>
+        </View>
+
         <View style={styles.listWrap}>
-          {filteredLocations.map((location) => (
-            <Pressable key={location.id} style={styles.card} onPress={() => setSelectedLocation(location)}>
-              <Text style={styles.cardTitle}>{location.name}</Text>
-              <Text style={styles.cardType}>{location.type}</Text>
-              <Text style={styles.cardAddress}>
-                {location.street}, {location.city}
-              </Text>
-            </Pressable>
-          ))}
+          {filteredLocations.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>No merchants match that search.</Text>
+              <Text style={styles.emptyText}>Try clearing the search and browsing the full list.</Text>
+            </View>
+          ) : (
+            filteredLocations.map((location) => (
+              <View key={location.id} style={styles.card}>
+                <Pressable onPress={() => setSelectedLocation(location)}>
+                  <Text style={styles.cardTitle}>{location.name}</Text>
+                  <Text style={styles.cardSubtitle}>{formatLocationSubtitle(location)}</Text>
+                  <Text style={styles.cardAddress}>
+                    {location.street}, {location.city}
+                  </Text>
+                  {location.description ? (
+                    <Text style={styles.cardDescription} numberOfLines={2}>
+                      {location.description}
+                    </Text>
+                  ) : null}
+                </Pressable>
+
+                <View style={styles.cardFooter}>
+                  {!location.payToAddress ? <Text style={styles.cardMetaMuted}>Payment unavailable right now</Text> : null}
+                  <View style={styles.cardActionRow}>
+                    <Pressable style={styles.cardSecondaryButton} onPress={() => setSelectedLocation(location)}>
+                      <Text style={styles.cardSecondaryButtonText}>Details</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.cardPrimaryButton, !location.payToAddress ? styles.cardPrimaryButtonDisabled : undefined]}
+                      disabled={!location.payToAddress}
+                      onPress={() => onPayLocation?.(location)}
+                    >
+                      <Text style={styles.cardPrimaryButtonText}>Pay</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </View>
+            ))
+          )}
         </View>
       </ScrollView>
 
@@ -283,6 +318,9 @@ export function MapScreen({ locations }: Props) {
               {selectedLocation.phone ? <Text style={styles.modalMeta}>Phone: {selectedLocation.phone}</Text> : null}
               {selectedLocation.email ? <Text style={styles.modalMeta}>Email: {selectedLocation.email}</Text> : null}
               {selectedLocation.website ? <Text style={styles.modalMeta}>Website: {selectedLocation.website}</Text> : null}
+              {!selectedLocation.payToAddress ? (
+                <Text style={styles.modalMetaMuted}>Payment is not available for this merchant right now.</Text>
+              ) : null}
               {selectedLocation.openingHours.length > 0 ? (
                 <View style={styles.hoursCard}>
                   {selectedLocation.openingHours.map((hours) => (
@@ -293,6 +331,17 @@ export function MapScreen({ locations }: Props) {
                 </View>
               ) : null}
 
+              <Pressable
+                style={[styles.payMerchantButton, !selectedLocation.payToAddress ? styles.payMerchantButtonDisabled : undefined]}
+                disabled={!selectedLocation.payToAddress}
+                onPress={() => {
+                  onPayLocation?.(selectedLocation);
+                  setSelectedLocation(null);
+                }}
+              >
+                <Text style={styles.payMerchantButtonText}>Pay merchant</Text>
+              </Pressable>
+
               <View style={styles.modalActions}>
                 <Pressable style={styles.secondaryButton} onPress={() => setSelectedLocation(null)}>
                   <Text style={styles.secondaryButtonText}>Close</Text>
@@ -300,7 +349,8 @@ export function MapScreen({ locations }: Props) {
                 <Pressable
                   style={styles.primaryButton}
                   onPress={() => {
-                    const url = selectedLocation.mapsPage ||
+                    const url =
+                      selectedLocation.mapsPage ||
                       `https://www.google.com/maps/place/?q=place_id:${selectedLocation.googleId}`;
                     void Linking.openURL(url);
                   }}
@@ -316,157 +366,223 @@ export function MapScreen({ locations }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  container: {
-    padding: spacing.lg,
-    gap: spacing.md,
-    paddingBottom: 110,
-  },
-  title: {
-    color: palette.text,
-    fontSize: 24,
-    fontWeight: "800",
-  },
-  subtitle: {
-    color: palette.textMuted,
-    lineHeight: 20,
-  },
-  input: {
-    backgroundColor: palette.surface,
-    borderWidth: 1,
-    borderColor: palette.border,
-    borderRadius: radii.md,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    color: palette.text,
-  },
-  filterRow: {
-    gap: 8,
-    paddingRight: 20,
-  },
-  filterChip: {
-    backgroundColor: palette.surface,
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: palette.border,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-  },
-  filterChipActive: {
-    backgroundColor: palette.primary,
-    borderColor: palette.primary,
-  },
-  filterChipText: {
-    color: palette.text,
-    fontWeight: "700",
-  },
-  filterChipTextActive: {
-    color: palette.white,
-  },
-  mapWrap: {
-    borderRadius: radii.lg,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: palette.border,
-    height: 280,
-    backgroundColor: palette.surfaceStrong,
-  },
-  map: {
-    width: "100%",
-    height: "100%",
-  },
-  listWrap: {
-    gap: 10,
-  },
-  card: {
-    backgroundColor: palette.surface,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: palette.border,
-    padding: spacing.md,
-    shadowColor: palette.shadow,
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
-  },
-  cardTitle: {
-    color: palette.text,
-    fontWeight: "800",
-    fontSize: 16,
-  },
-  cardType: {
-    color: palette.primary,
-    marginTop: 4,
-    textTransform: "capitalize",
-  },
-  cardAddress: {
-    color: palette.textMuted,
-    marginTop: 6,
-  },
-  modalContainer: {
-    padding: spacing.lg,
-    gap: spacing.md,
-    backgroundColor: palette.background,
-    flexGrow: 1,
-  },
-  modalTitle: {
-    color: palette.text,
-    fontSize: 28,
-    fontWeight: "900",
-  },
-  modalSubtitle: {
-    color: palette.primary,
-    fontWeight: "700",
-    textTransform: "capitalize",
-  },
-  modalBody: {
-    color: palette.text,
-    lineHeight: 22,
-  },
-  modalMeta: {
-    color: palette.textMuted,
-    lineHeight: 21,
-  },
-  hoursCard: {
-    backgroundColor: palette.surface,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: palette.border,
-    padding: spacing.md,
-    gap: 6,
-  },
-  hoursText: {
-    color: palette.text,
-  },
-  modalActions: {
-    flexDirection: "row",
-    gap: spacing.sm,
-    marginTop: "auto",
-  },
-  secondaryButton: {
-    flex: 1,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: palette.borderStrong,
-    backgroundColor: palette.surface,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  secondaryButtonText: {
-    color: palette.text,
-    fontWeight: "700",
-  },
-  primaryButton: {
-    flex: 1,
-    borderRadius: radii.md,
-    backgroundColor: palette.primary,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  primaryButtonText: {
-    color: palette.white,
-    fontWeight: "800",
-  },
-});
+function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) {
+  return StyleSheet.create({
+    flex: { flex: 1 },
+    container: {
+      padding: spacing.lg,
+      gap: spacing.md,
+      paddingBottom: 110,
+    },
+    title: {
+      color: palette.text,
+      fontSize: 24,
+      fontWeight: "800",
+    },
+    subtitle: {
+      color: palette.textMuted,
+      lineHeight: 20,
+    },
+    input: {
+      backgroundColor: palette.surface,
+      borderWidth: 1,
+      borderColor: palette.border,
+      borderRadius: radii.md,
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      color: palette.text,
+    },
+    resultsHeader: {
+      gap: 4,
+    },
+    resultsTitle: {
+      color: palette.text,
+      fontSize: 18,
+      fontWeight: "800",
+    },
+    mapWrap: {
+      borderRadius: radii.lg,
+      overflow: "hidden",
+      borderWidth: 1,
+      borderColor: palette.border,
+      height: 280,
+      backgroundColor: palette.surfaceStrong,
+    },
+    map: {
+      width: "100%",
+      height: "100%",
+    },
+    listWrap: {
+      gap: 10,
+    },
+    card: {
+      backgroundColor: palette.surface,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: palette.border,
+      padding: spacing.md,
+      gap: spacing.sm,
+      ...shadows.soft,
+    },
+    cardTitle: {
+      color: palette.text,
+      fontWeight: "800",
+      fontSize: 16,
+    },
+    cardSubtitle: {
+      color: palette.primary,
+      marginTop: 4,
+      textTransform: "capitalize",
+    },
+    cardAddress: {
+      color: palette.textMuted,
+      marginTop: 6,
+    },
+    cardDescription: {
+      color: palette.text,
+      lineHeight: 20,
+      marginTop: 8,
+    },
+    cardFooter: {
+      gap: spacing.sm,
+      marginTop: spacing.xs,
+    },
+    cardMetaMuted: {
+      color: palette.textMuted,
+      fontSize: 12,
+    },
+    cardActionRow: {
+      flexDirection: "row",
+      gap: spacing.sm,
+    },
+    cardSecondaryButton: {
+      flex: 1,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: palette.borderStrong,
+      backgroundColor: palette.background,
+      paddingVertical: 12,
+      alignItems: "center",
+    },
+    cardSecondaryButtonText: {
+      color: palette.text,
+      fontWeight: "700",
+    },
+    cardPrimaryButton: {
+      flex: 1,
+      borderRadius: radii.md,
+      backgroundColor: palette.primary,
+      paddingVertical: 12,
+      alignItems: "center",
+    },
+    cardPrimaryButtonDisabled: {
+      backgroundColor: palette.border,
+    },
+    cardPrimaryButtonText: {
+      color: palette.white,
+      fontWeight: "800",
+    },
+    emptyCard: {
+      backgroundColor: palette.surface,
+      borderWidth: 1,
+      borderColor: palette.border,
+      borderRadius: radii.md,
+      padding: spacing.lg,
+      gap: spacing.xs,
+      ...shadows.soft,
+    },
+    emptyTitle: {
+      color: palette.text,
+      fontWeight: "800",
+      fontSize: 16,
+    },
+    emptyText: {
+      color: palette.textMuted,
+      lineHeight: 20,
+    },
+    modalContainer: {
+      padding: spacing.lg,
+      gap: spacing.md,
+      backgroundColor: palette.background,
+      flexGrow: 1,
+    },
+    modalTitle: {
+      color: palette.text,
+      fontSize: 28,
+      fontWeight: "900",
+    },
+    modalSubtitle: {
+      color: palette.primary,
+      fontWeight: "700",
+      textTransform: "capitalize",
+    },
+    modalBody: {
+      color: palette.text,
+      lineHeight: 22,
+    },
+    modalMeta: {
+      color: palette.textMuted,
+      lineHeight: 21,
+    },
+    modalMetaMuted: {
+      color: palette.textMuted,
+      lineHeight: 21,
+      fontStyle: "italic",
+    },
+    hoursCard: {
+      backgroundColor: palette.surface,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: palette.border,
+      padding: spacing.md,
+      gap: 6,
+    },
+    hoursText: {
+      color: palette.text,
+    },
+    payMerchantButton: {
+      borderRadius: radii.md,
+      backgroundColor: palette.primary,
+      paddingVertical: 14,
+      alignItems: "center",
+      marginTop: spacing.sm,
+    },
+    payMerchantButtonDisabled: {
+      backgroundColor: palette.border,
+    },
+    payMerchantButtonText: {
+      color: palette.white,
+      fontWeight: "800",
+      fontSize: 16,
+    },
+    modalActions: {
+      flexDirection: "row",
+      gap: spacing.sm,
+      marginTop: "auto",
+    },
+    secondaryButton: {
+      flex: 1,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: palette.borderStrong,
+      backgroundColor: palette.surface,
+      paddingVertical: 14,
+      alignItems: "center",
+    },
+    secondaryButtonText: {
+      color: palette.text,
+      fontWeight: "700",
+    },
+    primaryButton: {
+      flex: 1,
+      borderRadius: radii.md,
+      backgroundColor: palette.primary,
+      paddingVertical: 14,
+      alignItems: "center",
+    },
+    primaryButtonText: {
+      color: palette.white,
+      fontWeight: "800",
+    },
+  });
+}

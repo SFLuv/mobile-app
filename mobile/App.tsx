@@ -4,15 +4,22 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
+  Vibration,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
+import * as Device from "expo-device";
+import * as Linking from "expo-linking";
+import * as Notifications from "expo-notifications";
 import { ethers } from "ethers";
 import {
   PrivyProvider,
@@ -26,11 +33,10 @@ import { WalletHomeScreen } from "./src/screens/WalletHomeScreen";
 import { ActivityScreen } from "./src/screens/ActivityScreen";
 import { MapScreen } from "./src/screens/MapScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
-import { MerchantApplicationScreen } from "./src/screens/MerchantApplicationScreen";
+import { ContactsScreen } from "./src/screens/ContactsScreen";
 import { mobileConfig } from "./src/config";
 import {
   createSmartWalletServiceFromSigner,
-  createSmartWalletServiceFromTestKey,
   RouteDiscovery,
   SmartWalletService,
 } from "./src/services/smartWallet";
@@ -38,13 +44,22 @@ import { AppBackendClient } from "./src/services/appBackend";
 import {
   AppContact,
   AppLocation,
-  AppOwnedLocation,
   AppTransaction,
   AppUser,
-  PonderSubscription,
-  VerifiedEmail,
 } from "./src/types/app";
-import { palette, radii, shadows, spacing } from "./src/theme";
+import { AppPreferences, defaultAppPreferences } from "./src/types/preferences";
+import { SfluvUniversalLink, parseSfluvUniversalLink } from "./src/utils/universalLinks";
+import {
+  AppThemeProvider,
+  Palette,
+  getShadows,
+  lightPalette,
+  palette,
+  radii,
+  shadows,
+  spacing,
+  useAppTheme,
+} from "./src/theme";
 
 type RuntimeState = {
   loading: boolean;
@@ -53,11 +68,91 @@ type RuntimeState = {
   error: string | null;
 };
 
-type Tab = "wallet" | "activity" | "map" | "settings";
+type PendingLinkIntent = {
+  id: number;
+  link: SfluvUniversalLink;
+};
+
+type SendDraft = {
+  recipient: string;
+  amount?: string;
+  memo?: string;
+};
+
+type SendDraftOptions = {
+  returnTab?: Tab | null;
+};
+
+type RedeemFlowState = {
+  code: string;
+  stage: "awaiting_wallet" | "redeeming" | "success" | "error";
+  message?: string;
+};
+
+type Tab = "wallet" | "activity" | "map" | "contacts" | "settings";
 type WalletPane = "home" | "send" | "receive";
+
+const PREFERENCES_STORAGE_KEY = "sfluv-wallet:preferences";
+const PUSH_TOKEN_STORAGE_KEY = "sfluv-wallet:push-token";
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 function blankRuntime(loading = false): RuntimeState {
   return { loading, service: null, discovery: null, error: null };
+}
+
+function resolveExpoProjectId(): string | undefined {
+  const configuredProjectId = mobileConfig.expoProjectId.trim();
+  if (configuredProjectId) {
+    return configuredProjectId;
+  }
+
+  const fromConstants =
+    Constants.easConfig?.projectId ??
+    ((Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined)?.eas?.projectId ?? "");
+  return typeof fromConstants === "string" && fromConstants.trim().length > 0 ? fromConstants.trim() : undefined;
+}
+
+async function registerForPushNotificationsAsync(): Promise<string | null> {
+  if (Platform.OS === "android") {
+    await Notifications.setNotificationChannelAsync("wallet-activity", {
+      name: "Wallet activity",
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 200, 250],
+      lightColor: "#ef6d66",
+    });
+  }
+
+  if (!Device.isDevice) {
+    console.warn("Push notifications require a physical device.");
+    return null;
+  }
+
+  const projectId = resolveExpoProjectId();
+  if (!projectId) {
+    console.warn("Expo project ID is required to register for push notifications.");
+    return null;
+  }
+
+  let { status } = await Notifications.getPermissionsAsync();
+  if (status !== "granted") {
+    const requested = await Notifications.requestPermissionsAsync();
+    status = requested.status;
+  }
+  if (status !== "granted") {
+    console.warn("Notification permissions were not granted.");
+    return null;
+  }
+
+  const token = await Notifications.getExpoPushTokenAsync({ projectId });
+  return token.data;
 }
 
 function formatDisplayBalance(raw: string): string {
@@ -72,36 +167,57 @@ function formatDisplayBalance(raw: string): string {
   return `${intPart}.${trimmed.slice(0, 4)}`;
 }
 
-function findPrimaryCandidate(discovery: RouteDiscovery | null, routeID: "legacy" | "new") {
-  if (!discovery) {
-    return undefined;
-  }
-  return (
-    discovery.candidates.find((candidate) => candidate.route.id === routeID && candidate.smartIndex === 0) ??
-    discovery.candidates.find((candidate) => candidate.route.id === routeID)
-  );
-}
-
 function shortAddress(value: string | undefined): string {
   if (!value) return "";
   if (value.length <= 16) return value;
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
 }
 
-function routeLabelTone(routeID: "legacy" | "new") {
-  if (routeID === "new") {
+function walletLabel(smartIndex: number | undefined): string {
+  if (typeof smartIndex !== "number" || smartIndex < 0) {
+    return "Wallet";
+  }
+  return `Wallet ${smartIndex + 1}`;
+}
+
+function transactionIdentity(tx: Pick<AppTransaction, "hash" | "amount" | "from" | "to">): string {
+  return `${tx.hash}:${tx.amount}:${tx.from}:${tx.to}`.toLowerCase();
+}
+
+function mergeTransactions(primary: AppTransaction[], secondary: AppTransaction[], limit = 25): AppTransaction[] {
+  const secondaryByIdentity = new Map(secondary.map((tx) => [transactionIdentity(tx), tx]));
+  const merged = primary.map((tx) => {
+    const secondaryTx = secondaryByIdentity.get(transactionIdentity(tx));
+    if (!secondaryTx) {
+      return tx;
+    }
     return {
-      backgroundColor: palette.primarySoft,
-      color: palette.primaryStrong,
-      icon: "sparkles" as const,
+      ...tx,
+      id: secondaryTx.id || tx.id,
+      memo: secondaryTx.memo || tx.memo,
     };
+  });
+
+  const seen = new Set(merged.map((tx) => transactionIdentity(tx)));
+  for (const tx of secondary) {
+    const identity = transactionIdentity(tx);
+    if (!seen.has(identity)) {
+      merged.push(tx);
+      seen.add(identity);
+    }
   }
 
-  return {
-    backgroundColor: palette.accent,
-    color: palette.text,
-    icon: "time" as const,
-  };
+  return merged
+    .sort((left, right) => {
+      if (left.timestamp !== right.timestamp) {
+        return right.timestamp - left.timestamp;
+      }
+      if (left.hash === right.hash) {
+        return 0;
+      }
+      return left.hash < right.hash ? 1 : -1;
+    })
+    .slice(0, limit);
 }
 
 function describeAppBackendIssue(error: unknown): string {
@@ -115,6 +231,26 @@ function describeAppBackendIssue(error: unknown): string {
   return message;
 }
 
+function mergePreferences(input: unknown): AppPreferences {
+  if (!input || typeof input !== "object") {
+    return defaultAppPreferences;
+  }
+
+  const candidate = input as Partial<AppPreferences>;
+  return {
+    themePreference:
+      candidate.themePreference === "light" || candidate.themePreference === "dark" || candidate.themePreference === "system"
+        ? candidate.themePreference
+        : defaultAppPreferences.themePreference,
+    notificationsEnabled:
+      typeof candidate.notificationsEnabled === "boolean"
+        ? candidate.notificationsEnabled
+        : defaultAppPreferences.notificationsEnabled,
+    hapticsEnabled:
+      typeof candidate.hapticsEnabled === "boolean" ? candidate.hapticsEnabled : defaultAppPreferences.hapticsEnabled,
+  };
+}
+
 function BottomTab({
   label,
   icon,
@@ -126,14 +262,15 @@ function BottomTab({
   active: boolean;
   onPress: () => void;
 }) {
+  const { palette } = useAppTheme();
   return (
-    <Pressable style={[styles.bottomTab, active ? styles.bottomTabActive : undefined]} onPress={onPress}>
+    <Pressable style={[styles.bottomTab, active ? { backgroundColor: palette.primarySoft } : undefined]} onPress={onPress}>
       <Ionicons
         name={icon}
         size={18}
         color={active ? palette.primaryStrong : palette.textMuted}
       />
-      <Text style={[styles.bottomTabText, active ? styles.bottomTabTextActive : undefined]}>{label}</Text>
+      <Text style={[styles.bottomTabText, { color: active ? palette.primaryStrong : palette.textMuted }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -142,27 +279,101 @@ function WalletAppShell({
   runtime,
   selectedCandidateKey,
   onSelectCandidate,
-  onMigrateLegacyToNew,
-  showMigrateLegacyToNew,
-  canMigrateLegacyToNew,
-  migratingLegacyToNew,
-  legacyBalance,
   ownerBadge,
   onLogout,
   backendClient,
+  pendingLinkIntent,
+  onConsumePendingLink,
 }: {
   runtime: RuntimeState;
   selectedCandidateKey?: string;
   onSelectCandidate: (key: string) => void;
-  onMigrateLegacyToNew?: () => Promise<void>;
-  showMigrateLegacyToNew?: boolean;
-  canMigrateLegacyToNew?: boolean;
-  migratingLegacyToNew?: boolean;
-  legacyBalance?: string;
   ownerBadge?: string;
   onLogout?: () => void;
   backendClient?: AppBackendClient | null;
+  pendingLinkIntent: PendingLinkIntent | null;
+  onConsumePendingLink: () => void;
 }) {
+  const [preferences, setPreferences] = useState<AppPreferences>(defaultAppPreferences);
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPreferences = async () => {
+      try {
+        const raw = await AsyncStorage.getItem(PREFERENCES_STORAGE_KEY);
+        if (!cancelled && raw) {
+          setPreferences(mergePreferences(JSON.parse(raw)));
+        }
+      } catch (error) {
+        console.warn("Unable to load saved app preferences", error);
+      } finally {
+        if (!cancelled) {
+          setPreferencesLoaded(true);
+        }
+      }
+    };
+
+    void loadPreferences();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!preferencesLoaded) {
+      return;
+    }
+
+    AsyncStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(preferences)).catch((error) => {
+      console.warn("Unable to persist app preferences", error);
+    });
+  }, [preferences, preferencesLoaded]);
+
+  return (
+    <AppThemeProvider preference={preferences.themePreference}>
+      <WalletAppShellContent
+        runtime={runtime}
+        selectedCandidateKey={selectedCandidateKey}
+        onSelectCandidate={onSelectCandidate}
+        ownerBadge={ownerBadge}
+        onLogout={onLogout}
+        backendClient={backendClient}
+        pendingLinkIntent={pendingLinkIntent}
+        onConsumePendingLink={onConsumePendingLink}
+        preferences={preferences}
+        onUpdatePreferences={setPreferences}
+      />
+    </AppThemeProvider>
+  );
+}
+
+function WalletAppShellContent({
+  runtime,
+  selectedCandidateKey,
+  onSelectCandidate,
+  ownerBadge,
+  onLogout,
+  backendClient,
+  pendingLinkIntent,
+  onConsumePendingLink,
+  preferences,
+  onUpdatePreferences,
+}: {
+  runtime: RuntimeState;
+  selectedCandidateKey?: string;
+  onSelectCandidate: (key: string) => void;
+  ownerBadge?: string;
+  onLogout?: () => void;
+  backendClient?: AppBackendClient | null;
+  pendingLinkIntent: PendingLinkIntent | null;
+  onConsumePendingLink: () => void;
+  preferences: AppPreferences;
+  onUpdatePreferences: (next: AppPreferences) => void;
+}) {
+  const { palette, shadows, isDark } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const [tab, setTab] = useState<Tab>("wallet");
   const [walletPane, setWalletPane] = useState<WalletPane>("home");
   const [smartAddress, setSmartAddress] = useState("");
@@ -170,30 +381,66 @@ function WalletAppShell({
   const [transactions, setTransactions] = useState<AppTransaction[]>([]);
   const [contacts, setContacts] = useState<AppContact[]>([]);
   const [locations, setLocations] = useState<AppLocation[]>([]);
-  const [ownedLocations, setOwnedLocations] = useState<AppOwnedLocation[]>([]);
-  const [verifiedEmails, setVerifiedEmails] = useState<VerifiedEmail[]>([]);
-  const [subscriptions, setSubscriptions] = useState<PonderSubscription[]>([]);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
+  const [storedPushToken, setStoredPushToken] = useState<string | null>(null);
+  const [walletSyncReady, setWalletSyncReady] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
   const [refreshingActivity, setRefreshingActivity] = useState(false);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
-  const [showMerchantApplication, setShowMerchantApplication] = useState(false);
   const [showWalletChooser, setShowWalletChooser] = useState(false);
-
-  const currentSubscription = useMemo(() => {
-    if (!smartAddress) return undefined;
-    return subscriptions.find((entry) => entry.address.toLowerCase() === smartAddress.toLowerCase());
-  }, [smartAddress, subscriptions]);
+  const [sendDraft, setSendDraft] = useState<SendDraft | null>(null);
+  const [sendReturnTab, setSendReturnTab] = useState<Tab | null>(null);
+  const [redeemFlow, setRedeemFlow] = useState<RedeemFlowState | null>(null);
+  const walletSurfaceRequestRef = useRef(0);
   const walletCandidates = runtime.discovery?.candidates ?? [];
+  const canChooseWallet = walletCandidates.length > 1;
   const selectedCandidate = useMemo(
     () => walletCandidates.find((candidate) => candidate.key === selectedCandidateKey) ?? walletCandidates[0],
     [selectedCandidateKey, walletCandidates],
   );
+  const notificationAddresses = useMemo(() => {
+    const seen = new Set<string>();
+    const addresses: string[] = [];
+    for (const candidate of walletCandidates) {
+      const normalized = candidate.accountAddress.toLowerCase();
+      if (seen.has(normalized)) {
+        continue;
+      }
+      seen.add(normalized);
+      addresses.push(candidate.accountAddress);
+    }
+    return addresses;
+  }, [walletCandidates]);
 
   const publicBackendClient = useMemo(
     () => backendClient ?? new AppBackendClient(async () => null),
     [backendClient],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    AsyncStorage.getItem(PUSH_TOKEN_STORAGE_KEY)
+      .then((value) => {
+        if (!cancelled) {
+          setStoredPushToken(value);
+        }
+      })
+      .catch((error) => {
+        console.warn("Unable to load saved push token", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const emitTransferHaptic = () => {
+    if (!preferences.hapticsEnabled) {
+      return;
+    }
+    Vibration.vibrate(10);
+  };
 
   const loadPublicLocations = async () => {
     try {
@@ -214,19 +461,6 @@ function WalletAppShell({
       const profile = await backendClient.ensureUser();
       setAppUser(profile.user);
       setContacts(profile.contacts);
-      setOwnedLocations(profile.locations);
-
-      const [emails, notifications] = await Promise.allSettled([
-        backendClient.getVerifiedEmails(),
-        backendClient.getNotificationSubscriptions(),
-      ]);
-
-      if (emails.status === "fulfilled") {
-        setVerifiedEmails(emails.value);
-      }
-      if (notifications.status === "fulfilled") {
-        setSubscriptions(notifications.value);
-      }
       setSyncNotice(null);
     } catch (error) {
       console.warn("Unable to load app profile", error);
@@ -236,7 +470,119 @@ function WalletAppShell({
     }
   };
 
+  const openSendDraft = (draft: SendDraft, options?: SendDraftOptions) => {
+    setSendDraft(draft);
+    setSendReturnTab(options?.returnTab ?? null);
+    setTab("wallet");
+    setWalletPane("send");
+  };
+
+  useEffect(() => {
+    if (!pendingLinkIntent) {
+      return;
+    }
+
+    const { link } = pendingLinkIntent;
+    if (link.type === "pay") {
+      openSendDraft({
+        recipient: link.address,
+      });
+      onConsumePendingLink();
+      return;
+    }
+
+    if (link.type === "request") {
+      openSendDraft({
+        recipient: link.address,
+        amount: link.amount,
+        memo: link.memo,
+      });
+      onConsumePendingLink();
+      return;
+    }
+
+    setTab("wallet");
+    setWalletPane("home");
+    setRedeemFlow({
+      code: link.code,
+      stage: "awaiting_wallet",
+    });
+    onConsumePendingLink();
+  }, [onConsumePendingLink, pendingLinkIntent]);
+
+  useEffect(() => {
+    if (!redeemFlow || redeemFlow.stage !== "awaiting_wallet") {
+      return;
+    }
+    if (runtime.error) {
+      setRedeemFlow({
+        code: redeemFlow.code,
+        stage: "error",
+        message: runtime.error,
+      });
+      return;
+    }
+    if (!runtime.service) {
+      return;
+    }
+    setRedeemFlow((current) =>
+      current && current.code === redeemFlow.code
+        ? {
+            code: current.code,
+            stage: "redeeming",
+          }
+        : current,
+    );
+  }, [redeemFlow, runtime.error, runtime.service]);
+
+  useEffect(() => {
+    if (!redeemFlow || redeemFlow.stage !== "redeeming") {
+      return;
+    }
+    if (!runtime.service) {
+      return;
+    }
+
+    let cancelled = false;
+    const redeem = async () => {
+      try {
+        const payoutAddress = await runtime.service?.smartAccountAddress();
+        if (!payoutAddress || cancelled) {
+          return;
+        }
+        await publicBackendClient.redeemCode(redeemFlow.code, payoutAddress);
+        if (cancelled) {
+          return;
+        }
+        setRedeemFlow({
+          code: redeemFlow.code,
+          stage: "success",
+          message: "Your SFLUV perk was sent to this wallet.",
+        });
+        await refreshWalletSurface();
+        await loadAppProfile();
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setRedeemFlow({
+          code: redeemFlow.code,
+          stage: "error",
+          message: (error as Error)?.message || "Unable to redeem this QR code right now.",
+        });
+      }
+    };
+
+    void redeem();
+    return () => {
+      cancelled = true;
+    };
+  }, [publicBackendClient, redeemFlow, runtime.service]);
+
   const refreshWalletSurface = async () => {
+    const requestID = walletSurfaceRequestRef.current + 1;
+    walletSurfaceRequestRef.current = requestID;
+
     if (!runtime.service) {
       setSmartAddress("");
       setSmartBalance("...");
@@ -246,20 +592,49 @@ function WalletAppShell({
 
     try {
       const address = await runtime.service.smartAccountAddress();
-      const balance = await runtime.service.smartAccountBalance();
-      setSmartAddress(address);
-      setSmartBalance(formatDisplayBalance(balance));
-
-      if (backendClient) {
-        try {
-          const txs = await backendClient.getTransactions(address, 0, 25);
-          setTransactions(txs);
-        } catch (error) {
-          console.warn("Unable to load transaction history", error);
-          setSyncNotice(describeAppBackendIssue(error));
-          setTransactions([]);
-        }
+      if (walletSurfaceRequestRef.current !== requestID) {
+        return;
       }
+
+      const nextAddress = ethers.utils.getAddress(address);
+      setSmartAddress(nextAddress);
+      setTransactions((current) => (smartAddress && smartAddress.toLowerCase() !== nextAddress.toLowerCase() ? [] : current));
+
+      const seededBalance =
+        selectedCandidate && selectedCandidate.accountAddress.toLowerCase() === nextAddress.toLowerCase()
+          ? formatDisplayBalance(selectedCandidate.tokenBalance)
+          : null;
+      setSmartBalance(seededBalance ?? "...");
+
+      void runtime.service
+        .smartAccountBalance()
+        .then((balance) => {
+          if (walletSurfaceRequestRef.current !== requestID) {
+            return;
+          }
+          setSmartBalance(formatDisplayBalance(balance));
+        })
+        .catch((error) => {
+          console.warn("Unable to load wallet balance", error);
+        });
+
+      void Promise.all([
+        runtime.service.recentTransfers(25).catch((error) => {
+          console.warn("Unable to load recent onchain transfers", error);
+          return [] as AppTransaction[];
+        }),
+        backendClient
+          ? backendClient.getTransactions(nextAddress, 0, 25).catch((error) => {
+              console.warn("Unable to load transaction history from app backend", error);
+              return [] as AppTransaction[];
+            })
+          : Promise.resolve([] as AppTransaction[]),
+      ]).then(([chainTransactions, backendTransactions]) => {
+        if (walletSurfaceRequestRef.current !== requestID) {
+          return;
+        }
+        setTransactions(mergeTransactions(chainTransactions, backendTransactions, 25));
+      });
     } catch (error) {
       console.warn("Unable to refresh wallet surface", error);
       setSyncNotice(describeAppBackendIssue(error));
@@ -276,12 +651,108 @@ function WalletAppShell({
 
   useEffect(() => {
     void refreshWalletSurface();
-  }, [runtime.service, selectedCandidateKey, backendClient]);
+  }, [runtime.service, runtime.discovery, selectedCandidateKey, backendClient]);
+
+  useEffect(() => {
+    if (!backendClient || !appUser || !runtime.discovery || walletCandidates.length === 0) {
+      setWalletSyncReady(false);
+      return;
+    }
+
+    let cancelled = false;
+    const syncWallets = async () => {
+      setWalletSyncReady(false);
+      try {
+        await backendClient.ensureLegacyWallets(
+          runtime.discovery?.ownerAddress ?? "",
+          walletCandidates.map((candidate) => ({
+            smartIndex: candidate.smartIndex,
+            accountAddress: candidate.accountAddress,
+          })),
+        );
+        if (!cancelled) {
+          setWalletSyncReady(true);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn("Unable to sync wallets with app backend", error);
+        }
+      }
+    };
+
+    void syncWallets();
+    return () => {
+      cancelled = true;
+    };
+  }, [appUser, backendClient, runtime.discovery, walletCandidates]);
+
+  useEffect(() => {
+    if (!backendClient || !appUser || !runtime.discovery || !walletSyncReady) {
+      return;
+    }
+
+    let cancelled = false;
+    const syncPushNotifications = async () => {
+      if (!preferences.notificationsEnabled) {
+        if (!storedPushToken) {
+          return;
+        }
+        try {
+          await backendClient.syncPushNotifications(storedPushToken, []);
+          await AsyncStorage.removeItem(PUSH_TOKEN_STORAGE_KEY);
+          if (!cancelled) {
+            setStoredPushToken(null);
+          }
+        } catch (error) {
+          if (!cancelled) {
+            console.warn("Unable to disable push notifications", error);
+          }
+        }
+        return;
+      }
+
+      try {
+        const token = storedPushToken ?? (await registerForPushNotificationsAsync());
+        if (!token || cancelled) {
+          return;
+        }
+        await backendClient.syncPushNotifications(token, notificationAddresses);
+        await AsyncStorage.setItem(PUSH_TOKEN_STORAGE_KEY, token);
+        if (!cancelled) {
+          setStoredPushToken(token);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn("Unable to sync push notifications", error);
+        }
+      }
+    };
+
+    void syncPushNotifications();
+    return () => {
+      cancelled = true;
+    };
+  }, [appUser, backendClient, notificationAddresses, preferences.notificationsEnabled, runtime.discovery, storedPushToken, walletSyncReady]);
 
   const handleSend = async (recipient: string, amount: string, unit: "wei" | "token", memo: string) => {
     if (!runtime.service) {
       throw new Error("Wallet signer is not ready.");
     }
+
+    const confirmed = await new Promise<boolean>((resolve) => {
+      Alert.alert(
+        "Send SFLUV?",
+        `Send ${amount.trim()} ${unit === "token" ? "SFLUV" : "wei"} to ${shortAddress(recipient.trim())}?`,
+        [
+          { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+          { text: "Send", onPress: () => resolve(true) },
+        ],
+      );
+    });
+    if (!confirmed) {
+      throw new Error("Transfer cancelled.");
+    }
+
     const result = await runtime.service.sendSFLUV(recipient, amount, unit);
     if (memo.trim() && result.txHash && backendClient) {
       try {
@@ -290,8 +761,10 @@ function WalletAppShell({
         // Memo save failure should not block the transfer UX.
       }
     }
+    emitTransferHaptic();
     await refreshWalletSurface();
     await loadAppProfile();
+    setSendReturnTab(null);
     setWalletPane("home");
     setTab("wallet");
     return result;
@@ -306,14 +779,17 @@ function WalletAppShell({
           : "Wallet"
       : tab === "activity"
         ? "Activity"
-        : tab === "map"
-          ? "Merchant Map"
+      : tab === "map"
+        ? "Merchant Map"
+        : tab === "contacts"
+          ? "Contacts"
           : "Settings";
   const showWalletPaneBack = tab === "wallet" && walletPane !== "home";
+  const showBlockingWalletState = runtime.loading && !runtime.service;
 
   return (
     <SafeAreaView style={styles.safe}>
-      <StatusBar style="dark" />
+      <StatusBar style={isDark ? "light" : "dark"} />
       <View style={styles.topBackdrop}>
         <View style={styles.topOrbLarge} />
         <View style={styles.topOrbSmall} />
@@ -324,19 +800,48 @@ function WalletAppShell({
           <Text style={styles.brandKicker}>SFLUV Wallet</Text>
           <Text style={styles.brand}>{activeTitle}</Text>
           <Text style={styles.topMeta}>
-            {selectedCandidateKey && runtime.discovery
-              ? runtime.discovery.candidates.find((item) => item.key === selectedCandidateKey)?.route.label ?? "Wallet"
-              : "Fast SFLUV payments"}
+            {tab === "settings"
+              ? "Preferences and account details"
+              : tab === "contacts"
+                ? "People and wallets you trust"
+                : selectedCandidate
+                  ? `${walletLabel(selectedCandidate.smartIndex)} selected`
+                  : "Fast SFLUV payments"}
           </Text>
         </View>
         <View style={styles.topActions}>
           {showWalletPaneBack ? (
-            <Pressable style={styles.iconButton} onPress={() => setWalletPane("home")}>
+            <Pressable
+              style={styles.iconButton}
+              onPress={() => {
+                if (walletPane === "send" && sendReturnTab) {
+                  setSendReturnTab(null);
+                  setWalletPane("home");
+                  setTab(sendReturnTab);
+                  return;
+                }
+                setSendReturnTab(null);
+                setWalletPane("home");
+              }}
+            >
               <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
             </Pressable>
           ) : null}
+          <Pressable
+            style={[styles.iconButton, tab === "settings" ? styles.iconButtonActive : undefined]}
+            onPress={() => {
+              setTab("settings");
+            }}
+          >
+            <Ionicons name={tab === "settings" ? "settings" : "settings-outline"} size={18} color={palette.primaryStrong} />
+          </Pressable>
           {onLogout ? (
-            <Pressable style={styles.iconButton} onPress={onLogout}>
+            <Pressable
+              style={styles.iconButton}
+              onPress={() => {
+                onLogout();
+              }}
+            >
               <Ionicons name="log-out-outline" size={18} color={palette.primaryStrong} />
             </Pressable>
           ) : null}
@@ -347,12 +852,12 @@ function WalletAppShell({
         {loadingData ? (
           <View style={styles.banner}>
             <ActivityIndicator size="small" color={palette.primaryStrong} />
-            <Text style={styles.bannerText}>Syncing with the SFLUV app backend…</Text>
+            <Text style={styles.bannerText}>Loading contacts…</Text>
           </View>
         ) : null}
 
         <View style={styles.content}>
-          {runtime.loading ? (
+          {showBlockingWalletState ? (
             <View style={styles.centerState}>
               <ActivityIndicator size="large" color={palette.primary} />
               <Text style={styles.stateText}>Preparing your wallet…</Text>
@@ -363,29 +868,51 @@ function WalletAppShell({
             </View>
           ) : tab === "wallet" ? (
             walletPane === "send" ? (
-              <SendScreen contacts={contacts} onPrepareSend={handleSend} />
-            ) : walletPane === "receive" ? (
-              <ReceiveScreen
-                accountAddress={smartAddress || runtime.discovery?.ownerAddress || ethers.constants.AddressZero}
-                chainId={mobileConfig.chainId}
-                tokenAddress={mobileConfig.tokenAddress}
+              <SendScreen
+                contacts={contacts}
+                onPrepareSend={handleSend}
+                draft={sendDraft}
+                onDraftApplied={() => setSendDraft(null)}
+                onOpenUniversalLink={(link) => {
+                  if (link.type === "redeem") {
+                    setRedeemFlow({
+                      code: link.code,
+                      stage: "awaiting_wallet",
+                    });
+                    setTab("wallet");
+                    setWalletPane("home");
+                    return;
+                  }
+                  openSendDraft({
+                    recipient: link.address,
+                    amount: link.type === "request" ? link.amount : undefined,
+                    memo: link.type === "request" ? link.memo : undefined,
+                  });
+                }}
               />
+            ) : walletPane === "receive" ? (
+              <ReceiveScreen accountAddress={smartAddress || runtime.discovery?.ownerAddress || ethers.constants.AddressZero} />
             ) : (
               <WalletHomeScreen
                 balance={smartBalance}
                 smartAddress={smartAddress}
                 ownerBadge={ownerBadge}
-                selectedRouteLabel={selectedCandidate?.route.label}
+                selectedWalletLabel={walletLabel(selectedCandidate?.smartIndex)}
                 recentTransactions={transactions}
-                onOpenSend={() => setWalletPane("send")}
-                onOpenReceive={() => setWalletPane("receive")}
-                onOpenActivity={() => setTab("activity")}
-                onOpenWalletChooser={() => setShowWalletChooser(true)}
-                onMigrateLegacyToNew={onMigrateLegacyToNew}
-                showMigrateLegacyToNew={showMigrateLegacyToNew}
-                canMigrateLegacyToNew={canMigrateLegacyToNew}
-                migratingLegacyToNew={migratingLegacyToNew}
-                legacyBalance={legacyBalance}
+                onOpenSend={() => {
+                  setWalletPane("send");
+                }}
+                onOpenReceive={() => {
+                  emitTransferHaptic();
+                  setWalletPane("receive");
+                }}
+                onOpenActivity={() => {
+                  setTab("activity");
+                }}
+                onOpenWalletChooser={() => {
+                  setShowWalletChooser(true);
+                }}
+                showWalletChooser={canChooseWallet}
               />
             )
           ) : tab === "activity" ? (
@@ -404,22 +931,35 @@ function WalletAppShell({
               }}
             />
           ) : tab === "map" ? (
-            <MapScreen locations={locations} />
-          ) : (
-            <SettingsScreen
-              user={appUser}
+            <MapScreen
+              locations={locations}
+              onPayLocation={(location) => {
+                if (!location.payToAddress) {
+                  Alert.alert("Payment unavailable", "This merchant does not have a payout wallet configured yet.");
+                  return;
+                }
+                openSendDraft({
+                  recipient: location.payToAddress,
+                }, { returnTab: "map" });
+              }}
+            />
+          ) : tab === "contacts" ? (
+            <ContactsScreen
               contacts={contacts}
-              locations={ownedLocations}
-              verifiedEmails={verifiedEmails}
-              notificationSubscription={currentSubscription}
-              activeWalletAddress={smartAddress}
               syncNotice={syncNotice}
-              onOpenMerchantApplication={() => setShowMerchantApplication(true)}
               onAddContact={async (name, address) => {
                 if (!backendClient) {
                   throw new Error("Backend not configured.");
                 }
                 await backendClient.addContact(name, address);
+                const updatedContacts = await backendClient.getContacts();
+                setContacts(updatedContacts);
+              }}
+              onUpdateContact={async (contact) => {
+                if (!backendClient) {
+                  throw new Error("Backend not configured.");
+                }
+                await backendClient.updateContact(contact);
                 const updatedContacts = await backendClient.getContacts();
                 setContacts(updatedContacts);
               }}
@@ -439,24 +979,15 @@ function WalletAppShell({
                 const updatedContacts = await backendClient.getContacts();
                 setContacts(updatedContacts);
               }}
-              onEnableNotification={async (email, address) => {
-                if (!backendClient) {
-                  throw new Error("Backend not configured.");
-                }
-                await backendClient.enableNotification(email, address);
-                const updatedSubscriptions = await backendClient.getNotificationSubscriptions();
-                setSubscriptions(updatedSubscriptions);
-              }}
-              onDisableNotification={async (id) => {
-                if (!backendClient) {
-                  throw new Error("Backend not configured.");
-                }
-                await backendClient.disableNotification(id);
-                const updatedSubscriptions = await backendClient.getNotificationSubscriptions();
-                setSubscriptions(updatedSubscriptions);
-              }}
-              onLogout={() => {
-                onLogout?.();
+            />
+          ) : (
+            <SettingsScreen
+              user={appUser}
+              activeWalletAddress={smartAddress}
+              syncNotice={syncNotice}
+              preferences={preferences}
+              onUpdatePreferences={(next) => {
+                onUpdatePreferences(next);
               }}
             />
           )}
@@ -476,42 +1007,31 @@ function WalletAppShell({
             label="Activity"
             icon={tab === "activity" ? "pulse" : "pulse-outline"}
             active={tab === "activity"}
-            onPress={() => setTab("activity")}
+            onPress={() => {
+              setTab("activity");
+            }}
           />
           <BottomTab
             label="Map"
             icon={tab === "map" ? "map" : "map-outline"}
             active={tab === "map"}
-            onPress={() => setTab("map")}
+            onPress={() => {
+              setTab("map");
+            }}
           />
           <BottomTab
-            label="Settings"
-            icon={tab === "settings" ? "settings" : "settings-outline"}
-            active={tab === "settings"}
-            onPress={() => setTab("settings")}
+            label="Contacts"
+            icon={tab === "contacts" ? "people" : "people-outline"}
+            active={tab === "contacts"}
+            onPress={() => {
+              setTab("contacts");
+            }}
           />
         </View>
       </View>
 
-      {showMerchantApplication ? (
-        <Modal visible animationType="slide" onRequestClose={() => setShowMerchantApplication(false)}>
-          <SafeAreaView style={styles.safe}>
-            <MerchantApplicationScreen
-              onClose={() => setShowMerchantApplication(false)}
-              onSubmit={async (draft) => {
-                if (!backendClient) {
-                  throw new Error("Backend not configured.");
-                }
-                await backendClient.submitMerchantApplication(draft);
-                await loadAppProfile();
-              }}
-            />
-          </SafeAreaView>
-        </Modal>
-      ) : null}
-
       <Modal
-        visible={showWalletChooser}
+        visible={showWalletChooser && canChooseWallet}
         transparent
         animationType="fade"
         onRequestClose={() => setShowWalletChooser(false)}
@@ -521,7 +1041,7 @@ function WalletAppShell({
             <View style={styles.walletChooserHeader}>
               <View>
                 <Text style={styles.walletChooserTitle}>Choose Wallet</Text>
-                <Text style={styles.walletChooserSubtitle}>Switch between your available wallet routes.</Text>
+                <Text style={styles.walletChooserSubtitle}>Switch between your available Citizen Wallet accounts.</Text>
               </View>
               <Pressable style={styles.walletChooserClose} onPress={() => setShowWalletChooser(false)}>
                 <Ionicons name="close" size={20} color={palette.primaryStrong} />
@@ -531,7 +1051,6 @@ function WalletAppShell({
             <ScrollView contentContainerStyle={styles.walletChooserList} showsVerticalScrollIndicator={false}>
               {walletCandidates.map((candidate) => {
                 const active = candidate.key === selectedCandidateKey;
-                const tone = routeLabelTone(candidate.route.id);
                 return (
                   <Pressable
                     key={candidate.key}
@@ -542,12 +1061,7 @@ function WalletAppShell({
                     }}
                   >
                     <View style={styles.walletChooserOptionHeader}>
-                      <View style={[styles.walletChooserRouteChip, { backgroundColor: tone.backgroundColor }]}>
-                        <Ionicons name={tone.icon} size={12} color={tone.color} />
-                        <Text style={[styles.walletChooserRouteChipText, { color: tone.color }]}>
-                          {candidate.route.label}
-                        </Text>
-                      </View>
+                      <Text style={styles.walletChooserOptionTitle}>{walletLabel(candidate.smartIndex)}</Text>
                       {active ? (
                         <View style={styles.walletChooserActiveBadge}>
                           <Ionicons name="checkmark" size={12} color={palette.white} />
@@ -563,6 +1077,42 @@ function WalletAppShell({
           </Pressable>
         </Pressable>
       </Modal>
+
+      <Modal visible={Boolean(redeemFlow)} transparent animationType="fade" onRequestClose={() => setRedeemFlow(null)}>
+        <View style={styles.sendingOverlay}>
+          <View style={styles.sendingCard}>
+            {redeemFlow?.stage === "success" ? (
+              <Ionicons name="checkmark-circle" size={42} color={palette.success} />
+            ) : redeemFlow?.stage === "error" ? (
+              <Ionicons name="alert-circle" size={42} color={palette.danger} />
+            ) : (
+              <ActivityIndicator size="large" color={palette.primary} />
+            )}
+            <Text style={styles.sendingTitle}>
+              {redeemFlow?.stage === "awaiting_wallet"
+                ? "Preparing your wallet…"
+                : redeemFlow?.stage === "redeeming"
+                  ? "Redeeming your perk…"
+                  : redeemFlow?.stage === "success"
+                    ? "Perk redeemed"
+                    : "Redeem failed"}
+            </Text>
+            <Text style={styles.sendingText}>
+              {redeemFlow?.message ||
+                (redeemFlow?.stage === "awaiting_wallet"
+                  ? "Finishing wallet setup before the reward is claimed."
+                  : redeemFlow?.stage === "redeeming"
+                    ? "Requesting your SFLUV reward from the event faucet."
+                    : "Close this modal and try again.")}
+            </Text>
+            {redeemFlow?.stage === "success" || redeemFlow?.stage === "error" ? (
+              <Pressable style={styles.dismissButton} onPress={() => setRedeemFlow(null)}>
+                <Text style={styles.dismissButtonText}>Close</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -573,15 +1123,54 @@ function PrivyWalletApp() {
   const { wallets, create } = useEmbeddedEthereumWallet();
 
   const [runtime, setRuntime] = useState<RuntimeState>(blankRuntime(true));
-  const [selectedCandidateKey, setSelectedCandidateKey] = useState<string | undefined>(undefined);
-  const [refreshNonce, setRefreshNonce] = useState(0);
-  const [migratingLegacyToNew, setMigratingLegacyToNew] = useState(false);
+  const [preferredCandidateKey, setPreferredCandidateKey] = useState<string | undefined>(undefined);
+  const [pendingLinkIntent, setPendingLinkIntent] = useState<PendingLinkIntent | null>(null);
   const creatingWalletRef = useRef(false);
+  const nextPendingLinkIDRef = useRef(0);
+  const embeddedWallet = wallets[0];
 
   const backendClient = useMemo(
     () => new AppBackendClient(async () => (await getAccessToken()) ?? null),
     [getAccessToken],
   );
+
+  const handleIncomingLink = (rawURL: string | null) => {
+    if (!rawURL) {
+      return;
+    }
+    const parsedLink = parseSfluvUniversalLink(rawURL);
+    if (!parsedLink) {
+      return;
+    }
+    nextPendingLinkIDRef.current += 1;
+    setPendingLinkIntent({
+      id: nextPendingLinkIDRef.current,
+      link: parsedLink,
+    });
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    Linking.getInitialURL()
+      .then((url) => {
+        if (!cancelled) {
+          handleIncomingLink(url);
+        }
+      })
+      .catch((error) => {
+        console.warn("Unable to read initial URL", error);
+      });
+
+    const subscription = Linking.addEventListener("url", ({ url }) => {
+      handleIncomingLink(url);
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (!isReady) {
@@ -589,7 +1178,7 @@ function PrivyWalletApp() {
     }
     if (!user) {
       setRuntime(blankRuntime(false));
-      setSelectedCandidateKey(undefined);
+      setPreferredCandidateKey(undefined);
       return;
     }
     if (wallets.length > 0 || creatingWalletRef.current) {
@@ -612,7 +1201,7 @@ function PrivyWalletApp() {
   }, [create, isReady, user, wallets.length]);
 
   useEffect(() => {
-    if (!isReady || !user || wallets.length === 0) {
+    if (!isReady || !user || !embeddedWallet) {
       return;
     }
 
@@ -620,16 +1209,16 @@ function PrivyWalletApp() {
     const bootstrap = async () => {
       setRuntime((state) => ({ ...state, loading: true, error: null }));
       try {
-        const embeddedWallet = wallets[0];
         const embeddedProvider = await embeddedWallet.getProvider();
         const web3Provider = new ethers.providers.Web3Provider(embeddedProvider as any);
         const signer = web3Provider.getSigner(embeddedWallet.address);
-        const { service, discovery } = await createSmartWalletServiceFromSigner(signer, selectedCandidateKey);
+        const { service, discovery } = await createSmartWalletServiceFromSigner(
+          signer,
+          preferredCandidateKey,
+          async () => (await getAccessToken()) ?? null,
+        );
         if (cancelled) {
           return;
-        }
-        if (!selectedCandidateKey) {
-          setSelectedCandidateKey(discovery.selectedCandidateKey);
         }
         setRuntime({
           loading: false,
@@ -654,76 +1243,17 @@ function PrivyWalletApp() {
     return () => {
       cancelled = true;
     };
-  }, [isReady, refreshNonce, selectedCandidateKey, user, wallets]);
+  }, [embeddedWallet, getAccessToken, isReady, preferredCandidateKey, user]);
 
   const oauthLoading = oauthState.status === "loading";
-  const legacyCandidate = findPrimaryCandidate(runtime.discovery, "legacy");
-  const newCandidate = findPrimaryCandidate(runtime.discovery, "new");
-  const showMigrateLegacyToNew =
-    Boolean(legacyCandidate && newCandidate) &&
-    legacyCandidate?.accountAddress.toLowerCase() !== newCandidate?.accountAddress.toLowerCase();
-  const canMigrateLegacyToNew = Boolean(showMigrateLegacyToNew && legacyCandidate?.tokenBalanceRaw.gt(0));
-
-  const runLegacyToNewMigration = async () => {
-    if (migratingLegacyToNew) {
-      return;
-    }
-    if (!legacyCandidate || !newCandidate) {
-      Alert.alert("Migration unavailable", "Could not resolve both legacy and new wallets.");
-      return;
-    }
-    if (wallets.length === 0) {
-      Alert.alert("Wallet not ready", "Embedded wallet is still loading.");
-      return;
-    }
-
-    setMigratingLegacyToNew(true);
-    try {
-      const embeddedWallet = wallets[0];
-      const embeddedProvider = await embeddedWallet.getProvider();
-      const web3Provider = new ethers.providers.Web3Provider(embeddedProvider as any);
-      const signer = web3Provider.getSigner(embeddedWallet.address);
-      const { service } = await createSmartWalletServiceFromSigner(signer, legacyCandidate.key);
-      const rawBalance = ethers.BigNumber.from(await service.smartAccountBalanceRaw());
-      if (rawBalance.isZero()) {
-        Alert.alert("No funds", "Legacy account has no SFLUV to migrate.");
-        return;
-      }
-      const result = await service.sendSFLUV(newCandidate.accountAddress, rawBalance.toString(), "wei");
-      if (result.txHash) {
-        Alert.alert("Migration confirmed", `Transaction ID:\n${result.txHash}`);
-      } else {
-        Alert.alert("Migration submitted", `UserOp submitted:\n${result.userOpHash}`);
-      }
-      setSelectedCandidateKey(newCandidate.key);
-      setRefreshNonce((value) => value + 1);
-    } catch (error) {
-      Alert.alert("Migration failed", (error as Error).message);
-    } finally {
-      setMigratingLegacyToNew(false);
-    }
-  };
-
-  const requestLegacyToNewMigration = async () => {
-    if (!canMigrateLegacyToNew || !legacyCandidate) {
-      return;
-    }
-
-    Alert.alert(
-      "Move legacy balance?",
-      `Send ${formatDisplayBalance(legacyCandidate.tokenBalance)} SFLUV from your legacy wallet into your new wallet?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Move Funds",
-          style: "default",
-          onPress: () => {
-            void runLegacyToNewMigration();
-          },
-        },
-      ],
-    );
-  };
+  const selectedCandidateKey =
+    preferredCandidateKey && runtime.discovery?.candidates.some((candidate) => candidate.key === preferredCandidateKey)
+      ? preferredCandidateKey
+      : runtime.discovery?.selectedCandidateKey;
+  const walletInitializing =
+    Boolean(user) &&
+    !runtime.error &&
+    (!embeddedWallet || runtime.loading || !runtime.service || !runtime.discovery);
 
   if (!isReady) {
     return (
@@ -737,14 +1267,19 @@ function PrivyWalletApp() {
   }
 
   if (!user) {
+    const loginBody =
+      pendingLinkIntent?.link.type === "redeem"
+        ? "Sign in with Privy to finish redeeming your SFLUV event perk on mobile."
+        : pendingLinkIntent
+          ? "Sign in with Privy to continue this SFLUV payment flow on mobile."
+          : "Sign in with Privy to open the same account system you already use on the web, with mobile-first send and receive flows.";
+
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.loginWrap}>
           <Text style={styles.loginBrand}>SFLUV Wallet</Text>
           <Text style={styles.loginTitle}>Wallet-first access to SFLUV on mobile</Text>
-          <Text style={styles.loginBody}>
-            Sign in with Privy to open the same account system you already use on the web, with mobile-first send and receive flows.
-          </Text>
+          <Text style={styles.loginBody}>{loginBody}</Text>
           <Pressable
             style={[styles.loginButton, oauthLoading ? styles.loginButtonDisabled : undefined]}
             disabled={oauthLoading}
@@ -775,79 +1310,34 @@ function PrivyWalletApp() {
 
   return (
     <WalletAppShell
-      runtime={runtime}
+      runtime={{ ...runtime, loading: walletInitializing }}
       selectedCandidateKey={selectedCandidateKey}
-      onSelectCandidate={(key) => setSelectedCandidateKey(key)}
-      onMigrateLegacyToNew={requestLegacyToNewMigration}
-      showMigrateLegacyToNew={showMigrateLegacyToNew}
-      canMigrateLegacyToNew={canMigrateLegacyToNew}
-      migratingLegacyToNew={migratingLegacyToNew}
-      legacyBalance={legacyCandidate ? formatDisplayBalance(legacyCandidate.tokenBalance) : "0"}
+      onSelectCandidate={(key) => setPreferredCandidateKey(key)}
       ownerBadge={ownerBadge}
       onLogout={() => {
         void logout();
       }}
       backendClient={backendClient}
+      pendingLinkIntent={pendingLinkIntent}
+      onConsumePendingLink={() => setPendingLinkIntent(null)}
     />
   );
 }
 
-function TestKeyWalletApp() {
-  const [runtime, setRuntime] = useState<RuntimeState>(blankRuntime(true));
-  const [selectedCandidateKey, setSelectedCandidateKey] = useState<string | undefined>(undefined);
-
-  useEffect(() => {
-    let cancelled = false;
-    const bootstrap = async () => {
-      try {
-        const loaded = await createSmartWalletServiceFromTestKey(selectedCandidateKey);
-        if (!cancelled) {
-          if (!selectedCandidateKey) {
-            setSelectedCandidateKey(loaded.discovery.selectedCandidateKey);
-          }
-          setRuntime({
-            loading: false,
-            service: loaded.service,
-            discovery: loaded.discovery,
-            error: null,
-          });
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setRuntime({
-            loading: false,
-            service: null,
-            discovery: null,
-            error: (error as Error).message,
-          });
-        }
-      }
-    };
-    void bootstrap();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedCandidateKey]);
-
-  const ownerBadge = runtime.discovery?.ownerAddress
-    ? `${runtime.discovery.ownerAddress.slice(0, 6)}...${runtime.discovery.ownerAddress.slice(-4)}`
-    : "test key";
-
+function MissingPrivyConfigScreen() {
   return (
-    <WalletAppShell
-      runtime={runtime}
-      selectedCandidateKey={selectedCandidateKey ?? runtime.discovery?.selectedCandidateKey}
-      onSelectCandidate={(key) => setSelectedCandidateKey(key)}
-      ownerBadge={ownerBadge}
-      backendClient={null}
-    />
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.centerState}>
+        <Text style={styles.errorText}>Privy configuration is required for this build.</Text>
+        <Text style={styles.stateText}>Set `EXPO_PUBLIC_PRIVY_APP_ID` and `EXPO_PUBLIC_PRIVY_CLIENT_ID` to run the app.</Text>
+      </View>
+    </SafeAreaView>
   );
 }
 
 export default function App() {
-  const withPrivy = mobileConfig.privyAppId.trim().length > 0;
-  if (!withPrivy) {
-    return <TestKeyWalletApp />;
+  if (!mobileConfig.privyAppId.trim().length) {
+    return <MissingPrivyConfigScreen />;
   }
 
   const supportedChain = {
@@ -878,7 +1368,8 @@ export default function App() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, isDark: boolean) =>
+  StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: palette.background,
@@ -892,7 +1383,7 @@ const styles = StyleSheet.create({
     width: 240,
     height: 240,
     borderRadius: 120,
-    backgroundColor: "rgba(239,109,102,0.07)",
+    backgroundColor: isDark ? "rgba(239,109,102,0.12)" : "rgba(239,109,102,0.07)",
     top: -90,
     right: -20,
   },
@@ -901,7 +1392,7 @@ const styles = StyleSheet.create({
     width: 170,
     height: 170,
     borderRadius: 85,
-    backgroundColor: "rgba(239,109,102,0.05)",
+    backgroundColor: isDark ? "rgba(239,109,102,0.08)" : "rgba(239,109,102,0.05)",
     top: 60,
     left: -40,
   },
@@ -943,11 +1434,14 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: palette.white,
+    backgroundColor: palette.surface,
     borderWidth: 1,
     borderColor: palette.primary,
     alignItems: "center",
     justifyContent: "center",
+  },
+  iconButtonActive: {
+    backgroundColor: palette.primarySoft,
   },
   contentShell: {
     flex: 1,
@@ -1050,7 +1544,7 @@ const styles = StyleSheet.create({
   },
   loginButton: {
     marginTop: spacing.sm,
-    backgroundColor: palette.white,
+    backgroundColor: palette.surface,
     borderRadius: radii.pill,
     paddingHorizontal: 22,
     paddingVertical: 16,
@@ -1065,6 +1559,50 @@ const styles = StyleSheet.create({
     color: palette.text,
     fontWeight: "900",
     fontSize: 16,
+  },
+  sendingOverlay: {
+    flex: 1,
+    backgroundColor: palette.overlay,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: spacing.lg,
+  },
+  sendingCard: {
+    width: "100%",
+    maxWidth: 320,
+    backgroundColor: palette.surface,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: palette.primary,
+    padding: spacing.lg,
+    alignItems: "center",
+    gap: spacing.sm,
+    ...shadows.card,
+  },
+  sendingTitle: {
+    color: palette.primaryStrong,
+    fontSize: 20,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  sendingText: {
+    color: palette.textMuted,
+    textAlign: "center",
+    lineHeight: 20,
+  },
+  dismissButton: {
+    marginTop: spacing.xs,
+    minWidth: 140,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 12,
+    borderRadius: radii.pill,
+    backgroundColor: palette.primaryStrong,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dismissButtonText: {
+    color: palette.white,
+    fontWeight: "800",
   },
   modalOverlay: {
     flex: 1,
@@ -1104,7 +1642,7 @@ const styles = StyleSheet.create({
     borderColor: palette.primary,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: palette.white,
+    backgroundColor: palette.surface,
   },
   walletChooserList: {
     gap: spacing.sm,
@@ -1128,16 +1666,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  walletChooserRouteChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: radii.pill,
-  },
-  walletChooserRouteChipText: {
-    fontSize: 12,
+  walletChooserOptionTitle: {
+    color: palette.text,
+    fontSize: 15,
     fontWeight: "800",
   },
   walletChooserActiveBadge: {
@@ -1159,3 +1690,5 @@ const styles = StyleSheet.create({
     fontFamily: "Courier",
   },
 });
+
+const styles = createStyles(lightPalette, shadows, false);

@@ -7,6 +7,7 @@ export class BackendClient {
     private paymasterAddress: string,
     private routePaymasterType: "cw" | "cw-safe",
     private backendKind: "sfluv" | "cw-engine" = "sfluv",
+    private getAccessToken?: () => Promise<string | null>,
   ) {}
 
   private rpcPath(): string {
@@ -18,9 +19,14 @@ export class BackendClient {
 
   private async rpc(method: string, params: unknown[]) {
     const url = `${this.baseUrl.replace(/\/+$/, "")}${this.rpcPath()}`;
+    const accessToken = this.getAccessToken ? await this.getAccessToken() : null;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (accessToken) {
+      headers["Access-Token"] = accessToken;
+    }
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
     });
 

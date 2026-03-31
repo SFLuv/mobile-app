@@ -17,7 +17,7 @@ Purpose: keep the mobile app in feature parity with the web app without making t
 - Do not invent mobile-only product features unless explicitly requested.
 - Preserve the same backend behavior and data model wherever possible.
 - Hide AA infrastructure details from normal users.
-- Keep `legacy` + `new` route support as infrastructure, not as the primary UX.
+- Current production mobile scope is Privy plus legacy Citizen Wallet smart accounts only.
 
 ## Translation Heuristics
 
@@ -146,11 +146,11 @@ For every new web feature:
   - delivery pipeline
 - Merchant application search depends on a client-usable Google Maps key
 - When testing the mobile app against a local backend on a real phone, do not use `localhost`; use the host machine LAN IP instead
-- If future wallet parity needs DB-backed wallet registration for both `legacy` and `new`, confirm the current web/backend branch actually contains the route-aware wallet schema before implementing
+- If future wallet parity needs DB-backed wallet registration beyond the current legacy Citizen Wallet scope, confirm the current web/backend branch actually contains the required wallet schema before implementing
 
 ## Guardrails
 
 - Do not touch unrelated web branches casually.
 - If web changes are required, work from the correct team branch and sync it with the latest W9 hotfix branch first.
-- Do not break the current mobile prototype’s AA route behavior while polishing the UI.
+- Do not break the current legacy wallet behavior while polishing the UI.
 - If a web feature is too desktop-specific, document why it stays web-only instead of forcing a poor mobile translation.

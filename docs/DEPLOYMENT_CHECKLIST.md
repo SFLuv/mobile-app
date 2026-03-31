@@ -2,6 +2,8 @@
 
 Use this after your own contracts are deployed on Berachain.
 
+This checklist is for the custom AA backend in this repo. The legacy-only mobile wallet build does not require it unless you intentionally override the hosted Citizen Wallet engine.
+
 ## 1) Fill Backend Contract Config
 
 Create a local `backend/chains.json` from `backend/chains.example.json` and edit it:
@@ -53,14 +55,11 @@ curl http://localhost:8088/health
 Set Expo public env vars:
 
 - `EXPO_PUBLIC_CHAIN_ID=80094`
-- `EXPO_PUBLIC_ENTRYPOINT_ADDRESS=<TokenEntryPoint>`
-- `EXPO_PUBLIC_ACCOUNT_FACTORY_ADDRESS=<AccountFactory>`
-- `EXPO_PUBLIC_PAYMASTER_ADDRESS=<Paymaster>`
 - `EXPO_PUBLIC_LEGACY_ENTRYPOINT_ADDRESS=<legacy TokenEntryPoint>`
 - `EXPO_PUBLIC_LEGACY_ACCOUNT_FACTORY_ADDRESS=<legacy AccountFactory>`
 - `EXPO_PUBLIC_LEGACY_PAYMASTER_ADDRESS=<legacy Paymaster>`
 - `EXPO_PUBLIC_TOKEN_ADDRESS=0x881cad4f885c6701d8481c0ed347f6d35444ea7e`
-- `EXPO_PUBLIC_BACKEND_URL=http://<your-backend-host>:8088`
+- `EXPO_PUBLIC_LEGACY_BACKEND_URL=http://<your-backend-host>:8088`
 - `EXPO_PUBLIC_PRIVY_APP_ID=<Privy app id>`
 - `EXPO_PUBLIC_PRIVY_CLIENT_ID=<Privy client id>`
 
@@ -78,5 +77,5 @@ npm run start
 
 1. Open receive screen, generate QR.
 2. Scan from send flow.
-3. Build/sponsor/send UserOp on both legacy and new route toggles.
-4. Confirm `eth_getTransactionReceipt` resolves via backend.
+3. Build, sponsor, and send a legacy UserOperation.
+4. Confirm `eth_getTransactionReceipt` resolves via the configured legacy backend.

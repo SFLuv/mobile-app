@@ -1,6 +1,7 @@
 import { ethers } from "ethers";
 import { BackendClient } from "../api/client";
-import { mobileConfig, RouteID, WalletRouteConfig } from "../config";
+import { mobileConfig, WalletConfig } from "../config";
+import { AppTransaction } from "../types/app";
 
 export type UserOpRPC = {
   sender: string;
@@ -33,7 +34,6 @@ export type AmountUnit = "wei" | "token";
 
 export type RouteCandidate = {
   key: string;
-  route: WalletRouteConfig;
   smartIndex: number;
   accountAddress: string;
   deployed: boolean;
@@ -50,6 +50,7 @@ export type RouteDiscovery = {
 const ERC20_ABI = [
   "function transfer(address to, uint256 amount) returns (bool)",
   "function balanceOf(address owner) view returns (uint256)",
+  "event Transfer(address indexed from, address indexed to, uint256 value)",
 ];
 
 const ACCOUNT_ABI = [
@@ -71,6 +72,10 @@ const TOKEN_ENTRYPOINT_ABI = [
 ];
 
 const NONCE_KEY_ZERO = 0;
+const MAX_TRANSFER_LOG_WINDOWS = 24;
+const TRANSFER_LOG_WINDOW = 9_500;
+const DISCOVERY_BATCH_SIZE = 2;
+const routeDiscoveryCache = new Map<string, RouteDiscovery>();
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -88,102 +93,117 @@ function normalizeHexQuantity(value: string): string {
   return stripped ? `0x${stripped}` : "0x0";
 }
 
-function routeFromID(routeID: RouteID): WalletRouteConfig {
-  return mobileConfig.routes[routeID];
+function candidateKey(smartIndex: number): string {
+  return `wallet:${smartIndex}`;
 }
 
-function sortRoutes(routeMap: Record<RouteID, WalletRouteConfig>): WalletRouteConfig[] {
-  const ordered: WalletRouteConfig[] = [];
-  const seen = new Set<RouteID>();
-  for (const id of mobileConfig.routePriority) {
-    if (!seen.has(id) && routeMap[id]) {
-      ordered.push(routeMap[id]);
-      seen.add(id);
+function formatTokenAmount(raw: string): string {
+  try {
+    const formatted = ethers.utils.formatUnits(raw, mobileConfig.tokenDecimals);
+    const [whole, fraction = ""] = formatted.split(".");
+    const trimmed = fraction.replace(/0+$/, "");
+    if (!trimmed) {
+      return whole;
     }
+    return `${whole}.${trimmed.slice(0, 4)}`;
+  } catch {
+    return "0";
   }
-  for (const id of ["legacy", "new"] as RouteID[]) {
-    if (!seen.has(id) && routeMap[id]) {
-      ordered.push(routeMap[id]);
-      seen.add(id);
-    }
-  }
-  return ordered;
-}
-
-function candidateKey(routeID: RouteID, smartIndex: number): string {
-  return `${routeID}:${smartIndex}`;
 }
 
 function resolveSelectedCandidate(candidates: RouteCandidate[]): string {
   if (candidates.length === 0) {
-    return candidateKey("new", 0);
+    return candidateKey(0);
   }
 
-  if (mobileConfig.forceRoute) {
-    const forced = candidates.find((candidate) => candidate.route.id === mobileConfig.forceRoute);
-    if (forced) {
-      return forced.key;
-    }
+  const primaryCandidate = candidates.find((candidate) => candidate.smartIndex === 0);
+  if (primaryCandidate && (primaryCandidate.deployed || primaryCandidate.tokenBalanceRaw.gt(0))) {
+    return primaryCandidate.key;
   }
 
-  const legacyPrimary = candidates.find((candidate) => candidate.route.id === "legacy" && candidate.smartIndex === 0);
-  const newPrimary = candidates.find((candidate) => candidate.route.id === "new" && candidate.smartIndex === 0);
-
-  if (mobileConfig.preferLegacyIfDeployed && legacyPrimary) {
-    if (legacyPrimary.deployed || legacyPrimary.tokenBalanceRaw.gt(0)) {
-      return legacyPrimary.key;
-    }
+  const fundedOrDeployed = candidates.find((candidate) => candidate.deployed || candidate.tokenBalanceRaw.gt(0));
+  if (fundedOrDeployed) {
+    return fundedOrDeployed.key;
   }
 
-  if (newPrimary) {
-    return newPrimary.key;
-  }
-
-  if (legacyPrimary) {
-    return legacyPrimary.key;
+  if (primaryCandidate) {
+    return primaryCandidate.key;
   }
 
   return candidates[0].key;
+}
+
+function routeDiscoveryCacheKey(ownerAddress: string): string {
+  return ownerAddress.trim().toLowerCase();
+}
+
+function storeRouteDiscovery(discovery: RouteDiscovery): RouteDiscovery {
+  routeDiscoveryCache.set(routeDiscoveryCacheKey(discovery.ownerAddress), discovery);
+  return discovery;
+}
+
+export function getCachedRouteDiscovery(ownerAddress: string): RouteDiscovery | undefined {
+  return routeDiscoveryCache.get(routeDiscoveryCacheKey(ownerAddress));
+}
+
+async function collectRouteCandidate(
+  ownerAddress: string,
+  smartIndex: number,
+  provider: ethers.providers.JsonRpcProvider,
+  token: ethers.Contract,
+  factory: ethers.Contract,
+): Promise<RouteCandidate | null> {
+  const accountAddress = ethers.utils.getAddress(await factory.getAddress(ownerAddress, smartIndex));
+  const [code, tokenBalanceRaw] = await Promise.all([
+    provider.getCode(accountAddress),
+    token.balanceOf(accountAddress) as Promise<ethers.BigNumber>,
+  ]);
+  const deployed = code !== "0x";
+
+  if (smartIndex !== 0 && !deployed && tokenBalanceRaw.lte(0)) {
+    return null;
+  }
+
+  return {
+    key: candidateKey(smartIndex),
+    smartIndex,
+    accountAddress,
+    deployed,
+    tokenBalanceRaw,
+    tokenBalance: ethers.utils.formatUnits(tokenBalanceRaw, mobileConfig.tokenDecimals),
+  };
 }
 
 export async function discoverRoutesForOwner(
   ownerAddress: string,
   provider: ethers.providers.JsonRpcProvider,
 ): Promise<RouteDiscovery> {
+  const cached = getCachedRouteDiscovery(ownerAddress);
+  if (cached) {
+    return cached;
+  }
+
   const token = new ethers.Contract(mobileConfig.tokenAddress, ERC20_ABI, provider);
-  const routes = sortRoutes(mobileConfig.routes);
+  const factory = new ethers.Contract(mobileConfig.wallet.accountFactory, ACCOUNT_FACTORY_ABI, provider);
   const candidates: RouteCandidate[] = [];
 
-  for (const route of routes) {
-    const factory = new ethers.Contract(route.accountFactory, ACCOUNT_FACTORY_ABI, provider);
-    for (let smartIndex = 0; smartIndex < mobileConfig.maxSmartAccountScan; smartIndex++) {
-      const accountAddress = ethers.utils.getAddress(await factory.getAddress(ownerAddress, smartIndex));
-      const code = await provider.getCode(accountAddress);
-      const tokenBalanceRaw: ethers.BigNumber = await token.balanceOf(accountAddress);
-      const deployed = code !== "0x";
-      const include = smartIndex === 0 || deployed || tokenBalanceRaw.gt(0);
-
-      if (include) {
-        candidates.push({
-          key: candidateKey(route.id, smartIndex),
-          route,
-          smartIndex,
-          accountAddress,
-          deployed,
-          tokenBalanceRaw,
-          tokenBalance: ethers.utils.formatUnits(tokenBalanceRaw, mobileConfig.tokenDecimals),
-        });
-      }
-
-      if (smartIndex > 0 && !deployed && tokenBalanceRaw.eq(0)) {
-        // Account indexes are typically sequential; stop after the first empty gap.
-        break;
+  for (let smartIndex = 0; smartIndex < mobileConfig.maxSmartAccountScan; smartIndex += DISCOVERY_BATCH_SIZE) {
+    const batch = Array.from(
+      { length: Math.min(DISCOVERY_BATCH_SIZE, mobileConfig.maxSmartAccountScan - smartIndex) },
+      (_, offset) => smartIndex + offset,
+    );
+    const batchResults = await Promise.all(
+      batch.map((index) => collectRouteCandidate(ownerAddress, index, provider, token, factory)),
+    );
+    for (const candidate of batchResults) {
+      if (candidate) {
+        candidates.push(candidate);
       }
     }
   }
 
   const selectedCandidateKey = resolveSelectedCandidate(candidates);
-  return { ownerAddress, selectedCandidateKey, candidates };
+  return storeRouteDiscovery({ ownerAddress, selectedCandidateKey, candidates });
 }
 
 export class SmartWalletService {
@@ -195,39 +215,44 @@ export class SmartWalletService {
   private readonly safeAccount: ethers.utils.Interface;
   private readonly accountFactory: ethers.Contract;
   private readonly tokenEntryPoint: ethers.Contract;
+  private smartAccountAddressCache?: string;
 
   constructor(
     private readonly ownerSigner: ethers.Signer,
     private readonly owner: string,
-    private readonly route: WalletRouteConfig,
+    private readonly walletConfig: WalletConfig,
     private readonly smartIndex: number,
+    private readonly getAccessToken?: () => Promise<string | null>,
+    smartAccountAddress?: string,
   ) {
     this.provider = new ethers.providers.JsonRpcProvider(mobileConfig.rpcURL, {
       chainId: mobileConfig.chainId,
       name: "berachain",
     });
     this.backend = new BackendClient(
-      route.backendURL,
+      walletConfig.backendURL,
       mobileConfig.chainId,
-      route.paymasterAddress,
-      route.paymasterType,
-      route.backendKind,
+      walletConfig.paymasterAddress,
+      walletConfig.paymasterType,
+      walletConfig.backendKind,
+      getAccessToken,
     );
 
     this.erc20 = new ethers.utils.Interface(ERC20_ABI);
     this.token = new ethers.Contract(mobileConfig.tokenAddress, ERC20_ABI, this.provider);
     this.account = new ethers.utils.Interface(ACCOUNT_ABI);
     this.safeAccount = new ethers.utils.Interface(SAFE_ACCOUNT_ABI);
-    this.accountFactory = new ethers.Contract(route.accountFactory, ACCOUNT_FACTORY_ABI, this.provider);
-    this.tokenEntryPoint = new ethers.Contract(route.entryPoint, TOKEN_ENTRYPOINT_ABI, this.provider);
+    this.accountFactory = new ethers.Contract(walletConfig.accountFactory, ACCOUNT_FACTORY_ABI, this.provider);
+    this.tokenEntryPoint = new ethers.Contract(walletConfig.entryPoint, TOKEN_ENTRYPOINT_ABI, this.provider);
+    this.smartAccountAddressCache = smartAccountAddress ? ethers.utils.getAddress(smartAccountAddress) : undefined;
   }
 
   ownerAddress(): string {
     return this.owner;
   }
 
-  routeConfig(): WalletRouteConfig {
-    return this.route;
+  routeConfig(): WalletConfig {
+    return this.walletConfig;
   }
 
   smartAccountIndex(): number {
@@ -235,8 +260,13 @@ export class SmartWalletService {
   }
 
   async smartAccountAddress(): Promise<string> {
+    if (this.smartAccountAddressCache) {
+      return this.smartAccountAddressCache;
+    }
+
     const address = await this.accountFactory.getAddress(this.owner, this.smartIndex);
-    return ethers.utils.getAddress(address);
+    this.smartAccountAddressCache = ethers.utils.getAddress(address);
+    return this.smartAccountAddressCache;
   }
 
   async smartAccountBalance(): Promise<string> {
@@ -249,6 +279,97 @@ export class SmartWalletService {
     const account = await this.smartAccountAddress();
     const balance: ethers.BigNumber = await this.token.balanceOf(account);
     return balance.toString();
+  }
+
+  async recentTransfers(count = 25): Promise<AppTransaction[]> {
+    const account = await this.smartAccountAddress();
+    const normalizedAccount = account.toLowerCase();
+    const transferTopic = this.token.interface.getEventTopic("Transfer");
+    const accountTopic = ethers.utils.hexZeroPad(account, 32).toLowerCase();
+    const latestBlock = await this.provider.getBlockNumber();
+    const seenLogs = new Map<
+      string,
+      {
+        blockNumber: number;
+        logIndex: number;
+        hash: string;
+        amount: string;
+        from: string;
+        to: string;
+      }
+    >();
+
+    let toBlock = latestBlock;
+    for (let windowIndex = 0; windowIndex < MAX_TRANSFER_LOG_WINDOWS && toBlock >= 0; windowIndex++) {
+      const fromBlock = Math.max(0, toBlock - TRANSFER_LOG_WINDOW + 1);
+      const [outgoingLogs, incomingLogs] = await Promise.all([
+        this.provider.getLogs({
+          address: mobileConfig.tokenAddress,
+          fromBlock,
+          toBlock,
+          topics: [transferTopic, accountTopic],
+        }),
+        this.provider.getLogs({
+          address: mobileConfig.tokenAddress,
+          fromBlock,
+          toBlock,
+          topics: [transferTopic, null, accountTopic],
+        }),
+      ]);
+
+      for (const log of [...outgoingLogs, ...incomingLogs]) {
+        const logKey = `${log.transactionHash}:${log.logIndex}`;
+        if (seenLogs.has(logKey)) {
+          continue;
+        }
+
+        const parsed = this.token.interface.parseLog(log);
+        seenLogs.set(logKey, {
+          blockNumber: log.blockNumber,
+          logIndex: log.logIndex,
+          hash: log.transactionHash,
+          amount: parsed.args.value.toString(),
+          from: ethers.utils.getAddress(parsed.args.from),
+          to: ethers.utils.getAddress(parsed.args.to),
+        });
+      }
+
+      if (seenLogs.size >= count) {
+        break;
+      }
+
+      toBlock = fromBlock - 1;
+    }
+
+    const sortedLogs = Array.from(seenLogs.values())
+      .sort((left, right) => {
+        if (left.blockNumber !== right.blockNumber) {
+          return right.blockNumber - left.blockNumber;
+        }
+        return right.logIndex - left.logIndex;
+      })
+      .slice(0, count);
+
+    const blockNumbers = [...new Set(sortedLogs.map((log) => log.blockNumber))];
+    const timestamps = new Map(
+      await Promise.all(
+        blockNumbers.map(async (blockNumber) => {
+          const block = await this.provider.getBlock(blockNumber);
+          return [blockNumber, block.timestamp] as const;
+        }),
+      ),
+    );
+
+    return sortedLogs.map((log) => ({
+      id: `${log.hash}:${log.logIndex}`,
+      hash: log.hash,
+      amount: log.amount,
+      amountFormatted: formatTokenAmount(log.amount),
+      timestamp: timestamps.get(log.blockNumber) ?? 0,
+      from: log.from,
+      to: log.to,
+      direction: log.from.toLowerCase() === normalizedAccount ? "send" : "receive",
+    }));
   }
 
   async sendSFLUV(
@@ -285,7 +406,7 @@ export class SmartWalletService {
 
     const transferCallData = this.erc20.encodeFunctionData("transfer", [recipient, amount]);
     const accountExecuteCallData =
-      this.route.paymasterType === "cw-safe"
+      this.walletConfig.paymasterType === "cw-safe"
         ? this.safeAccount.encodeFunctionData("execTransactionFromModule", [
             mobileConfig.tokenAddress,
             0,
@@ -313,7 +434,7 @@ export class SmartWalletService {
 
     const initCode = needsInitCode
       ? ethers.utils.hexConcat([
-          this.route.accountFactory,
+          this.walletConfig.accountFactory,
           this.accountFactory.interface.encodeFunctionData("createAccount", [this.owner, this.smartIndex]),
         ])
       : "0x";
@@ -332,7 +453,7 @@ export class SmartWalletService {
       signature: "0x",
     };
 
-    const sponsorData = (await this.backend.sponsor(userOp, this.route.entryPoint)) as SponsorResponse;
+    const sponsorData = (await this.backend.sponsor(userOp, this.walletConfig.entryPoint)) as SponsorResponse;
     if (!sponsorData?.paymasterAndData) {
       throw new Error("Sponsor did not return paymasterAndData");
     }
@@ -354,7 +475,7 @@ export class SmartWalletService {
     const userOpHash: string = await this.tokenEntryPoint.getUserOpHash(userOp);
     userOp.signature = await this.ownerSigner.signMessage(ethers.utils.arrayify(userOpHash));
 
-    const sentUserOpHash = (await this.backend.sendUserOp(userOp, this.route.entryPoint)) as string;
+    const sentUserOpHash = (await this.backend.sendUserOp(userOp, this.walletConfig.entryPoint)) as string;
     if (!sentUserOpHash) {
       throw new Error("eth_sendUserOperation returned empty hash");
     }
@@ -375,6 +496,7 @@ export class SmartWalletService {
 export async function createSmartWalletServiceFromSigner(
   signer: ethers.Signer,
   selectedCandidateKey?: string,
+  getAccessToken?: () => Promise<string | null>,
 ): Promise<{ service: SmartWalletService; discovery: RouteDiscovery }> {
   const ownerAddress = ethers.utils.getAddress(await signer.getAddress());
   const provider = new ethers.providers.JsonRpcProvider(mobileConfig.rpcURL, {
@@ -389,8 +511,7 @@ export async function createSmartWalletServiceFromSigner(
     discovery.candidates.find((item) => item.key === discovery.selectedCandidateKey) ??
     discovery.candidates[0] ??
     {
-      key: candidateKey("new", 0),
-      route: routeFromID("new"),
+      key: candidateKey(0),
       smartIndex: 0,
       accountAddress: ethers.constants.AddressZero,
       deployed: false,
@@ -399,34 +520,14 @@ export async function createSmartWalletServiceFromSigner(
     };
 
   return {
-    service: new SmartWalletService(signer, ownerAddress, candidate.route, candidate.smartIndex),
+    service: new SmartWalletService(
+      signer,
+      ownerAddress,
+      mobileConfig.wallet,
+      candidate.smartIndex,
+      getAccessToken,
+      candidate.accountAddress,
+    ),
     discovery,
   };
-}
-
-function normalizePrivateKey(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    throw new Error("Missing EXPO_PUBLIC_TEST_OWNER_PRIVATE_KEY");
-  }
-  const withPrefix = trimmed.startsWith("0x") ? trimmed : `0x${trimmed}`;
-  if (!/^0x[0-9a-fA-F]{64}$/.test(withPrefix)) {
-    throw new Error("Invalid EXPO_PUBLIC_TEST_OWNER_PRIVATE_KEY");
-  }
-  return withPrefix;
-}
-
-export async function createSmartWalletServiceFromTestKey(
-  selectedCandidateKey?: string,
-): Promise<{
-  service: SmartWalletService;
-  discovery: RouteDiscovery;
-}> {
-  const pk = normalizePrivateKey(mobileConfig.testOwnerPrivateKey);
-  const provider = new ethers.providers.JsonRpcProvider(mobileConfig.rpcURL, {
-    chainId: mobileConfig.chainId,
-    name: "berachain",
-  });
-  const signer = new ethers.Wallet(pk, provider);
-  return createSmartWalletServiceFromSigner(signer, selectedCandidateKey);
 }
