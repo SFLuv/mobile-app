@@ -77,6 +77,14 @@ EXPO_TOKEN=your-expo-token
 
 The npm Expo/EAS scripts in [package.json](/Users/sanchezoleary/Projects/mobile-app-sanchezo/mobile/package.json) source `mobile/.env` automatically, so a local `EXPO_TOKEN` there will be picked up for builds and related commands.
 
+If you are building on a personal Apple Developer account and do not want to use the production-style bundle identifier, override it locally in the same gitignored file:
+
+```env
+IOS_BUNDLE_IDENTIFIER=org.sanchezoleary.sfluvwallet.dev
+```
+
+That lets you ship a personal development build without claiming the final production app identifier first.
+
 ### 5. Add the Android App Links fingerprint to the web app env
 
 The web app serves `https://app.sfluv.org/.well-known/assetlinks.json`, which Android uses to verify that `app.sfluv.org` belongs to this app.
@@ -129,7 +137,8 @@ npm run build:android:dev
 
 ## iPhone-specific notes
 
-- The bundle identifier is `org.sfluv.wallet`
+- The default bundle identifier is `org.sfluv.wallet`
+- Local development builds can override it with `IOS_BUNDLE_IDENTIFIER`
 - The first iOS build will require Apple signing setup through EAS
 - EAS will prompt for Apple credentials or guide signing setup when needed
 - The phone may require iOS Developer Mode to run the installed development build
@@ -167,7 +176,7 @@ Symptoms:
 Fix:
 
 - finish Apple Developer Program setup
-- let EAS create/manage certificates and provisioning for `org.sfluv.wallet`
+- let EAS create/manage certificates and provisioning for your chosen iOS bundle identifier
 
 ### Using Expo Go by mistake
 

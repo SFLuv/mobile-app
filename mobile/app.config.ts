@@ -1,6 +1,7 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
 const DEFAULT_EAS_PROJECT_ID = "ee7c9c8e-f237-44cf-917c-ee424401e299";
+const DEFAULT_IOS_BUNDLE_IDENTIFIER = "org.sfluv.wallet";
 
 function buildExtra(config: ConfigContext["config"]): ExpoConfig["extra"] {
   const baseExtra =
@@ -32,7 +33,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   userInterfaceStyle: "light",
   ios: {
     supportsTablet: false,
-    bundleIdentifier: "org.sfluv.wallet",
+    bundleIdentifier: process.env.IOS_BUNDLE_IDENTIFIER?.trim() || DEFAULT_IOS_BUNDLE_IDENTIFIER,
     associatedDomains: ["applinks:app.sfluv.org"],
   },
   android: {
