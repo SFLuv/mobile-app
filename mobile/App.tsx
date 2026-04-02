@@ -41,7 +41,7 @@ import {
   RouteDiscovery,
   SmartWalletService,
 } from "./src/services/smartWallet";
-import { AppBackendClient } from "./src/services/appBackend";
+import { AppBackendAuthError, AppBackendClient } from "./src/services/appBackend";
 import {
   AppContact,
   AppLocation,
@@ -223,11 +223,11 @@ function mergeTransactions(primary: AppTransaction[], secondary: AppTransaction[
 }
 
 function describeAppBackendIssue(error: unknown): string {
+  if (error instanceof AppBackendAuthError) {
+    return error.message;
+  }
   const message = (error as Error)?.message?.trim();
   if (!message) {
-    return "Some shared app features could not sync right now. Wallet transfers still work.";
-  }
-  if (message === "Unable to load user profile." || message === "No Privy access token available.") {
     return "Some shared app features could not sync right now. Wallet transfers still work.";
   }
   return message;
@@ -396,6 +396,7 @@ function WalletAppShellContent({
   const walletSurfaceRequestRef = useRef(0);
   const appIsActiveRef = useRef(AppState.currentState === "active");
   const transferRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const backendAuthFailureHandledRef = useRef(false);
   const walletCandidates = runtime.discovery?.candidates ?? [];
   const canChooseWallet = walletCandidates.length > 1;
   const selectedCandidate = useMemo(
@@ -466,9 +467,22 @@ function WalletAppShellContent({
       setAppUser(profile.user);
       setContacts(profile.contacts);
       setSyncNotice(null);
+      backendAuthFailureHandledRef.current = false;
     } catch (error) {
       console.warn("Unable to load app profile", error);
-      setSyncNotice(describeAppBackendIssue(error));
+      const message = describeAppBackendIssue(error);
+      setSyncNotice(message);
+      if (error instanceof AppBackendAuthError && onLogout && !backendAuthFailureHandledRef.current) {
+        backendAuthFailureHandledRef.current = true;
+        Alert.alert("Sign in again", message, [
+          {
+            text: "OK",
+            onPress: () => {
+              onLogout();
+            },
+          },
+        ]);
+      }
     } finally {
       setLoadingData(false);
     }

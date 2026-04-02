@@ -7,7 +7,9 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "IOS_BUNDLE_IDENTIFIER": "org.sanchezoleary.sfluvwallet.dev"
+        "IOS_BUNDLE_IDENTIFIER": "org.sanchezoleary.sfluvwallet.dev",
+        "EXPO_PUBLIC_PRIVY_APP_ID": "cmc3nhnmc004yl10mwcmj4be3",
+        "EXPO_PUBLIC_PRIVY_CLIENT_ID": "client-WY6MsAXARAYUgz2i28xA5GP48PCXp5hw8eKTiD158gcx5"
       }
     },
     "preview": {
@@ -28,8 +30,8 @@
         "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDushyc7TgeFyIlxbqiujHdydWDoVoHwNQ",
         "EXPO_PUBLIC_MAP_ID": "5d823aa5e32225a021e19266",
         "EXPO_PUBLIC_MAX_SMART_ACCOUNT_SCAN": "5",
-        "EXPO_PUBLIC_PRIVY_APP_ID": "cmlidct3t00pql50du730rr3o",
-        "EXPO_PUBLIC_PRIVY_CLIENT_ID": "client-WY6W1dt7xSPHt77ahZUNcj6TCuH8GtvFxvz8uEVqHr24z",
+        "EXPO_PUBLIC_PRIVY_APP_ID": "cmc3nhnmc004yl10mwcmj4be3",
+        "EXPO_PUBLIC_PRIVY_CLIENT_ID": "client-WY6MsAXARAYUgz2i28xA5GP48PCXp5hw8eKTiD158gcx5",
         "EXPO_PUBLIC_EAS_PROJECT_ID": "ee7c9c8e-f237-44cf-917c-ee424401e299"
       }
     },

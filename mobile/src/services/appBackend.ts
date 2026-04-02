@@ -12,6 +12,26 @@ import {
   VerifiedEmail,
 } from "../types/app";
 
+export class AppBackendAuthError extends Error {
+  readonly status?: number;
+
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = "AppBackendAuthError";
+    this.status = status;
+  }
+}
+
+export class AppBackendRequestError extends Error {
+  readonly status?: number;
+
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = "AppBackendRequestError";
+    this.status = status;
+  }
+}
+
 type GetUserResponse = {
   user: {
     id: string;
@@ -104,6 +124,21 @@ type WalletsResponse = Array<{
 
 function endpoint(path: string): string {
   return `${mobileConfig.appBackendURL.replace(/\/+$/, "")}${path}`;
+}
+
+async function readResponseDetail(response: Response): Promise<string> {
+  try {
+    const body = await response.text();
+    return body.trim();
+  } catch {
+    return "";
+  }
+}
+
+async function throwRequestError(response: Response, fallbackMessage: string): Promise<never> {
+  const detail = await readResponseDetail(response);
+  const message = detail ? `${fallbackMessage} (${response.status}): ${detail}` : `${fallbackMessage} (${response.status}).`;
+  throw new AppBackendRequestError(message, response.status);
 }
 
 function asString(value: unknown, fallback = ""): string {
@@ -230,14 +265,31 @@ export class AppBackendClient {
   private async authFetch(path: string, options: RequestInit = {}): Promise<Response> {
     const accessToken = await this.getAccessToken();
     if (!accessToken) {
-      throw new Error("No Privy access token available.");
+      throw new AppBackendAuthError("Privy could not provide a backend access token. Please sign out and sign in again.");
     }
     const extraHeaders = (options.headers || {}) as Record<string, string>;
     const headers: Record<string, string> = {
       ...extraHeaders,
       "Access-Token": accessToken,
     };
-    return fetch(endpoint(path), { ...options, headers });
+    let response: Response;
+    try {
+      response = await fetch(endpoint(path), { ...options, headers });
+    } catch (error) {
+      throw new AppBackendRequestError(
+        `Unable to reach the shared app backend at ${mobileConfig.appBackendURL}. ${(error as Error)?.message ?? ""}`.trim(),
+      );
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      const detail = await readResponseDetail(response);
+      const message = detail
+        ? `Shared app backend rejected this Privy session (${response.status}): ${detail}`
+        : "Shared app backend rejected this Privy session. Please sign out and sign in again.";
+      throw new AppBackendAuthError(message, response.status);
+    }
+
+    return response;
   }
 
   async ensureUser(): Promise<{
@@ -250,13 +302,13 @@ export class AppBackendClient {
     if (response.status === 404) {
       const created = await this.authFetch("/users", { method: "POST" });
       if (!created.ok) {
-        throw new Error("Unable to create user profile in app backend.");
+        await throwRequestError(created, "Unable to create user profile in the shared app backend");
       }
       response = await this.authFetch("/users");
     }
 
     if (!response.ok) {
-      throw new Error("Unable to load user profile.");
+      await throwRequestError(response, "Unable to load user profile from the shared app backend");
     }
 
     const body = (await response.json()) as GetUserResponse;
@@ -271,7 +323,7 @@ export class AppBackendClient {
   async getWallets(): Promise<AppWallet[]> {
     const response = await this.authFetch("/wallets");
     if (!response.ok) {
-      throw new Error("Unable to load wallets.");
+      await throwRequestError(response, "Unable to load wallets from the shared app backend");
     }
     const body = (await response.json()) as WalletsResponse;
     return Array.isArray(body) ? body.map(mapWallet) : [];
@@ -295,7 +347,7 @@ export class AppBackendClient {
       }),
     });
     if (!response.ok) {
-      throw new Error("Unable to add wallet.");
+      await throwRequestError(response, "Unable to add wallet to the shared app backend");
     }
   }
 
@@ -341,7 +393,7 @@ export class AppBackendClient {
       }),
     });
     if (!response.ok) {
-      throw new Error("Unable to update primary wallet.");
+      await throwRequestError(response, "Unable to update primary wallet in the shared app backend");
     }
     const body = (await response.json()) as GetUserResponse["user"];
     const rawPrimaryWalletAddress = asString(body.primary_wallet_address).trim();
@@ -354,7 +406,7 @@ export class AppBackendClient {
   async getContacts(): Promise<AppContact[]> {
     const response = await this.authFetch("/contacts");
     if (!response.ok) {
-      throw new Error("Unable to load contacts.");
+      await throwRequestError(response, "Unable to load contacts from the shared app backend");
     }
     const body = (await response.json()) as GetUserResponse["contacts"];
     return Array.isArray(body) ? body.map(mapContact) : [];
@@ -372,7 +424,7 @@ export class AppBackendClient {
       }),
     });
     if (!response.ok) {
-      throw new Error("Unable to add contact.");
+      await throwRequestError(response, "Unable to add contact in the shared app backend");
     }
     const body = (await response.json()) as GetUserResponse["contacts"][number];
     return mapContact(body);
@@ -391,7 +443,7 @@ export class AppBackendClient {
       }),
     });
     if (!response.ok) {
-      throw new Error("Unable to update contact.");
+      await throwRequestError(response, "Unable to update contact in the shared app backend");
     }
   }
 
@@ -408,7 +460,7 @@ export class AppBackendClient {
       }),
     });
     if (!response.ok) {
-      throw new Error("Unable to update contact.");
+      await throwRequestError(response, "Unable to update contact in the shared app backend");
     }
   }
 
@@ -417,7 +469,7 @@ export class AppBackendClient {
       method: "DELETE",
     });
     if (!response.ok) {
-      throw new Error("Unable to delete contact.");
+      await throwRequestError(response, "Unable to delete contact from the shared app backend");
     }
   }
 
