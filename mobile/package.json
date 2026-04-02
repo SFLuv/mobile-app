@@ -10,8 +10,8 @@
     "ios": "./scripts/with-local-env.sh expo start --ios",
     "prebuild:ios": "./scripts/with-local-env.sh expo prebuild --platform ios --no-install",
     "config:check": "./scripts/with-local-env.sh expo config --type public",
-    "build:ios:dev": "./scripts/with-local-env.sh eas build --platform ios --profile development",
-    "build:android:dev": "./scripts/with-local-env.sh eas build --platform android --profile development",
+    "build:ios:dev": "./scripts/with-local-env.sh npx eas-cli build --platform ios --profile development",
+    "build:android:dev": "./scripts/with-local-env.sh npx eas-cli build --platform android --profile development",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
