@@ -188,6 +188,32 @@ Fix:
 
 - use the installed development build, not Expo Go
 
+### Dev build says "No development servers found"
+
+Symptoms:
+
+- the installed SFLUV development build opens, but the launcher shows no local servers
+- Metro is running, but the server list in the app is empty or stale
+
+Fix:
+
+- fully close and reopen the installed development build once
+- if the list is still empty, use the dev build's QR scanner instead of relying on server discovery
+- copy the current `exp+sfluv-wallet://expo-development-client/?url=...` URL from the `npm run start:dev-client` output
+- generate a QR for that URL, for example:
+
+```bash
+cd /Users/sanchezoleary/Projects/mobile-app-sanchezo/mobile
+npx --yes qrcode -o ./dev-client-qr.png 'exp+sfluv-wallet://expo-development-client/?url=http%3A%2F%2F192.168.1.166%3A8081'
+```
+
+- scan that QR inside the installed SFLUV development build
+
+Notes:
+
+- this worked reliably even when the in-app server list did not
+- the QR value changes with the current Metro host/port, so always use the latest URL printed by Expo
+
 ### Android App Links not verifying
 
 Symptoms:

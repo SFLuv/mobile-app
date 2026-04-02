@@ -13,7 +13,24 @@
     "preview": {
       "distribution": "internal",
       "env": {
-        "IOS_BUNDLE_IDENTIFIER": "org.sanchezoleary.sfluvwallet.dev"
+        "IOS_BUNDLE_IDENTIFIER": "org.sanchezoleary.sfluvwallet.dev",
+        "EXPO_PUBLIC_CHAIN_ID": "80094",
+        "EXPO_PUBLIC_RPC_URL": "https://rpc.berachain.com",
+        "EXPO_PUBLIC_LEGACY_ENTRYPOINT_ADDRESS": "0x7079253c0358eF9Fd87E16488299Ef6e06F403B6",
+        "EXPO_PUBLIC_LEGACY_ACCOUNT_FACTORY_ADDRESS": "0x7cC54D54bBFc65d1f0af7ACee5e4042654AF8185",
+        "EXPO_PUBLIC_LEGACY_PAYMASTER_ADDRESS": "0x9A5be02B65f9Aa00060cB8c951dAFaBAB9B860cd",
+        "EXPO_PUBLIC_LEGACY_PAYMASTER_TYPE": "cw-safe",
+        "EXPO_PUBLIC_LEGACY_BACKEND_URL": "https://80094.engine.citizenwallet.xyz",
+        "EXPO_PUBLIC_TOKEN_ADDRESS": "0x881cad4f885c6701d8481c0ed347f6d35444ea7e",
+        "EXPO_PUBLIC_TOKEN_DECIMALS": "18",
+        "EXPO_PUBLIC_APP_BACKEND_URL": "https://api.sfluv.org",
+        "EXPO_PUBLIC_APP_ORIGIN": "https://app.sfluv.org",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDushyc7TgeFyIlxbqiujHdydWDoVoHwNQ",
+        "EXPO_PUBLIC_MAP_ID": "5d823aa5e32225a021e19266",
+        "EXPO_PUBLIC_MAX_SMART_ACCOUNT_SCAN": "5",
+        "EXPO_PUBLIC_PRIVY_APP_ID": "cmlidct3t00pql50du730rr3o",
+        "EXPO_PUBLIC_PRIVY_CLIENT_ID": "client-WY6W1dt7xSPHt77ahZUNcj6TCuH8GtvFxvz8uEVqHr24z",
+        "EXPO_PUBLIC_EAS_PROJECT_ID": "ee7c9c8e-f237-44cf-917c-ee424401e299"
       }
     },
     "production": {}

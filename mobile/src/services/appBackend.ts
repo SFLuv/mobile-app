@@ -27,6 +27,7 @@ type GetUserResponse = {
     contact_email?: string;
     contact_phone?: string;
     contact_name?: string;
+    primary_wallet_address?: string;
     paypal_eth: string;
     last_redemption: number;
   };
@@ -114,9 +115,13 @@ function asNumber(value: unknown, fallback = 0): number {
 }
 
 function mapUser(input: GetUserResponse["user"]): AppUser {
+  const rawPrimaryWalletAddress = asString(input.primary_wallet_address).trim();
   return {
     id: input.id,
     name: input.contact_name || "SFLUV User",
+    primaryWalletAddress: ethers.utils.isAddress(rawPrimaryWalletAddress)
+      ? ethers.utils.getAddress(rawPrimaryWalletAddress)
+      : undefined,
     contactEmail: input.contact_email,
     contactPhone: input.contact_phone,
     isAdmin: input.is_admin,
@@ -324,6 +329,26 @@ export class AppBackendClient {
       });
       existingKeys.add(key);
     }
+  }
+
+  async updatePrimaryWallet(address: string): Promise<string> {
+    const normalizedAddress = ethers.utils.getAddress(address);
+    const response = await this.authFetch("/users/primary-wallet", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        primary_wallet_address: normalizedAddress,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error("Unable to update primary wallet.");
+    }
+    const body = (await response.json()) as GetUserResponse["user"];
+    const rawPrimaryWalletAddress = asString(body.primary_wallet_address).trim();
+    if (!ethers.utils.isAddress(rawPrimaryWalletAddress)) {
+      throw new Error("Shared app backend returned an invalid primary wallet.");
+    }
+    return ethers.utils.getAddress(rawPrimaryWalletAddress);
   }
 
   async getContacts(): Promise<AppContact[]> {

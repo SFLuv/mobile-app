@@ -1,6 +1,7 @@
 export interface AppUser {
   id: string;
   name: string;
+  primaryWalletAddress?: string;
   contactEmail?: string;
   contactPhone?: string;
   isAdmin: boolean;

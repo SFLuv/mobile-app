@@ -75,6 +75,7 @@ const NONCE_KEY_ZERO = 0;
 const MAX_TRANSFER_LOG_WINDOWS = 24;
 const TRANSFER_LOG_WINDOW = 9_500;
 const DISCOVERY_BATCH_SIZE = 2;
+const PROVIDER_POLLING_INTERVAL_MS = 2000;
 const routeDiscoveryCache = new Map<string, RouteDiscovery>();
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -229,6 +230,7 @@ export class SmartWalletService {
       chainId: mobileConfig.chainId,
       name: "berachain",
     });
+    this.provider.pollingInterval = PROVIDER_POLLING_INTERVAL_MS;
     this.backend = new BackendClient(
       walletConfig.backendURL,
       mobileConfig.chainId,
@@ -370,6 +372,31 @@ export class SmartWalletService {
       to: log.to,
       direction: log.from.toLowerCase() === normalizedAccount ? "send" : "receive",
     }));
+  }
+
+  async watchSmartAccountTransfers(onTransfer: (txHash: string) => void): Promise<() => void> {
+    const account = await this.smartAccountAddress();
+    const outgoingFilter = this.token.filters.Transfer(account, null);
+    const incomingFilter = this.token.filters.Transfer(null, account);
+
+    const handleLog = (from: string, to: string, _value: ethers.BigNumber, event: ethers.Event) => {
+      const normalizedAccount = account.toLowerCase();
+      if (from.toLowerCase() !== normalizedAccount && to.toLowerCase() !== normalizedAccount) {
+        return;
+      }
+      if (!event.transactionHash) {
+        return;
+      }
+      onTransfer(event.transactionHash);
+    };
+
+    this.token.on(outgoingFilter, handleLog);
+    this.token.on(incomingFilter, handleLog);
+
+    return () => {
+      this.token.off(outgoingFilter, handleLog);
+      this.token.off(incomingFilter, handleLog);
+    };
   }
 
   async sendSFLUV(

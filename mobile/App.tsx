@@ -2,6 +2,7 @@ import "./src/polyfills";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
   Alert,
   Modal,
   Platform,
@@ -94,6 +95,7 @@ type WalletPane = "home" | "send" | "receive";
 
 const PREFERENCES_STORAGE_KEY = "sfluv-wallet:preferences";
 const PUSH_TOKEN_STORAGE_KEY = "sfluv-wallet:push-token";
+const TRANSFER_REFRESH_DEBOUNCE_MS = 900;
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -392,6 +394,8 @@ function WalletAppShellContent({
   const [sendReturnTab, setSendReturnTab] = useState<Tab | null>(null);
   const [redeemFlow, setRedeemFlow] = useState<RedeemFlowState | null>(null);
   const walletSurfaceRequestRef = useRef(0);
+  const appIsActiveRef = useRef(AppState.currentState === "active");
+  const transferRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const walletCandidates = runtime.discovery?.candidates ?? [];
   const canChooseWallet = walletCandidates.length > 1;
   const selectedCandidate = useMemo(
@@ -654,6 +658,86 @@ function WalletAppShellContent({
   }, [runtime.service, runtime.discovery, selectedCandidateKey, backendClient]);
 
   useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      const isActive = nextState === "active";
+      const wasActive = appIsActiveRef.current;
+      appIsActiveRef.current = isActive;
+
+      if (!wasActive && isActive) {
+        void refreshWalletSurface();
+        void loadAppProfile();
+        void loadPublicLocations();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [backendClient, publicBackendClient, runtime.service, runtime.discovery, selectedCandidateKey]);
+
+  useEffect(() => {
+    if (!runtime.service) {
+      return;
+    }
+
+    const service = runtime.service;
+    let cancelled = false;
+    let unsubscribe: (() => void) | null = null;
+
+    const watchTransfers = async () => {
+      try {
+        unsubscribe = await service.watchSmartAccountTransfers(() => {
+          if (!appIsActiveRef.current) {
+            return;
+          }
+          if (transferRefreshTimeoutRef.current) {
+            clearTimeout(transferRefreshTimeoutRef.current);
+          }
+          transferRefreshTimeoutRef.current = setTimeout(() => {
+            transferRefreshTimeoutRef.current = null;
+            if (!cancelled) {
+              void refreshWalletSurface();
+            }
+          }, TRANSFER_REFRESH_DEBOUNCE_MS);
+        });
+      } catch (error) {
+        if (!cancelled) {
+          console.warn("Unable to watch wallet transfers", error);
+        }
+      }
+    };
+
+    void watchTransfers();
+
+    return () => {
+      cancelled = true;
+      if (transferRefreshTimeoutRef.current) {
+        clearTimeout(transferRefreshTimeoutRef.current);
+        transferRefreshTimeoutRef.current = null;
+      }
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [runtime.service, runtime.discovery, selectedCandidateKey]);
+
+  useEffect(() => {
+    return () => {
+      if (transferRefreshTimeoutRef.current) {
+        clearTimeout(transferRefreshTimeoutRef.current);
+        transferRefreshTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!runtime.service || !appIsActiveRef.current) {
+      return;
+    }
+    void refreshWalletSurface();
+  }, [runtime.service, selectedCandidateKey]);
+
+  useEffect(() => {
     if (!backendClient || !appUser || !runtime.discovery || walletCandidates.length === 0) {
       setWalletSyncReady(false);
       return;
@@ -670,6 +754,17 @@ function WalletAppShellContent({
             accountAddress: candidate.accountAddress,
           })),
         );
+
+        const existingPrimaryWallet = appUser.primaryWalletAddress?.trim();
+        if (!existingPrimaryWallet) {
+          const primaryCandidate =
+            walletCandidates.find((candidate) => candidate.smartIndex === 0) ?? walletCandidates[0];
+          if (primaryCandidate) {
+            await backendClient.updatePrimaryWallet(primaryCandidate.accountAddress);
+            await loadAppProfile();
+          }
+        }
+
         if (!cancelled) {
           setWalletSyncReady(true);
         }
@@ -903,7 +998,6 @@ function WalletAppShellContent({
                   setWalletPane("send");
                 }}
                 onOpenReceive={() => {
-                  emitTransferHaptic();
                   setWalletPane("receive");
                 }}
                 onOpenActivity={() => {
@@ -1267,19 +1361,12 @@ function PrivyWalletApp() {
   }
 
   if (!user) {
-    const loginBody =
-      pendingLinkIntent?.link.type === "redeem"
-        ? "Sign in with Privy to finish redeeming your SFLUV event perk on mobile."
-        : pendingLinkIntent
-          ? "Sign in with Privy to continue this SFLUV payment flow on mobile."
-          : "Sign in with Privy to open the same account system you already use on the web, with mobile-first send and receive flows.";
-
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.loginWrap}>
-          <Text style={styles.loginBrand}>SFLUV Wallet</Text>
-          <Text style={styles.loginTitle}>Wallet-first access to SFLUV on mobile</Text>
-          <Text style={styles.loginBody}>{loginBody}</Text>
+          <Text style={styles.loginBrand}>SFLUV</Text>
+          <Text style={styles.loginTitle}>A community currency for San Francisco</Text>
+          <Text style={styles.loginBody}>Sign in to send, receive, and redeem SFLUV.</Text>
           <Pressable
             style={[styles.loginButton, oauthLoading ? styles.loginButtonDisabled : undefined]}
             disabled={oauthLoading}
