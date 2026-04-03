@@ -11,6 +11,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   Vibration,
   View,
 } from "react-native";
@@ -25,6 +26,7 @@ import { ethers } from "ethers";
 import {
   PrivyProvider,
   useEmbeddedEthereumWallet,
+  useLoginWithEmail,
   useLoginWithOAuth,
   usePrivy,
 } from "@privy-io/expo";
@@ -37,7 +39,10 @@ import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { ContactsScreen } from "./src/screens/ContactsScreen";
 import { mobileConfig } from "./src/config";
 import {
+  clearCachedRouteDiscovery,
   createSmartWalletServiceFromSigner,
+  createSmartWalletServiceForIndex,
+  RouteCandidate,
   RouteDiscovery,
   SmartWalletService,
 } from "./src/services/smartWallet";
@@ -47,6 +52,7 @@ import {
   AppLocation,
   AppTransaction,
   AppUser,
+  AppWallet,
 } from "./src/types/app";
 import { AppPreferences, defaultAppPreferences } from "./src/types/preferences";
 import { SfluvUniversalLink, parseSfluvUniversalLink } from "./src/utils/universalLinks";
@@ -182,6 +188,136 @@ function walletLabel(smartIndex: number | undefined): string {
   return `Wallet ${smartIndex + 1}`;
 }
 
+function eoaWalletName(walletOrder: number): string {
+  return `EOA-${walletOrder + 1}`;
+}
+
+function smartWalletName(walletOrder: number, smartIndex: number, isNewAccount: boolean): string {
+  if (smartIndex === 0 && isNewAccount) {
+    return "Primary Wallet";
+  }
+  return `SW-${walletOrder + 1}-${smartIndex + 1}`;
+}
+
+async function ensureManagedEmbeddedWallets({
+  backendClient,
+  signer,
+  ownerAddress,
+  candidates,
+  isNewAccount,
+  getAccessToken,
+}: {
+  backendClient: AppBackendClient;
+  signer: ethers.Signer;
+  ownerAddress: string;
+  candidates: RouteCandidate[];
+  isNewAccount: boolean;
+  getAccessToken: () => Promise<string | null>;
+}): Promise<{ latestWallets: AppWallet[]; deployedPrimarySmartWallet: boolean }> {
+  let latestWallets = await backendClient.getWallets();
+  const normalizedOwner = ethers.utils.getAddress(ownerAddress);
+
+  const hasEOAWallet = latestWallets.some(
+    (wallet) => wallet.isEoa && wallet.eoaAddress.toLowerCase() === normalizedOwner.toLowerCase(),
+  );
+  if (!hasEOAWallet) {
+    await backendClient.addWallet({
+      owner: "",
+      name: eoaWalletName(0),
+      isEoa: true,
+      isHidden: false,
+      isRedeemer: false,
+      isMinter: false,
+      eoaAddress: normalizedOwner,
+    });
+    latestWallets = await backendClient.getWallets();
+  }
+
+  const sortedCandidates = [...candidates].sort((left, right) => left.smartIndex - right.smartIndex);
+  const existingSmartWallets = new Set(
+    latestWallets
+      .filter((wallet) => !wallet.isEoa && wallet.smartAddress && typeof wallet.smartIndex === "number")
+      .map((wallet) => `${wallet.smartIndex}:${wallet.smartAddress?.toLowerCase()}`),
+  );
+
+  for (const candidate of sortedCandidates) {
+    const walletKey = `${candidate.smartIndex}:${candidate.accountAddress.toLowerCase()}`;
+    if (existingSmartWallets.has(walletKey)) {
+      continue;
+    }
+
+    await backendClient.addWallet({
+      owner: "",
+      name: smartWalletName(0, candidate.smartIndex, isNewAccount),
+      isEoa: false,
+      isHidden: false,
+      isRedeemer: false,
+      isMinter: false,
+      eoaAddress: normalizedOwner,
+      smartAddress: candidate.accountAddress,
+      smartIndex: candidate.smartIndex,
+    });
+    existingSmartWallets.add(walletKey);
+  }
+
+  if (sortedCandidates.length > 0) {
+    latestWallets = await backendClient.getWallets();
+  }
+
+  const primaryCandidate = sortedCandidates.find((candidate) => candidate.smartIndex === 0);
+  if (!primaryCandidate || primaryCandidate.deployed) {
+    return { latestWallets, deployedPrimarySmartWallet: false };
+  }
+
+  const primaryService = await createSmartWalletServiceForIndex(
+    signer,
+    0,
+    getAccessToken,
+    primaryCandidate.accountAddress,
+  );
+  const deployedPrimarySmartWallet = await primaryService.ensureSmartWalletDeployed();
+  if (deployedPrimarySmartWallet) {
+    latestWallets = await backendClient.getWallets();
+  }
+
+  return { latestWallets, deployedPrimarySmartWallet };
+}
+
+async function ensureDefaultPrimaryWalletAssignment(
+  backendClient: AppBackendClient,
+  currentUser: AppUser,
+  walletList: AppWallet[],
+  primaryEoaAddress: string,
+): Promise<string> {
+  const existingPrimaryWallet = currentUser.primaryWalletAddress?.trim();
+  if (existingPrimaryWallet) {
+    return existingPrimaryWallet;
+  }
+
+  const normalizedPrimaryEoa = ethers.utils.getAddress(primaryEoaAddress).toLowerCase();
+  const preferredSmartWallet = walletList.find(
+    (wallet) =>
+      !wallet.isEoa &&
+      wallet.smartIndex === 0 &&
+      wallet.eoaAddress.toLowerCase() === normalizedPrimaryEoa &&
+      typeof wallet.smartAddress === "string" &&
+      wallet.smartAddress.trim().length > 0,
+  );
+  const fallbackSmartWallet = walletList.find(
+    (wallet) =>
+      !wallet.isEoa &&
+      wallet.smartIndex === 0 &&
+      typeof wallet.smartAddress === "string" &&
+      wallet.smartAddress.trim().length > 0,
+  );
+
+  const nextPrimaryWallet = preferredSmartWallet?.smartAddress ?? fallbackSmartWallet?.smartAddress ?? "";
+  if (!nextPrimaryWallet) {
+    return "";
+  }
+  return backendClient.updatePrimaryWallet(nextPrimaryWallet);
+}
+
 function transactionIdentity(tx: Pick<AppTransaction, "hash" | "amount" | "from" | "to">): string {
   return `${tx.hash}:${tx.amount}:${tx.from}:${tx.to}`.toLowerCase();
 }
@@ -284,6 +420,7 @@ function WalletAppShell({
   ownerBadge,
   onLogout,
   backendClient,
+  backendBootstrapReady,
   pendingLinkIntent,
   onConsumePendingLink,
 }: {
@@ -293,6 +430,7 @@ function WalletAppShell({
   ownerBadge?: string;
   onLogout?: () => void;
   backendClient?: AppBackendClient | null;
+  backendBootstrapReady: boolean;
   pendingLinkIntent: PendingLinkIntent | null;
   onConsumePendingLink: () => void;
 }) {
@@ -342,6 +480,7 @@ function WalletAppShell({
         ownerBadge={ownerBadge}
         onLogout={onLogout}
         backendClient={backendClient}
+        backendBootstrapReady={backendBootstrapReady}
         pendingLinkIntent={pendingLinkIntent}
         onConsumePendingLink={onConsumePendingLink}
         preferences={preferences}
@@ -358,6 +497,7 @@ function WalletAppShellContent({
   ownerBadge,
   onLogout,
   backendClient,
+  backendBootstrapReady,
   pendingLinkIntent,
   onConsumePendingLink,
   preferences,
@@ -369,6 +509,7 @@ function WalletAppShellContent({
   ownerBadge?: string;
   onLogout?: () => void;
   backendClient?: AppBackendClient | null;
+  backendBootstrapReady: boolean;
   pendingLinkIntent: PendingLinkIntent | null;
   onConsumePendingLink: () => void;
   preferences: AppPreferences;
@@ -385,7 +526,6 @@ function WalletAppShellContent({
   const [locations, setLocations] = useState<AppLocation[]>([]);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [storedPushToken, setStoredPushToken] = useState<string | null>(null);
-  const [walletSyncReady, setWalletSyncReady] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
   const [refreshingActivity, setRefreshingActivity] = useState(false);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
@@ -403,6 +543,7 @@ function WalletAppShellContent({
     () => walletCandidates.find((candidate) => candidate.key === selectedCandidateKey) ?? walletCandidates[0],
     [selectedCandidateKey, walletCandidates],
   );
+  const walletSyncReady = backendBootstrapReady && Boolean(appUser) && Boolean(runtime.discovery);
   const notificationAddresses = useMemo(() => {
     const seen = new Set<string>();
     const addresses: string[] = [];
@@ -664,8 +805,11 @@ function WalletAppShellContent({
   }, []);
 
   useEffect(() => {
+    if (!backendBootstrapReady) {
+      return;
+    }
     void loadAppProfile();
-  }, [backendClient]);
+  }, [backendBootstrapReady, backendClient]);
 
   useEffect(() => {
     void refreshWalletSurface();
@@ -679,7 +823,9 @@ function WalletAppShellContent({
 
       if (!wasActive && isActive) {
         void refreshWalletSurface();
-        void loadAppProfile();
+        if (backendBootstrapReady) {
+          void loadAppProfile();
+        }
         void loadPublicLocations();
       }
     });
@@ -687,7 +833,23 @@ function WalletAppShellContent({
     return () => {
       subscription.remove();
     };
-  }, [backendClient, publicBackendClient, runtime.service, runtime.discovery, selectedCandidateKey]);
+  }, [backendBootstrapReady, backendClient, publicBackendClient, runtime.service, runtime.discovery, selectedCandidateKey]);
+
+  useEffect(() => {
+    if (!backendBootstrapReady) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      if (appIsActiveRef.current) {
+        void loadAppProfile();
+      }
+    }, 15_000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [backendBootstrapReady, backendClient]);
 
   useEffect(() => {
     if (!runtime.service) {
@@ -750,50 +912,6 @@ function WalletAppShellContent({
     }
     void refreshWalletSurface();
   }, [runtime.service, selectedCandidateKey]);
-
-  useEffect(() => {
-    if (!backendClient || !appUser || !runtime.discovery || walletCandidates.length === 0) {
-      setWalletSyncReady(false);
-      return;
-    }
-
-    let cancelled = false;
-    const syncWallets = async () => {
-      setWalletSyncReady(false);
-      try {
-        await backendClient.ensureLegacyWallets(
-          runtime.discovery?.ownerAddress ?? "",
-          walletCandidates.map((candidate) => ({
-            smartIndex: candidate.smartIndex,
-            accountAddress: candidate.accountAddress,
-          })),
-        );
-
-        const existingPrimaryWallet = appUser.primaryWalletAddress?.trim();
-        if (!existingPrimaryWallet) {
-          const primaryCandidate =
-            walletCandidates.find((candidate) => candidate.smartIndex === 0) ?? walletCandidates[0];
-          if (primaryCandidate) {
-            await backendClient.updatePrimaryWallet(primaryCandidate.accountAddress);
-            await loadAppProfile();
-          }
-        }
-
-        if (!cancelled) {
-          setWalletSyncReady(true);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          console.warn("Unable to sync wallets with app backend", error);
-        }
-      }
-    };
-
-    void syncWallets();
-    return () => {
-      cancelled = true;
-    };
-  }, [appUser, backendClient, runtime.discovery, walletCandidates]);
 
   useEffect(() => {
     if (!backendClient || !appUser || !runtime.discovery || !walletSyncReady) {
@@ -1228,12 +1346,20 @@ function WalletAppShellContent({
 function PrivyWalletApp() {
   const { user, isReady, logout, getAccessToken } = usePrivy();
   const { login, state: oauthState } = useLoginWithOAuth();
+  const { sendCode, loginWithCode } = useLoginWithEmail();
   const { wallets, create } = useEmbeddedEthereumWallet();
 
   const [runtime, setRuntime] = useState<RuntimeState>(blankRuntime(true));
   const [preferredCandidateKey, setPreferredCandidateKey] = useState<string | undefined>(undefined);
   const [pendingLinkIntent, setPendingLinkIntent] = useState<PendingLinkIntent | null>(null);
+  const [backendBootstrapReady, setBackendBootstrapReady] = useState(false);
+  const [loginMode, setLoginMode] = useState<"choice" | "email">("choice");
+  const [emailAddress, setEmailAddress] = useState("");
+  const [emailCode, setEmailCode] = useState("");
+  const [emailCodeSent, setEmailCodeSent] = useState(false);
+  const [emailLoading, setEmailLoading] = useState(false);
   const creatingWalletRef = useRef(false);
+  const bootstrappedIdentityRef = useRef<string | null>(null);
   const nextPendingLinkIDRef = useRef(0);
   const embeddedWallet = wallets[0];
 
@@ -1241,6 +1367,16 @@ function PrivyWalletApp() {
     () => new AppBackendClient(async () => (await getAccessToken()) ?? null),
     [getAccessToken],
   );
+
+  const presentLoginError = (error: unknown) => {
+    const message = (error as Error)?.message?.trim() || "Unable to sign in right now.";
+    setRuntime({
+      loading: false,
+      service: null,
+      discovery: null,
+      error: message,
+    });
+  };
 
   const handleIncomingLink = (rawURL: string | null) => {
     if (!rawURL) {
@@ -1287,6 +1423,13 @@ function PrivyWalletApp() {
     if (!user) {
       setRuntime(blankRuntime(false));
       setPreferredCandidateKey(undefined);
+      setBackendBootstrapReady(false);
+      setLoginMode("choice");
+      setEmailAddress("");
+      setEmailCode("");
+      setEmailCodeSent(false);
+      setEmailLoading(false);
+      bootstrappedIdentityRef.current = null;
       return;
     }
     if (wallets.length > 0 || creatingWalletRef.current) {
@@ -1296,12 +1439,7 @@ function PrivyWalletApp() {
     creatingWalletRef.current = true;
     create({ createAdditional: false })
       .catch((error) => {
-        setRuntime({
-          loading: false,
-          service: null,
-          discovery: null,
-          error: (error as Error).message,
-        });
+        presentLoginError(error);
       })
       .finally(() => {
         creatingWalletRef.current = false;
@@ -1320,11 +1458,44 @@ function PrivyWalletApp() {
         const embeddedProvider = await embeddedWallet.getProvider();
         const web3Provider = new ethers.providers.Web3Provider(embeddedProvider as any);
         const signer = web3Provider.getSigner(embeddedWallet.address);
-        const { service, discovery } = await createSmartWalletServiceFromSigner(
+        const accessTokenProvider = async () => (await getAccessToken()) ?? null;
+        let { service, discovery } = await createSmartWalletServiceFromSigner(
           signer,
           preferredCandidateKey,
-          async () => (await getAccessToken()) ?? null,
+          accessTokenProvider,
         );
+        const bootstrapKey = `${user.id}:${discovery.ownerAddress.toLowerCase()}`;
+
+        if (bootstrappedIdentityRef.current !== bootstrapKey) {
+          if (!cancelled) {
+            setBackendBootstrapReady(false);
+          }
+          const profile = await backendClient.ensureUser();
+          const { latestWallets, deployedPrimarySmartWallet } = await ensureManagedEmbeddedWallets({
+            backendClient,
+            signer,
+            ownerAddress: discovery.ownerAddress,
+            candidates: discovery.candidates,
+            isNewAccount: profile.wallets.length === 0,
+            getAccessToken: accessTokenProvider,
+          });
+          await ensureDefaultPrimaryWalletAssignment(
+            backendClient,
+            profile.user,
+            latestWallets,
+            discovery.ownerAddress,
+          );
+          if (deployedPrimarySmartWallet) {
+            clearCachedRouteDiscovery(discovery.ownerAddress);
+            ({ service, discovery } = await createSmartWalletServiceFromSigner(
+              signer,
+              preferredCandidateKey,
+              accessTokenProvider,
+              { forceRefresh: true },
+            ));
+          }
+          bootstrappedIdentityRef.current = bootstrapKey;
+        }
         if (cancelled) {
           return;
         }
@@ -1334,16 +1505,13 @@ function PrivyWalletApp() {
           discovery,
           error: null,
         });
+        setBackendBootstrapReady(true);
       } catch (error) {
         if (cancelled) {
           return;
         }
-        setRuntime({
-          loading: false,
-          service: null,
-          discovery: null,
-          error: (error as Error).message,
-        });
+        setBackendBootstrapReady(false);
+        presentLoginError(error);
       }
     };
 
@@ -1351,9 +1519,10 @@ function PrivyWalletApp() {
     return () => {
       cancelled = true;
     };
-  }, [embeddedWallet, getAccessToken, isReady, preferredCandidateKey, user]);
+  }, [backendClient, embeddedWallet, getAccessToken, isReady, preferredCandidateKey, user]);
 
   const oauthLoading = oauthState.status === "loading";
+  const authLoading = oauthLoading || emailLoading;
   const selectedCandidateKey =
     preferredCandidateKey && runtime.discovery?.candidates.some((candidate) => candidate.key === preferredCandidateKey)
       ? preferredCandidateKey
@@ -1361,7 +1530,56 @@ function PrivyWalletApp() {
   const walletInitializing =
     Boolean(user) &&
     !runtime.error &&
-    (!embeddedWallet || runtime.loading || !runtime.service || !runtime.discovery);
+    (!embeddedWallet || runtime.loading || !runtime.service || !runtime.discovery || !backendBootstrapReady);
+
+  const handleGoogleLogin = async () => {
+    try {
+      await login({ provider: "google" });
+    } catch (error) {
+      presentLoginError(error);
+    }
+  };
+
+  const handleSendEmailCode = async () => {
+    const normalizedEmail = emailAddress.trim();
+    if (!normalizedEmail) {
+      presentLoginError(new Error("Enter your email address to continue."));
+      return;
+    }
+
+    setEmailLoading(true);
+    try {
+      await sendCode({ email: normalizedEmail });
+      setEmailCodeSent(true);
+      setRuntime((state) => ({ ...state, error: null }));
+    } catch (error) {
+      presentLoginError(error);
+    } finally {
+      setEmailLoading(false);
+    }
+  };
+
+  const handleEmailLogin = async () => {
+    const normalizedEmail = emailAddress.trim();
+    const normalizedCode = emailCode.trim();
+    if (!normalizedEmail) {
+      presentLoginError(new Error("Enter your email address to continue."));
+      return;
+    }
+    if (!normalizedCode) {
+      presentLoginError(new Error("Enter the verification code from your email."));
+      return;
+    }
+
+    setEmailLoading(true);
+    try {
+      await loginWithCode({ email: normalizedEmail, code: normalizedCode });
+    } catch (error) {
+      presentLoginError(error);
+    } finally {
+      setEmailLoading(false);
+    }
+  };
 
   if (!isReady) {
     return (
@@ -1381,24 +1599,99 @@ function PrivyWalletApp() {
           <Text style={styles.loginBrand}>SFLUV</Text>
           <Text style={styles.loginTitle}>A community currency for San Francisco</Text>
           <Text style={styles.loginBody}>Sign in to send, receive, and redeem SFLUV.</Text>
-          <Pressable
-            style={[styles.loginButton, oauthLoading ? styles.loginButtonDisabled : undefined]}
-            disabled={oauthLoading}
-            onPress={async () => {
-              try {
-                await login({ provider: "google" });
-              } catch (error) {
-                setRuntime({
-                  loading: false,
-                  service: null,
-                  discovery: null,
-                  error: (error as Error).message,
-                });
-              }
-            }}
-          >
-            <Text style={styles.loginButtonText}>{oauthLoading ? "Connecting..." : "Continue with Google"}</Text>
-          </Pressable>
+          {loginMode === "email" ? (
+            <>
+              <TextInput
+                style={styles.loginInput}
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!authLoading}
+                inputMode="email"
+                keyboardType="email-address"
+                onChangeText={setEmailAddress}
+                placeholder="Email address"
+                placeholderTextColor={lightPalette.textMuted}
+                textContentType="emailAddress"
+                value={emailAddress}
+              />
+              {emailCodeSent ? (
+                <TextInput
+                  style={styles.loginInput}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!authLoading}
+                  keyboardType="number-pad"
+                  onChangeText={setEmailCode}
+                  placeholder="Verification code"
+                  placeholderTextColor={lightPalette.textMuted}
+                  textContentType="oneTimeCode"
+                  value={emailCode}
+                />
+              ) : null}
+              <Pressable
+                style={[styles.loginButton, authLoading ? styles.loginButtonDisabled : undefined]}
+                disabled={authLoading}
+                onPress={() => {
+                  void (emailCodeSent ? handleEmailLogin() : handleSendEmailCode());
+                }}
+              >
+                <Text style={styles.loginButtonText}>
+                  {emailLoading
+                    ? emailCodeSent
+                      ? "Verifying..."
+                      : "Sending code..."
+                    : emailCodeSent
+                      ? "Continue with Email"
+                      : "Email me a code"}
+                </Text>
+              </Pressable>
+              {emailCodeSent ? (
+                <Pressable
+                  style={[styles.loginSecondaryButton, authLoading ? styles.loginButtonDisabled : undefined]}
+                  disabled={authLoading}
+                  onPress={() => {
+                    void handleSendEmailCode();
+                  }}
+                >
+                  <Text style={styles.loginSecondaryButtonText}>Send a new code</Text>
+                </Pressable>
+              ) : null}
+              <Pressable
+                style={styles.loginTertiaryButton}
+                disabled={authLoading}
+                onPress={() => {
+                  setLoginMode("choice");
+                  setEmailCode("");
+                  setEmailCodeSent(false);
+                  setRuntime((state) => ({ ...state, error: null }));
+                }}
+              >
+                <Text style={styles.loginTertiaryButtonText}>Other sign-in options</Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Pressable
+                style={[styles.loginButton, authLoading ? styles.loginButtonDisabled : undefined]}
+                disabled={authLoading}
+                onPress={() => {
+                  void handleGoogleLogin();
+                }}
+              >
+                <Text style={styles.loginButtonText}>{oauthLoading ? "Connecting..." : "Continue with Google"}</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.loginSecondaryButton, authLoading ? styles.loginButtonDisabled : undefined]}
+                disabled={authLoading}
+                onPress={() => {
+                  setLoginMode("email");
+                  setRuntime((state) => ({ ...state, error: null }));
+                }}
+              >
+                <Text style={styles.loginSecondaryButtonText}>Continue with Email</Text>
+              </Pressable>
+            </>
+          )}
           {runtime.error ? <Text style={styles.errorText}>{runtime.error}</Text> : null}
         </View>
       </SafeAreaView>
@@ -1419,6 +1712,7 @@ function PrivyWalletApp() {
         void logout();
       }}
       backendClient={backendClient}
+      backendBootstrapReady={backendBootstrapReady}
       pendingLinkIntent={pendingLinkIntent}
       onConsumePendingLink={() => setPendingLinkIntent(null)}
     />
@@ -1643,6 +1937,16 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     lineHeight: 22,
     maxWidth: 340,
   },
+  loginInput: {
+    backgroundColor: palette.surface,
+    borderRadius: radii.pill,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderWidth: 1,
+    borderColor: palette.border,
+    color: palette.text,
+    fontSize: 16,
+  },
   loginButton: {
     marginTop: spacing.sm,
     backgroundColor: palette.surface,
@@ -1660,6 +1964,31 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     color: palette.text,
     fontWeight: "900",
     fontSize: 16,
+  },
+  loginSecondaryButton: {
+    borderRadius: radii.pill,
+    paddingHorizontal: 22,
+    paddingVertical: 16,
+    minWidth: 240,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: "transparent",
+  },
+  loginSecondaryButtonText: {
+    color: palette.primaryStrong,
+    fontWeight: "800",
+    fontSize: 15,
+  },
+  loginTertiaryButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 6,
+  },
+  loginTertiaryButtonText: {
+    color: palette.textMuted,
+    fontWeight: "700",
   },
   sendingOverlay: {
     flex: 1,

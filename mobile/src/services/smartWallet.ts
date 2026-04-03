@@ -48,6 +48,7 @@ export type RouteDiscovery = {
 };
 
 const ERC20_ABI = [
+  "function approve(address spender, uint256 amount) returns (bool)",
   "function transfer(address to, uint256 amount) returns (bool)",
   "function balanceOf(address owner) view returns (uint256)",
   "event Transfer(address indexed from, address indexed to, uint256 value)",
@@ -76,6 +77,8 @@ const MAX_TRANSFER_LOG_WINDOWS = 24;
 const TRANSFER_LOG_WINDOW = 9_500;
 const DISCOVERY_BATCH_SIZE = 2;
 const PROVIDER_POLLING_INTERVAL_MS = 2000;
+const SMART_WALLET_DEPLOYMENT_TIMEOUT_MS = 90_000;
+const SMART_WALLET_DEPLOYMENT_POLL_INTERVAL_MS = 1_500;
 const routeDiscoveryCache = new Map<string, RouteDiscovery>();
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -147,6 +150,14 @@ export function getCachedRouteDiscovery(ownerAddress: string): RouteDiscovery | 
   return routeDiscoveryCache.get(routeDiscoveryCacheKey(ownerAddress));
 }
 
+export function clearCachedRouteDiscovery(ownerAddress?: string): void {
+  if (!ownerAddress) {
+    routeDiscoveryCache.clear();
+    return;
+  }
+  routeDiscoveryCache.delete(routeDiscoveryCacheKey(ownerAddress));
+}
+
 async function collectRouteCandidate(
   ownerAddress: string,
   smartIndex: number,
@@ -178,8 +189,9 @@ async function collectRouteCandidate(
 export async function discoverRoutesForOwner(
   ownerAddress: string,
   provider: ethers.providers.JsonRpcProvider,
+  options?: { forceRefresh?: boolean },
 ): Promise<RouteDiscovery> {
-  const cached = getCachedRouteDiscovery(ownerAddress);
+  const cached = options?.forceRefresh ? undefined : getCachedRouteDiscovery(ownerAddress);
   if (cached) {
     return cached;
   }
@@ -281,6 +293,127 @@ export class SmartWalletService {
     const account = await this.smartAccountAddress();
     const balance: ethers.BigNumber = await this.token.balanceOf(account);
     return balance.toString();
+  }
+
+  private encodeAccountExecuteCallData(target: string, targetCallData: string): string {
+    return this.walletConfig.paymasterType === "cw-safe"
+      ? this.safeAccount.encodeFunctionData("execTransactionFromModule", [
+          target,
+          0,
+          targetCallData,
+          0, // operation = call
+        ])
+      : this.account.encodeFunctionData("execute", [
+          target,
+          0,
+          targetCallData,
+        ]);
+  }
+
+  private async hasDeployedCode(address: string): Promise<boolean> {
+    const code = await this.provider.getCode(address);
+    return code !== "0x";
+  }
+
+  private async waitForDeployedCode(address: string): Promise<boolean> {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < SMART_WALLET_DEPLOYMENT_TIMEOUT_MS) {
+      if (await this.hasDeployedCode(address)) {
+        return true;
+      }
+      await sleep(SMART_WALLET_DEPLOYMENT_POLL_INTERVAL_MS);
+    }
+    return false;
+  }
+
+  private async submitAccountContractCall(target: string, targetCallData: string): Promise<SendResult> {
+    const sender = await this.smartAccountAddress();
+    const nonce: ethers.BigNumber = await this.tokenEntryPoint.getNonce(sender, NONCE_KEY_ZERO);
+    const needsInitCode = nonce.eq(0) && !(await this.hasDeployedCode(sender));
+    const accountExecuteCallData = this.encodeAccountExecuteCallData(target, targetCallData);
+
+    const feeData = await this.provider.getFeeData();
+    const maxPriorityFeePerGas =
+      feeData.maxPriorityFeePerGas ?? feeData.gasPrice ?? ethers.BigNumber.from(0);
+    const maxFeePerGas = feeData.maxFeePerGas ?? feeData.gasPrice ?? ethers.BigNumber.from(0);
+
+    const callGasLimit = needsInitCode ? ethers.BigNumber.from(1_800_000) : ethers.BigNumber.from(450_000);
+    const verificationGasLimit = needsInitCode
+      ? ethers.BigNumber.from(2_500_000)
+      : ethers.BigNumber.from(700_000);
+    const preVerificationGas = needsInitCode
+      ? ethers.BigNumber.from(180_000)
+      : ethers.BigNumber.from(90_000);
+
+    const initCode = needsInitCode
+      ? ethers.utils.hexConcat([
+          this.walletConfig.accountFactory,
+          this.accountFactory.interface.encodeFunctionData("createAccount", [this.owner, this.smartIndex]),
+        ])
+      : "0x";
+
+    const userOp: UserOpRPC = {
+      sender,
+      nonce: toHex(nonce),
+      initCode,
+      callData: accountExecuteCallData,
+      callGasLimit: toHex(callGasLimit),
+      verificationGasLimit: toHex(verificationGasLimit),
+      preVerificationGas: toHex(preVerificationGas),
+      maxFeePerGas: toHex(maxFeePerGas),
+      maxPriorityFeePerGas: toHex(maxPriorityFeePerGas),
+      paymasterAndData: "0x",
+      signature: "0x",
+    };
+
+    const sponsorData = (await this.backend.sponsor(userOp, this.walletConfig.entryPoint)) as SponsorResponse;
+    if (!sponsorData?.paymasterAndData) {
+      throw new Error("Sponsor did not return paymasterAndData");
+    }
+
+    userOp.paymasterAndData = sponsorData.paymasterAndData;
+    if (sponsorData.callGasLimit) {
+      userOp.callGasLimit = normalizeHexQuantity(sponsorData.callGasLimit);
+    }
+    if (sponsorData.verificationGasLimit) {
+      userOp.verificationGasLimit = normalizeHexQuantity(sponsorData.verificationGasLimit);
+    }
+    if (sponsorData.preVerificationGas) {
+      userOp.preVerificationGas = normalizeHexQuantity(sponsorData.preVerificationGas);
+    }
+    if (sponsorData.nonce) {
+      userOp.nonce = normalizeHexQuantity(sponsorData.nonce);
+    }
+
+    const userOpHash: string = await this.tokenEntryPoint.getUserOpHash(userOp);
+    userOp.signature = await this.ownerSigner.signMessage(ethers.utils.arrayify(userOpHash));
+
+    const sentUserOpHash = (await this.backend.sendUserOp(userOp, this.walletConfig.entryPoint)) as string;
+    if (!sentUserOpHash) {
+      throw new Error("eth_sendUserOperation returned empty hash");
+    }
+
+    for (let i = 0; i < 60; i++) {
+      const receipt = await this.backend.getReceipt(sentUserOpHash);
+      if (receipt) {
+        const txHash = typeof receipt?.transactionHash === "string" ? receipt.transactionHash : undefined;
+        return { userOpHash: sentUserOpHash, txHash };
+      }
+      await sleep(2_000);
+    }
+
+    return { userOpHash: sentUserOpHash };
+  }
+
+  async ensureSmartWalletDeployed(): Promise<boolean> {
+    const account = await this.smartAccountAddress();
+    if (await this.hasDeployedCode(account)) {
+      return true;
+    }
+
+    const deploymentCallData = this.erc20.encodeFunctionData("approve", [account, ethers.constants.Zero]);
+    await this.submitAccountContractCall(mobileConfig.tokenAddress, deploymentCallData);
+    return this.waitForDeployedCode(account);
   }
 
   async recentTransfers(count = 25): Promise<AppTransaction[]> {
@@ -426,97 +559,8 @@ export class SmartWalletService {
       throw new Error("Amount must be greater than zero");
     }
 
-    const sender = await this.smartAccountAddress();
-    const nonce: ethers.BigNumber = await this.tokenEntryPoint.getNonce(sender, NONCE_KEY_ZERO);
-    const code = await this.provider.getCode(sender);
-    const needsInitCode = nonce.eq(0) && code === "0x";
-
     const transferCallData = this.erc20.encodeFunctionData("transfer", [recipient, amount]);
-    const accountExecuteCallData =
-      this.walletConfig.paymasterType === "cw-safe"
-        ? this.safeAccount.encodeFunctionData("execTransactionFromModule", [
-            mobileConfig.tokenAddress,
-            0,
-            transferCallData,
-            0, // operation = call
-          ])
-        : this.account.encodeFunctionData("execute", [
-            mobileConfig.tokenAddress,
-            0,
-            transferCallData,
-          ]);
-
-    const feeData = await this.provider.getFeeData();
-    const maxPriorityFeePerGas =
-      feeData.maxPriorityFeePerGas ?? feeData.gasPrice ?? ethers.BigNumber.from(0);
-    const maxFeePerGas = feeData.maxFeePerGas ?? feeData.gasPrice ?? ethers.BigNumber.from(0);
-
-    const callGasLimit = needsInitCode ? ethers.BigNumber.from(1_800_000) : ethers.BigNumber.from(450_000);
-    const verificationGasLimit = needsInitCode
-      ? ethers.BigNumber.from(2_500_000)
-      : ethers.BigNumber.from(700_000);
-    const preVerificationGas = needsInitCode
-      ? ethers.BigNumber.from(180_000)
-      : ethers.BigNumber.from(90_000);
-
-    const initCode = needsInitCode
-      ? ethers.utils.hexConcat([
-          this.walletConfig.accountFactory,
-          this.accountFactory.interface.encodeFunctionData("createAccount", [this.owner, this.smartIndex]),
-        ])
-      : "0x";
-
-    const userOp: UserOpRPC = {
-      sender,
-      nonce: toHex(nonce),
-      initCode,
-      callData: accountExecuteCallData,
-      callGasLimit: toHex(callGasLimit),
-      verificationGasLimit: toHex(verificationGasLimit),
-      preVerificationGas: toHex(preVerificationGas),
-      maxFeePerGas: toHex(maxFeePerGas),
-      maxPriorityFeePerGas: toHex(maxPriorityFeePerGas),
-      paymasterAndData: "0x",
-      signature: "0x",
-    };
-
-    const sponsorData = (await this.backend.sponsor(userOp, this.walletConfig.entryPoint)) as SponsorResponse;
-    if (!sponsorData?.paymasterAndData) {
-      throw new Error("Sponsor did not return paymasterAndData");
-    }
-
-    userOp.paymasterAndData = sponsorData.paymasterAndData;
-    if (sponsorData.callGasLimit) {
-      userOp.callGasLimit = normalizeHexQuantity(sponsorData.callGasLimit);
-    }
-    if (sponsorData.verificationGasLimit) {
-      userOp.verificationGasLimit = normalizeHexQuantity(sponsorData.verificationGasLimit);
-    }
-    if (sponsorData.preVerificationGas) {
-      userOp.preVerificationGas = normalizeHexQuantity(sponsorData.preVerificationGas);
-    }
-    if (sponsorData.nonce) {
-      userOp.nonce = normalizeHexQuantity(sponsorData.nonce);
-    }
-
-    const userOpHash: string = await this.tokenEntryPoint.getUserOpHash(userOp);
-    userOp.signature = await this.ownerSigner.signMessage(ethers.utils.arrayify(userOpHash));
-
-    const sentUserOpHash = (await this.backend.sendUserOp(userOp, this.walletConfig.entryPoint)) as string;
-    if (!sentUserOpHash) {
-      throw new Error("eth_sendUserOperation returned empty hash");
-    }
-
-    for (let i = 0; i < 60; i++) {
-      const receipt = await this.backend.getReceipt(sentUserOpHash);
-      if (receipt) {
-        const txHash = typeof receipt?.transactionHash === "string" ? receipt.transactionHash : undefined;
-        return { userOpHash: sentUserOpHash, txHash };
-      }
-      await sleep(2_000);
-    }
-
-    return { userOpHash: sentUserOpHash };
+    return this.submitAccountContractCall(mobileConfig.tokenAddress, transferCallData);
   }
 }
 
@@ -524,6 +568,7 @@ export async function createSmartWalletServiceFromSigner(
   signer: ethers.Signer,
   selectedCandidateKey?: string,
   getAccessToken?: () => Promise<string | null>,
+  options?: { forceRefresh?: boolean },
 ): Promise<{ service: SmartWalletService; discovery: RouteDiscovery }> {
   const ownerAddress = ethers.utils.getAddress(await signer.getAddress());
   const provider = new ethers.providers.JsonRpcProvider(mobileConfig.rpcURL, {
@@ -531,7 +576,7 @@ export async function createSmartWalletServiceFromSigner(
     name: "berachain",
   });
 
-  const discovery = await discoverRoutesForOwner(ownerAddress, provider);
+  const discovery = await discoverRoutesForOwner(ownerAddress, provider, options);
   const resolvedKey = selectedCandidateKey ?? discovery.selectedCandidateKey;
   const candidate =
     discovery.candidates.find((item) => item.key === resolvedKey) ??
@@ -557,4 +602,21 @@ export async function createSmartWalletServiceFromSigner(
     ),
     discovery,
   };
+}
+
+export async function createSmartWalletServiceForIndex(
+  signer: ethers.Signer,
+  smartIndex: number,
+  getAccessToken?: () => Promise<string | null>,
+  smartAccountAddress?: string,
+): Promise<SmartWalletService> {
+  const ownerAddress = ethers.utils.getAddress(await signer.getAddress());
+  return new SmartWalletService(
+    signer,
+    ownerAddress,
+    mobileConfig.wallet,
+    smartIndex,
+    getAccessToken,
+    smartAccountAddress,
+  );
 }
