@@ -600,7 +600,10 @@ export async function createSmartWalletServiceFromSigner(
       getAccessToken,
       candidate.accountAddress,
     ),
-    discovery,
+    discovery: {
+      ...discovery,
+      selectedCandidateKey: candidate.key,
+    },
   };
 }
 

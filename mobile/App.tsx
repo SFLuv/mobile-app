@@ -101,6 +101,7 @@ type WalletPane = "home" | "send" | "receive";
 
 const PREFERENCES_STORAGE_KEY = "sfluv-wallet:preferences";
 const PUSH_TOKEN_STORAGE_KEY = "sfluv-wallet:push-token";
+const WALLET_PREFERENCES_STORAGE_KEY_PREFIX = "sfluv-wallet:wallet-preferences";
 const TRANSFER_REFRESH_DEBOUNCE_MS = 900;
 
 Notifications.setNotificationHandler({
@@ -186,6 +187,117 @@ function walletLabel(smartIndex: number | undefined): string {
     return "Wallet";
   }
   return `Wallet ${smartIndex + 1}`;
+}
+
+type StoredWalletPreferences = {
+  defaultWalletAddress?: string;
+  hiddenWalletAddresses: string[];
+};
+
+function walletPreferencesStorageKey(userID: string): string {
+  return `${WALLET_PREFERENCES_STORAGE_KEY_PREFIX}:${userID}`;
+}
+
+function normalizeWalletAddress(value: string | undefined | null): string | undefined {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (!trimmed || !ethers.utils.isAddress(trimmed)) {
+    return undefined;
+  }
+  return ethers.utils.getAddress(trimmed);
+}
+
+function normalizeHiddenWalletAddresses(addresses: string[]): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const address of addresses) {
+    const next = normalizeWalletAddress(address);
+    if (!next) {
+      continue;
+    }
+    const key = next.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    normalized.push(next);
+  }
+  return normalized;
+}
+
+function deriveStoredWalletPreferences(user: AppUser, wallets: AppWallet[]): StoredWalletPreferences {
+  return {
+    defaultWalletAddress: normalizeWalletAddress(user.primaryWalletAddress),
+    hiddenWalletAddresses: normalizeHiddenWalletAddresses(
+      wallets
+        .filter((wallet) => !wallet.isEoa && wallet.isHidden && wallet.smartAddress)
+        .map((wallet) => wallet.smartAddress ?? ""),
+    ),
+  };
+}
+
+function resolveCandidateKeyForAddress(
+  address: string | undefined,
+  candidates: RouteCandidate[],
+): string | undefined {
+  const normalizedAddress = normalizeWalletAddress(address);
+  if (!normalizedAddress) {
+    return undefined;
+  }
+  return candidates.find((candidate) => candidate.accountAddress.toLowerCase() === normalizedAddress.toLowerCase())?.key;
+}
+
+function resolveCandidateKeyWithPreferences({
+  candidates,
+  requestedCandidateKey,
+  discoverySelectedCandidateKey,
+  defaultWalletAddress,
+  hiddenWalletAddresses,
+}: {
+  candidates: RouteCandidate[];
+  requestedCandidateKey?: string;
+  discoverySelectedCandidateKey?: string;
+  defaultWalletAddress?: string;
+  hiddenWalletAddresses?: string[];
+}): string | undefined {
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  const normalizedDefaultWallet = normalizeWalletAddress(defaultWalletAddress);
+  const hiddenWalletSet = new Set(normalizeHiddenWalletAddresses(hiddenWalletAddresses ?? []).map((address) => address.toLowerCase()));
+  const requestedCandidate = requestedCandidateKey
+    ? candidates.find((candidate) => candidate.key === requestedCandidateKey)
+    : undefined;
+  if (requestedCandidate) {
+    return requestedCandidate.key;
+  }
+  const defaultCandidate = normalizedDefaultWallet
+    ? candidates.find((candidate) => candidate.accountAddress.toLowerCase() === normalizedDefaultWallet.toLowerCase())
+    : undefined;
+  if (defaultCandidate) {
+    return defaultCandidate.key;
+  }
+
+  const visibleCandidates = candidates.filter((candidate) => !hiddenWalletSet.has(candidate.accountAddress.toLowerCase()));
+  const visibleDiscoveryCandidate =
+    discoverySelectedCandidateKey &&
+    visibleCandidates.find((candidate) => candidate.key === discoverySelectedCandidateKey);
+  if (visibleDiscoveryCandidate) {
+    return visibleDiscoveryCandidate.key;
+  }
+
+  if (visibleCandidates.length > 0) {
+    return visibleCandidates[0].key;
+  }
+
+  if (discoverySelectedCandidateKey) {
+    const discoveryCandidate = candidates.find((candidate) => candidate.key === discoverySelectedCandidateKey);
+    if (discoveryCandidate) {
+      return discoveryCandidate.key;
+    }
+  }
+
+  return candidates[0]?.key;
 }
 
 function eoaWalletName(walletOrder: number): string {
@@ -421,6 +533,8 @@ function WalletAppShell({
   onLogout,
   backendClient,
   backendBootstrapReady,
+  walletPreferences,
+  onWalletPreferencesSync,
   pendingLinkIntent,
   onConsumePendingLink,
 }: {
@@ -431,6 +545,8 @@ function WalletAppShell({
   onLogout?: () => void;
   backendClient?: AppBackendClient | null;
   backendBootstrapReady: boolean;
+  walletPreferences: StoredWalletPreferences;
+  onWalletPreferencesSync: (user: AppUser, wallets: AppWallet[]) => void;
   pendingLinkIntent: PendingLinkIntent | null;
   onConsumePendingLink: () => void;
 }) {
@@ -481,6 +597,8 @@ function WalletAppShell({
         onLogout={onLogout}
         backendClient={backendClient}
         backendBootstrapReady={backendBootstrapReady}
+        walletPreferences={walletPreferences}
+        onWalletPreferencesSync={onWalletPreferencesSync}
         pendingLinkIntent={pendingLinkIntent}
         onConsumePendingLink={onConsumePendingLink}
         preferences={preferences}
@@ -498,6 +616,8 @@ function WalletAppShellContent({
   onLogout,
   backendClient,
   backendBootstrapReady,
+  walletPreferences,
+  onWalletPreferencesSync,
   pendingLinkIntent,
   onConsumePendingLink,
   preferences,
@@ -510,6 +630,8 @@ function WalletAppShellContent({
   onLogout?: () => void;
   backendClient?: AppBackendClient | null;
   backendBootstrapReady: boolean;
+  walletPreferences: StoredWalletPreferences;
+  onWalletPreferencesSync: (user: AppUser, wallets: AppWallet[]) => void;
   pendingLinkIntent: PendingLinkIntent | null;
   onConsumePendingLink: () => void;
   preferences: AppPreferences;
@@ -538,11 +660,26 @@ function WalletAppShellContent({
   const transferRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const backendAuthFailureHandledRef = useRef(false);
   const walletCandidates = runtime.discovery?.candidates ?? [];
-  const canChooseWallet = walletCandidates.length > 1;
+  const hiddenWalletSet = useMemo(
+    () => new Set(walletPreferences.hiddenWalletAddresses.map((address) => address.toLowerCase())),
+    [walletPreferences.hiddenWalletAddresses],
+  );
   const selectedCandidate = useMemo(
     () => walletCandidates.find((candidate) => candidate.key === selectedCandidateKey) ?? walletCandidates[0],
     [selectedCandidateKey, walletCandidates],
   );
+  const walletChooserCandidates = useMemo(() => {
+    const selectedKey = selectedCandidate?.key;
+    const normalizedDefaultWallet = walletPreferences.defaultWalletAddress?.toLowerCase();
+    return walletCandidates.filter((candidate) => {
+      const normalizedAddress = candidate.accountAddress.toLowerCase();
+      if (!hiddenWalletSet.has(normalizedAddress)) {
+        return true;
+      }
+      return candidate.key === selectedKey || normalizedAddress === normalizedDefaultWallet;
+    });
+  }, [hiddenWalletSet, selectedCandidate?.key, walletCandidates, walletPreferences.defaultWalletAddress]);
+  const canChooseWallet = walletChooserCandidates.length > 1;
   const walletSyncReady = backendBootstrapReady && Boolean(appUser) && Boolean(runtime.discovery);
   const notificationAddresses = useMemo(() => {
     const seen = new Set<string>();
@@ -606,6 +743,7 @@ function WalletAppShellContent({
     try {
       const profile = await backendClient.ensureUser();
       setAppUser(profile.user);
+      onWalletPreferencesSync(profile.user, profile.wallets);
       setContacts(profile.contacts);
       setSyncNotice(null);
       backendAuthFailureHandledRef.current = false;
@@ -1275,7 +1413,7 @@ function WalletAppShellContent({
             </View>
 
             <ScrollView contentContainerStyle={styles.walletChooserList} showsVerticalScrollIndicator={false}>
-              {walletCandidates.map((candidate) => {
+              {walletChooserCandidates.map((candidate) => {
                 const active = candidate.key === selectedCandidateKey;
                 return (
                   <Pressable
@@ -1353,6 +1491,11 @@ function PrivyWalletApp() {
   const [preferredCandidateKey, setPreferredCandidateKey] = useState<string | undefined>(undefined);
   const [pendingLinkIntent, setPendingLinkIntent] = useState<PendingLinkIntent | null>(null);
   const [backendBootstrapReady, setBackendBootstrapReady] = useState(false);
+  const [walletPreferencesReady, setWalletPreferencesReady] = useState(false);
+  const [walletPreferences, setWalletPreferences] = useState<StoredWalletPreferences>({
+    defaultWalletAddress: undefined,
+    hiddenWalletAddresses: [],
+  });
   const [loginMode, setLoginMode] = useState<"choice" | "email">("choice");
   const [emailAddress, setEmailAddress] = useState("");
   const [emailCode, setEmailCode] = useState("");
@@ -1360,6 +1503,7 @@ function PrivyWalletApp() {
   const [emailLoading, setEmailLoading] = useState(false);
   const creatingWalletRef = useRef(false);
   const bootstrappedIdentityRef = useRef<string | null>(null);
+  const manualWalletSelectionRef = useRef(false);
   const nextPendingLinkIDRef = useRef(0);
   const embeddedWallet = wallets[0];
 
@@ -1375,6 +1519,18 @@ function PrivyWalletApp() {
       service: null,
       discovery: null,
       error: message,
+    });
+  };
+
+  const syncWalletPreferences = (nextUser: AppUser, nextWallets: AppWallet[]) => {
+    const storageUserID = nextUser.id || user?.id;
+    if (!storageUserID) {
+      return;
+    }
+    const nextPreferences = deriveStoredWalletPreferences(nextUser, nextWallets);
+    setWalletPreferences(nextPreferences);
+    AsyncStorage.setItem(walletPreferencesStorageKey(storageUserID), JSON.stringify(nextPreferences)).catch((error) => {
+      console.warn("Unable to persist wallet preferences", error);
     });
   };
 
@@ -1424,11 +1580,17 @@ function PrivyWalletApp() {
       setRuntime(blankRuntime(false));
       setPreferredCandidateKey(undefined);
       setBackendBootstrapReady(false);
+      setWalletPreferencesReady(false);
+      setWalletPreferences({
+        defaultWalletAddress: undefined,
+        hiddenWalletAddresses: [],
+      });
       setLoginMode("choice");
       setEmailAddress("");
       setEmailCode("");
       setEmailCodeSent(false);
       setEmailLoading(false);
+      manualWalletSelectionRef.current = false;
       bootstrappedIdentityRef.current = null;
       return;
     }
@@ -1447,7 +1609,60 @@ function PrivyWalletApp() {
   }, [create, isReady, user, wallets.length]);
 
   useEffect(() => {
-    if (!isReady || !user || !embeddedWallet) {
+    if (!isReady || !user?.id) {
+      return;
+    }
+
+    let cancelled = false;
+    setWalletPreferencesReady(false);
+    AsyncStorage.getItem(walletPreferencesStorageKey(user.id))
+      .then((raw) => {
+        if (cancelled) {
+          return;
+        }
+        if (!raw) {
+          setWalletPreferences({
+            defaultWalletAddress: undefined,
+            hiddenWalletAddresses: [],
+          });
+          return;
+        }
+        try {
+          const parsed = JSON.parse(raw) as Partial<StoredWalletPreferences>;
+          setWalletPreferences({
+            defaultWalletAddress: normalizeWalletAddress(parsed.defaultWalletAddress),
+            hiddenWalletAddresses: normalizeHiddenWalletAddresses(Array.isArray(parsed.hiddenWalletAddresses) ? parsed.hiddenWalletAddresses : []),
+          });
+        } catch (error) {
+          console.warn("Unable to parse cached wallet preferences", error);
+          setWalletPreferences({
+            defaultWalletAddress: undefined,
+            hiddenWalletAddresses: [],
+          });
+        }
+      })
+      .catch((error) => {
+        console.warn("Unable to load cached wallet preferences", error);
+        if (!cancelled) {
+          setWalletPreferences({
+            defaultWalletAddress: undefined,
+            hiddenWalletAddresses: [],
+          });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setWalletPreferencesReady(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isReady, user?.id]);
+
+  useEffect(() => {
+    if (!isReady || !user || !embeddedWallet || !walletPreferencesReady) {
       return;
     }
 
@@ -1464,6 +1679,20 @@ function PrivyWalletApp() {
           preferredCandidateKey,
           accessTokenProvider,
         );
+        const initialPreferredCandidateKey = resolveCandidateKeyWithPreferences({
+          candidates: discovery.candidates,
+          requestedCandidateKey: preferredCandidateKey,
+          discoverySelectedCandidateKey: discovery.selectedCandidateKey,
+          defaultWalletAddress: walletPreferences.defaultWalletAddress,
+          hiddenWalletAddresses: walletPreferences.hiddenWalletAddresses,
+        });
+        if (initialPreferredCandidateKey && initialPreferredCandidateKey !== discovery.selectedCandidateKey) {
+          ({ service, discovery } = await createSmartWalletServiceFromSigner(
+            signer,
+            initialPreferredCandidateKey,
+            accessTokenProvider,
+          ));
+        }
         const bootstrapKey = `${user.id}:${discovery.ownerAddress.toLowerCase()}`;
 
         if (bootstrappedIdentityRef.current !== bootstrapKey) {
@@ -1479,19 +1708,35 @@ function PrivyWalletApp() {
             isNewAccount: profile.wallets.length === 0,
             getAccessToken: accessTokenProvider,
           });
-          await ensureDefaultPrimaryWalletAssignment(
-            backendClient,
-            profile.user,
-            latestWallets,
-            discovery.ownerAddress,
-          );
+          const updatedPrimaryWalletAddress =
+            (await ensureDefaultPrimaryWalletAssignment(
+              backendClient,
+              profile.user,
+              latestWallets,
+              discovery.ownerAddress,
+            )) || profile.user.primaryWalletAddress;
+          const syncedUser = {
+            ...profile.user,
+            primaryWalletAddress: updatedPrimaryWalletAddress || profile.user.primaryWalletAddress,
+          };
+          const syncedWalletPreferences = deriveStoredWalletPreferences(syncedUser, latestWallets);
+          syncWalletPreferences(syncedUser, latestWallets);
+          const syncedPreferredCandidateKey = resolveCandidateKeyWithPreferences({
+            candidates: discovery.candidates,
+            requestedCandidateKey: preferredCandidateKey,
+            discoverySelectedCandidateKey: discovery.selectedCandidateKey,
+            defaultWalletAddress: syncedWalletPreferences.defaultWalletAddress,
+            hiddenWalletAddresses: syncedWalletPreferences.hiddenWalletAddresses,
+          });
           if (deployedPrimarySmartWallet) {
             clearCachedRouteDiscovery(discovery.ownerAddress);
+          }
+          if (deployedPrimarySmartWallet || (syncedPreferredCandidateKey && syncedPreferredCandidateKey !== discovery.selectedCandidateKey)) {
             ({ service, discovery } = await createSmartWalletServiceFromSigner(
               signer,
-              preferredCandidateKey,
+              syncedPreferredCandidateKey,
               accessTokenProvider,
-              { forceRefresh: true },
+              deployedPrimarySmartWallet ? { forceRefresh: true } : undefined,
             ));
           }
           bootstrappedIdentityRef.current = bootstrapKey;
@@ -1519,14 +1764,45 @@ function PrivyWalletApp() {
     return () => {
       cancelled = true;
     };
-  }, [backendClient, embeddedWallet, getAccessToken, isReady, preferredCandidateKey, user]);
+  }, [
+    backendClient,
+    embeddedWallet,
+    getAccessToken,
+    isReady,
+    preferredCandidateKey,
+    user,
+    walletPreferences.defaultWalletAddress,
+    walletPreferences.hiddenWalletAddresses,
+    walletPreferencesReady,
+  ]);
+
+  useEffect(() => {
+    if (!runtime.discovery || manualWalletSelectionRef.current) {
+      return;
+    }
+    const nextPreferredCandidateKey = resolveCandidateKeyWithPreferences({
+      candidates: runtime.discovery.candidates,
+      discoverySelectedCandidateKey: runtime.discovery.selectedCandidateKey,
+      defaultWalletAddress: walletPreferences.defaultWalletAddress,
+      hiddenWalletAddresses: walletPreferences.hiddenWalletAddresses,
+    });
+    if (
+      nextPreferredCandidateKey &&
+      nextPreferredCandidateKey !== runtime.discovery.selectedCandidateKey &&
+      nextPreferredCandidateKey !== preferredCandidateKey
+    ) {
+      setPreferredCandidateKey(nextPreferredCandidateKey);
+    }
+  }, [
+    preferredCandidateKey,
+    runtime.discovery,
+    walletPreferences.defaultWalletAddress,
+    walletPreferences.hiddenWalletAddresses,
+  ]);
 
   const oauthLoading = oauthState.status === "loading";
   const authLoading = oauthLoading || emailLoading;
-  const selectedCandidateKey =
-    preferredCandidateKey && runtime.discovery?.candidates.some((candidate) => candidate.key === preferredCandidateKey)
-      ? preferredCandidateKey
-      : runtime.discovery?.selectedCandidateKey;
+  const selectedCandidateKey = runtime.discovery?.selectedCandidateKey;
   const walletInitializing =
     Boolean(user) &&
     !runtime.error &&
@@ -1706,13 +1982,18 @@ function PrivyWalletApp() {
     <WalletAppShell
       runtime={{ ...runtime, loading: walletInitializing }}
       selectedCandidateKey={selectedCandidateKey}
-      onSelectCandidate={(key) => setPreferredCandidateKey(key)}
+      onSelectCandidate={(key) => {
+        manualWalletSelectionRef.current = true;
+        setPreferredCandidateKey(key);
+      }}
       ownerBadge={ownerBadge}
       onLogout={() => {
         void logout();
       }}
       backendClient={backendClient}
       backendBootstrapReady={backendBootstrapReady}
+      walletPreferences={walletPreferences}
+      onWalletPreferencesSync={syncWalletPreferences}
       pendingLinkIntent={pendingLinkIntent}
       onConsumePendingLink={() => setPendingLinkIntent(null)}
     />
