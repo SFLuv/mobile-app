@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { AppTransaction } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
@@ -14,6 +14,8 @@ type Props = {
   onOpenReceive: () => void;
   onOpenActivity: () => void;
   onOpenWalletChooser: () => void;
+  refreshing: boolean;
+  onRefresh: () => Promise<void>;
   showWalletChooser?: boolean;
 };
 
@@ -37,13 +39,25 @@ export function WalletHomeScreen({
   onOpenReceive,
   onOpenActivity,
   onOpenWalletChooser,
+  refreshing,
+  onRefresh,
   showWalletChooser,
 }: Props) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
 
   return (
-    <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      contentContainerStyle={styles.container}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => void onRefresh()}
+          tintColor={palette.primaryStrong}
+        />
+      }
+      showsVerticalScrollIndicator={false}
+    >
       <View style={styles.heroWrap}>
         <View style={styles.heroGlowLarge} />
         <View style={styles.heroGlowSmall} />
@@ -64,6 +78,7 @@ export function WalletHomeScreen({
         <Text style={styles.heroEyebrow}>Selected wallet</Text>
         <Text style={styles.heroBalance}>{balance}</Text>
         <Text style={styles.heroCurrency}>SFLUV available</Text>
+        <Text style={styles.refreshHint}>Pull down to refresh balance and activity.</Text>
 
         <View style={styles.addressBar}>
           <Ionicons name="wallet-outline" size={16} color={palette.primaryStrong} />
@@ -229,6 +244,12 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       color: palette.textMuted,
       fontSize: 15,
       fontWeight: "600",
+    },
+    refreshHint: {
+      marginTop: 6,
+      color: palette.textMuted,
+      fontSize: 12,
+      fontWeight: "700",
     },
     addressBar: {
       marginTop: spacing.lg,

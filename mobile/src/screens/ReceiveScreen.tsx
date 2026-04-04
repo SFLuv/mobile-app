@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import QRCode from "react-native-qrcode-svg";
 import * as Clipboard from "expo-clipboard";
@@ -27,6 +27,17 @@ export function ReceiveScreen({ accountAddress }: Props) {
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
   const [amountSFLUV, setAmountSFLUV] = useState("");
   const [memo, setMemo] = useState("");
+  const [copied, setCopied] = useState(false);
+  const copyResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimeoutRef.current) {
+        clearTimeout(copyResetTimeoutRef.current);
+        copyResetTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   const requestAmount = useMemo(() => {
     const trimmed = amountSFLUV.trim();
@@ -72,11 +83,18 @@ export function ReceiveScreen({ accountAddress }: Props) {
             style={styles.copyButton}
             onPress={async () => {
               await Clipboard.setStringAsync(accountAddress);
-              Alert.alert("Copied", "Address copied to clipboard.");
+              setCopied(true);
+              if (copyResetTimeoutRef.current) {
+                clearTimeout(copyResetTimeoutRef.current);
+              }
+              copyResetTimeoutRef.current = setTimeout(() => {
+                setCopied(false);
+                copyResetTimeoutRef.current = null;
+              }, 2200);
             }}
           >
-            <Ionicons name="copy-outline" size={16} color={palette.primaryStrong} />
-            <Text style={styles.copyButtonText}>Copy</Text>
+            <Ionicons name={copied ? "checkmark" : "copy-outline"} size={16} color={palette.primaryStrong} />
+            <Text style={styles.copyButtonText}>{copied ? "Copied" : "Copy"}</Text>
           </Pressable>
         </View>
       </View>

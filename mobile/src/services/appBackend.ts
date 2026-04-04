@@ -7,6 +7,7 @@ import {
   AppTransaction,
   AppUser,
   AppWallet,
+  AppWalletOwnerLookup,
   MerchantApplicationDraft,
   PonderSubscription,
   VerifiedEmail,
@@ -122,6 +123,19 @@ type WalletsResponse = Array<{
   smart_index?: number | null;
 }>;
 
+type WalletLookupResponse = {
+  found?: boolean;
+  user_id?: string;
+  is_merchant?: boolean;
+  merchant_name?: string;
+  wallet_name?: string;
+  address?: string;
+  matched_primary_wallet?: boolean;
+  matched_payment_wallet?: boolean;
+  pay_to_address?: string;
+  tip_to_address?: string;
+};
+
 function endpoint(path: string): string {
   return `${mobileConfig.appBackendURL.replace(/\/+$/, "")}${path}`;
 }
@@ -200,11 +214,13 @@ function mapContact(input: GetUserResponse["contacts"][number]): AppContact {
 
 function mapLocation(input: Record<string, unknown>): AppLocation {
   const rawPayToAddress = asString(input.pay_to_address).trim();
+  const rawTipToAddress = asString(input.tip_to_address).trim();
   return {
     id: asNumber(input.id),
     googleId: asString(input.google_id),
     name: asString(input.name),
     payToAddress: ethers.utils.isAddress(rawPayToAddress) ? ethers.utils.getAddress(rawPayToAddress) : undefined,
+    tipToAddress: ethers.utils.isAddress(rawTipToAddress) ? ethers.utils.getAddress(rawTipToAddress) : undefined,
     description: asString(input.description),
     type: asString(input.type),
     street: asString(input.street),
@@ -242,6 +258,31 @@ function mapOwnedLocation(input: Record<string, unknown>): AppOwnedLocation {
     tabletModel: asString(input.tablet_model),
     messagingService: asString(input.messaging_service),
     reference: asString(input.reference),
+  };
+}
+
+function mapWalletOwnerLookup(input: WalletLookupResponse, fallbackAddress: string): AppWalletOwnerLookup | null {
+  if (!input.found) {
+    return null;
+  }
+
+  const normalizedMatchedAddress = asString(input.address).trim();
+  const rawPayToAddress = asString(input.pay_to_address).trim();
+  const rawTipToAddress = asString(input.tip_to_address).trim();
+
+  return {
+    found: true,
+    userId: asString(input.user_id) || undefined,
+    isMerchant: Boolean(input.is_merchant),
+    merchantName: asString(input.merchant_name) || undefined,
+    walletName: asString(input.wallet_name) || undefined,
+    address: ethers.utils.isAddress(normalizedMatchedAddress)
+      ? ethers.utils.getAddress(normalizedMatchedAddress)
+      : fallbackAddress,
+    matchedPrimaryWallet: input.matched_primary_wallet === true,
+    matchedPaymentWallet: input.matched_payment_wallet === true,
+    payToAddress: ethers.utils.isAddress(rawPayToAddress) ? ethers.utils.getAddress(rawPayToAddress) : undefined,
+    tipToAddress: ethers.utils.isAddress(rawTipToAddress) ? ethers.utils.getAddress(rawTipToAddress) : undefined,
   };
 }
 
@@ -480,6 +521,16 @@ export class AppBackendClient {
     }
     const body = (await response.json()) as PublicLocationsResponse;
     return Array.isArray(body.locations) ? body.locations.map(mapLocation) : [];
+  }
+
+  async lookupWalletOwner(address: string): Promise<AppWalletOwnerLookup | null> {
+    const normalizedAddress = ethers.utils.getAddress(address);
+    const response = await this.authFetch(`/wallets/lookup/${encodeURIComponent(normalizedAddress)}`);
+    if (!response.ok) {
+      return null;
+    }
+    const body = (await response.json()) as WalletLookupResponse;
+    return mapWalletOwnerLookup(body, normalizedAddress);
   }
 
   async redeemCode(code: string, address: string): Promise<void> {

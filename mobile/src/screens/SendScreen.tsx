@@ -1,26 +1,51 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
+  Animated,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  TouchableWithoutFeedback,
+  Vibration,
   View,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
 import { AmountUnit, SendResult } from "../services/smartWallet";
-import { AppContact } from "../types/app";
+import type { AppBackendClient } from "../services/appBackend";
+import { AppContact, AppLocation, AppWalletOwnerLookup } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { parseSendTarget, parseSfluvUniversalLink, SfluvUniversalLink } from "../utils/universalLinks";
 
+type RecipientKind = "contact" | "merchant";
+
+type RecipientSuggestion = {
+  key: string;
+  kind: RecipientKind;
+  label: string;
+  address: string;
+  subtitle?: string;
+};
+
+type TipPromptState = {
+  merchantName: string;
+  tipToAddress: string;
+  amount: string;
+};
+
 type Props = {
   contacts: AppContact[];
+  merchants: AppLocation[];
+  backendClient?: AppBackendClient | null;
+  hapticsEnabled: boolean;
   onPrepareSend: (
     recipient: string,
     amount: string,
@@ -31,10 +56,15 @@ type Props = {
     recipient: string;
     amount?: string;
     memo?: string;
+    recipientLabel?: string;
+    recipientKind?: RecipientKind;
   } | null;
   onDraftApplied?: () => void;
   onOpenUniversalLink?: (link: SfluvUniversalLink) => void;
+  onCompleteFlow?: () => void;
 };
+
+type FeedbackTone = "info" | "success" | "danger";
 
 function shortAddress(address: string): string {
   if (address.length <= 16) {
@@ -49,39 +79,343 @@ function initials(name: string): string {
   return parts.map((part) => part[0]?.toUpperCase() ?? "").join("");
 }
 
-export function SendScreen({ contacts, onPrepareSend, draft, onDraftApplied, onOpenUniversalLink }: Props) {
+function SwipeToSend({
+  disabled,
+  loading,
+  label,
+  onComplete,
+}: {
+  disabled: boolean;
+  loading: boolean;
+  label: string;
+  onComplete: () => void;
+}) {
+  const { palette, shadows } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
+  const translateX = useRef(new Animated.Value(0)).current;
+  const [trackWidth, setTrackWidth] = useState(0);
+  const thumbSize = 56;
+  const swipeDistance = Math.max(trackWidth - thumbSize - 8, 0);
+
+  useEffect(() => {
+    if (!loading) {
+      Animated.spring(translateX, {
+        toValue: 0,
+        useNativeDriver: true,
+        speed: 18,
+        bounciness: 0,
+      }).start();
+    }
+  }, [loading, translateX]);
+
+  const resetSwipe = () => {
+    Animated.spring(translateX, {
+      toValue: 0,
+      useNativeDriver: true,
+      speed: 18,
+      bounciness: 0,
+    }).start();
+  };
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => !disabled && !loading && swipeDistance > 0,
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          !disabled && !loading && swipeDistance > 0 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+        onPanResponderMove: (_, gesture) => {
+          const nextValue = Math.max(0, Math.min(gesture.dx, swipeDistance));
+          translateX.setValue(nextValue);
+        },
+        onPanResponderRelease: (_, gesture) => {
+          if (gesture.dx >= swipeDistance * 0.72) {
+            Animated.timing(translateX, {
+              toValue: swipeDistance,
+              duration: 120,
+              useNativeDriver: true,
+            }).start(({ finished }) => {
+              if (finished) {
+                onComplete();
+              }
+            });
+            return;
+          }
+          resetSwipe();
+        },
+        onPanResponderTerminate: resetSwipe,
+      }),
+    [disabled, loading, onComplete, swipeDistance, translateX],
+  );
+
+  return (
+    <View
+      style={[styles.swipeTrack, disabled ? styles.swipeTrackDisabled : undefined]}
+      onLayout={(event) => {
+        setTrackWidth(event.nativeEvent.layout.width);
+      }}
+    >
+      <Text style={[styles.swipeTrackText, disabled ? styles.swipeTrackTextDisabled : undefined]}>
+        {loading ? "Sending…" : label}
+      </Text>
+      <Animated.View
+        style={[
+          styles.swipeThumb,
+          {
+            transform: [{ translateX }],
+          },
+          disabled ? styles.swipeThumbDisabled : undefined,
+        ]}
+        {...panResponder.panHandlers}
+      >
+        {loading ? (
+          <ActivityIndicator size="small" color={palette.primaryStrong} />
+        ) : (
+          <Ionicons name="arrow-forward" size={18} color={palette.primaryStrong} />
+        )}
+      </Animated.View>
+    </View>
+  );
+}
+
+export function SendScreen({
+  contacts,
+  merchants,
+  backendClient,
+  hapticsEnabled,
+  onPrepareSend,
+  draft,
+  onDraftApplied,
+  onOpenUniversalLink,
+  onCompleteFlow,
+}: Props) {
   const { palette, shadows } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
   const [recipientInput, setRecipientInput] = useState("");
   const [amountInput, setAmountInput] = useState("");
   const [memoInput, setMemoInput] = useState("");
+  const [entryMode, setEntryMode] = useState<"scan" | "manual">("scan");
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [scanLocked, setScanLocked] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [feedback, setFeedback] = useState<{ tone: FeedbackTone; message: string } | null>(null);
+  const [tipPrompt, setTipPrompt] = useState<TipPromptState | null>(null);
+  const [tipSending, setTipSending] = useState(false);
+  const [recipientLookup, setRecipientLookup] = useState<AppWalletOwnerLookup | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
+  const [draftRecipient, setDraftRecipient] = useState<RecipientSuggestion | null>(null);
 
   const parsed = useMemo(() => parseSendTarget(recipientInput), [recipientInput]);
+
+  const merchantSuggestions = useMemo<RecipientSuggestion[]>(
+    () =>
+      merchants
+        .filter((merchant) => merchant.payToAddress)
+        .map((merchant) => ({
+          key: `merchant:${merchant.id}`,
+          kind: "merchant",
+          label: merchant.name,
+          address: merchant.payToAddress!,
+          subtitle: [merchant.type, merchant.city].filter(Boolean).join(" • "),
+        })),
+    [merchants],
+  );
+
+  const contactSuggestions = useMemo<RecipientSuggestion[]>(
+    () =>
+      contacts.map((contact) => ({
+        key: `contact:${contact.id}`,
+        kind: "contact",
+        label: contact.name,
+        address: contact.address,
+      })),
+    [contacts],
+  );
+
+  const suggestions = useMemo(() => {
+    const byAddress = new Map<string, RecipientSuggestion>();
+    for (const suggestion of [...contactSuggestions, ...merchantSuggestions]) {
+      const key = suggestion.address.toLowerCase();
+      if (!byAddress.has(key)) {
+        byAddress.set(key, suggestion);
+      }
+    }
+    return [...byAddress.values()];
+  }, [contactSuggestions, merchantSuggestions]);
+
+  const suggestionByAddress = useMemo(
+    () => new Map(suggestions.map((suggestion) => [suggestion.address.toLowerCase(), suggestion] as const)),
+    [suggestions],
+  );
+
+  const query = recipientInput.trim().toLowerCase();
+
+  const favoriteContacts = useMemo<RecipientSuggestion[]>(
+    () =>
+      contacts
+        .filter((contact) => contact.isFavorite)
+        .map((contact) => ({
+          key: `favorite:${contact.id}`,
+          kind: "contact" as const,
+          label: contact.name,
+          address: contact.address,
+        })),
+    [contacts],
+  );
+
+  const filteredSuggestions = useMemo(() => {
+    if (!query) {
+      const featured = [...favoriteContacts, ...merchantSuggestions].slice(0, 6);
+      const seen = new Set<string>();
+      return featured.filter((suggestion) => {
+        const key = suggestion.address.toLowerCase();
+        if (seen.has(key)) {
+          return false;
+        }
+        seen.add(key);
+        return true;
+      });
+    }
+
+    return suggestions
+      .filter((suggestion) => {
+        const haystack = `${suggestion.label} ${suggestion.address} ${suggestion.subtitle ?? ""}`.toLowerCase();
+        return haystack.includes(query);
+      })
+      .slice(0, 6);
+  }, [favoriteContacts, merchantSuggestions, query, suggestions]);
+
+  useEffect(() => {
+    if (!backendClient || !parsed?.recipient) {
+      setRecipientLookup(null);
+      return;
+    }
+
+    let cancelled = false;
+    void backendClient
+      .lookupWalletOwner(parsed.recipient)
+      .then((lookup) => {
+        if (cancelled) {
+          return;
+        }
+        setRecipientLookup(lookup);
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setRecipientLookup(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [backendClient, parsed?.recipient]);
+
+  const lookedUpRecipient = useMemo<RecipientSuggestion | null>(() => {
+    if (!parsed || !recipientLookup?.found || !recipientLookup.isMerchant) {
+      return null;
+    }
+
+    const label = (recipientLookup.merchantName || recipientLookup.walletName || "Merchant").trim() || "Merchant";
+    const subtitle =
+      recipientLookup.walletName && recipientLookup.walletName.trim() && recipientLookup.walletName.trim() !== label
+        ? recipientLookup.walletName.trim()
+        : undefined;
+
+    return {
+      key: `lookup:${parsed.recipient.toLowerCase()}`,
+      kind: "merchant",
+      label,
+      address: parsed.recipient,
+      subtitle,
+    };
+  }, [parsed, recipientLookup]);
+
+  const resolvedRecipient = useMemo(() => {
+    if (!parsed) {
+      return null;
+    }
+
+    if (lookedUpRecipient) {
+      return lookedUpRecipient;
+    }
+
+    const matched = suggestionByAddress.get(parsed.recipient.toLowerCase());
+    if (matched) {
+      return matched;
+    }
+
+    if (draftRecipient && draftRecipient.address.toLowerCase() === parsed.recipient.toLowerCase()) {
+      return draftRecipient;
+    }
+
+    return null;
+  }, [draftRecipient, lookedUpRecipient, parsed, suggestionByAddress]);
+
+  const resolvedMerchantTipTarget = useMemo(() => {
+    if (!parsed) {
+      return null;
+    }
+
+    if (
+      recipientLookup?.found &&
+      recipientLookup.isMerchant &&
+      (recipientLookup.matchedPaymentWallet || recipientLookup.matchedPrimaryWallet) &&
+      recipientLookup.tipToAddress &&
+      recipientLookup.tipToAddress.toLowerCase() !== parsed.recipient.toLowerCase()
+    ) {
+      return {
+        name: (recipientLookup.merchantName || recipientLookup.walletName || resolvedRecipient?.label || "Merchant").trim() || "Merchant",
+        tipToAddress: recipientLookup.tipToAddress,
+      };
+    }
+
+    return (
+      merchants.find(
+        (merchant) =>
+          merchant.payToAddress?.toLowerCase() === parsed.recipient.toLowerCase() &&
+          merchant.tipToAddress &&
+          merchant.tipToAddress.toLowerCase() !== parsed.recipient.toLowerCase(),
+      ) ?? null
+    );
+  }, [merchants, parsed, recipientLookup, resolvedRecipient?.label]);
 
   useEffect(() => {
     if (!draft) {
       return;
     }
+
     setRecipientInput(draft.recipient);
     setAmountInput(draft.amount ?? "");
     setMemoInput(draft.memo ?? "");
+    setEntryMode("manual");
+    setDraftRecipient(
+      draft.recipientLabel
+        ? {
+            key: `draft:${draft.recipient.toLowerCase()}`,
+            kind: draft.recipientKind ?? "merchant",
+            label: draft.recipientLabel,
+            address: draft.recipient,
+          }
+        : null,
+    );
+    setFeedback(null);
     onDraftApplied?.();
   }, [draft, onDraftApplied]);
 
-  const filteredContacts = useMemo(() => {
-    const query = recipientInput.trim().toLowerCase();
-    if (!query) {
-      return contacts.filter((contact) => contact.isFavorite).slice(0, 6);
+  useEffect(() => {
+    if (!feedback) {
+      return;
     }
-    return contacts
-      .filter((contact) => {
-        return contact.name.toLowerCase().includes(query) || contact.address.toLowerCase().includes(query);
-      })
-      .slice(0, 6);
-  }, [contacts, recipientInput]);
+
+    const timeout = setTimeout(() => {
+      setFeedback((current) => (current === feedback ? null : current));
+    }, 3200);
+
+    return () => {
+      clearTimeout(timeout);
+    };
+  }, [feedback]);
 
   const resolvedAmount = (parsed?.amount ?? amountInput).trim();
 
@@ -90,32 +424,64 @@ export function SendScreen({ contacts, onPrepareSend, draft, onDraftApplied, onO
     if (status !== "granted") {
       const req = await requestPermission();
       if (!req.granted) {
-        Alert.alert("Camera permission required");
+        setFeedback({
+          tone: "danger",
+          message: "Camera permission is required to scan payment QRs.",
+        });
         return;
       }
     }
+    setScanLocked(false);
     setScannerOpen(true);
   };
 
   const pasteClipboard = async () => {
     const value = (await Clipboard.getStringAsync()).trim();
     if (!value) {
-      Alert.alert("Clipboard empty", "Copy an address or payment QR value first.");
+      setFeedback({
+        tone: "info",
+        message: "Clipboard is empty. Copy an address or payment QR first.",
+      });
       return;
     }
+
     const universalLink = parseSfluvUniversalLink(value);
     if (universalLink?.type === "redeem") {
       onOpenUniversalLink?.(universalLink);
       return;
     }
+
     const parsedTarget = parseSendTarget(value);
     if (parsedTarget) {
       setRecipientInput(parsedTarget.recipient);
       setAmountInput(parsedTarget.amount ?? "");
       setMemoInput(parsedTarget.memo ?? "");
+      setEntryMode("manual");
+      setFeedback({
+        tone: "success",
+        message: "Loaded payment details from your clipboard.",
+      });
       return;
     }
+
     setRecipientInput(value);
+    setEntryMode("manual");
+  };
+
+  const resetComposer = () => {
+    setRecipientInput("");
+    setAmountInput("");
+    setMemoInput("");
+    setEntryMode("scan");
+    setDraftRecipient(null);
+    setFeedback(null);
+    setTipPrompt(null);
+    setTipSending(false);
+  };
+
+  const finishFlow = () => {
+    resetComposer();
+    onCompleteFlow?.();
   };
 
   const send = async () => {
@@ -124,133 +490,334 @@ export function SendScreen({ contacts, onPrepareSend, draft, onDraftApplied, onO
     }
 
     if (!parsed) {
-      Alert.alert("Invalid address", "Enter a wallet address or scan a valid payment QR.");
+      setFeedback({
+        tone: "danger",
+        message: "Enter a valid wallet address or scan a supported payment QR.",
+      });
       return;
     }
 
     if (!resolvedAmount) {
-      Alert.alert("Missing amount", "Enter an amount in SFLUV or scan a QR with a preset amount.");
+      setFeedback({
+        tone: "danger",
+        message: "Enter an amount in SFLUV or scan a QR with a preset amount.",
+      });
       return;
     }
 
     try {
       setIsSending(true);
-      const result = await onPrepareSend(
-        parsed.recipient,
-        resolvedAmount,
-        parsed.amountUnit,
-        memoInput.trim() || parsed.memo || "",
-      );
-
-      if (result.txHash) {
-        Alert.alert("Transaction confirmed", `Transaction ID:\n${result.txHash}`);
-      } else {
-        Alert.alert("Submitted", `UserOp submitted:\n${result.userOpHash}`);
+      await onPrepareSend(parsed.recipient, resolvedAmount, parsed.amountUnit, memoInput.trim() || parsed.memo || "");
+      if (resolvedMerchantTipTarget?.tipToAddress) {
+        setTipPrompt({
+          merchantName: resolvedMerchantTipTarget.name,
+          tipToAddress: resolvedMerchantTipTarget.tipToAddress,
+          amount: "",
+        });
+        return;
       }
+      finishFlow();
     } catch (error) {
-      Alert.alert("Send failed", (error as Error).message);
+      const message = (error as Error).message.trim();
+      if (message && message !== "Transfer cancelled.") {
+        setFeedback({
+          tone: "danger",
+          message,
+        });
+      }
     } finally {
       setIsSending(false);
     }
   };
 
+  const sendTip = async () => {
+    if (!tipPrompt || tipSending) {
+      return;
+    }
+
+    const normalizedTipAmount = tipPrompt.amount.trim();
+    if (!normalizedTipAmount) {
+      setFeedback({
+        tone: "danger",
+        message: "Enter a tip amount to continue.",
+      });
+      return;
+    }
+
+    const tipAmount = Number.parseFloat(normalizedTipAmount);
+    if (!Number.isFinite(tipAmount) || tipAmount <= 0) {
+      setFeedback({
+        tone: "danger",
+        message: "Tip amount must be greater than zero.",
+      });
+      return;
+    }
+
+    try {
+      setTipSending(true);
+      await onPrepareSend(tipPrompt.tipToAddress, normalizedTipAmount, "token", "");
+      setFeedback({
+        tone: "success",
+        message: `Tip sent to ${tipPrompt.merchantName}.`,
+      });
+      finishFlow();
+    } catch (error) {
+      const message = (error as Error).message.trim();
+      if (message && message !== "Transfer cancelled.") {
+        setFeedback({
+          tone: "danger",
+          message,
+        });
+      }
+    } finally {
+      setTipSending(false);
+    }
+  };
+
+  const selectSuggestion = (suggestion: RecipientSuggestion) => {
+    setRecipientInput(suggestion.address);
+    setDraftRecipient(suggestion);
+    setEntryMode("manual");
+    Keyboard.dismiss();
+  };
+
+  const sendLabel = resolvedRecipient ? `Slide to pay ${resolvedRecipient.label}` : "Slide to send SFLUV";
+
   return (
     <View style={styles.flex}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        <View style={styles.topActionRow}>
-          <View style={styles.toolRow}>
-            <Pressable style={styles.toolButton} onPress={openScanner}>
-              <Ionicons name="scan" size={18} color={palette.primaryStrong} />
-            </Pressable>
-            <Pressable style={styles.toolButton} onPress={() => void pasteClipboard()}>
-              <Ionicons name="clipboard-outline" size={18} color={palette.primaryStrong} />
-            </Pressable>
-          </View>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.sectionLabel}>Recipient</Text>
-          <TextInput
-            style={styles.recipientInput}
-            value={recipientInput}
-            onChangeText={setRecipientInput}
-            placeholder="Contact or wallet address"
-            placeholderTextColor={palette.textMuted}
-            autoCapitalize="none"
-            autoCorrect={false}
-            multiline
-            returnKeyType="done"
-            blurOnSubmit
-          />
-
-          {filteredContacts.length > 0 ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.contactRow}>
-              {filteredContacts.map((contact) => (
-                <Pressable key={contact.id} style={styles.contactChip} onPress={() => setRecipientInput(contact.address)}>
-                  <View style={styles.contactAvatar}>
-                    <Text style={styles.contactAvatarText}>{initials(contact.name)}</Text>
-                  </View>
-                  <Text style={styles.contactName} numberOfLines={1}>
-                    {contact.name}
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <View style={styles.flex}>
+            <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <View style={styles.modeRow}>
+                <Pressable
+                  style={[styles.modeButton, entryMode === "scan" ? styles.modeButtonActive : undefined]}
+                  onPress={() => setEntryMode("scan")}
+                >
+                  <Ionicons name="scan-outline" size={16} color={entryMode === "scan" ? palette.primaryStrong : palette.textMuted} />
+                  <Text style={[styles.modeButtonText, entryMode === "scan" ? styles.modeButtonTextActive : undefined]}>
+                    Scan
                   </Text>
                 </Pressable>
-              ))}
+                <Pressable
+                  style={[styles.modeButton, entryMode === "manual" ? styles.modeButtonActive : undefined]}
+                  onPress={() => setEntryMode("manual")}
+                >
+                  <Ionicons
+                    name="create-outline"
+                    size={16}
+                    color={entryMode === "manual" ? palette.primaryStrong : palette.textMuted}
+                  />
+                  <Text style={[styles.modeButtonText, entryMode === "manual" ? styles.modeButtonTextActive : undefined]}>
+                    Manual
+                  </Text>
+                </Pressable>
+              </View>
+
+              {feedback ? (
+                <View
+                  style={[
+                    styles.feedbackCard,
+                    feedback.tone === "danger"
+                      ? styles.feedbackDanger
+                      : feedback.tone === "success"
+                        ? styles.feedbackSuccess
+                        : styles.feedbackInfo,
+                  ]}
+                >
+                  <Ionicons
+                    name={
+                      feedback.tone === "danger"
+                        ? "alert-circle"
+                        : feedback.tone === "success"
+                          ? "checkmark-circle"
+                          : "information-circle"
+                    }
+                    size={18}
+                    color={
+                      feedback.tone === "danger"
+                        ? palette.danger
+                        : feedback.tone === "success"
+                          ? palette.success
+                          : palette.primaryStrong
+                    }
+                  />
+                  <Text style={styles.feedbackText}>{feedback.message}</Text>
+                </View>
+              ) : null}
+
+              {entryMode === "scan" ? (
+                <View style={styles.scanHeroCard}>
+                  <View style={styles.scanHeroIcon}>
+                    <Ionicons name="scan-outline" size={24} color={palette.white} />
+                  </View>
+                  <Text style={styles.scanHeroTitle}>Scan a payment QR</Text>
+                  <Text style={styles.scanHeroBody}>
+                    Use the camera first, then review and send once the recipient and amount are filled in.
+                  </Text>
+
+                  <View style={styles.scanHeroActions}>
+                    <Pressable style={styles.scanPrimaryButton} onPress={openScanner}>
+                      <Ionicons name="camera-outline" size={18} color={palette.white} />
+                      <Text style={styles.scanPrimaryButtonText}>Open camera</Text>
+                    </Pressable>
+                    <Pressable style={styles.scanSecondaryButton} onPress={() => void pasteClipboard()}>
+                      <Ionicons name="clipboard-outline" size={18} color={palette.primaryStrong} />
+                      <Text style={styles.scanSecondaryButtonText}>Paste code</Text>
+                    </Pressable>
+                  </View>
+
+                  <View style={styles.scanHintCard}>
+                    <Text style={styles.scanHintTitle}>Supported QR types</Text>
+                    <Text style={styles.scanHintBody}>SFLUV links, wallet addresses, and EIP-681 payment codes.</Text>
+                  </View>
+                </View>
+              ) : null}
+
+              <View style={styles.card}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionLabel}>Recipient</Text>
+                  <Pressable style={styles.inlineToolButton} onPress={() => void pasteClipboard()}>
+                    <Ionicons name="clipboard-outline" size={16} color={palette.primaryStrong} />
+                    <Text style={styles.inlineToolButtonText}>Paste</Text>
+                  </Pressable>
+                </View>
+
+                <TextInput
+                  style={styles.recipientInput}
+                  value={recipientInput}
+                  onChangeText={setRecipientInput}
+                  placeholder="Search merchants, contacts, or paste an address"
+                  placeholderTextColor={palette.textMuted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  multiline
+                  returnKeyType="done"
+                  blurOnSubmit
+                />
+
+                {resolvedRecipient ? (
+                  <View style={styles.recipientSummary}>
+                    <View style={styles.contactAvatar}>
+                      <Text style={styles.contactAvatarText}>{initials(resolvedRecipient.label)}</Text>
+                    </View>
+                    <View style={styles.recipientSummaryBody}>
+                      <View style={styles.recipientSummaryHeader}>
+                        <Text style={styles.recipientSummaryTitle}>{resolvedRecipient.label}</Text>
+                        <Text style={styles.recipientSummaryKind}>
+                          {resolvedRecipient.kind === "merchant" ? "Merchant" : "Contact"}
+                        </Text>
+                      </View>
+                      <Text style={styles.recipientSummaryMeta}>{shortAddress(parsed?.recipient ?? resolvedRecipient.address)}</Text>
+                    </View>
+                  </View>
+                ) : parsed ? (
+                  <View style={styles.validRecipientRow}>
+                    <Ionicons name="checkmark-circle" size={16} color={palette.success} />
+                    <Text style={styles.validRecipientText}>Ready to pay {shortAddress(parsed.recipient)}</Text>
+                  </View>
+                ) : null}
+
+                {filteredSuggestions.length > 0 ? (
+                  <View style={styles.suggestionList}>
+                    {filteredSuggestions.map((suggestion) => (
+                      <Pressable key={suggestion.key} style={styles.suggestionCard} onPress={() => selectSuggestion(suggestion)}>
+                        <View style={styles.contactAvatar}>
+                          <Text style={styles.contactAvatarText}>{initials(suggestion.label)}</Text>
+                        </View>
+                        <View style={styles.suggestionBody}>
+                          <View style={styles.suggestionHeader}>
+                            <Text style={styles.suggestionTitle}>{suggestion.label}</Text>
+                            <View
+                              style={[
+                                styles.kindBadge,
+                                suggestion.kind === "merchant" ? styles.kindBadgeMerchant : styles.kindBadgeContact,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.kindBadgeText,
+                                  suggestion.kind === "merchant"
+                                    ? styles.kindBadgeTextMerchant
+                                    : styles.kindBadgeTextContact,
+                                ]}
+                              >
+                                {suggestion.kind === "merchant" ? "Merchant" : "Contact"}
+                              </Text>
+                            </View>
+                          </View>
+                          <Text style={styles.suggestionMeta}>{suggestion.subtitle || shortAddress(suggestion.address)}</Text>
+                        </View>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+
+              <View style={styles.amountCard}>
+                <View style={styles.amountRow}>
+                  <Text style={styles.currencyPrefix}>$</Text>
+                  <TextInput
+                    style={styles.amountInput}
+                    value={amountInput}
+                    onChangeText={setAmountInput}
+                    placeholder="0.00"
+                    placeholderTextColor={palette.textMuted}
+                    keyboardType={Platform.select({ ios: "decimal-pad", android: "numeric" })}
+                    returnKeyType="done"
+                    blurOnSubmit
+                  />
+                  <Text style={styles.amountToken}>SFLUV</Text>
+                </View>
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.sectionLabel}>Add a note</Text>
+                <TextInput
+                  style={styles.noteInput}
+                  value={memoInput}
+                  onChangeText={setMemoInput}
+                  placeholder="What's this for?"
+                  placeholderTextColor={palette.textMuted}
+                  returnKeyType="done"
+                  blurOnSubmit
+                />
+              </View>
             </ScrollView>
-          ) : null}
 
-          {parsed ? (
-            <View style={styles.validRecipientRow}>
-              <Ionicons name="checkmark-circle" size={16} color={palette.success} />
-              <Text style={styles.validRecipientText}>Ready to pay {shortAddress(parsed.recipient)}</Text>
+            <View style={styles.actionDock}>
+              <SwipeToSend
+                disabled={!parsed || !resolvedAmount || isSending}
+                loading={isSending}
+                label={sendLabel}
+                onComplete={() => {
+                  void send();
+                }}
+              />
+              <Text style={styles.actionHint}>Swipe all the way across to confirm the payment.</Text>
             </View>
-          ) : null}
-        </View>
-
-        <View style={styles.amountCard}>
-          <View style={styles.amountRow}>
-            <Text style={styles.currencyPrefix}>$</Text>
-            <TextInput
-              style={styles.amountInput}
-              value={amountInput}
-              onChangeText={setAmountInput}
-              placeholder="0.00"
-              placeholderTextColor={palette.textMuted}
-              keyboardType={Platform.select({ ios: "decimal-pad", android: "numeric" })}
-              returnKeyType="done"
-              blurOnSubmit
-            />
-            <Text style={styles.amountToken}>SFLUV</Text>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
 
-        <View style={styles.card}>
-          <Text style={styles.sectionLabel}>Add a note</Text>
-          <TextInput
-            style={styles.noteInput}
-            value={memoInput}
-            onChangeText={setMemoInput}
-            placeholder="What's this for?"
-            placeholderTextColor={palette.textMuted}
-            returnKeyType="done"
-            blurOnSubmit
-          />
-        </View>
-
-        <Pressable
-          style={[styles.sendButton, isSending ? styles.sendButtonDisabled : undefined]}
-          onPress={send}
-          disabled={isSending}
-        >
-          <Text style={styles.sendButtonText}>{isSending ? "Sending..." : "Send money"}</Text>
-          <Ionicons name="arrow-forward" size={18} color={palette.white} />
-        </Pressable>
-      </ScrollView>
-
-      <Modal visible={scannerOpen} animationType="slide" onRequestClose={() => setScannerOpen(false)}>
+      <Modal
+        visible={scannerOpen}
+        animationType="slide"
+        onRequestClose={() => {
+          setScannerOpen(false);
+          setScanLocked(false);
+        }}
+      >
         <View style={styles.scannerScreen}>
           <View style={styles.scannerHeader}>
             <Text style={styles.scannerTitle}>Scan payment QR</Text>
-            <Pressable style={styles.scannerClose} onPress={() => setScannerOpen(false)}>
+            <Pressable
+              style={styles.scannerClose}
+              onPress={() => {
+                setScannerOpen(false);
+                setScanLocked(false);
+              }}
+            >
               <Ionicons name="close" size={22} color={palette.primaryStrong} />
             </Pressable>
           </View>
@@ -260,28 +827,124 @@ export function SendScreen({ contacts, onPrepareSend, draft, onDraftApplied, onO
               style={StyleSheet.absoluteFillObject}
               barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
               onBarcodeScanned={(result) => {
-                if (!scannerOpen) {
+                if (!scannerOpen || scanLocked) {
                   return;
                 }
+
+                setScanLocked(true);
+                if (hapticsEnabled) {
+                  Vibration.vibrate(10);
+                }
+
                 const universalLink = parseSfluvUniversalLink(result.data);
                 if (universalLink?.type === "redeem") {
                   onOpenUniversalLink?.(universalLink);
                   setScannerOpen(false);
+                  setFeedback({
+                    tone: "success",
+                    message: "Redeem code scanned.",
+                  });
                   return;
                 }
+
                 const scanned = parseSendTarget(result.data);
                 if (scanned) {
                   setRecipientInput(scanned.recipient);
                   setAmountInput(scanned.amount ?? "");
                   setMemoInput(scanned.memo ?? "");
+                  setEntryMode("manual");
+                  setFeedback({
+                    tone: "success",
+                    message: "QR scanned. Review the payment before sending.",
+                  });
                 } else {
                   setRecipientInput(result.data);
+                  setEntryMode("manual");
+                  setFeedback({
+                    tone: "info",
+                    message: "Scanned value pasted into the recipient field.",
+                  });
                 }
+
                 setScannerOpen(false);
               }}
             />
+            <View pointerEvents="none" style={styles.scannerOverlay}>
+              <View style={styles.scannerMask} />
+              <View style={styles.scannerCenterRow}>
+                <View style={styles.scannerMaskSide} />
+                <View style={styles.scannerGuide}>
+                  <View style={styles.scannerGuideCornerTopLeft} />
+                  <View style={styles.scannerGuideCornerTopRight} />
+                  <View style={styles.scannerGuideCornerBottomLeft} />
+                  <View style={styles.scannerGuideCornerBottomRight} />
+                </View>
+                <View style={styles.scannerMaskSide} />
+              </View>
+              <View style={styles.scannerMask} />
+            </View>
           </View>
           <Text style={styles.scannerHint}>Point your camera at any supported SFLUV payment QR.</Text>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={tipPrompt !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          finishFlow();
+        }}
+      >
+        <View style={styles.sendingOverlay}>
+          <View style={styles.tipPromptCard}>
+            <Text style={styles.tipPromptTitle}>Thank you! Would you like to leave a tip?</Text>
+            <Text style={styles.tipPromptBody}>
+              {tipPrompt?.merchantName
+                ? `Send an optional second payment to ${tipPrompt.merchantName}'s separate tipping wallet.`
+                : "Send an optional second payment to this merchant's separate tipping wallet."}
+            </Text>
+
+            <View style={styles.tipAmountWrap}>
+              <Text style={styles.tipAmountPrefix}>$</Text>
+              <TextInput
+                style={styles.tipAmountInput}
+                value={tipPrompt?.amount || ""}
+                onChangeText={(value) =>
+                  setTipPrompt((current) => (current ? { ...current, amount: value } : current))
+                }
+                placeholder="0.00"
+                placeholderTextColor={palette.textMuted}
+                keyboardType={Platform.select({ ios: "decimal-pad", android: "numeric" })}
+                returnKeyType="done"
+                blurOnSubmit
+              />
+              <Text style={styles.tipAmountToken}>SFLUV</Text>
+            </View>
+
+            <View style={styles.tipPromptActions}>
+              <Pressable
+                style={[styles.tipPromptButton, styles.tipPromptButtonSecondary]}
+                onPress={finishFlow}
+                disabled={tipSending}
+              >
+                <Text style={styles.tipPromptButtonSecondaryText}>No thanks</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.tipPromptButton, styles.tipPromptButtonPrimary, tipSending ? styles.tipPromptButtonDisabled : undefined]}
+                onPress={() => {
+                  void sendTip();
+                }}
+                disabled={tipSending}
+              >
+                {tipSending ? (
+                  <ActivityIndicator size="small" color={palette.white} />
+                ) : (
+                  <Text style={styles.tipPromptButtonPrimaryText}>Send tip</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
         </View>
       </Modal>
 
@@ -307,26 +970,135 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       paddingHorizontal: spacing.lg,
       paddingTop: spacing.md,
       gap: spacing.sm,
-      paddingBottom: 96,
+      paddingBottom: spacing.md,
     },
-    topActionRow: {
+    modeRow: {
       flexDirection: "row",
-      justifyContent: "flex-end",
-      alignItems: "center",
+      gap: spacing.sm,
     },
-    toolRow: {
-      flexDirection: "row",
-      gap: spacing.xs,
-    },
-    toolButton: {
-      width: 42,
-      height: 42,
-      borderRadius: 21,
-      backgroundColor: palette.surfaceStrong,
+    modeButton: {
+      flex: 1,
+      minHeight: 48,
+      borderRadius: radii.pill,
+      backgroundColor: palette.surface,
       borderWidth: 1,
-      borderColor: palette.primary,
+      borderColor: palette.border,
       alignItems: "center",
       justifyContent: "center",
+      flexDirection: "row",
+      gap: 8,
+    },
+    modeButtonActive: {
+      borderColor: palette.primary,
+      backgroundColor: palette.primarySoft,
+    },
+    modeButtonText: {
+      color: palette.textMuted,
+      fontWeight: "800",
+    },
+    modeButtonTextActive: {
+      color: palette.primaryStrong,
+    },
+    feedbackCard: {
+      borderRadius: radii.md,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      borderWidth: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    feedbackInfo: {
+      backgroundColor: palette.primarySoft,
+      borderColor: palette.primary,
+    },
+    feedbackSuccess: {
+      backgroundColor: palette.surface,
+      borderColor: palette.success,
+    },
+    feedbackDanger: {
+      backgroundColor: palette.surface,
+      borderColor: palette.danger,
+    },
+    feedbackText: {
+      color: palette.text,
+      flex: 1,
+      lineHeight: 20,
+      fontWeight: "700",
+    },
+    scanHeroCard: {
+      backgroundColor: palette.primaryStrong,
+      borderRadius: radii.lg,
+      padding: spacing.lg,
+      gap: spacing.md,
+      ...shadows.card,
+    },
+    scanHeroIcon: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: "rgba(255,255,255,0.18)",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    scanHeroTitle: {
+      color: palette.white,
+      fontSize: 28,
+      fontWeight: "900",
+      letterSpacing: -0.4,
+    },
+    scanHeroBody: {
+      color: "rgba(255,255,255,0.82)",
+      lineHeight: 21,
+    },
+    scanHeroActions: {
+      flexDirection: "row",
+      gap: spacing.sm,
+    },
+    scanPrimaryButton: {
+      flex: 1,
+      minHeight: 50,
+      borderRadius: radii.pill,
+      backgroundColor: palette.navyStrong,
+      alignItems: "center",
+      justifyContent: "center",
+      flexDirection: "row",
+      gap: 8,
+    },
+    scanPrimaryButtonText: {
+      color: palette.white,
+      fontWeight: "900",
+    },
+    scanSecondaryButton: {
+      flex: 1,
+      minHeight: 50,
+      borderRadius: radii.pill,
+      backgroundColor: palette.surface,
+      alignItems: "center",
+      justifyContent: "center",
+      flexDirection: "row",
+      gap: 8,
+    },
+    scanSecondaryButtonText: {
+      color: palette.primaryStrong,
+      fontWeight: "800",
+    },
+    scanHintCard: {
+      backgroundColor: "rgba(255,255,255,0.12)",
+      borderRadius: radii.md,
+      padding: spacing.md,
+      gap: 6,
+    },
+    scanHintTitle: {
+      color: palette.white,
+      fontWeight: "800",
+      fontSize: 13,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+    },
+    scanHintBody: {
+      color: "rgba(255,255,255,0.78)",
+      lineHeight: 20,
     },
     card: {
       backgroundColor: palette.surface,
@@ -337,12 +1109,32 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       gap: 8,
       ...shadows.soft,
     },
+    sectionHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
     sectionLabel: {
       color: palette.primaryStrong,
       fontSize: 12,
       fontWeight: "800",
       textTransform: "uppercase",
       letterSpacing: 0.7,
+    },
+    inlineToolButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      borderRadius: radii.pill,
+      backgroundColor: palette.primarySoft,
+    },
+    inlineToolButtonText: {
+      color: palette.primaryStrong,
+      fontWeight: "800",
+      fontSize: 12,
     },
     recipientInput: {
       minHeight: 54,
@@ -357,14 +1149,37 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       fontSize: 15,
       lineHeight: 20,
     },
-    contactRow: {
-      gap: spacing.sm,
-      paddingTop: 2,
-    },
-    contactChip: {
-      width: 72,
+    recipientSummary: {
+      flexDirection: "row",
       alignItems: "center",
-      gap: 6,
+      gap: spacing.sm,
+      paddingTop: 4,
+    },
+    recipientSummaryBody: {
+      flex: 1,
+      gap: 4,
+    },
+    recipientSummaryHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    recipientSummaryTitle: {
+      color: palette.text,
+      fontWeight: "900",
+      fontSize: 16,
+    },
+    recipientSummaryKind: {
+      color: palette.primaryStrong,
+      fontWeight: "800",
+      fontSize: 12,
+      textTransform: "uppercase",
+      letterSpacing: 0.4,
+    },
+    recipientSummaryMeta: {
+      color: palette.textMuted,
+      fontSize: 13,
     },
     contactAvatar: {
       width: 52,
@@ -381,11 +1196,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       fontWeight: "900",
       fontSize: 15,
     },
-    contactName: {
-      color: palette.text,
-      fontSize: 11,
-      fontWeight: "700",
-    },
     validRecipientRow: {
       flexDirection: "row",
       alignItems: "center",
@@ -395,6 +1205,65 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     validRecipientText: {
       color: palette.success,
       fontWeight: "700",
+    },
+    suggestionList: {
+      gap: 10,
+      paddingTop: 4,
+    },
+    suggestionCard: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      padding: 12,
+      borderRadius: radii.md,
+      backgroundColor: palette.surfaceStrong,
+      borderWidth: 1,
+      borderColor: palette.border,
+    },
+    suggestionBody: {
+      flex: 1,
+      gap: 4,
+    },
+    suggestionHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    suggestionTitle: {
+      color: palette.text,
+      fontWeight: "800",
+      fontSize: 15,
+    },
+    suggestionMeta: {
+      color: palette.textMuted,
+      fontSize: 12,
+    },
+    kindBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 5,
+      borderRadius: radii.pill,
+      borderWidth: 1,
+    },
+    kindBadgeMerchant: {
+      backgroundColor: palette.primarySoft,
+      borderColor: palette.primary,
+    },
+    kindBadgeContact: {
+      backgroundColor: palette.surface,
+      borderColor: palette.borderStrong,
+    },
+    kindBadgeText: {
+      fontSize: 10,
+      fontWeight: "800",
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+    },
+    kindBadgeTextMerchant: {
+      color: palette.primaryStrong,
+    },
+    kindBadgeTextContact: {
+      color: palette.textMuted,
     },
     amountCard: {
       backgroundColor: palette.surface,
@@ -441,23 +1310,55 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       color: palette.text,
       fontSize: 15,
     },
-    sendButton: {
-      minHeight: 58,
-      borderRadius: radii.pill,
-      backgroundColor: palette.primary,
-      alignItems: "center",
-      justifyContent: "center",
-      flexDirection: "row",
+    actionDock: {
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.lg,
       gap: 10,
+      backgroundColor: palette.background,
+    },
+    actionHint: {
+      color: palette.textMuted,
+      textAlign: "center",
+      fontSize: 12,
+      fontWeight: "700",
+    },
+    swipeTrack: {
+      minHeight: 64,
+      borderRadius: radii.pill,
+      backgroundColor: palette.primaryStrong,
+      justifyContent: "center",
+      paddingHorizontal: 8,
+      position: "relative",
+      overflow: "hidden",
       ...shadows.card,
     },
-    sendButtonDisabled: {
-      opacity: 0.72,
+    swipeTrackDisabled: {
+      backgroundColor: palette.borderStrong,
     },
-    sendButtonText: {
+    swipeTrackText: {
       color: palette.white,
-      fontSize: 16,
+      textAlign: "center",
+      fontSize: 15,
       fontWeight: "900",
+      paddingHorizontal: 72,
+    },
+    swipeTrackTextDisabled: {
+      color: palette.surface,
+    },
+    swipeThumb: {
+      position: "absolute",
+      left: 4,
+      top: 4,
+      bottom: 4,
+      width: 56,
+      borderRadius: radii.pill,
+      backgroundColor: palette.surface,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    swipeThumbDisabled: {
+      backgroundColor: palette.surfaceStrong,
     },
     scannerScreen: {
       flex: 1,
@@ -493,6 +1394,73 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       overflow: "hidden",
       backgroundColor: palette.text,
     },
+    scannerOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      justifyContent: "center",
+    },
+    scannerMask: {
+      flex: 1,
+      backgroundColor: "rgba(0,0,0,0.26)",
+    },
+    scannerCenterRow: {
+      flexDirection: "row",
+      height: 240,
+    },
+    scannerMaskSide: {
+      flex: 1,
+      backgroundColor: "rgba(0,0,0,0.26)",
+    },
+    scannerGuide: {
+      width: 240,
+      borderRadius: 28,
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.16)",
+      backgroundColor: "transparent",
+    },
+    scannerGuideCornerTopLeft: {
+      position: "absolute",
+      top: 18,
+      left: 18,
+      width: 34,
+      height: 34,
+      borderTopWidth: 4,
+      borderLeftWidth: 4,
+      borderColor: palette.white,
+      borderTopLeftRadius: 16,
+    },
+    scannerGuideCornerTopRight: {
+      position: "absolute",
+      top: 18,
+      right: 18,
+      width: 34,
+      height: 34,
+      borderTopWidth: 4,
+      borderRightWidth: 4,
+      borderColor: palette.white,
+      borderTopRightRadius: 16,
+    },
+    scannerGuideCornerBottomLeft: {
+      position: "absolute",
+      bottom: 18,
+      left: 18,
+      width: 34,
+      height: 34,
+      borderBottomWidth: 4,
+      borderLeftWidth: 4,
+      borderColor: palette.white,
+      borderBottomLeftRadius: 16,
+    },
+    scannerGuideCornerBottomRight: {
+      position: "absolute",
+      bottom: 18,
+      right: 18,
+      width: 34,
+      height: 34,
+      borderBottomWidth: 4,
+      borderRightWidth: 4,
+      borderColor: palette.white,
+      borderBottomRightRadius: 16,
+    },
     scannerHint: {
       color: palette.textMuted,
       textAlign: "center",
@@ -519,12 +1487,89 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       color: palette.text,
       fontSize: 20,
       fontWeight: "900",
-      textAlign: "center",
     },
     sendingText: {
       color: palette.textMuted,
       textAlign: "center",
       lineHeight: 20,
+    },
+    tipPromptCard: {
+      width: "100%",
+      maxWidth: 360,
+      backgroundColor: palette.surface,
+      borderRadius: radii.lg,
+      padding: spacing.xl,
+      gap: spacing.md,
+      ...shadows.card,
+    },
+    tipPromptTitle: {
+      color: palette.text,
+      fontSize: 22,
+      fontWeight: "900",
+      textAlign: "center",
+    },
+    tipPromptBody: {
+      color: palette.textMuted,
+      textAlign: "center",
+      lineHeight: 20,
+    },
+    tipAmountWrap: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surfaceStrong,
+      borderRadius: radii.md,
+      paddingHorizontal: 14,
+      minHeight: 58,
+    },
+    tipAmountPrefix: {
+      color: palette.primaryStrong,
+      fontSize: 22,
+      fontWeight: "900",
+    },
+    tipAmountInput: {
+      flex: 1,
+      color: palette.text,
+      fontSize: 24,
+      fontWeight: "900",
+      paddingVertical: 10,
+    },
+    tipAmountToken: {
+      color: palette.primaryStrong,
+      fontWeight: "800",
+    },
+    tipPromptActions: {
+      flexDirection: "row",
+      gap: spacing.sm,
+    },
+    tipPromptButton: {
+      flex: 1,
+      minHeight: 50,
+      borderRadius: radii.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: spacing.md,
+    },
+    tipPromptButtonPrimary: {
+      backgroundColor: palette.primaryStrong,
+    },
+    tipPromptButtonSecondary: {
+      backgroundColor: palette.surfaceStrong,
+      borderWidth: 1,
+      borderColor: palette.borderStrong,
+    },
+    tipPromptButtonDisabled: {
+      opacity: 0.7,
+    },
+    tipPromptButtonPrimaryText: {
+      color: palette.white,
+      fontWeight: "900",
+    },
+    tipPromptButtonSecondaryText: {
+      color: palette.primaryStrong,
+      fontWeight: "800",
     },
   });
 }

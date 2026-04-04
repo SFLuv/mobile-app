@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Ionicons } from "@expo/vector-icons";
 import {
   Linking,
   Modal,
@@ -158,6 +159,17 @@ function formatLocationSubtitle(location: AppLocation): string {
   return pieces.join(" • ");
 }
 
+function normalizeWebsite(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return `https://${trimmed}`;
+}
+
 function compareLocations(left: AppLocation, right: AppLocation): number {
   return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
 }
@@ -167,6 +179,7 @@ export function MapScreen({ locations, onPayLocation }: Props) {
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
   const [query, setQuery] = useState("");
   const [selectedLocation, setSelectedLocation] = useState<AppLocation | null>(null);
+  const [viewMode, setViewMode] = useState<"map" | "list">("map");
   const mapRef = useRef<MapView | null>(null);
   const [mapReady, setMapReady] = useState(false);
 
@@ -230,36 +243,60 @@ export function MapScreen({ locations, onPayLocation }: Props) {
           placeholderTextColor={palette.textMuted}
         />
 
-        <View style={styles.mapWrap}>
-          <MapView
-            ref={(instance) => {
-              mapRef.current = instance;
-            }}
-            style={styles.map}
-            initialRegion={mapRegion}
-            onMapReady={() => setMapReady(true)}
-            toolbarEnabled={false}
-            moveOnMarkerPress={false}
-            customMapStyle={isDark ? DARK_MAP_STYLE : undefined}
+        <View style={styles.viewModeRow}>
+          <Pressable
+            style={[styles.viewModeButton, viewMode === "map" ? styles.viewModeButtonActive : undefined]}
+            onPress={() => setViewMode("map")}
           >
-            {displayLocations.map((entry) => (
-              <Marker
-                key={entry.location.id}
-                coordinate={{ latitude: entry.latitude, longitude: entry.longitude }}
-                title={entry.location.name}
-                description={entry.location.description}
-                pinColor={entry.location.payToAddress ? palette.primary : palette.textMuted}
-                tracksViewChanges={false}
-                onPress={() => setSelectedLocation(entry.location)}
-              />
-            ))}
-          </MapView>
+            <Ionicons name="map-outline" size={16} color={viewMode === "map" ? palette.primaryStrong : palette.textMuted} />
+            <Text style={[styles.viewModeButtonText, viewMode === "map" ? styles.viewModeButtonTextActive : undefined]}>
+              Map
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.viewModeButton, viewMode === "list" ? styles.viewModeButtonActive : undefined]}
+            onPress={() => setViewMode("list")}
+          >
+            <Ionicons name="list-outline" size={16} color={viewMode === "list" ? palette.primaryStrong : palette.textMuted} />
+            <Text style={[styles.viewModeButtonText, viewMode === "list" ? styles.viewModeButtonTextActive : undefined]}>
+              List
+            </Text>
+          </Pressable>
         </View>
+
+        {viewMode === "map" ? (
+          <View style={styles.mapWrap}>
+            <MapView
+              ref={(instance) => {
+                mapRef.current = instance;
+              }}
+              style={styles.map}
+              initialRegion={mapRegion}
+              onMapReady={() => setMapReady(true)}
+              toolbarEnabled={false}
+              moveOnMarkerPress={false}
+              customMapStyle={isDark ? DARK_MAP_STYLE : undefined}
+            >
+              {displayLocations.map((entry) => (
+                <Marker
+                  key={entry.location.id}
+                  coordinate={{ latitude: entry.latitude, longitude: entry.longitude }}
+                  title={entry.location.name}
+                  description={entry.location.description}
+                  pinColor={entry.location.payToAddress ? palette.primary : palette.textMuted}
+                  tracksViewChanges={false}
+                  onPress={() => setSelectedLocation(entry.location)}
+                />
+              ))}
+            </MapView>
+          </View>
+        ) : null}
 
         <View style={styles.resultsHeader}>
           <Text style={styles.resultsTitle}>
             {filteredLocations.length} merchant{filteredLocations.length === 1 ? "" : "s"}
           </Text>
+          {viewMode === "map" ? <Text style={styles.resultsMeta}>Switch to List for a faster browse view.</Text> : null}
         </View>
 
         <View style={styles.listWrap}>
@@ -315,9 +352,21 @@ export function MapScreen({ locations, onPayLocation }: Props) {
               <Text style={styles.modalMeta}>
                 {selectedLocation.street}, {selectedLocation.city}, {selectedLocation.state} {selectedLocation.zip}
               </Text>
-              {selectedLocation.phone ? <Text style={styles.modalMeta}>Phone: {selectedLocation.phone}</Text> : null}
-              {selectedLocation.email ? <Text style={styles.modalMeta}>Email: {selectedLocation.email}</Text> : null}
-              {selectedLocation.website ? <Text style={styles.modalMeta}>Website: {selectedLocation.website}</Text> : null}
+              {selectedLocation.phone ? (
+                <Pressable onPress={() => void Linking.openURL(`tel:${selectedLocation.phone}`)}>
+                  <Text style={styles.modalLink}>Call {selectedLocation.phone}</Text>
+                </Pressable>
+              ) : null}
+              {selectedLocation.email ? (
+                <Pressable onPress={() => void Linking.openURL(`mailto:${selectedLocation.email}`)}>
+                  <Text style={styles.modalLink}>Email {selectedLocation.email}</Text>
+                </Pressable>
+              ) : null}
+              {selectedLocation.website ? (
+                <Pressable onPress={() => void Linking.openURL(normalizeWebsite(selectedLocation.website))}>
+                  <Text style={styles.modalLink}>Open website</Text>
+                </Pressable>
+              ) : null}
               {!selectedLocation.payToAddress ? (
                 <Text style={styles.modalMetaMuted}>Payment is not available for this merchant right now.</Text>
               ) : null}
@@ -349,13 +398,25 @@ export function MapScreen({ locations, onPayLocation }: Props) {
                 <Pressable
                   style={styles.primaryButton}
                   onPress={() => {
+                    const url = `https://maps.apple.com/?ll=${selectedLocation.lat},${selectedLocation.lng}&q=${encodeURIComponent(selectedLocation.name)}`;
+                    void Linking.openURL(url);
+                  }}
+                >
+                  <Text style={styles.primaryButtonText}>Apple Maps</Text>
+                </Pressable>
+              </View>
+
+              <View style={styles.modalActions}>
+                <Pressable
+                  style={styles.secondaryButton}
+                  onPress={() => {
                     const url =
                       selectedLocation.mapsPage ||
                       `https://www.google.com/maps/place/?q=place_id:${selectedLocation.googleId}`;
                     void Linking.openURL(url);
                   }}
                 >
-                  <Text style={styles.primaryButtonText}>Directions</Text>
+                  <Text style={styles.secondaryButtonText}>Google Maps</Text>
                 </Pressable>
               </View>
             </>
@@ -392,6 +453,33 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       paddingVertical: 12,
       color: palette.text,
     },
+    viewModeRow: {
+      flexDirection: "row",
+      gap: spacing.sm,
+    },
+    viewModeButton: {
+      flex: 1,
+      minHeight: 46,
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surface,
+      alignItems: "center",
+      justifyContent: "center",
+      flexDirection: "row",
+      gap: 8,
+    },
+    viewModeButtonActive: {
+      borderColor: palette.primary,
+      backgroundColor: palette.primarySoft,
+    },
+    viewModeButtonText: {
+      color: palette.textMuted,
+      fontWeight: "800",
+    },
+    viewModeButtonTextActive: {
+      color: palette.primaryStrong,
+    },
     resultsHeader: {
       gap: 4,
     },
@@ -399,6 +487,11 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       color: palette.text,
       fontSize: 18,
       fontWeight: "800",
+    },
+    resultsMeta: {
+      color: palette.textMuted,
+      fontSize: 12,
+      fontWeight: "700",
     },
     mapWrap: {
       borderRadius: radii.lg,
@@ -523,6 +616,10 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     modalMeta: {
       color: palette.textMuted,
       lineHeight: 21,
+    },
+    modalLink: {
+      color: palette.primaryStrong,
+      fontWeight: "800",
     },
     modalMetaMuted: {
       color: palette.textMuted,

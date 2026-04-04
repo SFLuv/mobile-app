@@ -43,6 +43,7 @@ export interface AppLocation {
   googleId: string;
   name: string;
   payToAddress?: string;
+  tipToAddress?: string;
   description: string;
   type: string;
   street: string;
@@ -77,6 +78,19 @@ export interface AppOwnedLocation extends AppLocation {
   tabletModel: string;
   messagingService: string;
   reference: string;
+}
+
+export interface AppWalletOwnerLookup {
+  found: boolean;
+  userId?: string;
+  isMerchant: boolean;
+  merchantName?: string;
+  walletName?: string;
+  address: string;
+  matchedPrimaryWallet: boolean;
+  matchedPaymentWallet: boolean;
+  payToAddress?: string;
+  tipToAddress?: string;
 }
 
 export interface AppTransaction {

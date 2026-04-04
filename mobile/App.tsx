@@ -60,10 +60,7 @@ import {
   AppThemeProvider,
   Palette,
   getShadows,
-  lightPalette,
-  palette,
   radii,
-  shadows,
   spacing,
   useAppTheme,
 } from "./src/theme";
@@ -84,6 +81,8 @@ type SendDraft = {
   recipient: string;
   amount?: string;
   memo?: string;
+  recipientLabel?: string;
+  recipientKind?: "contact" | "merchant";
 };
 
 type SendDraftOptions = {
@@ -96,13 +95,19 @@ type RedeemFlowState = {
   message?: string;
 };
 
+type ToastState = {
+  id: number;
+  tone: "info" | "success" | "error";
+  message: string;
+};
+
 type Tab = "wallet" | "activity" | "map" | "contacts" | "settings";
 type WalletPane = "home" | "send" | "receive";
 
 const PREFERENCES_STORAGE_KEY = "sfluv-wallet:preferences";
 const PUSH_TOKEN_STORAGE_KEY = "sfluv-wallet:push-token";
 const WALLET_PREFERENCES_STORAGE_KEY_PREFIX = "sfluv-wallet:wallet-preferences";
-const TRANSFER_REFRESH_DEBOUNCE_MS = 900;
+const TRANSFER_REFRESH_DEBOUNCE_MS = 350;
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -501,55 +506,7 @@ function mergePreferences(input: unknown): AppPreferences {
   };
 }
 
-function BottomTab({
-  label,
-  icon,
-  active,
-  onPress,
-}: {
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  active: boolean;
-  onPress: () => void;
-}) {
-  const { palette } = useAppTheme();
-  return (
-    <Pressable style={[styles.bottomTab, active ? { backgroundColor: palette.primarySoft } : undefined]} onPress={onPress}>
-      <Ionicons
-        name={icon}
-        size={18}
-        color={active ? palette.primaryStrong : palette.textMuted}
-      />
-      <Text style={[styles.bottomTabText, { color: active ? palette.primaryStrong : palette.textMuted }]}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function WalletAppShell({
-  runtime,
-  selectedCandidateKey,
-  onSelectCandidate,
-  ownerBadge,
-  onLogout,
-  backendClient,
-  backendBootstrapReady,
-  walletPreferences,
-  onWalletPreferencesSync,
-  pendingLinkIntent,
-  onConsumePendingLink,
-}: {
-  runtime: RuntimeState;
-  selectedCandidateKey?: string;
-  onSelectCandidate: (key: string) => void;
-  ownerBadge?: string;
-  onLogout?: () => void;
-  backendClient?: AppBackendClient | null;
-  backendBootstrapReady: boolean;
-  walletPreferences: StoredWalletPreferences;
-  onWalletPreferencesSync: (user: AppUser, wallets: AppWallet[]) => void;
-  pendingLinkIntent: PendingLinkIntent | null;
-  onConsumePendingLink: () => void;
-}) {
+function useStoredPreferences(): [AppPreferences, React.Dispatch<React.SetStateAction<AppPreferences>>] {
   const [preferences, setPreferences] = useState<AppPreferences>(defaultAppPreferences);
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
 
@@ -587,24 +544,79 @@ function WalletAppShell({
     });
   }, [preferences, preferencesLoaded]);
 
+  return [preferences, setPreferences];
+}
+
+function BottomTab({
+  label,
+  icon,
+  active,
+  onPress,
+}: {
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  active: boolean;
+  onPress: () => void;
+}) {
+  const { palette, shadows, isDark } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   return (
-    <AppThemeProvider preference={preferences.themePreference}>
-      <WalletAppShellContent
-        runtime={runtime}
-        selectedCandidateKey={selectedCandidateKey}
-        onSelectCandidate={onSelectCandidate}
-        ownerBadge={ownerBadge}
-        onLogout={onLogout}
-        backendClient={backendClient}
-        backendBootstrapReady={backendBootstrapReady}
-        walletPreferences={walletPreferences}
-        onWalletPreferencesSync={onWalletPreferencesSync}
-        pendingLinkIntent={pendingLinkIntent}
-        onConsumePendingLink={onConsumePendingLink}
-        preferences={preferences}
-        onUpdatePreferences={setPreferences}
+    <Pressable style={[styles.bottomTab, active ? { backgroundColor: palette.primarySoft } : undefined]} onPress={onPress}>
+      <Ionicons
+        name={icon}
+        size={18}
+        color={active ? palette.primaryStrong : palette.textMuted}
       />
-    </AppThemeProvider>
+      <Text style={[styles.bottomTabText, { color: active ? palette.primaryStrong : palette.textMuted }]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function WalletAppShell({
+  runtime,
+  selectedCandidateKey,
+  onSelectCandidate,
+  ownerBadge,
+  onLogout,
+  backendClient,
+  backendBootstrapReady,
+  walletPreferences,
+  onWalletPreferencesSync,
+  pendingLinkIntent,
+  onConsumePendingLink,
+  preferences,
+  onUpdatePreferences,
+}: {
+  runtime: RuntimeState;
+  selectedCandidateKey?: string;
+  onSelectCandidate: (key: string) => void;
+  ownerBadge?: string;
+  onLogout?: () => void;
+  backendClient?: AppBackendClient | null;
+  backendBootstrapReady: boolean;
+  walletPreferences: StoredWalletPreferences;
+  onWalletPreferencesSync: (user: AppUser, wallets: AppWallet[]) => void;
+  pendingLinkIntent: PendingLinkIntent | null;
+  onConsumePendingLink: () => void;
+  preferences: AppPreferences;
+  onUpdatePreferences: (next: AppPreferences) => void;
+}) {
+  return (
+    <WalletAppShellContent
+      runtime={runtime}
+      selectedCandidateKey={selectedCandidateKey}
+      onSelectCandidate={onSelectCandidate}
+      ownerBadge={ownerBadge}
+      onLogout={onLogout}
+      backendClient={backendClient}
+      backendBootstrapReady={backendBootstrapReady}
+      walletPreferences={walletPreferences}
+      onWalletPreferencesSync={onWalletPreferencesSync}
+      pendingLinkIntent={pendingLinkIntent}
+      onConsumePendingLink={onConsumePendingLink}
+      preferences={preferences}
+      onUpdatePreferences={onUpdatePreferences}
+    />
   );
 }
 
@@ -648,17 +660,19 @@ function WalletAppShellContent({
   const [locations, setLocations] = useState<AppLocation[]>([]);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [storedPushToken, setStoredPushToken] = useState<string | null>(null);
-  const [loadingData, setLoadingData] = useState(false);
+  const [refreshingHome, setRefreshingHome] = useState(false);
   const [refreshingActivity, setRefreshingActivity] = useState(false);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [showWalletChooser, setShowWalletChooser] = useState(false);
   const [sendDraft, setSendDraft] = useState<SendDraft | null>(null);
   const [sendReturnTab, setSendReturnTab] = useState<Tab | null>(null);
   const [redeemFlow, setRedeemFlow] = useState<RedeemFlowState | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
   const walletSurfaceRequestRef = useRef(0);
   const appIsActiveRef = useRef(AppState.currentState === "active");
   const transferRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const backendAuthFailureHandledRef = useRef(false);
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const walletCandidates = runtime.discovery?.candidates ?? [];
   const hiddenWalletSet = useMemo(
     () => new Set(walletPreferences.hiddenWalletAddresses.map((address) => address.toLowerCase())),
@@ -718,6 +732,36 @@ function WalletAppShellContent({
     };
   }, []);
 
+  useEffect(() => {
+    if (!toast) {
+      return;
+    }
+
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+
+    toastTimeoutRef.current = setTimeout(() => {
+      setToast((current) => (current?.id === toast.id ? null : current));
+      toastTimeoutRef.current = null;
+    }, 2600);
+
+    return () => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+        toastTimeoutRef.current = null;
+      }
+    };
+  }, [toast]);
+
+  const showToast = (message: string, tone: ToastState["tone"] = "info") => {
+    setToast({
+      id: Date.now(),
+      tone,
+      message,
+    });
+  };
+
   const emitTransferHaptic = () => {
     if (!preferences.hapticsEnabled) {
       return;
@@ -739,7 +783,6 @@ function WalletAppShellContent({
       return;
     }
 
-    setLoadingData(true);
     try {
       const profile = await backendClient.ensureUser();
       setAppUser(profile.user);
@@ -762,8 +805,6 @@ function WalletAppShellContent({
           },
         ]);
       }
-    } finally {
-      setLoadingData(false);
     }
   };
 
@@ -894,28 +935,26 @@ function WalletAppShellContent({
       }
 
       const nextAddress = ethers.utils.getAddress(address);
+      const switchingWallets = smartAddress && smartAddress.toLowerCase() !== nextAddress.toLowerCase();
       setSmartAddress(nextAddress);
-      setTransactions((current) => (smartAddress && smartAddress.toLowerCase() !== nextAddress.toLowerCase() ? [] : current));
+      setTransactions((current) => (switchingWallets ? [] : current));
+      setSmartBalance((current) => {
+        if (!switchingWallets && current && current !== "...") {
+          return current;
+        }
 
-      const seededBalance =
-        selectedCandidate && selectedCandidate.accountAddress.toLowerCase() === nextAddress.toLowerCase()
-          ? formatDisplayBalance(selectedCandidate.tokenBalance)
-          : null;
-      setSmartBalance(seededBalance ?? "...");
+        if (selectedCandidate && selectedCandidate.accountAddress.toLowerCase() === nextAddress.toLowerCase()) {
+          return formatDisplayBalance(selectedCandidate.tokenBalance);
+        }
 
-      void runtime.service
-        .smartAccountBalance()
-        .then((balance) => {
-          if (walletSurfaceRequestRef.current !== requestID) {
-            return;
-          }
-          setSmartBalance(formatDisplayBalance(balance));
-        })
-        .catch((error) => {
+        return current || "...";
+      });
+
+      const [balance, chainTransactions, backendTransactions] = await Promise.all([
+        runtime.service.smartAccountBalance().catch((error) => {
           console.warn("Unable to load wallet balance", error);
-        });
-
-      void Promise.all([
+          return null;
+        }),
         runtime.service.recentTransfers(25).catch((error) => {
           console.warn("Unable to load recent onchain transfers", error);
           return [] as AppTransaction[];
@@ -926,12 +965,16 @@ function WalletAppShellContent({
               return [] as AppTransaction[];
             })
           : Promise.resolve([] as AppTransaction[]),
-      ]).then(([chainTransactions, backendTransactions]) => {
-        if (walletSurfaceRequestRef.current !== requestID) {
-          return;
-        }
-        setTransactions(mergeTransactions(chainTransactions, backendTransactions, 25));
-      });
+      ]);
+
+      if (walletSurfaceRequestRef.current !== requestID) {
+        return;
+      }
+
+      if (balance) {
+        setSmartBalance(formatDisplayBalance(balance));
+      }
+      setTransactions(mergeTransactions(chainTransactions, backendTransactions, 25));
     } catch (error) {
       console.warn("Unable to refresh wallet surface", error);
       setSyncNotice(describeAppBackendIssue(error));
@@ -972,22 +1015,6 @@ function WalletAppShellContent({
       subscription.remove();
     };
   }, [backendBootstrapReady, backendClient, publicBackendClient, runtime.service, runtime.discovery, selectedCandidateKey]);
-
-  useEffect(() => {
-    if (!backendBootstrapReady) {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      if (appIsActiveRef.current) {
-        void loadAppProfile();
-      }
-    }, 15_000);
-
-    return () => {
-      clearInterval(interval);
-    };
-  }, [backendBootstrapReady, backendClient]);
 
   useEffect(() => {
     if (!runtime.service) {
@@ -1051,6 +1078,13 @@ function WalletAppShellContent({
     void refreshWalletSurface();
   }, [runtime.service, selectedCandidateKey]);
 
+  const finishSendFlow = () => {
+    const returnTab = sendReturnTab;
+    setSendReturnTab(null);
+    setWalletPane("home");
+    setTab(returnTab ?? "wallet");
+  };
+
   useEffect(() => {
     if (!backendClient || !appUser || !runtime.discovery || !walletSyncReady) {
       return;
@@ -1104,20 +1138,6 @@ function WalletAppShellContent({
       throw new Error("Wallet signer is not ready.");
     }
 
-    const confirmed = await new Promise<boolean>((resolve) => {
-      Alert.alert(
-        "Send SFLUV?",
-        `Send ${amount.trim()} ${unit === "token" ? "SFLUV" : "wei"} to ${shortAddress(recipient.trim())}?`,
-        [
-          { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
-          { text: "Send", onPress: () => resolve(true) },
-        ],
-      );
-    });
-    if (!confirmed) {
-      throw new Error("Transfer cancelled.");
-    }
-
     const result = await runtime.service.sendSFLUV(recipient, amount, unit);
     if (memo.trim() && result.txHash && backendClient) {
       try {
@@ -1129,10 +1149,16 @@ function WalletAppShellContent({
     emitTransferHaptic();
     await refreshWalletSurface();
     await loadAppProfile();
-    setSendReturnTab(null);
-    setWalletPane("home");
-    setTab("wallet");
+    showToast(result.txHash ? "Payment confirmed." : "Payment submitted.", "success");
     return result;
+  };
+
+  const refreshEverything = async () => {
+    await refreshWalletSurface();
+    if (backendBootstrapReady) {
+      await loadAppProfile();
+    }
+    await loadPublicLocations();
   };
 
   const activeTitle =
@@ -1214,13 +1240,6 @@ function WalletAppShellContent({
       </View>
 
       <View style={styles.contentShell}>
-        {loadingData ? (
-          <View style={styles.banner}>
-            <ActivityIndicator size="small" color={palette.primaryStrong} />
-            <Text style={styles.bannerText}>Loading contacts…</Text>
-          </View>
-        ) : null}
-
         <View style={styles.content}>
           {showBlockingWalletState ? (
             <View style={styles.centerState}>
@@ -1235,7 +1254,11 @@ function WalletAppShellContent({
             walletPane === "send" ? (
               <SendScreen
                 contacts={contacts}
+                merchants={locations}
+                backendClient={backendClient}
+                hapticsEnabled={preferences.hapticsEnabled}
                 onPrepareSend={handleSend}
+                onCompleteFlow={finishSendFlow}
                 draft={sendDraft}
                 onDraftApplied={() => setSendDraft(null)}
                 onOpenUniversalLink={(link) => {
@@ -1264,6 +1287,15 @@ function WalletAppShellContent({
                 ownerBadge={ownerBadge}
                 selectedWalletLabel={walletLabel(selectedCandidate?.smartIndex)}
                 recentTransactions={transactions}
+                refreshing={refreshingHome}
+                onRefresh={async () => {
+                  setRefreshingHome(true);
+                  try {
+                    await refreshEverything();
+                  } finally {
+                    setRefreshingHome(false);
+                  }
+                }}
                 onOpenSend={() => {
                   setWalletPane("send");
                 }}
@@ -1299,11 +1331,13 @@ function WalletAppShellContent({
               locations={locations}
               onPayLocation={(location) => {
                 if (!location.payToAddress) {
-                  Alert.alert("Payment unavailable", "This merchant does not have a payout wallet configured yet.");
+                  showToast("Payment is not available for this merchant right now.", "error");
                   return;
                 }
                 openSendDraft({
                   recipient: location.payToAddress,
+                  recipientLabel: location.name,
+                  recipientKind: "merchant",
                 }, { returnTab: "map" });
               }}
             />
@@ -1392,6 +1426,12 @@ function WalletAppShellContent({
             }}
           />
         </View>
+
+        {toast ? (
+          <View style={[styles.toastCard, toast.tone === "error" ? styles.toastCardError : toast.tone === "success" ? styles.toastCardSuccess : styles.toastCardInfo]}>
+            <Text style={styles.toastText}>{toast.message}</Text>
+          </View>
+        ) : null}
       </View>
 
       <Modal
@@ -1481,7 +1521,15 @@ function WalletAppShellContent({
   );
 }
 
-function PrivyWalletApp() {
+function PrivyWalletApp({
+  preferences,
+  onUpdatePreferences,
+}: {
+  preferences: AppPreferences;
+  onUpdatePreferences: (next: AppPreferences) => void;
+}) {
+  const { palette, shadows, isDark } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const { user, isReady, logout, getAccessToken } = usePrivy();
   const { login, state: oauthState } = useLoginWithOAuth();
   const { sendCode, loginWithCode } = useLoginWithEmail();
@@ -1886,7 +1934,7 @@ function PrivyWalletApp() {
                 keyboardType="email-address"
                 onChangeText={setEmailAddress}
                 placeholder="Email address"
-                placeholderTextColor={lightPalette.textMuted}
+                placeholderTextColor={palette.textMuted}
                 textContentType="emailAddress"
                 value={emailAddress}
               />
@@ -1899,7 +1947,7 @@ function PrivyWalletApp() {
                   keyboardType="number-pad"
                   onChangeText={setEmailCode}
                   placeholder="Verification code"
-                  placeholderTextColor={lightPalette.textMuted}
+                  placeholderTextColor={palette.textMuted}
                   textContentType="oneTimeCode"
                   value={emailCode}
                 />
@@ -1996,11 +2044,15 @@ function PrivyWalletApp() {
       onWalletPreferencesSync={syncWalletPreferences}
       pendingLinkIntent={pendingLinkIntent}
       onConsumePendingLink={() => setPendingLinkIntent(null)}
+      preferences={preferences}
+      onUpdatePreferences={onUpdatePreferences}
     />
   );
 }
 
 function MissingPrivyConfigScreen() {
+  const { palette, shadows, isDark } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.centerState}>
@@ -2012,9 +2064,7 @@ function MissingPrivyConfigScreen() {
 }
 
 export default function App() {
-  if (!mobileConfig.privyAppId.trim().length) {
-    return <MissingPrivyConfigScreen />;
-  }
+  const [preferences, setPreferences] = useStoredPreferences();
 
   const supportedChain = {
     id: mobileConfig.chainId,
@@ -2027,20 +2077,26 @@ export default function App() {
   } as any;
 
   return (
-    <PrivyProvider
-      appId={mobileConfig.privyAppId}
-      clientId={mobileConfig.privyClientId || undefined}
-      supportedChains={[supportedChain]}
-      config={{
-        embedded: {
-          ethereum: {
-            createOnLogin: "users-without-wallets",
-          },
-        },
-      }}
-    >
-      <PrivyWalletApp />
-    </PrivyProvider>
+    <AppThemeProvider preference={preferences.themePreference}>
+      {!mobileConfig.privyAppId.trim().length ? (
+        <MissingPrivyConfigScreen />
+      ) : (
+        <PrivyProvider
+          appId={mobileConfig.privyAppId}
+          clientId={mobileConfig.privyClientId || undefined}
+          supportedChains={[supportedChain]}
+          config={{
+            embedded: {
+              ethereum: {
+                createOnLogin: "users-without-wallets",
+              },
+            },
+          }}
+        >
+          <PrivyWalletApp preferences={preferences} onUpdatePreferences={setPreferences} />
+        </PrivyProvider>
+      )}
+    </AppThemeProvider>
   );
 }
 
@@ -2126,25 +2182,6 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     borderTopRightRadius: radii.xl,
     overflow: "hidden",
   },
-  banner: {
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
-    backgroundColor: palette.primarySoft,
-    borderRadius: radii.md,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: "#f3c8c2",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  bannerText: {
-    color: palette.primaryStrong,
-    flex: 1,
-    fontWeight: "700",
-  },
   content: {
     flex: 1,
   },
@@ -2174,6 +2211,34 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     borderWidth: 1,
     borderColor: palette.border,
     ...shadows.card,
+  },
+  toastCard: {
+    position: "absolute",
+    left: spacing.lg,
+    right: spacing.lg,
+    bottom: 92,
+    borderRadius: radii.md,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    ...shadows.card,
+  },
+  toastCardInfo: {
+    backgroundColor: palette.surface,
+    borderColor: palette.primary,
+  },
+  toastCardSuccess: {
+    backgroundColor: palette.surface,
+    borderColor: palette.success,
+  },
+  toastCardError: {
+    backgroundColor: palette.surface,
+    borderColor: palette.danger,
+  },
+  toastText: {
+    color: palette.text,
+    fontWeight: "800",
+    textAlign: "center",
   },
   bottomTab: {
     flex: 1,
@@ -2401,5 +2466,3 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     fontFamily: "Courier",
   },
 });
-
-const styles = createStyles(lightPalette, shadows, false);
