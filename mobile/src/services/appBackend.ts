@@ -90,6 +90,13 @@ type TransactionsResponse = {
   total: number;
 };
 
+type WalletLookupResponse = {
+  found?: boolean;
+  is_merchant?: boolean;
+  merchant_name?: string;
+  wallet_name?: string;
+};
+
 type VerifiedEmailResponse = Array<{
   id: string;
   user_id: string;
@@ -611,6 +618,20 @@ export class AppBackendClient {
       memo: tx.memo,
       direction: tx.from.toLowerCase() === address.toLowerCase() ? "send" : "receive",
     }));
+  }
+
+  async lookupMerchantWalletLabel(address: string): Promise<string | null> {
+    const normalizedAddress = ethers.utils.getAddress(address);
+    const response = await this.authFetch(`/wallets/lookup/${encodeURIComponent(normalizedAddress)}`);
+    if (!response.ok) {
+      return null;
+    }
+    const body = (await response.json()) as WalletLookupResponse;
+    if (!body.found || !body.is_merchant) {
+      return null;
+    }
+    const merchantName = (body.merchant_name || body.wallet_name || "").trim();
+    return merchantName || null;
   }
 
   async saveTransactionMemo(txHash: string, memo: string): Promise<void> {

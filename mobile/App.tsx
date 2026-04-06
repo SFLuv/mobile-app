@@ -103,6 +103,9 @@ const PREFERENCES_STORAGE_KEY = "sfluv-wallet:preferences";
 const PUSH_TOKEN_STORAGE_KEY = "sfluv-wallet:push-token";
 const WALLET_PREFERENCES_STORAGE_KEY_PREFIX = "sfluv-wallet:wallet-preferences";
 const TRANSFER_REFRESH_DEBOUNCE_MS = 900;
+const TRANSACTION_POLL_INTERVAL_MS = 2_000;
+const WALLET_TRANSACTION_LIMIT = 5;
+const ACTIVITY_TRANSACTION_PAGE_SIZE = 10;
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -434,6 +437,14 @@ function transactionIdentity(tx: Pick<AppTransaction, "hash" | "amount" | "from"
   return `${tx.hash}:${tx.amount}:${tx.from}:${tx.to}`.toLowerCase();
 }
 
+function transactionLookupKey(tx: Pick<AppTransaction, "id" | "hash" | "amount" | "from" | "to">): string {
+  const trimmedID = tx.id.trim();
+  if (trimmedID) {
+    return `id:${trimmedID.toLowerCase()}`;
+  }
+  return `identity:${transactionIdentity(tx)}`;
+}
+
 function mergeTransactions(primary: AppTransaction[], secondary: AppTransaction[], limit = 25): AppTransaction[] {
   const secondaryByIdentity = new Map(secondary.map((tx) => [transactionIdentity(tx), tx]));
   const merged = primary.map((tx) => {
@@ -468,6 +479,11 @@ function mergeTransactions(primary: AppTransaction[], secondary: AppTransaction[
       return left.hash < right.hash ? 1 : -1;
     })
     .slice(0, limit);
+}
+
+function hasNewTransactions(current: AppTransaction[], incoming: AppTransaction[]): boolean {
+  const existingKeys = new Set(current.map((tx) => transactionLookupKey(tx)));
+  return incoming.some((tx) => !existingKeys.has(transactionLookupKey(tx)));
 }
 
 function describeAppBackendIssue(error: unknown): string {
@@ -643,15 +659,23 @@ function WalletAppShellContent({
   const [walletPane, setWalletPane] = useState<WalletPane>("home");
   const [smartAddress, setSmartAddress] = useState("");
   const [smartBalance, setSmartBalance] = useState("...");
-  const [transactions, setTransactions] = useState<AppTransaction[]>([]);
+  const [walletTransactions, setWalletTransactions] = useState<AppTransaction[]>([]);
+  const [activityTransactions, setActivityTransactions] = useState<AppTransaction[]>([]);
+  const [walletTransactionsLoaded, setWalletTransactionsLoaded] = useState(false);
+  const [activityTransactionsLoaded, setActivityTransactionsLoaded] = useState(false);
   const [contacts, setContacts] = useState<AppContact[]>([]);
   const [locations, setLocations] = useState<AppLocation[]>([]);
+  const [merchantLabelsByAddress, setMerchantLabelsByAddress] = useState<Record<string, string>>({});
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [storedPushToken, setStoredPushToken] = useState<string | null>(null);
   const [loadingData, setLoadingData] = useState(false);
   const [refreshingActivity, setRefreshingActivity] = useState(false);
+  const [loadingMoreActivity, setLoadingMoreActivity] = useState(false);
+  const [activityPageCount, setActivityPageCount] = useState(1);
+  const [activityHasMore, setActivityHasMore] = useState(true);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [showWalletChooser, setShowWalletChooser] = useState(false);
+  const [merchantMapViewMode, setMerchantMapViewMode] = useState<"map" | "list">("map");
   const [sendDraft, setSendDraft] = useState<SendDraft | null>(null);
   const [sendReturnTab, setSendReturnTab] = useState<Tab | null>(null);
   const [redeemFlow, setRedeemFlow] = useState<RedeemFlowState | null>(null);
@@ -659,6 +683,11 @@ function WalletAppShellContent({
   const appIsActiveRef = useRef(AppState.currentState === "active");
   const transferRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const backendAuthFailureHandledRef = useRef(false);
+  const runtimeServiceRef = useRef<SmartWalletService | null>(runtime.service);
+  const smartAddressRef = useRef(smartAddress);
+  const walletTransactionsRef = useRef<AppTransaction[]>(walletTransactions);
+  const activityTransactionsRef = useRef<AppTransaction[]>(activityTransactions);
+  const merchantLabelsRef = useRef<Record<string, string>>(merchantLabelsByAddress);
   const walletCandidates = runtime.discovery?.candidates ?? [];
   const hiddenWalletSet = useMemo(
     () => new Set(walletPreferences.hiddenWalletAddresses.map((address) => address.toLowerCase())),
@@ -681,6 +710,8 @@ function WalletAppShellContent({
   }, [hiddenWalletSet, selectedCandidate?.key, walletCandidates, walletPreferences.defaultWalletAddress]);
   const canChooseWallet = walletChooserCandidates.length > 1;
   const walletSyncReady = backendBootstrapReady && Boolean(appUser) && Boolean(runtime.discovery);
+  const walletHistoryActive = tab === "wallet" && walletPane === "home";
+  const activityHistoryActive = tab === "activity";
   const notificationAddresses = useMemo(() => {
     const seen = new Set<string>();
     const addresses: string[] = [];
@@ -699,6 +730,46 @@ function WalletAppShellContent({
     () => backendClient ?? new AppBackendClient(async () => null),
     [backendClient],
   );
+
+  useEffect(() => {
+    runtimeServiceRef.current = runtime.service;
+  }, [runtime.service]);
+
+  useEffect(() => {
+    smartAddressRef.current = smartAddress;
+  }, [smartAddress]);
+
+  useEffect(() => {
+    walletTransactionsRef.current = walletTransactions;
+  }, [walletTransactions]);
+
+  useEffect(() => {
+    activityTransactionsRef.current = activityTransactions;
+  }, [activityTransactions]);
+
+  useEffect(() => {
+    merchantLabelsRef.current = merchantLabelsByAddress;
+  }, [merchantLabelsByAddress]);
+
+  useEffect(() => {
+    setMerchantLabelsByAddress((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const location of locations) {
+        if (!location.payToAddress) {
+          continue;
+        }
+        const normalizedAddress = location.payToAddress.toLowerCase();
+        const normalizedName = location.name.trim();
+        if (!normalizedName || next[normalizedAddress] === normalizedName) {
+          continue;
+        }
+        next[normalizedAddress] = normalizedName;
+        changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [locations]);
 
   useEffect(() => {
     let cancelled = false;
@@ -765,6 +836,51 @@ function WalletAppShellContent({
     } finally {
       setLoadingData(false);
     }
+  };
+
+  const ensureTransactionMerchantLabels = async (transactions: AppTransaction[]) => {
+    if (!backendClient || transactions.length === 0) {
+      return;
+    }
+
+    const contactAddresses = new Set(contacts.map((contact) => contact.address.toLowerCase()));
+    const knownMerchantAddresses = new Set(
+      locations
+        .map((location) => location.payToAddress?.toLowerCase())
+        .filter((address): address is string => Boolean(address)),
+    );
+
+    const uniqueAddresses = new Set<string>();
+    for (const tx of transactions) {
+      uniqueAddresses.add(tx.from.toLowerCase());
+      uniqueAddresses.add(tx.to.toLowerCase());
+    }
+
+    const toLookup = Array.from(uniqueAddresses).filter((address) => {
+      if (contactAddresses.has(address) || knownMerchantAddresses.has(address)) {
+        return false;
+      }
+      return !Object.prototype.hasOwnProperty.call(merchantLabelsRef.current, address);
+    });
+
+    if (toLookup.length === 0) {
+      return;
+    }
+
+    const resolvedLabels = await Promise.all(
+      toLookup.map(async (address) => ({
+        address,
+        label: await backendClient.lookupMerchantWalletLabel(address),
+      })),
+    );
+
+    setMerchantLabelsByAddress((current) => {
+      const next = { ...current };
+      for (const entry of resolvedLabels) {
+        next[entry.address] = entry.label?.trim() || "";
+      }
+      return next;
+    });
   };
 
   const openSendDraft = (draft: SendDraft, options?: SendDraftOptions) => {
@@ -876,6 +992,121 @@ function WalletAppShellContent({
     };
   }, [publicBackendClient, redeemFlow, runtime.service]);
 
+  const refreshSelectedWalletBalance = async (options?: {
+    requestID?: number;
+    service?: SmartWalletService | null;
+    silent?: boolean;
+  }) => {
+    const service = options?.service ?? runtimeServiceRef.current;
+    if (!service) {
+      return;
+    }
+
+    const requestID = options?.requestID ?? walletSurfaceRequestRef.current;
+    try {
+      const balance = await service.smartAccountBalance();
+      if (walletSurfaceRequestRef.current !== requestID || runtimeServiceRef.current !== service) {
+        return;
+      }
+      setSmartBalance(formatDisplayBalance(balance));
+    } catch (error) {
+      if (!options?.silent) {
+        console.warn("Unable to load wallet balance", error);
+      }
+    }
+  };
+
+  const refreshWalletTransactionsFromBackend = async (address: string, options?: { silent?: boolean }) => {
+    if (!backendClient) {
+      return false;
+    }
+
+    try {
+      const nextTransactions = await backendClient.getTransactions(address, 0, WALLET_TRANSACTION_LIMIT);
+      const normalizedAddress = address.toLowerCase();
+      const activeAddress = smartAddressRef.current.toLowerCase();
+      if (activeAddress && activeAddress !== normalizedAddress) {
+        return false;
+      }
+
+      setWalletTransactionsLoaded(true);
+      void ensureTransactionMerchantLabels(nextTransactions);
+      const foundNewTransactions = hasNewTransactions(walletTransactionsRef.current, nextTransactions);
+      setWalletTransactions((current) => mergeTransactions(current, nextTransactions, WALLET_TRANSACTION_LIMIT));
+      if (foundNewTransactions) {
+        await refreshSelectedWalletBalance({ silent: true });
+      }
+      return foundNewTransactions;
+    } catch (error) {
+      if (!options?.silent) {
+        console.warn("Unable to load wallet transaction history from app backend", error);
+      }
+      return false;
+    }
+  };
+
+  const refreshActivityTransactionsFromBackend = async (address: string, options?: { silent?: boolean }) => {
+    if (!backendClient) {
+      return false;
+    }
+
+    try {
+      const nextTransactions = await backendClient.getTransactions(address, 0, ACTIVITY_TRANSACTION_PAGE_SIZE);
+      const normalizedAddress = address.toLowerCase();
+      const activeAddress = smartAddressRef.current.toLowerCase();
+      if (activeAddress && activeAddress !== normalizedAddress) {
+        return false;
+      }
+
+      setActivityTransactionsLoaded(true);
+      void ensureTransactionMerchantLabels(nextTransactions);
+      const foundNewTransactions = hasNewTransactions(activityTransactionsRef.current, nextTransactions);
+      const currentVisibleCount = Math.max(ACTIVITY_TRANSACTION_PAGE_SIZE, activityPageCount * ACTIVITY_TRANSACTION_PAGE_SIZE);
+      setActivityTransactions((current) => mergeTransactions(current, nextTransactions, currentVisibleCount));
+      if (activityPageCount === 1) {
+        setActivityHasMore(nextTransactions.length === ACTIVITY_TRANSACTION_PAGE_SIZE);
+      }
+      if (foundNewTransactions) {
+        await refreshSelectedWalletBalance({ silent: true });
+      }
+      return foundNewTransactions;
+    } catch (error) {
+      if (!options?.silent) {
+        console.warn("Unable to load activity transaction history from app backend", error);
+      }
+      return false;
+    }
+  };
+
+  const loadMoreActivityTransactions = async () => {
+    if (!backendClient || !smartAddress || loadingMoreActivity || !activityHasMore) {
+      return;
+    }
+
+    const nextPage = activityPageCount;
+    const normalizedAddress = smartAddress.toLowerCase();
+    setLoadingMoreActivity(true);
+    try {
+      const nextTransactions = await backendClient.getTransactions(smartAddress, nextPage, ACTIVITY_TRANSACTION_PAGE_SIZE);
+      if (smartAddressRef.current.toLowerCase() !== normalizedAddress) {
+        return;
+      }
+
+      if (nextTransactions.length > 0) {
+        const nextPageCount = activityPageCount + 1;
+        setActivityTransactions((current) =>
+          mergeTransactions(current, nextTransactions, nextPageCount * ACTIVITY_TRANSACTION_PAGE_SIZE),
+        );
+        setActivityPageCount(nextPageCount);
+      }
+      setActivityHasMore(nextTransactions.length === ACTIVITY_TRANSACTION_PAGE_SIZE);
+    } catch (error) {
+      console.warn("Unable to load more transaction history", error);
+    } finally {
+      setLoadingMoreActivity(false);
+    }
+  };
+
   const refreshWalletSurface = async () => {
     const requestID = walletSurfaceRequestRef.current + 1;
     walletSurfaceRequestRef.current = requestID;
@@ -883,55 +1114,43 @@ function WalletAppShellContent({
     if (!runtime.service) {
       setSmartAddress("");
       setSmartBalance("...");
-      setTransactions([]);
+      setWalletTransactions([]);
+      setActivityTransactions([]);
+      setWalletTransactionsLoaded(false);
+      setActivityTransactionsLoaded(false);
+      setActivityPageCount(1);
+      setActivityHasMore(true);
       return;
     }
 
     try {
-      const address = await runtime.service.smartAccountAddress();
+      const service = runtime.service;
+      const address = await service.smartAccountAddress();
       if (walletSurfaceRequestRef.current !== requestID) {
         return;
       }
 
       const nextAddress = ethers.utils.getAddress(address);
+      const previousAddress = smartAddressRef.current;
+      const addressChanged = previousAddress.toLowerCase() !== nextAddress.toLowerCase();
       setSmartAddress(nextAddress);
-      setTransactions((current) => (smartAddress && smartAddress.toLowerCase() !== nextAddress.toLowerCase() ? [] : current));
+      if (addressChanged) {
+        setWalletTransactions([]);
+        setActivityTransactions([]);
+        setWalletTransactionsLoaded(false);
+        setActivityTransactionsLoaded(false);
+        setActivityPageCount(1);
+        setActivityHasMore(true);
+        setLoadingMoreActivity(false);
+        setRefreshingActivity(false);
+      }
 
       const seededBalance =
         selectedCandidate && selectedCandidate.accountAddress.toLowerCase() === nextAddress.toLowerCase()
           ? formatDisplayBalance(selectedCandidate.tokenBalance)
           : null;
       setSmartBalance(seededBalance ?? "...");
-
-      void runtime.service
-        .smartAccountBalance()
-        .then((balance) => {
-          if (walletSurfaceRequestRef.current !== requestID) {
-            return;
-          }
-          setSmartBalance(formatDisplayBalance(balance));
-        })
-        .catch((error) => {
-          console.warn("Unable to load wallet balance", error);
-        });
-
-      void Promise.all([
-        runtime.service.recentTransfers(25).catch((error) => {
-          console.warn("Unable to load recent onchain transfers", error);
-          return [] as AppTransaction[];
-        }),
-        backendClient
-          ? backendClient.getTransactions(nextAddress, 0, 25).catch((error) => {
-              console.warn("Unable to load transaction history from app backend", error);
-              return [] as AppTransaction[];
-            })
-          : Promise.resolve([] as AppTransaction[]),
-      ]).then(([chainTransactions, backendTransactions]) => {
-        if (walletSurfaceRequestRef.current !== requestID) {
-          return;
-        }
-        setTransactions(mergeTransactions(chainTransactions, backendTransactions, 25));
-      });
+      void refreshSelectedWalletBalance({ requestID, service, silent: true });
     } catch (error) {
       console.warn("Unable to refresh wallet surface", error);
       setSyncNotice(describeAppBackendIssue(error));
@@ -954,6 +1173,58 @@ function WalletAppShellContent({
   }, [runtime.service, runtime.discovery, selectedCandidateKey, backendClient]);
 
   useEffect(() => {
+    if (!backendClient || !smartAddress || !walletHistoryActive) {
+      return;
+    }
+
+    let cancelled = false;
+    const poll = async () => {
+      if (cancelled) {
+        return;
+      }
+      await refreshWalletTransactionsFromBackend(smartAddress, { silent: true });
+    };
+
+    void poll();
+    const interval = setInterval(() => {
+      if (appIsActiveRef.current) {
+        void poll();
+      }
+    }, TRANSACTION_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [backendClient, smartAddress, walletHistoryActive]);
+
+  useEffect(() => {
+    if (!backendClient || !smartAddress || !activityHistoryActive) {
+      return;
+    }
+
+    let cancelled = false;
+    const poll = async () => {
+      if (cancelled) {
+        return;
+      }
+      await refreshActivityTransactionsFromBackend(smartAddress, { silent: true });
+    };
+
+    void poll();
+    const interval = setInterval(() => {
+      if (appIsActiveRef.current) {
+        void poll();
+      }
+    }, TRANSACTION_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [activityHistoryActive, activityPageCount, backendClient, smartAddress]);
+
+  useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
       const isActive = nextState === "active";
       const wasActive = appIsActiveRef.current;
@@ -961,6 +1232,14 @@ function WalletAppShellContent({
 
       if (!wasActive && isActive) {
         void refreshWalletSurface();
+        if (smartAddressRef.current) {
+          if (walletHistoryActive) {
+            void refreshWalletTransactionsFromBackend(smartAddressRef.current, { silent: true });
+          }
+          if (activityHistoryActive) {
+            void refreshActivityTransactionsFromBackend(smartAddressRef.current, { silent: true });
+          }
+        }
         if (backendBootstrapReady) {
           void loadAppProfile();
         }
@@ -971,7 +1250,16 @@ function WalletAppShellContent({
     return () => {
       subscription.remove();
     };
-  }, [backendBootstrapReady, backendClient, publicBackendClient, runtime.service, runtime.discovery, selectedCandidateKey]);
+  }, [
+    activityHistoryActive,
+    backendBootstrapReady,
+    backendClient,
+    publicBackendClient,
+    runtime.service,
+    runtime.discovery,
+    selectedCandidateKey,
+    walletHistoryActive,
+  ]);
 
   useEffect(() => {
     if (!backendBootstrapReady) {
@@ -1011,6 +1299,14 @@ function WalletAppShellContent({
             transferRefreshTimeoutRef.current = null;
             if (!cancelled) {
               void refreshWalletSurface();
+              if (smartAddressRef.current) {
+                if (walletHistoryActive) {
+                  void refreshWalletTransactionsFromBackend(smartAddressRef.current, { silent: true });
+                }
+                if (activityHistoryActive) {
+                  void refreshActivityTransactionsFromBackend(smartAddressRef.current, { silent: true });
+                }
+              }
             }
           }, TRANSFER_REFRESH_DEBOUNCE_MS);
         });
@@ -1033,7 +1329,7 @@ function WalletAppShellContent({
         unsubscribe();
       }
     };
-  }, [runtime.service, runtime.discovery, selectedCandidateKey]);
+  }, [activityHistoryActive, runtime.service, runtime.discovery, selectedCandidateKey, walletHistoryActive]);
 
   useEffect(() => {
     return () => {
@@ -1120,15 +1416,18 @@ function WalletAppShellContent({
 
     const result = await runtime.service.sendSFLUV(recipient, amount, unit);
     if (memo.trim() && result.txHash && backendClient) {
-      try {
-        await backendClient.saveTransactionMemo(result.txHash, memo);
-      } catch {
+      void backendClient.saveTransactionMemo(result.txHash, memo).catch(() => {
         // Memo save failure should not block the transfer UX.
-      }
+      });
     }
     emitTransferHaptic();
-    await refreshWalletSurface();
-    await loadAppProfile();
+    const activeAddress = smartAddressRef.current || selectedCandidate?.accountAddress || "";
+    void refreshSelectedWalletBalance({ silent: true });
+    if (activeAddress) {
+      void refreshWalletTransactionsFromBackend(activeAddress, { silent: true });
+      void refreshActivityTransactionsFromBackend(activeAddress, { silent: true });
+    }
+    void loadAppProfile();
     setSendReturnTab(null);
     setWalletPane("home");
     setTab("wallet");
@@ -1200,16 +1499,6 @@ function WalletAppShellContent({
           >
             <Ionicons name={tab === "settings" ? "settings" : "settings-outline"} size={18} color={palette.primaryStrong} />
           </Pressable>
-          {onLogout ? (
-            <Pressable
-              style={styles.iconButton}
-              onPress={() => {
-                onLogout();
-              }}
-            >
-              <Ionicons name="log-out-outline" size={18} color={palette.primaryStrong} />
-            </Pressable>
-          ) : null}
         </View>
       </View>
 
@@ -1235,9 +1524,14 @@ function WalletAppShellContent({
             walletPane === "send" ? (
               <SendScreen
                 contacts={contacts}
+                merchants={locations}
                 onPrepareSend={handleSend}
                 draft={sendDraft}
                 onDraftApplied={() => setSendDraft(null)}
+                onOpenMerchantList={() => {
+                  setMerchantMapViewMode("list");
+                  setTab("map");
+                }}
                 onOpenUniversalLink={(link) => {
                   if (link.type === "redeem") {
                     setRedeemFlow({
@@ -1263,7 +1557,8 @@ function WalletAppShellContent({
                 smartAddress={smartAddress}
                 ownerBadge={ownerBadge}
                 selectedWalletLabel={walletLabel(selectedCandidate?.smartIndex)}
-                recentTransactions={transactions}
+                recentTransactions={walletTransactions}
+                transactionsLoaded={walletTransactionsLoaded}
                 onOpenSend={() => {
                   setWalletPane("send");
                 }}
@@ -1281,22 +1576,38 @@ function WalletAppShellContent({
             )
           ) : tab === "activity" ? (
             <ActivityScreen
-              transactions={transactions}
+              transactions={activityTransactions}
+              transactionsLoaded={activityTransactionsLoaded}
               contacts={contacts}
+              merchants={locations}
+              merchantLabels={merchantLabelsByAddress}
               activeAddress={smartAddress}
+              selectedWalletLabel={walletLabel(selectedCandidate?.smartIndex)}
               refreshing={refreshingActivity}
+              loadingMore={loadingMoreActivity}
+              canLoadMore={activityHasMore}
+              showWalletChooser={canChooseWallet}
+              onOpenWalletChooser={() => {
+                setShowWalletChooser(true);
+              }}
               onRefresh={async () => {
                 setRefreshingActivity(true);
                 try {
-                  await refreshWalletSurface();
+                  if (smartAddressRef.current) {
+                    await refreshActivityTransactionsFromBackend(smartAddressRef.current, { silent: true });
+                  }
+                  await refreshSelectedWalletBalance({ silent: true });
                 } finally {
                   setRefreshingActivity(false);
                 }
               }}
+              onLoadMore={loadMoreActivityTransactions}
             />
           ) : tab === "map" ? (
             <MapScreen
               locations={locations}
+              viewMode={merchantMapViewMode}
+              onChangeViewMode={setMerchantMapViewMode}
               onPayLocation={(location) => {
                 if (!location.payToAddress) {
                   Alert.alert("Payment unavailable", "This merchant does not have a payout wallet configured yet.");
@@ -1310,6 +1621,7 @@ function WalletAppShellContent({
           ) : tab === "contacts" ? (
             <ContactsScreen
               contacts={contacts}
+              shareAddress={smartAddress}
               syncNotice={syncNotice}
               onAddContact={async (name, address) => {
                 if (!backendClient) {
@@ -1350,6 +1662,7 @@ function WalletAppShellContent({
               activeWalletAddress={smartAddress}
               syncNotice={syncNotice}
               preferences={preferences}
+              onLogout={onLogout}
               onUpdatePreferences={(next) => {
                 onUpdatePreferences(next);
               }}
@@ -1380,6 +1693,7 @@ function WalletAppShellContent({
             icon={tab === "map" ? "map" : "map-outline"}
             active={tab === "map"}
             onPress={() => {
+              setMerchantMapViewMode("map");
               setTab("map");
             }}
           />
@@ -1416,14 +1730,22 @@ function WalletAppShellContent({
               {walletChooserCandidates.map((candidate) => {
                 const active = candidate.key === selectedCandidateKey;
                 return (
-                  <Pressable
-                    key={candidate.key}
-                    style={[styles.walletChooserOption, active ? styles.walletChooserOptionActive : undefined]}
-                    onPress={() => {
-                      onSelectCandidate(candidate.key);
-                      setShowWalletChooser(false);
-                    }}
-                  >
+	                  <Pressable
+	                    key={candidate.key}
+	                    style={[styles.walletChooserOption, active ? styles.walletChooserOptionActive : undefined]}
+	                    onPress={() => {
+	                      if (!active) {
+	                        setWalletTransactions([]);
+	                        setActivityTransactions([]);
+	                        setWalletTransactionsLoaded(false);
+	                        setActivityTransactionsLoaded(false);
+	                        setActivityPageCount(1);
+	                        setActivityHasMore(true);
+	                      }
+	                      onSelectCandidate(candidate.key);
+	                      setShowWalletChooser(false);
+	                    }}
+	                  >
                     <View style={styles.walletChooserOptionHeader}>
                       <Text style={styles.walletChooserOptionTitle}>{walletLabel(candidate.smartIndex)}</Text>
                       {active ? (

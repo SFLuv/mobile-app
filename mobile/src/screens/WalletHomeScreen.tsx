@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { AppTransaction } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
@@ -10,6 +10,7 @@ type Props = {
   ownerBadge?: string;
   selectedWalletLabel?: string;
   recentTransactions: AppTransaction[];
+  transactionsLoaded: boolean;
   onOpenSend: () => void;
   onOpenReceive: () => void;
   onOpenActivity: () => void;
@@ -33,6 +34,7 @@ export function WalletHomeScreen({
   ownerBadge,
   selectedWalletLabel,
   recentTransactions,
+  transactionsLoaded,
   onOpenSend,
   onOpenReceive,
   onOpenActivity,
@@ -102,14 +104,19 @@ export function WalletHomeScreen({
           </Pressable>
         </View>
 
-        {recentTransactions.length === 0 ? (
+        {!transactionsLoaded ? (
+          <View style={styles.emptyState}>
+            <ActivityIndicator size="small" color={palette.primaryStrong} />
+            <Text style={styles.emptyTitle}>loading transactions</Text>
+          </View>
+        ) : recentTransactions.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="time-outline" size={22} color={palette.textMuted} />
             <Text style={styles.emptyTitle}>No payments yet</Text>
             <Text style={styles.emptyBody}>Your latest sends and receives will appear here after the first transfer.</Text>
           </View>
         ) : (
-          recentTransactions.slice(0, 4).map((tx) => {
+          recentTransactions.slice(0, 5).map((tx) => {
             const incoming = tx.direction !== "send";
             return (
               <View key={tx.id} style={styles.txCard}>

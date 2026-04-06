@@ -10,6 +10,7 @@ type Props = {
   syncNotice?: string | null;
   preferences: AppPreferences;
   onUpdatePreferences: (next: AppPreferences) => void;
+  onLogout?: () => void;
 };
 
 function shortAddress(address: string): string {
@@ -66,7 +67,7 @@ function PreferenceRow({
   );
 }
 
-export function SettingsScreen({ user, activeWalletAddress, syncNotice, preferences, onUpdatePreferences }: Props) {
+export function SettingsScreen({ user, activeWalletAddress, syncNotice, preferences, onUpdatePreferences, onLogout }: Props) {
   const { palette, shadows } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
 
@@ -126,6 +127,12 @@ export function SettingsScreen({ user, activeWalletAddress, syncNotice, preferen
         <Text style={styles.body}>This is the smart account currently active in the app.</Text>
         <Text style={styles.walletAddress}>{activeWalletAddress ? shortAddress(activeWalletAddress) : "Wallet not loaded yet"}</Text>
       </View>
+
+      {onLogout ? (
+        <Pressable style={styles.logoutButton} onPress={onLogout}>
+          <Text style={styles.logoutButtonText}>Log out</Text>
+        </Pressable>
+      ) : null}
     </ScrollView>
   );
 }
@@ -239,6 +246,21 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       fontSize: 16,
       fontWeight: "900",
       fontFamily: "Courier",
+    },
+    logoutButton: {
+      minHeight: 52,
+      marginTop: spacing.sm,
+      borderRadius: radii.md,
+      backgroundColor: palette.primaryMuted,
+      borderWidth: 1,
+      borderColor: palette.primary,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    logoutButtonText: {
+      color: palette.danger,
+      fontWeight: "900",
+      fontSize: 15,
     },
   });
 }
