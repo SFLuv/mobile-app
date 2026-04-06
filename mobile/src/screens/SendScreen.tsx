@@ -20,9 +20,16 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
 import { AmountUnit, SendResult } from "../services/smartWallet";
+import { useCurrentLocation } from "../hooks/useCurrentLocation";
 import type { AppBackendClient } from "../services/appBackend";
 import { AppContact, AppLocation, AppWalletOwnerLookup } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
+import {
+  findNearestMerchantWithinThreshold,
+  formatDistanceLabel,
+  locationDistanceMeters,
+  sortLocationsByProximity,
+} from "../utils/location";
 import { parseSendTarget, parseSfluvUniversalLink, SfluvUniversalLink } from "../utils/universalLinks";
 
 type RecipientKind = "contact" | "merchant";
@@ -195,7 +202,7 @@ export function SendScreen({
   const [recipientInput, setRecipientInput] = useState("");
   const [amountInput, setAmountInput] = useState("");
   const [memoInput, setMemoInput] = useState("");
-  const [entryMode, setEntryMode] = useState<"scan" | "manual">("scan");
+  const [entryMode, setEntryMode] = useState<"scan" | "manual">("manual");
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanLocked, setScanLocked] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -205,12 +212,19 @@ export function SendScreen({
   const [recipientLookup, setRecipientLookup] = useState<AppWalletOwnerLookup | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [draftRecipient, setDraftRecipient] = useState<RecipientSuggestion | null>(null);
+  const { location: userLocation, loading: loadingLocation, permissionGranted: locationPermissionGranted } = useCurrentLocation(
+    entryMode === "manual",
+  );
 
   const parsed = useMemo(() => parseSendTarget(recipientInput), [recipientInput]);
+  const payableMerchants = useMemo(
+    () => sortLocationsByProximity(merchants.filter((merchant) => Boolean(merchant.payToAddress)), userLocation),
+    [merchants, userLocation],
+  );
 
   const merchantSuggestions = useMemo<RecipientSuggestion[]>(
     () =>
-      merchants
+      payableMerchants
         .filter((merchant) => merchant.payToAddress)
         .map((merchant) => ({
           key: `merchant:${merchant.id}`,
@@ -219,7 +233,7 @@ export function SendScreen({
           address: merchant.payToAddress!,
           subtitle: [merchant.type, merchant.city].filter(Boolean).join(" • "),
         })),
-    [merchants],
+    [payableMerchants],
   );
 
   const contactSuggestions = useMemo<RecipientSuggestion[]>(
@@ -285,6 +299,34 @@ export function SendScreen({
       })
       .slice(0, 6);
   }, [favoriteContacts, merchantSuggestions, query, suggestions]);
+
+  const displayedMerchants = useMemo(() => {
+    const excludedAddress = parsed?.recipient?.toLowerCase();
+    return payableMerchants
+      .filter((merchant) => {
+        if (!merchant.payToAddress) {
+          return false;
+        }
+        if (!excludedAddress) {
+          return true;
+        }
+        return merchant.payToAddress.toLowerCase() !== excludedAddress;
+      })
+      .slice(0, 5);
+  }, [parsed?.recipient, payableMerchants]);
+
+  const suggestedNearbyMerchant = useMemo(() => {
+    const nearest = findNearestMerchantWithinThreshold(payableMerchants, userLocation);
+    if (!nearest?.payToAddress) {
+      return null;
+    }
+
+    if (parsed?.recipient && nearest.payToAddress.toLowerCase() === parsed.recipient.toLowerCase()) {
+      return null;
+    }
+
+    return nearest;
+  }, [parsed?.recipient, payableMerchants, userLocation]);
 
   useEffect(() => {
     if (!backendClient || !parsed?.recipient) {
@@ -474,7 +516,7 @@ export function SendScreen({
     setRecipientInput("");
     setAmountInput("");
     setMemoInput("");
-    setEntryMode("scan");
+    setEntryMode("manual");
     setDraftRecipient(null);
     setFeedback(null);
     setTipPrompt(null);
@@ -593,15 +635,6 @@ export function SendScreen({
             <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <View style={styles.modeRow}>
                 <Pressable
-                  style={[styles.modeButton, entryMode === "scan" ? styles.modeButtonActive : undefined]}
-                  onPress={() => setEntryMode("scan")}
-                >
-                  <Ionicons name="scan-outline" size={16} color={entryMode === "scan" ? palette.primaryStrong : palette.textMuted} />
-                  <Text style={[styles.modeButtonText, entryMode === "scan" ? styles.modeButtonTextActive : undefined]}>
-                    Scan
-                  </Text>
-                </Pressable>
-                <Pressable
                   style={[styles.modeButton, entryMode === "manual" ? styles.modeButtonActive : undefined]}
                   onPress={() => setEntryMode("manual")}
                 >
@@ -612,6 +645,15 @@ export function SendScreen({
                   />
                   <Text style={[styles.modeButtonText, entryMode === "manual" ? styles.modeButtonTextActive : undefined]}>
                     Manual
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.modeButton, entryMode === "scan" ? styles.modeButtonActive : undefined]}
+                  onPress={() => setEntryMode("scan")}
+                >
+                  <Ionicons name="scan-outline" size={16} color={entryMode === "scan" ? palette.primaryStrong : palette.textMuted} />
+                  <Text style={[styles.modeButtonText, entryMode === "scan" ? styles.modeButtonTextActive : undefined]}>
+                    Scan
                   </Text>
                 </Pressable>
               </View>
@@ -646,6 +688,34 @@ export function SendScreen({
                   />
                   <Text style={styles.feedbackText}>{feedback.message}</Text>
                 </View>
+              ) : null}
+
+              {entryMode === "manual" && suggestedNearbyMerchant?.payToAddress ? (
+                <Pressable
+                  style={styles.highlightCard}
+                  onPress={() => {
+                    setRecipientInput(suggestedNearbyMerchant.payToAddress!);
+                    setDraftRecipient({
+                      key: `merchant:${suggestedNearbyMerchant.id}`,
+                      kind: "merchant",
+                      label: suggestedNearbyMerchant.name,
+                      address: suggestedNearbyMerchant.payToAddress!,
+                      subtitle: [suggestedNearbyMerchant.type, suggestedNearbyMerchant.city].filter(Boolean).join(" • "),
+                    });
+                  }}
+                >
+                  <View style={styles.highlightHeader}>
+                    <Text style={styles.highlightEyebrow}>Suggested nearby payment</Text>
+                    <Ionicons name="location" size={16} color={palette.primaryStrong} />
+                  </View>
+                  <Text style={styles.highlightTitle}>{suggestedNearbyMerchant.name}</Text>
+                  <Text style={styles.highlightMeta}>
+                    {formatDistanceLabel(locationDistanceMeters(suggestedNearbyMerchant, userLocation) ?? 0)}
+                  </Text>
+                  <Text style={styles.highlightBody}>
+                    {suggestedNearbyMerchant.street}, {suggestedNearbyMerchant.city}
+                  </Text>
+                </Pressable>
               ) : null}
 
               {entryMode === "scan" ? (
@@ -762,6 +832,69 @@ export function SendScreen({
                   </View>
                 ) : null}
               </View>
+
+              {entryMode === "manual" && displayedMerchants.length > 0 ? (
+                <View style={styles.card}>
+                  <View style={styles.merchantHeader}>
+                    <View style={styles.merchantHeaderTextWrap}>
+                      <Text style={styles.sectionLabel}>Nearby merchants</Text>
+                      <Text style={styles.sectionHint}>
+                        {userLocation
+                          ? "Closest merchants appear first."
+                          : loadingLocation
+                            ? "Checking your location for nearby merchants."
+                            : locationPermissionGranted
+                              ? "Loading nearby merchants."
+                              : "Enable location to sort merchants by distance."}
+                      </Text>
+                    </View>
+                    {onOpenMerchantList ? (
+                      <Pressable style={styles.moreButton} onPress={onOpenMerchantList}>
+                        <Text style={styles.moreButtonText}>More</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+
+                  <View style={styles.merchantList}>
+                    {displayedMerchants.map((merchant) => {
+                      const distance = locationDistanceMeters(merchant, userLocation);
+                      return (
+                        <Pressable
+                          key={merchant.id}
+                          style={styles.merchantOption}
+                          onPress={() => {
+                            if (!merchant.payToAddress) {
+                              return;
+                            }
+                            setRecipientInput(merchant.payToAddress);
+                            setDraftRecipient({
+                              key: `merchant:${merchant.id}`,
+                              kind: "merchant",
+                              label: merchant.name,
+                              address: merchant.payToAddress,
+                              subtitle: [merchant.type, merchant.city].filter(Boolean).join(" • "),
+                            });
+                          }}
+                        >
+                          <View style={styles.merchantOptionBody}>
+                            <Text style={styles.merchantOptionTitle}>{merchant.name}</Text>
+                            <Text style={styles.merchantOptionSubtitle}>
+                              {[merchant.type, merchant.city].filter(Boolean).join(" • ")}
+                            </Text>
+                            <Text style={styles.merchantOptionAddress}>{shortAddress(merchant.payToAddress || "")}</Text>
+                          </View>
+                          <View style={styles.merchantOptionMeta}>
+                            {distance !== null ? (
+                              <Text style={styles.merchantOptionDistance}>{formatDistanceLabel(distance)}</Text>
+                            ) : null}
+                            <Ionicons name="chevron-forward" size={16} color={palette.primaryStrong} />
+                          </View>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              ) : null}
 
               <View style={styles.amountCard}>
                 <View style={styles.amountRow}>
@@ -1125,6 +1258,40 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       color: palette.primaryStrong,
       fontWeight: "800",
     },
+    highlightCard: {
+      backgroundColor: palette.surface,
+      borderRadius: radii.xl,
+      borderWidth: 1.5,
+      borderColor: palette.primary,
+      padding: spacing.lg,
+      gap: spacing.xs,
+      ...shadows.card,
+    },
+    highlightHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+    },
+    highlightEyebrow: {
+      color: palette.primaryStrong,
+      fontSize: 12,
+      fontWeight: "800",
+      textTransform: "uppercase",
+      letterSpacing: 0.7,
+    },
+    highlightTitle: {
+      color: palette.text,
+      fontSize: 20,
+      fontWeight: "900",
+    },
+    highlightMeta: {
+      color: palette.primaryStrong,
+      fontWeight: "800",
+    },
+    highlightBody: {
+      color: palette.textMuted,
+      lineHeight: 20,
+    },
     card: {
       backgroundColor: palette.surface,
       borderRadius: radii.lg,
@@ -1146,6 +1313,11 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       fontWeight: "800",
       textTransform: "uppercase",
       letterSpacing: 0.7,
+    },
+    sectionHint: {
+      color: palette.textMuted,
+      lineHeight: 18,
+      marginTop: 4,
     },
     inlineToolButton: {
       flexDirection: "row",
@@ -1289,6 +1461,70 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     kindBadgeTextContact: {
       color: palette.textMuted,
+    },
+    merchantHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+      gap: spacing.sm,
+    },
+    merchantHeaderTextWrap: {
+      flex: 1,
+    },
+    moreButton: {
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: radii.pill,
+      backgroundColor: palette.surfaceStrong,
+      borderWidth: 1,
+      borderColor: palette.border,
+    },
+    moreButtonText: {
+      color: palette.primaryStrong,
+      fontWeight: "800",
+      fontSize: 12,
+    },
+    merchantList: {
+      gap: spacing.sm,
+      marginTop: spacing.sm,
+    },
+    merchantOption: {
+      borderRadius: radii.md,
+      backgroundColor: palette.surfaceStrong,
+      borderWidth: 1,
+      borderColor: palette.border,
+      padding: spacing.md,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: spacing.sm,
+    },
+    merchantOptionBody: {
+      flex: 1,
+      gap: 4,
+    },
+    merchantOptionTitle: {
+      color: palette.text,
+      fontWeight: "800",
+      fontSize: 15,
+    },
+    merchantOptionSubtitle: {
+      color: palette.textMuted,
+      fontSize: 13,
+    },
+    merchantOptionAddress: {
+      color: palette.primaryStrong,
+      fontWeight: "700",
+      fontSize: 12,
+    },
+    merchantOptionMeta: {
+      alignItems: "flex-end",
+      gap: 8,
+    },
+    merchantOptionDistance: {
+      color: palette.primaryStrong,
+      fontWeight: "700",
+      fontSize: 12,
     },
     amountCard: {
       backgroundColor: palette.surface,
