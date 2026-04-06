@@ -66,6 +66,12 @@ export function buildUniversalRequestLink(input: {
   return url.toString();
 }
 
+export function buildUniversalPayLink(input: {
+  address: string;
+}): string {
+  return `${normalizeOrigin(mobileConfig.appOrigin)}/pay/${ethers.utils.getAddress(input.address)}`;
+}
+
 export function parseSfluvUniversalLink(rawValue: string): SfluvUniversalLink | null {
   const trimmed = rawValue.trim();
   if (!trimmed) {

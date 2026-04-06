@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Ionicons } from "@expo/vector-icons";
 import {
   Linking,
   Modal,
   Pressable,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,12 +11,18 @@ import {
   View,
 } from "react-native";
 import MapView, { Marker, Region } from "react-native-maps";
+import { useCurrentLocation } from "../hooks/useCurrentLocation";
 import { AppLocation } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
+import { formatDistanceLabel, locationDistanceMeters, sortLocationsByProximity, UserLocation } from "../utils/location";
+
+type MapViewMode = "map" | "list";
 
 type Props = {
   locations: AppLocation[];
   onPayLocation?: (location: AppLocation) => void;
+  viewMode: MapViewMode;
+  onChangeViewMode: (viewMode: MapViewMode) => void;
 };
 
 type DisplayLocation = {
@@ -43,43 +49,6 @@ const DARK_MAP_STYLE = [
   { featureType: "transit", elementType: "geometry", stylers: [{ color: "#24313a" }] },
   { featureType: "water", elementType: "geometry", stylers: [{ color: "#0f3a4a" }] },
 ];
-
-function regionForLocations(locations: AppLocation[]): Region {
-  if (locations.length === 0) {
-    return INITIAL_REGION;
-  }
-
-  if (locations.length === 1) {
-    return {
-      latitude: locations[0].lat,
-      longitude: locations[0].lng,
-      latitudeDelta: 0.008,
-      longitudeDelta: 0.008,
-    };
-  }
-
-  let minLat = locations[0].lat;
-  let maxLat = locations[0].lat;
-  let minLng = locations[0].lng;
-  let maxLng = locations[0].lng;
-
-  for (const location of locations) {
-    minLat = Math.min(minLat, location.lat);
-    maxLat = Math.max(maxLat, location.lat);
-    minLng = Math.min(minLng, location.lng);
-    maxLng = Math.max(maxLng, location.lng);
-  }
-
-  const latitudeDelta = Math.max((maxLat - minLat) * 1.9, 0.008);
-  const longitudeDelta = Math.max((maxLng - minLng) * 1.9, 0.008);
-
-  return {
-    latitude: (minLat + maxLat) / 2,
-    longitude: (minLng + maxLng) / 2,
-    latitudeDelta,
-    longitudeDelta,
-  };
-}
 
 function distanceMeters(
   left: { lat: number; lng: number },
@@ -170,71 +139,101 @@ function normalizeWebsite(value: string): string {
   return `https://${trimmed}`;
 }
 
-function compareLocations(left: AppLocation, right: AppLocation): number {
-  return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+function regionForPoints(points: Array<{ latitude: number; longitude: number }>): Region {
+  if (points.length === 0) {
+    return INITIAL_REGION;
+  }
+
+  if (points.length === 1) {
+    return {
+      latitude: points[0].latitude,
+      longitude: points[0].longitude,
+      latitudeDelta: 0.01,
+      longitudeDelta: 0.01,
+    };
+  }
+
+  let minLat = points[0].latitude;
+  let maxLat = points[0].latitude;
+  let minLng = points[0].longitude;
+  let maxLng = points[0].longitude;
+
+  for (const point of points) {
+    minLat = Math.min(minLat, point.latitude);
+    maxLat = Math.max(maxLat, point.latitude);
+    minLng = Math.min(minLng, point.longitude);
+    maxLng = Math.max(maxLng, point.longitude);
+  }
+
+  return {
+    latitude: (minLat + maxLat) / 2,
+    longitude: (minLng + maxLng) / 2,
+    latitudeDelta: Math.max((maxLat - minLat) * 1.7, 0.01),
+    longitudeDelta: Math.max((maxLng - minLng) * 1.7, 0.01),
+  };
 }
 
-export function MapScreen({ locations, onPayLocation }: Props) {
+function coordinatesForDisplay(displayLocations: DisplayLocation[], userLocation: UserLocation | null) {
+  const points = displayLocations.map((entry) => ({
+    latitude: entry.latitude,
+    longitude: entry.longitude,
+  }));
+
+  if (userLocation) {
+    points.push({
+      latitude: userLocation.lat,
+      longitude: userLocation.lng,
+    });
+  }
+
+  return points;
+}
+
+export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode }: Props) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
   const [query, setQuery] = useState("");
   const [selectedLocation, setSelectedLocation] = useState<AppLocation | null>(null);
-  const [viewMode, setViewMode] = useState<"map" | "list">("map");
-  const mapRef = useRef<MapView | null>(null);
   const [mapReady, setMapReady] = useState(false);
+  const mapRef = useRef<MapView | null>(null);
+  const { location: userLocation } = useCurrentLocation(true);
 
   const filteredLocations = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     const matching = locations.filter((location) => {
       const haystack = `${location.name} ${location.description} ${location.city} ${location.street}`.toLowerCase();
-      const matchesQuery = normalized === "" || haystack.includes(normalized);
-      return matchesQuery;
+      return normalized === "" || haystack.includes(normalized);
     });
 
-    return matching.sort(compareLocations);
-  }, [locations, query]);
+    return sortLocationsByProximity(matching, userLocation);
+  }, [locations, query, userLocation]);
 
   const displayLocations = useMemo(() => spreadLocationsForDisplay(filteredLocations), [filteredLocations]);
-  const mapRegion = useMemo(
-    () =>
-      regionForLocations(
-        displayLocations.map((entry) => ({
-          ...entry.location,
-          lat: entry.latitude,
-          lng: entry.longitude,
-        })),
-      ),
-    [displayLocations],
+  const mapCoordinates = useMemo(
+    () => coordinatesForDisplay(displayLocations, userLocation),
+    [displayLocations, userLocation],
   );
+  const mapRegion = useMemo(() => regionForPoints(mapCoordinates), [mapCoordinates]);
 
   useEffect(() => {
-    if (!mapRef.current || !mapReady || displayLocations.length === 0) {
+    if (!mapRef.current || !mapReady || mapCoordinates.length === 0 || viewMode !== "map") {
       return;
     }
 
-    if (displayLocations.length === 1) {
+    if (mapCoordinates.length === 1) {
       mapRef.current.animateToRegion(mapRegion, 250);
       return;
     }
 
-    mapRef.current.fitToCoordinates(
-      displayLocations.map((entry) => ({
-        latitude: entry.latitude,
-        longitude: entry.longitude,
-      })),
-      {
-        edgePadding: { top: 64, right: 64, bottom: 64, left: 64 },
-        animated: true,
-      },
-    );
-  }, [displayLocations, mapReady, mapRegion]);
+    mapRef.current.fitToCoordinates(mapCoordinates, {
+      edgePadding: { top: 72, right: 72, bottom: 72, left: 72 },
+      animated: true,
+    });
+  }, [mapCoordinates, mapReady, mapRegion, viewMode]);
 
   return (
     <View style={styles.flex}>
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>Merchant Map</Text>
-        <Text style={styles.subtitle}>Browse approved merchants and jump straight into a payment.</Text>
-
+      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <TextInput
           style={styles.input}
           value={query}
@@ -243,25 +242,28 @@ export function MapScreen({ locations, onPayLocation }: Props) {
           placeholderTextColor={palette.textMuted}
         />
 
-        <View style={styles.viewModeRow}>
+        <View style={styles.segmentWrap}>
           <Pressable
-            style={[styles.viewModeButton, viewMode === "map" ? styles.viewModeButtonActive : undefined]}
-            onPress={() => setViewMode("map")}
+            style={[styles.segmentButton, viewMode === "map" ? styles.segmentButtonActive : undefined]}
+            onPress={() => onChangeViewMode("map")}
           >
-            <Ionicons name="map-outline" size={16} color={viewMode === "map" ? palette.primaryStrong : palette.textMuted} />
-            <Text style={[styles.viewModeButtonText, viewMode === "map" ? styles.viewModeButtonTextActive : undefined]}>
-              Map
-            </Text>
+            <Text style={[styles.segmentText, viewMode === "map" ? styles.segmentTextActive : undefined]}>Map View</Text>
           </Pressable>
           <Pressable
-            style={[styles.viewModeButton, viewMode === "list" ? styles.viewModeButtonActive : undefined]}
-            onPress={() => setViewMode("list")}
+            style={[styles.segmentButton, viewMode === "list" ? styles.segmentButtonActive : undefined]}
+            onPress={() => onChangeViewMode("list")}
           >
-            <Ionicons name="list-outline" size={16} color={viewMode === "list" ? palette.primaryStrong : palette.textMuted} />
-            <Text style={[styles.viewModeButtonText, viewMode === "list" ? styles.viewModeButtonTextActive : undefined]}>
-              List
-            </Text>
+            <Text style={[styles.segmentText, viewMode === "list" ? styles.segmentTextActive : undefined]}>List View</Text>
           </Pressable>
+        </View>
+
+        <View style={styles.resultsHeader}>
+          <Text style={styles.resultsTitle}>
+            {filteredLocations.length} merchant{filteredLocations.length === 1 ? "" : "s"}
+          </Text>
+          <Text style={styles.resultsSubtitle}>
+            {userLocation ? "Showing nearest merchants first." : "Enable location to sort by proximity."}
+          </Text>
         </View>
 
         {viewMode === "map" ? (
@@ -277,6 +279,15 @@ export function MapScreen({ locations, onPayLocation }: Props) {
               moveOnMarkerPress={false}
               customMapStyle={isDark ? DARK_MAP_STYLE : undefined}
             >
+              {userLocation ? (
+                <Marker
+                  coordinate={{ latitude: userLocation.lat, longitude: userLocation.lng }}
+                  title="You"
+                  description="Current location"
+                  pinColor={palette.success}
+                  tracksViewChanges={false}
+                />
+              ) : null}
               {displayLocations.map((entry) => (
                 <Marker
                   key={entry.location.id}
@@ -290,138 +301,142 @@ export function MapScreen({ locations, onPayLocation }: Props) {
               ))}
             </MapView>
           </View>
-        ) : null}
-
-        <View style={styles.resultsHeader}>
-          <Text style={styles.resultsTitle}>
-            {filteredLocations.length} merchant{filteredLocations.length === 1 ? "" : "s"}
-          </Text>
-          {viewMode === "map" ? <Text style={styles.resultsMeta}>Switch to List for a faster browse view.</Text> : null}
-        </View>
-
-        <View style={styles.listWrap}>
-          {filteredLocations.length === 0 ? (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>No merchants match that search.</Text>
-              <Text style={styles.emptyText}>Try clearing the search and browsing the full list.</Text>
-            </View>
-          ) : (
-            filteredLocations.map((location) => (
-              <View key={location.id} style={styles.card}>
-                <Pressable onPress={() => setSelectedLocation(location)}>
-                  <Text style={styles.cardTitle}>{location.name}</Text>
-                  <Text style={styles.cardSubtitle}>{formatLocationSubtitle(location)}</Text>
-                  <Text style={styles.cardAddress}>
-                    {location.street}, {location.city}
-                  </Text>
-                  {location.description ? (
-                    <Text style={styles.cardDescription} numberOfLines={2}>
-                      {location.description}
-                    </Text>
-                  ) : null}
-                </Pressable>
-
-                <View style={styles.cardFooter}>
-                  {!location.payToAddress ? <Text style={styles.cardMetaMuted}>Payment unavailable right now</Text> : null}
-                  <View style={styles.cardActionRow}>
-                    <Pressable style={styles.cardSecondaryButton} onPress={() => setSelectedLocation(location)}>
-                      <Text style={styles.cardSecondaryButtonText}>Details</Text>
-                    </Pressable>
-                    <Pressable
-                      style={[styles.cardPrimaryButton, !location.payToAddress ? styles.cardPrimaryButtonDisabled : undefined]}
-                      disabled={!location.payToAddress}
-                      onPress={() => onPayLocation?.(location)}
-                    >
-                      <Text style={styles.cardPrimaryButtonText}>Pay</Text>
-                    </Pressable>
-                  </View>
-                </View>
+        ) : (
+          <View style={styles.listWrap}>
+            {filteredLocations.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>No merchants match that search.</Text>
+                <Text style={styles.emptyText}>Try clearing the search and browsing the full list.</Text>
               </View>
-            ))
-          )}
-        </View>
+            ) : (
+              filteredLocations.map((location) => {
+                const distance = locationDistanceMeters(location, userLocation);
+                return (
+                  <View key={location.id} style={styles.card}>
+                    <Pressable onPress={() => setSelectedLocation(location)}>
+                      <Text style={styles.cardTitle}>{location.name}</Text>
+                      <Text style={styles.cardSubtitle}>{formatLocationSubtitle(location)}</Text>
+                      {distance !== null ? <Text style={styles.cardDistance}>{formatDistanceLabel(distance)}</Text> : null}
+                      <Text style={styles.cardAddress}>
+                        {location.street}, {location.city}
+                      </Text>
+                      {location.description ? (
+                        <Text style={styles.cardDescription} numberOfLines={2}>
+                          {location.description}
+                        </Text>
+                      ) : null}
+                    </Pressable>
+
+                    <View style={styles.cardFooter}>
+                      {!location.payToAddress ? <Text style={styles.cardMetaMuted}>Payment unavailable right now</Text> : null}
+                      <View style={styles.cardActionRow}>
+                        <Pressable style={styles.cardSecondaryButton} onPress={() => setSelectedLocation(location)}>
+                          <Text style={styles.cardSecondaryButtonText}>Details</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[styles.cardPrimaryButton, !location.payToAddress ? styles.cardPrimaryButtonDisabled : undefined]}
+                          disabled={!location.payToAddress}
+                          onPress={() => onPayLocation?.(location)}
+                        >
+                          <Text style={styles.cardPrimaryButtonText}>Pay</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
+        )}
       </ScrollView>
 
       <Modal visible={selectedLocation !== null} animationType="slide" onRequestClose={() => setSelectedLocation(null)}>
-        <ScrollView contentContainerStyle={styles.modalContainer}>
-          {selectedLocation ? (
-            <>
-              <Text style={styles.modalTitle}>{selectedLocation.name}</Text>
-              <Text style={styles.modalSubtitle}>{selectedLocation.type}</Text>
-              <Text style={styles.modalBody}>{selectedLocation.description}</Text>
-              <Text style={styles.modalMeta}>
-                {selectedLocation.street}, {selectedLocation.city}, {selectedLocation.state} {selectedLocation.zip}
-              </Text>
-              {selectedLocation.phone ? (
-                <Pressable onPress={() => void Linking.openURL(`tel:${selectedLocation.phone}`)}>
-                  <Text style={styles.modalLink}>Call {selectedLocation.phone}</Text>
+        <SafeAreaView style={styles.modalSafeArea}>
+          <ScrollView contentContainerStyle={styles.modalContainer}>
+            {selectedLocation ? (
+              <>
+                <Text style={styles.modalTitle}>{selectedLocation.name}</Text>
+                <Text style={styles.modalSubtitle}>{selectedLocation.type}</Text>
+                {locationDistanceMeters(selectedLocation, userLocation) !== null ? (
+                  <Text style={styles.modalDistance}>
+                    {formatDistanceLabel(locationDistanceMeters(selectedLocation, userLocation) ?? 0)}
+                  </Text>
+                ) : null}
+                <Text style={styles.modalBody}>{selectedLocation.description}</Text>
+                <Text style={styles.modalMeta}>
+                  {selectedLocation.street}, {selectedLocation.city}, {selectedLocation.state} {selectedLocation.zip}
+                </Text>
+                {selectedLocation.phone ? (
+                  <Pressable onPress={() => void Linking.openURL(`tel:${selectedLocation.phone}`)}>
+                    <Text style={styles.modalLink}>Call {selectedLocation.phone}</Text>
+                  </Pressable>
+                ) : null}
+                {selectedLocation.email ? (
+                  <Pressable onPress={() => void Linking.openURL(`mailto:${selectedLocation.email}`)}>
+                    <Text style={styles.modalLink}>Email {selectedLocation.email}</Text>
+                  </Pressable>
+                ) : null}
+                {selectedLocation.website ? (
+                  <Pressable onPress={() => void Linking.openURL(normalizeWebsite(selectedLocation.website))}>
+                    <Text style={styles.modalLink}>Open website</Text>
+                  </Pressable>
+                ) : null}
+                {!selectedLocation.payToAddress ? (
+                  <Text style={styles.modalMetaMuted}>Payment is not available for this merchant right now.</Text>
+                ) : null}
+                {selectedLocation.openingHours.length > 0 ? (
+                  <View style={styles.hoursCard}>
+                    {selectedLocation.openingHours.map((hours) => (
+                      <Text key={hours} style={styles.hoursText}>
+                        {hours}
+                      </Text>
+                    ))}
+                  </View>
+                ) : null}
+
+                <Pressable
+                  style={[styles.payMerchantButton, !selectedLocation.payToAddress ? styles.payMerchantButtonDisabled : undefined]}
+                  disabled={!selectedLocation.payToAddress}
+                  onPress={() => {
+                    onPayLocation?.(selectedLocation);
+                    setSelectedLocation(null);
+                  }}
+                >
+                  <Text style={styles.payMerchantButtonText}>Pay merchant</Text>
                 </Pressable>
-              ) : null}
-              {selectedLocation.email ? (
-                <Pressable onPress={() => void Linking.openURL(`mailto:${selectedLocation.email}`)}>
-                  <Text style={styles.modalLink}>Email {selectedLocation.email}</Text>
-                </Pressable>
-              ) : null}
-              {selectedLocation.website ? (
-                <Pressable onPress={() => void Linking.openURL(normalizeWebsite(selectedLocation.website))}>
-                  <Text style={styles.modalLink}>Open website</Text>
-                </Pressable>
-              ) : null}
-              {!selectedLocation.payToAddress ? (
-                <Text style={styles.modalMetaMuted}>Payment is not available for this merchant right now.</Text>
-              ) : null}
-              {selectedLocation.openingHours.length > 0 ? (
-                <View style={styles.hoursCard}>
-                  {selectedLocation.openingHours.map((hours) => (
-                    <Text key={hours} style={styles.hoursText}>
-                      {hours}
-                    </Text>
-                  ))}
+
+                <View style={styles.modalActions}>
+                  <Pressable
+                    style={styles.primaryButton}
+                    onPress={() => {
+                      const url =
+                        selectedLocation.mapsPage ||
+                        `https://www.google.com/maps/place/?q=place_id:${selectedLocation.googleId}`;
+                      void Linking.openURL(url);
+                    }}
+                  >
+                    <Text style={styles.primaryButtonText}>Google Maps</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.secondaryButton}
+                    onPress={() => {
+                      const url = `https://maps.apple.com/?ll=${selectedLocation.lat},${selectedLocation.lng}&q=${encodeURIComponent(selectedLocation.name)}`;
+                      void Linking.openURL(url);
+                    }}
+                  >
+                    <Text style={styles.secondaryButtonText}>Apple Maps</Text>
+                  </Pressable>
                 </View>
-              ) : null}
 
-              <Pressable
-                style={[styles.payMerchantButton, !selectedLocation.payToAddress ? styles.payMerchantButtonDisabled : undefined]}
-                disabled={!selectedLocation.payToAddress}
-                onPress={() => {
-                  onPayLocation?.(selectedLocation);
-                  setSelectedLocation(null);
-                }}
-              >
-                <Text style={styles.payMerchantButtonText}>Pay merchant</Text>
-              </Pressable>
-
-              <View style={styles.modalActions}>
-                <Pressable style={styles.secondaryButton} onPress={() => setSelectedLocation(null)}>
-                  <Text style={styles.secondaryButtonText}>Close</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.primaryButton}
-                  onPress={() => {
-                    const url = `https://maps.apple.com/?ll=${selectedLocation.lat},${selectedLocation.lng}&q=${encodeURIComponent(selectedLocation.name)}`;
-                    void Linking.openURL(url);
-                  }}
-                >
-                  <Text style={styles.primaryButtonText}>Apple Maps</Text>
-                </Pressable>
-              </View>
-
-              <View style={styles.modalActions}>
-                <Pressable
-                  style={styles.secondaryButton}
-                  onPress={() => {
-                    const url =
-                      selectedLocation.mapsPage ||
-                      `https://www.google.com/maps/place/?q=place_id:${selectedLocation.googleId}`;
-                    void Linking.openURL(url);
-                  }}
-                >
-                  <Text style={styles.secondaryButtonText}>Google Maps</Text>
-                </Pressable>
-              </View>
-            </>
-          ) : null}
-        </ScrollView>
+                <View style={styles.modalActions}>
+                  <Pressable style={styles.secondaryButton} onPress={() => setSelectedLocation(null)}>
+                    <Text style={styles.secondaryButtonText}>Close</Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : null}
+          </ScrollView>
+        </SafeAreaView>
       </Modal>
     </View>
   );
@@ -435,15 +450,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       gap: spacing.md,
       paddingBottom: 110,
     },
-    title: {
-      color: palette.text,
-      fontSize: 24,
-      fontWeight: "800",
-    },
-    subtitle: {
-      color: palette.textMuted,
-      lineHeight: 20,
-    },
     input: {
       backgroundColor: palette.surface,
       borderWidth: 1,
@@ -453,32 +459,29 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       paddingVertical: 12,
       color: palette.text,
     },
-    viewModeRow: {
+    segmentWrap: {
       flexDirection: "row",
       gap: spacing.sm,
+      backgroundColor: palette.surfaceStrong,
+      borderRadius: radii.lg,
+      padding: 6,
     },
-    viewModeButton: {
+    segmentButton: {
       flex: 1,
-      minHeight: 46,
-      borderRadius: radii.pill,
-      borderWidth: 1,
-      borderColor: palette.border,
-      backgroundColor: palette.surface,
+      borderRadius: radii.md,
+      paddingVertical: 12,
       alignItems: "center",
-      justifyContent: "center",
-      flexDirection: "row",
-      gap: 8,
     },
-    viewModeButtonActive: {
-      borderColor: palette.primary,
-      backgroundColor: palette.primarySoft,
+    segmentButtonActive: {
+      backgroundColor: palette.primary,
     },
-    viewModeButtonText: {
+    segmentText: {
       color: palette.textMuted,
       fontWeight: "800",
+      fontSize: 13,
     },
-    viewModeButtonTextActive: {
-      color: palette.primaryStrong,
+    segmentTextActive: {
+      color: palette.white,
     },
     resultsHeader: {
       gap: 4,
@@ -488,17 +491,16 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       fontSize: 18,
       fontWeight: "800",
     },
-    resultsMeta: {
+    resultsSubtitle: {
       color: palette.textMuted,
-      fontSize: 12,
-      fontWeight: "700",
+      lineHeight: 18,
     },
     mapWrap: {
       borderRadius: radii.lg,
       overflow: "hidden",
       borderWidth: 1,
       borderColor: palette.border,
-      height: 280,
+      height: 360,
       backgroundColor: palette.surfaceStrong,
     },
     map: {
@@ -526,6 +528,11 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       color: palette.primary,
       marginTop: 4,
       textTransform: "capitalize",
+    },
+    cardDistance: {
+      color: palette.primaryStrong,
+      marginTop: 6,
+      fontWeight: "700",
     },
     cardAddress: {
       color: palette.textMuted,
@@ -593,6 +600,10 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       color: palette.textMuted,
       lineHeight: 20,
     },
+    modalSafeArea: {
+      flex: 1,
+      backgroundColor: palette.background,
+    },
     modalContainer: {
       padding: spacing.lg,
       gap: spacing.md,
@@ -608,6 +619,10 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       color: palette.primary,
       fontWeight: "700",
       textTransform: "capitalize",
+    },
+    modalDistance: {
+      color: palette.primaryStrong,
+      fontWeight: "700",
     },
     modalBody: {
       color: palette.text,

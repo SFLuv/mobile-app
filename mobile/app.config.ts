@@ -73,6 +73,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   plugins: [
     "expo-asset",
     "expo-dev-client",
+    [
+      "expo-location",
+      {
+        locationWhenInUsePermission: "SFLUV Wallet uses your location to show nearby merchants and your position on the merchant map.",
+      },
+    ],
     "expo-notifications",
     "expo-secure-store",
     "expo-web-browser",

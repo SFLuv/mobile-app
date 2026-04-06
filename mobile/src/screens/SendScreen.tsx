@@ -61,6 +61,7 @@ type Props = {
   } | null;
   onDraftApplied?: () => void;
   onOpenUniversalLink?: (link: SfluvUniversalLink) => void;
+  onOpenMerchantList?: () => void;
   onCompleteFlow?: () => void;
 };
 
@@ -186,6 +187,7 @@ export function SendScreen({
   draft,
   onDraftApplied,
   onOpenUniversalLink,
+  onOpenMerchantList,
   onCompleteFlow,
 }: Props) {
   const { palette, shadows } = useAppTheme();
@@ -671,6 +673,13 @@ export function SendScreen({
                     <Text style={styles.scanHintTitle}>Supported QR types</Text>
                     <Text style={styles.scanHintBody}>SFLUV links, wallet addresses, and EIP-681 payment codes.</Text>
                   </View>
+
+                  {onOpenMerchantList ? (
+                    <Pressable style={styles.browseMerchantsButton} onPress={onOpenMerchantList}>
+                      <Ionicons name="storefront-outline" size={18} color={palette.primaryStrong} />
+                      <Text style={styles.browseMerchantsButtonText}>Browse merchant list</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
               ) : null}
 
@@ -1099,6 +1108,22 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     scanHintBody: {
       color: "rgba(255,255,255,0.78)",
       lineHeight: 20,
+    },
+    browseMerchantsButton: {
+      marginTop: spacing.sm,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: palette.primary,
+      backgroundColor: palette.surface,
+      paddingVertical: 12,
+    },
+    browseMerchantsButtonText: {
+      color: palette.primaryStrong,
+      fontWeight: "800",
     },
     card: {
       backgroundColor: palette.surface,
