@@ -392,6 +392,26 @@ export class AppBackendClient {
     }
   }
 
+  async updateWallet(wallet: AppWallet): Promise<void> {
+    if (typeof wallet.id !== "number") {
+      throw new Error("Wallet ID is required to update wallet settings.");
+    }
+
+    const response = await this.authFetch("/wallets", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: wallet.id,
+        owner: wallet.owner,
+        name: wallet.name,
+        is_hidden: wallet.isHidden,
+      }),
+    });
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to update wallet settings in the shared app backend");
+    }
+  }
+
   async ensureLegacyWallets(ownerAddress: string, candidates: Array<{ smartIndex: number; accountAddress: string }>): Promise<void> {
     const normalizedOwner = ethers.utils.getAddress(ownerAddress);
     const existing = await this.getWallets();

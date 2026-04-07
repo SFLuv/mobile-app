@@ -197,6 +197,39 @@ function walletLabel(smartIndex: number | undefined): string {
   return `Wallet ${smartIndex + 1}`;
 }
 
+function walletDisplayName(
+  wallets: AppWallet[],
+  address: string | undefined,
+  smartIndex: number | undefined,
+): string {
+  const normalizedAddress = normalizeWalletAddress(address);
+  if (normalizedAddress) {
+    const matchingWallet = wallets.find((wallet) => {
+      const candidateAddress = wallet.smartAddress ?? wallet.eoaAddress;
+      return candidateAddress.toLowerCase() === normalizedAddress.toLowerCase();
+    });
+    const namedWallet = matchingWallet?.name.trim();
+    if (namedWallet) {
+      return namedWallet;
+    }
+  }
+  return walletLabel(smartIndex);
+}
+
+function sortWalletsForSettings(wallets: AppWallet[]): AppWallet[] {
+  return [...wallets].sort((left, right) => {
+    if (left.isEoa !== right.isEoa) {
+      return left.isEoa ? 1 : -1;
+    }
+    const leftIndex = typeof left.smartIndex === "number" ? left.smartIndex : Number.POSITIVE_INFINITY;
+    const rightIndex = typeof right.smartIndex === "number" ? right.smartIndex : Number.POSITIVE_INFINITY;
+    if (leftIndex !== rightIndex) {
+      return leftIndex - rightIndex;
+    }
+    return (left.name || "").localeCompare(right.name || "", undefined, { sensitivity: "base" });
+  });
+}
+
 type StoredWalletPreferences = {
   defaultWalletAddress?: string;
   hiddenWalletAddresses: string[];
@@ -677,6 +710,7 @@ function WalletAppShellContent({
   const [activityTransactionsLoaded, setActivityTransactionsLoaded] = useState(false);
   const [contacts, setContacts] = useState<AppContact[]>([]);
   const [locations, setLocations] = useState<AppLocation[]>([]);
+  const [backendWallets, setBackendWallets] = useState<AppWallet[]>([]);
   const [merchantLabelsByAddress, setMerchantLabelsByAddress] = useState<Record<string, string>>({});
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [storedPushToken, setStoredPushToken] = useState<string | null>(null);
@@ -722,6 +756,14 @@ function WalletAppShellContent({
       return candidate.key === selectedKey || normalizedAddress === normalizedDefaultWallet;
     });
   }, [hiddenWalletSet, selectedCandidate?.key, walletCandidates, walletPreferences.defaultWalletAddress]);
+  const settingsWallets = useMemo(() => sortWalletsForSettings(backendWallets), [backendWallets]);
+  const selectedWalletLabel = useMemo(
+    () =>
+      selectedCandidate
+        ? walletDisplayName(backendWallets, selectedCandidate.accountAddress, selectedCandidate.smartIndex)
+        : undefined,
+    [backendWallets, selectedCandidate],
+  );
   const canChooseWallet = walletChooserCandidates.length > 1;
   const walletSyncReady = backendBootstrapReady && Boolean(appUser) && Boolean(runtime.discovery);
   const walletHistoryActive = tab === "wallet" && walletPane === "home";
@@ -857,6 +899,7 @@ function WalletAppShellContent({
     try {
       const profile = await backendClient.ensureUser();
       setAppUser(profile.user);
+      setBackendWallets(profile.wallets);
       onWalletPreferencesSync(profile.user, profile.wallets);
       setContacts(profile.contacts);
       setSyncNotice(null);
@@ -1427,6 +1470,36 @@ function WalletAppShellContent({
     setTab(returnTab ?? "wallet");
   };
 
+  const handleRenameWallet = async (wallet: AppWallet, nextName: string) => {
+    if (!backendClient) {
+      throw new Error("Backend not configured.");
+    }
+    await backendClient.updateWallet({
+      ...wallet,
+      name: nextName.trim(),
+    });
+    await loadAppProfile();
+  };
+
+  const handleSetWalletVisibility = async (wallet: AppWallet, shouldShow: boolean) => {
+    if (!backendClient) {
+      throw new Error("Backend not configured.");
+    }
+    await backendClient.updateWallet({
+      ...wallet,
+      isHidden: !shouldShow,
+    });
+    await loadAppProfile();
+  };
+
+  const handleSetPrimaryWallet = async (address: string) => {
+    if (!backendClient) {
+      throw new Error("Backend not configured.");
+    }
+    await backendClient.updatePrimaryWallet(address);
+    await loadAppProfile();
+  };
+
   const handleSend = async (recipient: string, amount: string, unit: "wei" | "token", memo: string) => {
     if (!runtime.service) {
       throw new Error("Wallet signer is not ready.");
@@ -1496,11 +1569,11 @@ function WalletAppShellContent({
           <Text style={styles.brand}>{activeTitle}</Text>
           <Text style={styles.topMeta}>
             {tab === "settings"
-              ? "Preferences and account details"
-              : tab === "contacts"
-                ? "People and wallets you trust"
-                : selectedCandidate
-                  ? `${walletLabel(selectedCandidate.smartIndex)} selected`
+                  ? "Preferences and account details"
+                : tab === "contacts"
+                  ? "People and wallets you trust"
+                : selectedWalletLabel
+                  ? `${selectedWalletLabel} selected`
                   : "Fast SFLUV payments"}
           </Text>
         </View>
@@ -1583,7 +1656,7 @@ function WalletAppShellContent({
                 balance={smartBalance}
                 smartAddress={smartAddress}
                 ownerBadge={ownerBadge}
-                selectedWalletLabel={walletLabel(selectedCandidate?.smartIndex)}
+                selectedWalletLabel={selectedWalletLabel}
                 recentTransactions={walletTransactions}
                 transactionsLoaded={walletTransactionsLoaded}
                 refreshing={refreshingHome}
@@ -1618,7 +1691,7 @@ function WalletAppShellContent({
               merchants={locations}
               merchantLabels={merchantLabelsByAddress}
               activeAddress={smartAddress}
-              selectedWalletLabel={walletLabel(selectedCandidate?.smartIndex)}
+              selectedWalletLabel={selectedWalletLabel}
               refreshing={refreshingActivity}
               loadingMore={loadingMoreActivity}
               canLoadMore={activityHasMore}
@@ -1697,10 +1770,16 @@ function WalletAppShellContent({
           ) : (
             <SettingsScreen
               user={appUser}
+              wallets={settingsWallets}
+              primaryWalletAddress={appUser?.primaryWalletAddress}
               activeWalletAddress={smartAddress}
+              activeWalletLabel={selectedWalletLabel}
               syncNotice={syncNotice}
               preferences={preferences}
               onLogout={onLogout}
+              onRenameWallet={handleRenameWallet}
+              onSetPrimaryWallet={handleSetPrimaryWallet}
+              onSetWalletVisibility={handleSetWalletVisibility}
               onUpdatePreferences={(next) => {
                 onUpdatePreferences(next);
               }}
@@ -1797,10 +1876,12 @@ function WalletAppShellContent({
 	                      }
 	                      onSelectCandidate(candidate.key);
 	                      setShowWalletChooser(false);
-	                    }}
+                    }}
 	                  >
                     <View style={styles.walletChooserOptionHeader}>
-                      <Text style={styles.walletChooserOptionTitle}>{walletLabel(candidate.smartIndex)}</Text>
+                      <Text style={styles.walletChooserOptionTitle}>
+                        {walletDisplayName(backendWallets, candidate.accountAddress, candidate.smartIndex)}
+                      </Text>
                       {active ? (
                         <View style={styles.walletChooserActiveBadge}>
                           <Ionicons name="checkmark" size={12} color={palette.white} />

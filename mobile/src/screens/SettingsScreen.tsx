@@ -1,21 +1,46 @@
-import React, { useMemo } from "react";
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
-import { AppUser } from "../types/app";
+import React, { useEffect, useMemo, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { AppUser, AppWallet } from "../types/app";
 import { AppPreferences, ThemePreference } from "../types/preferences";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 
 type Props = {
   user: AppUser | null;
+  wallets: AppWallet[];
+  primaryWalletAddress?: string;
   activeWalletAddress?: string;
+  activeWalletLabel?: string;
   syncNotice?: string | null;
   preferences: AppPreferences;
   onUpdatePreferences: (next: AppPreferences) => void;
+  onRenameWallet: (wallet: AppWallet, nextName: string) => Promise<void>;
+  onSetPrimaryWallet: (address: string) => Promise<void>;
+  onSetWalletVisibility: (wallet: AppWallet, shouldShow: boolean) => Promise<void>;
   onLogout?: () => void;
 };
 
 function shortAddress(address: string): string {
   if (address.length <= 16) return address;
   return `${address.slice(0, 8)}...${address.slice(-6)}`;
+}
+
+function walletFallbackName(wallet: AppWallet): string {
+  if (wallet.isEoa) {
+    return "Embedded owner wallet";
+  }
+  if (typeof wallet.smartIndex === "number") {
+    return `Wallet ${wallet.smartIndex + 1}`;
+  }
+  return "Wallet";
+}
+
+function walletDisplayName(wallet: AppWallet): string {
+  const trimmedName = wallet.name.trim();
+  return trimmedName || walletFallbackName(wallet);
+}
+
+function walletAddress(wallet: AppWallet): string {
+  return wallet.smartAddress ?? wallet.eoaAddress;
 }
 
 function ThemeOption({
@@ -67,7 +92,174 @@ function PreferenceRow({
   );
 }
 
-export function SettingsScreen({ user, activeWalletAddress, syncNotice, preferences, onUpdatePreferences, onLogout }: Props) {
+function WalletSettingsRow({
+  wallet,
+  isPrimary,
+  onRenameWallet,
+  onSetPrimaryWallet,
+  onSetWalletVisibility,
+}: {
+  wallet: AppWallet;
+  isPrimary: boolean;
+  onRenameWallet: (wallet: AppWallet, nextName: string) => Promise<void>;
+  onSetPrimaryWallet: (address: string) => Promise<void>;
+  onSetWalletVisibility: (wallet: AppWallet, shouldShow: boolean) => Promise<void>;
+}) {
+  const { palette } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
+  const [draftName, setDraftName] = useState(walletDisplayName(wallet));
+  const [saveState, setSaveState] = useState<{
+    nameSaving: boolean;
+    visibilitySaving: boolean;
+    primarySaving: boolean;
+    error: string;
+    success: string;
+  }>({
+    nameSaving: false,
+    visibilitySaving: false,
+    primarySaving: false,
+    error: "",
+    success: "",
+  });
+
+  useEffect(() => {
+    setDraftName(walletDisplayName(wallet));
+  }, [wallet.name, wallet.isEoa, wallet.smartIndex]);
+
+  const isVisible = !wallet.isHidden;
+  const editableName = draftName.trim();
+  const canPersistWallet = typeof wallet.id === "number";
+  const canSaveName = canPersistWallet && editableName.length > 0 && editableName !== walletDisplayName(wallet);
+  const address = walletAddress(wallet);
+
+  const setError = (message: string) => {
+    setSaveState((current) => ({ ...current, error: message, success: "" }));
+  };
+
+  const setSuccess = (message: string) => {
+    setSaveState((current) => ({ ...current, success: message, error: "" }));
+  };
+
+  return (
+    <View style={styles.walletRow}>
+      <View style={styles.walletRowHeader}>
+        <View style={styles.walletRowBadges}>
+          <View style={styles.walletTypePill}>
+            <Text style={styles.walletTypePillText}>{wallet.isEoa ? "Owner" : "Smart wallet"}</Text>
+          </View>
+          {isPrimary ? (
+            <View style={styles.primaryPill}>
+              <Text style={styles.primaryPillText}>Primary</Text>
+            </View>
+          ) : null}
+        </View>
+        <Text style={styles.walletRowAddress}>{shortAddress(address)}</Text>
+      </View>
+
+      <TextInput
+        style={styles.walletNameInput}
+        value={draftName}
+        onChangeText={(value) => {
+          setDraftName(value);
+          if (saveState.error || saveState.success) {
+            setSaveState((current) => ({ ...current, error: "", success: "" }));
+          }
+        }}
+        placeholder={walletFallbackName(wallet)}
+        placeholderTextColor={palette.textMuted}
+      />
+
+      <View style={styles.walletActionRow}>
+        <Pressable
+          style={[styles.secondaryButton, !canSaveName || saveState.nameSaving ? styles.buttonDisabled : undefined]}
+          disabled={!canSaveName || saveState.nameSaving}
+          onPress={() => {
+            setSaveState((current) => ({ ...current, nameSaving: true, error: "", success: "" }));
+            void onRenameWallet(wallet, editableName)
+              .then(() => {
+                setSaveState((current) => ({ ...current, nameSaving: false }));
+                setSuccess("Wallet name updated.");
+              })
+              .catch((error) => {
+                setSaveState((current) => ({ ...current, nameSaving: false }));
+                setError((error as Error)?.message || "Unable to update wallet name.");
+              });
+          }}
+        >
+          <Text style={styles.secondaryButtonText}>{saveState.nameSaving ? "Saving..." : "Save name"}</Text>
+        </Pressable>
+
+        <Pressable
+          style={[styles.primaryActionButton, (isPrimary || saveState.primarySaving) ? styles.buttonDisabled : undefined]}
+          disabled={isPrimary || saveState.primarySaving}
+          onPress={() => {
+            setSaveState((current) => ({ ...current, primarySaving: true, error: "", success: "" }));
+            void onSetPrimaryWallet(address)
+              .then(() => {
+                setSaveState((current) => ({ ...current, primarySaving: false }));
+                setSuccess("Primary wallet updated.");
+              })
+              .catch((error) => {
+                setSaveState((current) => ({ ...current, primarySaving: false }));
+                setError((error as Error)?.message || "Unable to update primary wallet.");
+              });
+          }}
+        >
+          <Text style={styles.primaryActionButtonText}>
+            {saveState.primarySaving ? "Saving..." : isPrimary ? "Primary wallet" : "Set primary"}
+          </Text>
+        </Pressable>
+      </View>
+
+      {!wallet.isEoa ? (
+        <View style={styles.visibilityRow}>
+          <View style={styles.preferenceCopy}>
+            <Text style={styles.preferenceTitle}>Show in wallet chooser</Text>
+            <Text style={styles.preferenceBody}>Controls whether this smart wallet appears in the mobile wallet picker.</Text>
+          </View>
+          <Switch
+            trackColor={{ false: palette.borderStrong, true: "#f5a59f" }}
+            thumbColor={isVisible ? palette.primaryStrong : palette.white}
+            value={isVisible}
+            disabled={saveState.visibilitySaving || !canPersistWallet}
+            onValueChange={(next) => {
+              setSaveState((current) => ({ ...current, visibilitySaving: true, error: "", success: "" }));
+              void onSetWalletVisibility(wallet, next)
+                .then(() => {
+                  setSaveState((current) => ({ ...current, visibilitySaving: false }));
+                  setSuccess("Wallet display updated.");
+                })
+                .catch((error) => {
+                  setSaveState((current) => ({ ...current, visibilitySaving: false }));
+                  setError((error as Error)?.message || "Unable to update wallet visibility.");
+                });
+            }}
+          />
+        </View>
+      ) : (
+        <Text style={styles.walletHelperText}>The owner wallet is used for account bootstrap and is not shown in the smart-wallet chooser.</Text>
+      )}
+
+      {saveState.error ? <Text style={styles.inlineError}>{saveState.error}</Text> : null}
+      {saveState.success ? <Text style={styles.inlineSuccess}>{saveState.success}</Text> : null}
+    </View>
+  );
+}
+
+export function SettingsScreen({
+  user,
+  wallets,
+  primaryWalletAddress,
+  activeWalletAddress,
+  activeWalletLabel,
+  syncNotice,
+  preferences,
+  onUpdatePreferences,
+  onRenameWallet,
+  onSetPrimaryWallet,
+  onSetWalletVisibility,
+  onLogout,
+}: Props) {
   const { palette, shadows } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
 
@@ -75,11 +267,13 @@ export function SettingsScreen({ user, activeWalletAddress, syncNotice, preferen
     onUpdatePreferences({ ...preferences, themePreference });
   };
 
+  const normalizedPrimaryWallet = primaryWalletAddress?.toLowerCase();
+
   return (
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.heroCard}>
         <Text style={styles.title}>Settings</Text>
-        <Text style={styles.subtitle}>App preferences, local device behavior, and the account you currently have open.</Text>
+        <Text style={styles.subtitle}>App preferences, wallet defaults, and display settings for the account you currently have open.</Text>
       </View>
 
       {syncNotice ? (
@@ -91,7 +285,7 @@ export function SettingsScreen({ user, activeWalletAddress, syncNotice, preferen
 
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Appearance</Text>
-        <Text style={styles.body}>Theme preference is saved on this device and now updates the active app shell live.</Text>
+        <Text style={styles.body}>System now follows your phone preference, while light and dark remain manual overrides on this device.</Text>
         <View style={styles.themeRow}>
           <ThemeOption label="System" active={preferences.themePreference === "system"} onPress={() => applyThemePreference("system")} />
           <ThemeOption label="Light" active={preferences.themePreference === "light"} onPress={() => applyThemePreference("light")} />
@@ -125,7 +319,27 @@ export function SettingsScreen({ user, activeWalletAddress, syncNotice, preferen
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Current wallet</Text>
         <Text style={styles.body}>This is the smart account currently active in the app.</Text>
+        {activeWalletLabel ? <Text style={styles.currentWalletLabel}>{activeWalletLabel}</Text> : null}
         <Text style={styles.walletAddress}>{activeWalletAddress ? shortAddress(activeWalletAddress) : "Wallet not loaded yet"}</Text>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Wallet settings</Text>
+        <Text style={styles.body}>Wallet names come from the shared backend. You can rename them here, choose your primary wallet, and decide which smart wallets appear in the chooser.</Text>
+        {wallets.length === 0 ? (
+          <Text style={styles.meta}>No wallets are loaded yet.</Text>
+        ) : (
+          wallets.map((wallet) => (
+            <WalletSettingsRow
+              key={`${wallet.id ?? walletAddress(wallet)}:${walletAddress(wallet)}`}
+              wallet={wallet}
+              isPrimary={walletAddress(wallet).toLowerCase() === normalizedPrimaryWallet}
+              onRenameWallet={onRenameWallet}
+              onSetPrimaryWallet={onSetPrimaryWallet}
+              onSetWalletVisibility={onSetWalletVisibility}
+            />
+          ))
+        )}
       </View>
 
       {onLogout ? (
@@ -199,6 +413,11 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       color: palette.textMuted,
       lineHeight: 20,
     },
+    currentWalletLabel: {
+      color: palette.text,
+      fontSize: 18,
+      fontWeight: "800",
+    },
     themeRow: {
       flexDirection: "row",
       gap: 8,
@@ -246,6 +465,120 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       fontSize: 16,
       fontWeight: "900",
       fontFamily: "Courier",
+    },
+    walletRow: {
+      gap: spacing.sm,
+      paddingTop: spacing.sm,
+      borderTopWidth: 1,
+      borderTopColor: palette.border,
+    },
+    walletRowHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    walletRowBadges: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      flexWrap: "wrap",
+    },
+    walletTypePill: {
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: radii.pill,
+      backgroundColor: palette.surfaceStrong,
+      borderWidth: 1,
+      borderColor: palette.border,
+    },
+    walletTypePillText: {
+      color: palette.textMuted,
+      fontWeight: "700",
+      fontSize: 12,
+    },
+    primaryPill: {
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: radii.pill,
+      backgroundColor: palette.primarySoft,
+      borderWidth: 1,
+      borderColor: palette.primary,
+    },
+    primaryPillText: {
+      color: palette.primaryStrong,
+      fontWeight: "800",
+      fontSize: 12,
+    },
+    walletRowAddress: {
+      color: palette.textMuted,
+      fontSize: 13,
+      fontWeight: "700",
+    },
+    walletNameInput: {
+      borderWidth: 1,
+      borderColor: palette.border,
+      borderRadius: radii.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: 12,
+      backgroundColor: palette.surfaceStrong,
+      color: palette.text,
+      fontSize: 16,
+      fontWeight: "700",
+    },
+    walletActionRow: {
+      flexDirection: "row",
+      gap: 10,
+    },
+    secondaryButton: {
+      flex: 1,
+      minHeight: 46,
+      borderRadius: radii.md,
+      backgroundColor: palette.surfaceStrong,
+      borderWidth: 1,
+      borderColor: palette.border,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 12,
+    },
+    secondaryButtonText: {
+      color: palette.text,
+      fontWeight: "800",
+    },
+    primaryActionButton: {
+      flex: 1,
+      minHeight: 46,
+      borderRadius: radii.md,
+      backgroundColor: palette.primary,
+      borderWidth: 1,
+      borderColor: palette.primary,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 12,
+    },
+    primaryActionButtonText: {
+      color: palette.white,
+      fontWeight: "900",
+    },
+    buttonDisabled: {
+      opacity: 0.55,
+    },
+    visibilityRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.md,
+    },
+    walletHelperText: {
+      color: palette.textMuted,
+      lineHeight: 20,
+    },
+    inlineError: {
+      color: palette.danger,
+      lineHeight: 20,
+    },
+    inlineSuccess: {
+      color: palette.success,
+      lineHeight: 20,
     },
     logoutButton: {
       minHeight: 52,

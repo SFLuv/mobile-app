@@ -9,7 +9,7 @@ import {
   View,
 } from "react-native";
 import { MerchantApplicationDraft, MerchantPlaceCandidate } from "../types/app";
-import { palette, radii, spacing } from "../theme";
+import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { getMerchantPlaceDetails, searchMerchantPlaces } from "../services/googlePlaces";
 
 type Props = {
@@ -38,6 +38,8 @@ const DRAFT_TEMPLATE: MerchantApplicationDraft = {
 };
 
 export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
+  const { palette, shadows } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<MerchantPlaceCandidate[]>([]);
   const [draft, setDraft] = useState<MerchantApplicationDraft>(DRAFT_TEMPLATE);
@@ -265,94 +267,97 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    padding: spacing.lg,
-    gap: spacing.md,
-    paddingBottom: 100,
-    backgroundColor: palette.background,
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  back: {
-    color: palette.primary,
-    fontWeight: "700",
-  },
-  backSpacer: {
-    width: 32,
-  },
-  title: {
-    color: palette.text,
-    fontSize: 24,
-    fontWeight: "900",
-  },
-  subtitle: {
-    color: palette.textMuted,
-    lineHeight: 20,
-  },
-  card: {
-    backgroundColor: palette.surface,
-    borderWidth: 1,
-    borderColor: palette.border,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
-  sectionTitle: {
-    color: palette.text,
-    fontWeight: "800",
-    fontSize: 18,
-  },
-  input: {
-    backgroundColor: palette.white,
-    borderWidth: 1,
-    borderColor: palette.border,
-    borderRadius: radii.md,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    color: palette.text,
-  },
-  textArea: {
-    minHeight: 100,
-    textAlignVertical: "top",
-  },
-  primaryButton: {
-    backgroundColor: palette.primary,
-    borderRadius: radii.md,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  primaryButtonText: {
-    color: palette.white,
-    fontWeight: "800",
-  },
-  selectedText: {
-    color: palette.textMuted,
-    lineHeight: 20,
-  },
-  resultCard: {
-    backgroundColor: palette.white,
-    borderWidth: 1,
-    borderColor: palette.border,
-    borderRadius: radii.md,
-    padding: 12,
-  },
-  resultTitle: {
-    color: palette.text,
-    fontWeight: "800",
-  },
-  resultMeta: {
-    color: palette.textMuted,
-    marginTop: 4,
-  },
-  error: {
-    color: palette.danger,
-    lineHeight: 20,
-  },
-  disabled: {
-    opacity: 0.7,
-  },
-});
+function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) {
+  return StyleSheet.create({
+    container: {
+      padding: spacing.lg,
+      gap: spacing.md,
+      paddingBottom: 100,
+      backgroundColor: palette.background,
+    },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    back: {
+      color: palette.primary,
+      fontWeight: "700",
+    },
+    backSpacer: {
+      width: 32,
+    },
+    title: {
+      color: palette.text,
+      fontSize: 24,
+      fontWeight: "900",
+    },
+    subtitle: {
+      color: palette.textMuted,
+      lineHeight: 20,
+    },
+    card: {
+      backgroundColor: palette.surface,
+      borderWidth: 1,
+      borderColor: palette.border,
+      borderRadius: radii.md,
+      padding: spacing.md,
+      gap: spacing.sm,
+      ...shadows.soft,
+    },
+    sectionTitle: {
+      color: palette.text,
+      fontWeight: "800",
+      fontSize: 18,
+    },
+    input: {
+      backgroundColor: palette.surfaceMuted,
+      borderWidth: 1,
+      borderColor: palette.border,
+      borderRadius: radii.md,
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      color: palette.text,
+    },
+    textArea: {
+      minHeight: 100,
+      textAlignVertical: "top",
+    },
+    primaryButton: {
+      backgroundColor: palette.primary,
+      borderRadius: radii.md,
+      paddingVertical: 14,
+      alignItems: "center",
+    },
+    primaryButtonText: {
+      color: palette.white,
+      fontWeight: "800",
+    },
+    selectedText: {
+      color: palette.textMuted,
+      lineHeight: 20,
+    },
+    resultCard: {
+      backgroundColor: palette.surfaceMuted,
+      borderWidth: 1,
+      borderColor: palette.border,
+      borderRadius: radii.md,
+      padding: 12,
+    },
+    resultTitle: {
+      color: palette.text,
+      fontWeight: "800",
+    },
+    resultMeta: {
+      color: palette.textMuted,
+      marginTop: 4,
+    },
+    error: {
+      color: palette.danger,
+      lineHeight: 20,
+    },
+    disabled: {
+      opacity: 0.7,
+    },
+  });
+}

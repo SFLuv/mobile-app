@@ -68,14 +68,18 @@ export function findNearestMerchantWithinThreshold(
   }
 
   const thresholdMeters = thresholdFeet / FEET_PER_METER;
-  const nearest = sortLocationsByProximity(locations, userLocation)[0];
-  if (!nearest) {
-    return null;
-  }
+  const nearest = [...locations]
+    .map((location) => ({
+      location,
+      distance: locationDistanceMeters(location, userLocation) ?? Number.POSITIVE_INFINITY,
+    }))
+    .filter((entry) => Number.isFinite(entry.distance) && entry.distance <= thresholdMeters)
+    .sort((left, right) => {
+      if (left.distance !== right.distance) {
+        return left.distance - right.distance;
+      }
+      return compareLocationsByName(left.location, right.location);
+    })[0];
 
-  const distance = locationDistanceMeters(nearest, userLocation);
-  if (distance === null || distance > thresholdMeters) {
-    return null;
-  }
-  return nearest;
+  return nearest?.location ?? null;
 }
