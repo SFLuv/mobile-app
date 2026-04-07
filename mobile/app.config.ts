@@ -41,6 +41,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   android: {
     package: "org.sfluv.wallet",
+    config: {
+      googleMaps: {
+        apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() || "",
+      },
+    },
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
       backgroundColor: "#f6f0e2",
