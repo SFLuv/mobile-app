@@ -451,6 +451,17 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
                   >
                     <Text style={styles.primaryButtonText}>Google Maps</Text>
                   </Pressable>
+                  {Platform.OS === "ios" ? (
+                    <Pressable
+                      style={styles.secondaryButton}
+                      onPress={() => {
+                        const url = `https://maps.apple.com/?ll=${selectedLocation.lat},${selectedLocation.lng}&q=${encodeURIComponent(selectedLocation.name)}`;
+                        void Linking.openURL(url);
+                      }}
+                    >
+                      <Text style={styles.secondaryButtonText}>Apple Maps</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
               </>
             ) : null}
