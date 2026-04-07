@@ -463,6 +463,7 @@ export function SendScreen({
     if (status !== "granted") {
       const req = await requestPermission();
       if (!req.granted) {
+        setEntryMode("manual");
         setFeedback({
           tone: "danger",
           message: "Camera permission is required to scan payment QRs.",
@@ -472,6 +473,11 @@ export function SendScreen({
     }
     setScanLocked(false);
     setScannerOpen(true);
+  };
+
+  const activateScanner = () => {
+    setEntryMode("scan");
+    void openScanner();
   };
 
   const pasteClipboard = async () => {
@@ -651,7 +657,7 @@ export function SendScreen({
                 </Pressable>
                 <Pressable
                   style={[styles.modeButton, entryMode === "scan" ? styles.modeButtonActive : undefined]}
-                  onPress={() => setEntryMode("scan")}
+                  onPress={activateScanner}
                 >
                   <Ionicons name="scan-outline" size={16} color={entryMode === "scan" ? palette.primaryStrong : palette.textMuted} />
                   <Text style={[styles.modeButtonText, entryMode === "scan" ? styles.modeButtonTextActive : undefined]}>
@@ -689,41 +695,6 @@ export function SendScreen({
                     }
                   />
                   <Text style={styles.feedbackText}>{feedback.message}</Text>
-                </View>
-              ) : null}
-
-              {entryMode === "scan" ? (
-                <View style={styles.scanHeroCard}>
-                  <View style={styles.scanHeroIcon}>
-                    <Ionicons name="scan-outline" size={24} color={palette.white} />
-                  </View>
-                  <Text style={styles.scanHeroTitle}>Scan a payment QR</Text>
-                  <Text style={styles.scanHeroBody}>
-                    Use the camera first, then review and send once the recipient and amount are filled in.
-                  </Text>
-
-                  <View style={styles.scanHeroActions}>
-                    <Pressable style={styles.scanPrimaryButton} onPress={openScanner}>
-                      <Ionicons name="camera-outline" size={18} color={palette.white} />
-                      <Text style={styles.scanPrimaryButtonText}>Open camera</Text>
-                    </Pressable>
-                    <Pressable style={styles.scanSecondaryButton} onPress={() => void pasteClipboard()}>
-                      <Ionicons name="clipboard-outline" size={18} color={palette.primaryStrong} />
-                      <Text style={styles.scanSecondaryButtonText}>Paste code</Text>
-                    </Pressable>
-                  </View>
-
-                  <View style={styles.scanHintCard}>
-                    <Text style={styles.scanHintTitle}>Supported QR types</Text>
-                    <Text style={styles.scanHintBody}>SFLUV links, wallet addresses, and EIP-681 payment codes.</Text>
-                  </View>
-
-                  {onOpenMerchantList ? (
-                    <Pressable style={styles.browseMerchantsButton} onPress={onOpenMerchantList}>
-                      <Ionicons name="storefront-outline" size={18} color={palette.primaryStrong} />
-                      <Text style={styles.browseMerchantsButtonText}>Browse merchant list</Text>
-                    </Pressable>
-                  ) : null}
                 </View>
               ) : null}
 
@@ -830,7 +801,7 @@ export function SendScreen({
                 </View>
               </View>
 
-              {entryMode === "manual" && displayedMerchants.length > 0 ? (
+              {entryMode === "manual" && !parsed && displayedMerchants.length > 0 ? (
                 <View style={styles.card}>
                   <View style={styles.merchantHeader}>
                     <View style={styles.merchantHeaderTextWrap}>
@@ -933,6 +904,7 @@ export function SendScreen({
         onRequestClose={() => {
           setScannerOpen(false);
           setScanLocked(false);
+          setEntryMode("manual");
         }}
       >
         <View style={styles.scannerScreen}>
@@ -943,6 +915,7 @@ export function SendScreen({
               onPress={() => {
                 setScannerOpen(false);
                 setScanLocked(false);
+                setEntryMode("manual");
               }}
             >
               <Ionicons name="close" size={22} color={palette.primaryStrong} />
@@ -967,6 +940,7 @@ export function SendScreen({
                 if (universalLink?.type === "redeem") {
                   onOpenUniversalLink?.(universalLink);
                   setScannerOpen(false);
+                  setEntryMode("manual");
                   setFeedback({
                     tone: "success",
                     message: "Redeem code scanned.",
@@ -994,6 +968,7 @@ export function SendScreen({
                 }
 
                 setScannerOpen(false);
+                setEntryMode("manual");
               }}
             />
             <View pointerEvents="none" style={styles.scannerOverlay}>

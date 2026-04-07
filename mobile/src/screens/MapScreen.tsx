@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Ionicons } from "@expo/vector-icons";
 import {
   Linking,
   Modal,
@@ -278,16 +279,8 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
               toolbarEnabled={false}
               moveOnMarkerPress={false}
               customMapStyle={isDark ? DARK_MAP_STYLE : undefined}
+              showsUserLocation
             >
-              {userLocation ? (
-                <Marker
-                  coordinate={{ latitude: userLocation.lat, longitude: userLocation.lng }}
-                  title="You"
-                  description="Current location"
-                  pinColor={palette.success}
-                  tracksViewChanges={false}
-                />
-              ) : null}
               {displayLocations.map((entry) => (
                 <Marker
                   key={entry.location.id}
@@ -355,8 +348,15 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
           <ScrollView contentContainerStyle={styles.modalContainer}>
             {selectedLocation ? (
               <>
-                <Text style={styles.modalTitle}>{selectedLocation.name}</Text>
-                <Text style={styles.modalSubtitle}>{selectedLocation.type}</Text>
+                <View style={styles.modalHeader}>
+                  <View style={styles.modalHeaderCopy}>
+                    <Text style={styles.modalTitle}>{selectedLocation.name}</Text>
+                    <Text style={styles.modalSubtitle}>{selectedLocation.type}</Text>
+                  </View>
+                  <Pressable style={styles.modalCloseButton} onPress={() => setSelectedLocation(null)}>
+                    <Ionicons name="close" size={20} color={palette.primaryStrong} />
+                  </Pressable>
+                </View>
                 {locationDistanceMeters(selectedLocation, userLocation) !== null ? (
                   <Text style={styles.modalDistance}>
                     {formatDistanceLabel(locationDistanceMeters(selectedLocation, userLocation) ?? 0)}
@@ -425,12 +425,6 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
                     }}
                   >
                     <Text style={styles.secondaryButtonText}>Apple Maps</Text>
-                  </Pressable>
-                </View>
-
-                <View style={styles.modalActions}>
-                  <Pressable style={styles.secondaryButton} onPress={() => setSelectedLocation(null)}>
-                    <Text style={styles.secondaryButtonText}>Close</Text>
                   </Pressable>
                 </View>
               </>
@@ -609,6 +603,26 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       gap: spacing.md,
       backgroundColor: palette.background,
       flexGrow: 1,
+    },
+    modalHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+      gap: spacing.md,
+    },
+    modalHeaderCopy: {
+      flex: 1,
+      gap: 4,
+    },
+    modalCloseButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: palette.surface,
+      borderWidth: 1,
+      borderColor: palette.border,
     },
     modalTitle: {
       color: palette.text,

@@ -83,7 +83,7 @@ export function WalletHomeScreen({
 }: Props) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
-  const refreshAccent = palette.primaryStrong;
+  const refreshAccent = palette.primary;
 
   const contactNameByAddress = useMemo(() => {
     const next: Record<string, string> = {};
@@ -117,6 +117,8 @@ export function WalletHomeScreen({
           tintColor={refreshAccent}
           colors={[refreshAccent]}
           progressBackgroundColor={isDark ? palette.backgroundMuted : palette.surfaceStrong}
+          title={refreshing ? "Refreshing…" : undefined}
+          titleColor={refreshAccent}
         />
       }
       showsVerticalScrollIndicator={false}

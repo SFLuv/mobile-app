@@ -79,7 +79,7 @@ export function ActivityScreen({
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const [selectedTransaction, setSelectedTransaction] = useState<TransactionDetailPayload | null>(null);
-  const refreshAccent = palette.primaryStrong;
+  const refreshAccent = palette.primary;
 
   const contactNameByAddress = useMemo(() => {
     const next: Record<string, string> = {};
@@ -131,6 +131,8 @@ export function ActivityScreen({
             tintColor={refreshAccent}
             colors={[refreshAccent]}
             progressBackgroundColor={isDark ? palette.backgroundMuted : palette.surfaceStrong}
+            title={refreshing ? "Refreshing…" : undefined}
+            titleColor={refreshAccent}
           />
         }
         showsVerticalScrollIndicator={false}
