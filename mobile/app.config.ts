@@ -54,17 +54,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           {
             scheme: "https",
             host: "app.sfluv.org",
-            pathPrefix: "/pay",
-          },
-          {
-            scheme: "https",
-            host: "app.sfluv.org",
-            pathPrefix: "/redeem",
-          },
-          {
-            scheme: "https",
-            host: "app.sfluv.org",
-            pathPrefix: "/request",
+            pathPrefix: "/",
           },
         ],
       },

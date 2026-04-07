@@ -106,7 +106,6 @@ export function ReceiveScreen({ accountAddress, onRedeemCodeScanned }: Props) {
             </Pressable>
           </View>
           <Text style={styles.subtitle}>Show this QR or share the link to request payment instantly.</Text>
-          <Text style={styles.heroCaption}>Scanning a faucet reward QR will redeem it into this wallet.</Text>
         </View>
         {scanError ? (
           <View style={styles.scanErrorCard}>
@@ -194,7 +193,7 @@ export function ReceiveScreen({ accountAddress, onRedeemCodeScanned }: Props) {
         }}
       >
         <View style={styles.scannerScreen}>
-          <View style={[styles.scannerHeader, { paddingTop: topInset + spacing.sm }]}>
+          <View style={[styles.scannerHeader, { paddingTop: topInset + spacing.xl }]}>
             <Text style={styles.scannerTitle}>Scan reward QR</Text>
             <Pressable
               style={styles.scannerClose}
@@ -293,10 +292,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     subtitle: {
       color: "rgba(255,255,255,0.78)",
       lineHeight: 21,
-    },
-    heroCaption: {
-      color: "rgba(255,255,255,0.68)",
-      lineHeight: 20,
     },
     redeemButton: {
       minHeight: 42,

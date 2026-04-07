@@ -260,6 +260,21 @@ function parseCitizenWalletRequestLink(rawValue: string): SendTarget | null {
   };
 }
 
+function parseHostedRequestLink(rawValue: string): Extract<SfluvUniversalLink, { type: "request" }> | null {
+  const parsed = parseCitizenWalletRequestLink(rawValue);
+  if (!parsed) {
+    return null;
+  }
+
+  return {
+    type: "request",
+    address: parsed.recipient,
+    amount: parsed.amount,
+    memo: parsed.memo,
+    href: rawValue.trim(),
+  };
+}
+
 function normalizeOrigin(rawOrigin: string): string {
   return rawOrigin.trim().replace(/\/+$/, "");
 }
@@ -338,6 +353,11 @@ export function parseSfluvUniversalLink(rawValue: string): SfluvUniversalLink | 
       code: legacyRedeemCode,
       href: trimmed,
     };
+  }
+
+  const hostedRequestLink = parseHostedRequestLink(trimmed);
+  if (hostedRequestLink) {
+    return hostedRequestLink;
   }
 
   if (parsedURL.protocol !== "https:" || parsedURL.host.toLowerCase() !== configuredURL.host.toLowerCase()) {

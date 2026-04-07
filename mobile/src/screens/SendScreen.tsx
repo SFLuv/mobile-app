@@ -985,10 +985,7 @@ export function SendScreen({
                   setAmountInput(scanned.amount ?? "");
                   setMemoInput(scanned.memo ?? "");
                   setEntryMode("manual");
-                  setFeedback({
-                    tone: "success",
-                    message: "QR scanned. Review the payment before sending.",
-                  });
+                  setFeedback(null);
                 } else {
                   setRecipientInput(result.data);
                   setEntryMode("manual");
