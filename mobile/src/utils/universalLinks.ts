@@ -32,6 +32,14 @@ export type SendTarget = {
   amountUnit: AmountUnit;
 };
 
+function aliasHost(): string {
+  try {
+    return new URL(normalizeOrigin(mobileConfig.appOrigin)).host;
+  } catch {
+    return "wallet.berachain.sfluv.org";
+  }
+}
+
 function normalizeBase64Url(rawValue: string): string {
   const normalized = rawValue.trim().replace(/-/g, "+").replace(/_/g, "/");
   const padLength = (4 - (normalized.length % 4)) % 4;
@@ -103,6 +111,59 @@ function parseCitizenWalletPluginLink(rawValue: string): SendTarget | null {
   };
 }
 
+function parseCitizenWalletRequestLink(rawValue: string): SendTarget | null {
+  const trimmed = rawValue.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  let parsedURL: URL;
+  let configuredURL: URL;
+  try {
+    parsedURL = new URL(trimmed);
+    configuredURL = new URL(normalizeOrigin(mobileConfig.appOrigin));
+  } catch {
+    return null;
+  }
+
+  if (parsedURL.protocol !== "https:" || parsedURL.host.toLowerCase() !== configuredURL.host.toLowerCase()) {
+    return null;
+  }
+
+  const mode = parsedURL.searchParams.get("p")?.trim().toLowerCase();
+  if (mode !== "r") {
+    return null;
+  }
+
+  const sendToValue = parsedURL.searchParams.get("sendto")?.trim();
+  if (!sendToValue) {
+    return null;
+  }
+
+  const [rawRecipient] = decodeURIComponent(sendToValue).split("@");
+  if (!rawRecipient || !ethers.utils.isAddress(rawRecipient)) {
+    return null;
+  }
+
+  const recipient = ethers.utils.getAddress(rawRecipient);
+  const rawTipTo = parsedURL.searchParams.get("tipTo")?.trim();
+  const tipToAddress =
+    rawTipTo && ethers.utils.isAddress(rawTipTo) && rawTipTo.toLowerCase() !== recipient.toLowerCase()
+      ? ethers.utils.getAddress(rawTipTo)
+      : undefined;
+  const amount = normalizeRequestAmount(parsedURL.searchParams.get("amount"));
+  const memo = parsedURL.searchParams.get("memo")?.trim() || undefined;
+
+  return {
+    recipient,
+    amount,
+    memo,
+    tipToAddress,
+    amountUnit: "token",
+    source: "sfluv-link",
+  };
+}
+
 function normalizeOrigin(rawOrigin: string): string {
   return rawOrigin.trim().replace(/\/+$/, "");
 }
@@ -127,8 +188,16 @@ export function buildUniversalRequestLink(input: {
   address: string;
   amount?: string;
   memo?: string;
+  tipToAddress?: string;
 }): string {
-  const url = new URL(`${normalizeOrigin(mobileConfig.appOrigin)}/request/${ethers.utils.getAddress(input.address)}`);
+  const url = new URL(`${normalizeOrigin(mobileConfig.appOrigin)}/map`);
+  url.searchParams.set("p", "r");
+  url.searchParams.set("alias", aliasHost());
+  url.searchParams.set("sendto", `${ethers.utils.getAddress(input.address)}@${aliasHost()}`);
+  const tipToAddress = input.tipToAddress?.trim();
+  if (tipToAddress && ethers.utils.isAddress(tipToAddress) && tipToAddress.toLowerCase() !== input.address.toLowerCase()) {
+    url.searchParams.set("tipTo", ethers.utils.getAddress(tipToAddress));
+  }
   const amount = input.amount?.trim();
   if (amount) {
     url.searchParams.set("amount", amount);
@@ -234,6 +303,11 @@ export function parseSendTarget(rawValue: string): SendTarget | null {
   }
   if (universalLink?.type === "redeem") {
     return null;
+  }
+
+  const citizenWalletRequestLink = parseCitizenWalletRequestLink(rawValue);
+  if (citizenWalletRequestLink) {
+    return citizenWalletRequestLink;
   }
 
   const citizenWalletPluginLink = parseCitizenWalletPluginLink(rawValue);

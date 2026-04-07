@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
+  Dimensions,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
@@ -199,6 +200,7 @@ export function SendScreen({
 }: Props) {
   const { palette, shadows } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
+  const topInset = Math.max((Dimensions.get("window").height - Dimensions.get("screen").height) * -1, 0);
   const [recipientInput, setRecipientInput] = useState("");
   const [amountInput, setAmountInput] = useState("");
   const [memoInput, setMemoInput] = useState("");
@@ -371,7 +373,7 @@ export function SendScreen({
   }, [parsed, recipientLookup]);
 
   const paymentLinkRecipient = useMemo<RecipientSuggestion | null>(() => {
-    if (!parsed || parsed.source !== "citizenwallet-plugin-link") {
+    if (!parsed || (parsed.source !== "citizenwallet-plugin-link" && parsed.source !== "sfluv-link")) {
       return null;
     }
 
@@ -937,7 +939,7 @@ export function SendScreen({
         }}
       >
         <View style={styles.scannerScreen}>
-          <View style={styles.scannerHeader}>
+          <View style={[styles.scannerHeader, { paddingTop: topInset + spacing.sm }]}>
             <Text style={styles.scannerTitle}>Scan payment QR</Text>
             <Pressable
               style={styles.scannerClose}

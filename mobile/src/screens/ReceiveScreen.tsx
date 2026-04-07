@@ -69,7 +69,6 @@ export function ReceiveScreen({ accountAddress }: Props) {
         <View style={styles.heroIconWrap}>
           <Ionicons name="download-outline" size={20} color={palette.white} />
         </View>
-        <Text style={styles.title}>Receive SFLUV</Text>
         <Text style={styles.subtitle}>Show this QR or share the link to request payment instantly.</Text>
       </View>
 
@@ -166,12 +165,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       backgroundColor: "rgba(255,255,255,0.16)",
       alignItems: "center",
       justifyContent: "center",
-    },
-    title: {
-      color: palette.white,
-      fontSize: 30,
-      fontWeight: "900",
-      letterSpacing: -0.6,
     },
     subtitle: {
       color: "rgba(255,255,255,0.78)",
