@@ -107,10 +107,12 @@ type WalletPane = "home" | "send" | "receive";
 const PREFERENCES_STORAGE_KEY = "sfluv-wallet:preferences";
 const PUSH_TOKEN_STORAGE_KEY = "sfluv-wallet:push-token";
 const WALLET_PREFERENCES_STORAGE_KEY_PREFIX = "sfluv-wallet:wallet-preferences";
+const BALANCE_CACHE_STORAGE_KEY_PREFIX = "sfluv-wallet:balance-cache";
 const TRANSFER_REFRESH_DEBOUNCE_MS = 350;
 const TRANSACTION_POLL_INTERVAL_MS = 2_000;
 const WALLET_TRANSACTION_LIMIT = 5;
 const ACTIVITY_TRANSACTION_PAGE_SIZE = 10;
+const LINK_DEDUPE_WINDOW_MS = 4_000;
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -188,6 +190,21 @@ function shortAddress(value: string | undefined): string {
   if (!value) return "";
   if (value.length <= 16) return value;
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
+}
+
+function walletBalanceCacheKey(address: string): string {
+  return `${BALANCE_CACHE_STORAGE_KEY_PREFIX}:${address.trim().toLowerCase()}`;
+}
+
+function linkSignature(link: SfluvUniversalLink): string {
+  switch (link.type) {
+    case "pay":
+      return `pay:${link.address.toLowerCase()}`;
+    case "redeem":
+      return `redeem:${link.code.trim().toLowerCase()}`;
+    case "request":
+      return `request:${link.address.toLowerCase()}:${link.amount ?? ""}:${link.memo ?? ""}`;
+  }
 }
 
 function walletLabel(smartIndex: number | undefined): string {
@@ -1096,7 +1113,12 @@ function WalletAppShellContent({
       if (walletSurfaceRequestRef.current !== requestID || runtimeServiceRef.current !== service) {
         return;
       }
-      setSmartBalance(formatDisplayBalance(balance));
+      const formattedBalance = formatDisplayBalance(balance);
+      setSmartBalance(formattedBalance);
+      const activeAddress = smartAddressRef.current || (await service.smartAccountAddress());
+      void AsyncStorage.setItem(walletBalanceCacheKey(activeAddress), formattedBalance).catch((storageError) => {
+        console.warn("Unable to cache wallet balance", storageError);
+      });
     } catch (error) {
       if (!options?.silent) {
         console.warn("Unable to load wallet balance", error);
@@ -1233,11 +1255,18 @@ function WalletAppShellContent({
         setRefreshingActivity(false);
       }
 
-      const seededBalance =
-        selectedCandidate && selectedCandidate.accountAddress.toLowerCase() === nextAddress.toLowerCase()
-          ? formatDisplayBalance(selectedCandidate.tokenBalance)
-          : null;
-      setSmartBalance(seededBalance ?? "...");
+      if (addressChanged || smartBalance === "...") {
+        try {
+          const cachedBalance = await AsyncStorage.getItem(walletBalanceCacheKey(nextAddress));
+          if (walletSurfaceRequestRef.current !== requestID) {
+            return;
+          }
+          setSmartBalance(cachedBalance?.trim() || "...");
+        } catch (error) {
+          console.warn("Unable to load cached wallet balance", error);
+          setSmartBalance("...");
+        }
+      }
       void refreshSelectedWalletBalance({ requestID, service, silent: true });
     } catch (error) {
       console.warn("Unable to refresh wallet surface", error);
@@ -1975,6 +2004,7 @@ function PrivyWalletApp({
   const bootstrappedIdentityRef = useRef<string | null>(null);
   const manualWalletSelectionRef = useRef(false);
   const nextPendingLinkIDRef = useRef(0);
+  const recentIncomingLinkRef = useRef<{ signature: string; timestamp: number } | null>(null);
   const embeddedWallet = wallets[0];
 
   const backendClient = useMemo(
@@ -2012,6 +2042,16 @@ function PrivyWalletApp({
     if (!parsedLink) {
       return;
     }
+    const signature = linkSignature(parsedLink);
+    const lastHandledLink = recentIncomingLinkRef.current;
+    const now = Date.now();
+    if (lastHandledLink && lastHandledLink.signature === signature && now - lastHandledLink.timestamp < LINK_DEDUPE_WINDOW_MS) {
+      return;
+    }
+    recentIncomingLinkRef.current = {
+      signature,
+      timestamp: now,
+    };
     nextPendingLinkIDRef.current += 1;
     setPendingLinkIntent({
       id: nextPendingLinkIDRef.current,

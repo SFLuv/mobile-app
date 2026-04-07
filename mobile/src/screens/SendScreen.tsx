@@ -939,7 +939,7 @@ export function SendScreen({
         }}
       >
         <View style={styles.scannerScreen}>
-          <View style={[styles.scannerHeader, { paddingTop: topInset + spacing.sm }]}>
+          <View style={[styles.scannerHeader, { paddingTop: topInset + spacing.xxl }]}>
             <Text style={styles.scannerTitle}>Scan payment QR</Text>
             <Pressable
               style={styles.scannerClose}
@@ -949,7 +949,7 @@ export function SendScreen({
                 setEntryMode("manual");
               }}
             >
-              <Ionicons name="close" size={22} color={palette.primaryStrong} />
+              <Ionicons name="close" size={20} color={palette.white} />
             </Pressable>
           </View>
 
@@ -999,22 +999,12 @@ export function SendScreen({
                 setEntryMode("manual");
               }}
             />
-            <View pointerEvents="none" style={styles.scannerOverlay}>
-              <View style={styles.scannerMask} />
-              <View style={styles.scannerCenterRow}>
-                <View style={styles.scannerMaskSide} />
-                <View style={styles.scannerGuide}>
-                  <View style={styles.scannerGuideCornerTopLeft} />
-                  <View style={styles.scannerGuideCornerTopRight} />
-                  <View style={styles.scannerGuideCornerBottomLeft} />
-                  <View style={styles.scannerGuideCornerBottomRight} />
-                </View>
-                <View style={styles.scannerMaskSide} />
-              </View>
-              <View style={styles.scannerMask} />
-            </View>
+            <View pointerEvents="none" style={styles.scannerGuide} />
           </View>
-          <Text style={styles.scannerHint}>Point your camera at any supported SFLUV payment QR.</Text>
+          <View style={styles.scannerFooter}>
+            {scanLocked ? <ActivityIndicator size="small" color={palette.white} /> : null}
+            <Text style={styles.scannerHint}>Point your camera at any supported SFLUV payment QR.</Text>
+          </View>
         </View>
       </Modal>
 
@@ -1682,19 +1672,19 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     scannerScreen: {
       flex: 1,
-      backgroundColor: palette.background,
+      backgroundColor: "rgba(8, 12, 20, 0.92)",
       paddingHorizontal: spacing.lg,
-      paddingTop: spacing.xl,
-      gap: spacing.lg,
+      paddingBottom: spacing.xl,
     },
     scannerHeader: {
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
+      paddingBottom: spacing.lg,
     },
     scannerTitle: {
-      color: palette.primaryStrong,
-      fontSize: 24,
+      color: palette.white,
+      fontSize: 22,
       fontWeight: "900",
     },
     scannerClose: {
@@ -1703,88 +1693,38 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       borderRadius: 21,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: palette.surface,
-      borderWidth: 1,
-      borderColor: palette.primary,
+      backgroundColor: "rgba(255,255,255,0.12)",
     },
     scannerFrame: {
       flex: 1,
       minHeight: 360,
-      borderRadius: radii.lg,
+      borderRadius: radii.xl,
       overflow: "hidden",
-      backgroundColor: palette.text,
-    },
-    scannerOverlay: {
-      ...StyleSheet.absoluteFillObject,
+      borderWidth: 2,
+      borderColor: "rgba(255,255,255,0.16)",
+      backgroundColor: "#05070b",
       justifyContent: "center",
-    },
-    scannerMask: {
-      flex: 1,
-      backgroundColor: "rgba(0,0,0,0.26)",
-    },
-    scannerCenterRow: {
-      flexDirection: "row",
-      height: 240,
-    },
-    scannerMaskSide: {
-      flex: 1,
-      backgroundColor: "rgba(0,0,0,0.26)",
+      alignItems: "center",
     },
     scannerGuide: {
-      width: 240,
-      borderRadius: 28,
-      borderWidth: 1,
-      borderColor: "rgba(255,255,255,0.16)",
+      width: 236,
+      height: 236,
+      borderRadius: 32,
+      borderWidth: 3,
+      borderColor: palette.primaryStrong,
       backgroundColor: "transparent",
     },
-    scannerGuideCornerTopLeft: {
-      position: "absolute",
-      top: 18,
-      left: 18,
-      width: 34,
-      height: 34,
-      borderTopWidth: 4,
-      borderLeftWidth: 4,
-      borderColor: palette.white,
-      borderTopLeftRadius: 16,
-    },
-    scannerGuideCornerTopRight: {
-      position: "absolute",
-      top: 18,
-      right: 18,
-      width: 34,
-      height: 34,
-      borderTopWidth: 4,
-      borderRightWidth: 4,
-      borderColor: palette.white,
-      borderTopRightRadius: 16,
-    },
-    scannerGuideCornerBottomLeft: {
-      position: "absolute",
-      bottom: 18,
-      left: 18,
-      width: 34,
-      height: 34,
-      borderBottomWidth: 4,
-      borderLeftWidth: 4,
-      borderColor: palette.white,
-      borderBottomLeftRadius: 16,
-    },
-    scannerGuideCornerBottomRight: {
-      position: "absolute",
-      bottom: 18,
-      right: 18,
-      width: 34,
-      height: 34,
-      borderBottomWidth: 4,
-      borderRightWidth: 4,
-      borderColor: palette.white,
-      borderBottomRightRadius: 16,
+    scannerFooter: {
+      minHeight: 74,
+      paddingTop: spacing.lg,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: spacing.sm,
     },
     scannerHint: {
-      color: palette.textMuted,
+      color: "rgba(255,255,255,0.82)",
       textAlign: "center",
-      paddingBottom: spacing.xl,
+      lineHeight: 21,
     },
     sendingOverlay: {
       flex: 1,

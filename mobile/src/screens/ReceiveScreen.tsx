@@ -95,18 +95,10 @@ export function ReceiveScreen({ accountAddress, onRedeemCodeScanned }: Props) {
   return (
     <>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-        <View style={styles.heroCard}>
-          <View style={styles.heroTopRow}>
-            <View style={styles.heroIconWrap}>
-              <Ionicons name="download-outline" size={20} color={palette.white} />
-            </View>
-            <Pressable style={styles.redeemButton} onPress={() => void openRedeemScanner()}>
-              <Ionicons name="scan-outline" size={16} color={palette.white} />
-              <Text style={styles.redeemButtonText}>Redeem QR</Text>
-            </Pressable>
-          </View>
-          <Text style={styles.subtitle}>Show this QR or share the link to request payment instantly.</Text>
-        </View>
+        <Pressable style={styles.redeemButton} onPress={() => void openRedeemScanner()}>
+          <Ionicons name="scan-outline" size={18} color={palette.white} />
+          <Text style={styles.redeemButtonText}>Redeem QR</Text>
+        </Pressable>
         {scanError ? (
           <View style={styles.scanErrorCard}>
             <Ionicons name="alert-circle-outline" size={16} color={palette.danger} />
@@ -193,7 +185,7 @@ export function ReceiveScreen({ accountAddress, onRedeemCodeScanned }: Props) {
         }}
       >
         <View style={styles.scannerScreen}>
-          <View style={[styles.scannerHeader, { paddingTop: topInset + spacing.xl }]}>
+          <View style={[styles.scannerHeader, { paddingTop: topInset + spacing.xxl }]}>
             <Text style={styles.scannerTitle}>Scan reward QR</Text>
             <Pressable
               style={styles.scannerClose}
@@ -268,40 +260,16 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       gap: spacing.md,
       paddingBottom: 120,
     },
-    heroCard: {
-      backgroundColor: palette.primaryStrong,
-      borderRadius: radii.lg,
-      padding: spacing.lg,
-      gap: spacing.sm,
-      ...shadows.card,
-    },
-    heroTopRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: spacing.md,
-    },
-    heroIconWrap: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: "rgba(255,255,255,0.16)",
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    subtitle: {
-      color: "rgba(255,255,255,0.78)",
-      lineHeight: 21,
-    },
     redeemButton: {
-      minHeight: 42,
-      borderRadius: radii.pill,
-      paddingHorizontal: 14,
-      backgroundColor: "rgba(255,255,255,0.16)",
+      minHeight: 52,
+      borderRadius: radii.lg,
+      paddingHorizontal: spacing.lg,
+      backgroundColor: palette.primaryStrong,
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
-      gap: 8,
+      gap: spacing.sm,
+      ...shadows.soft,
     },
     redeemButtonText: {
       color: palette.white,

@@ -5,6 +5,8 @@ import { TransactionDetailPayload, TransactionDetailsModal } from "../components
 import { AppContact, AppLocation, AppTransaction } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 
+const FAUCET_ADDRESS = "0x21df0dfce7420c2dc4c92ec335e9f9ad447e864a";
+
 type Props = {
   transactions: AppTransaction[];
   transactionsLoaded: boolean;
@@ -48,6 +50,9 @@ function resolveAddressLabel(
   const normalizedAddress = address.toLowerCase();
   if (activeAddress && normalizedAddress === activeAddress.toLowerCase()) {
     return "You";
+  }
+  if (normalizedAddress === FAUCET_ADDRESS) {
+    return "SFLUV Faucet";
   }
   const contactName = contactNameByAddress[normalizedAddress];
   if (contactName) {
@@ -106,6 +111,7 @@ export function ActivityScreen({
   const decoratedTransactions = useMemo<TransactionDetailPayload[]>(() => {
     return transactions.map((transaction) => {
       const received = transaction.direction !== "send";
+      const reward = received && transaction.from.toLowerCase() === FAUCET_ADDRESS;
       const fromLabel = resolveAddressLabel(transaction.from, activeAddress, contactNameByAddress, merchantNameByAddress);
       const toLabel = resolveAddressLabel(transaction.to, activeAddress, contactNameByAddress, merchantNameByAddress);
 
@@ -114,7 +120,7 @@ export function ActivityScreen({
         received,
         fromLabel,
         toLabel,
-        typeLabel: "Currency Transfer",
+        typeLabel: reward ? "Reward" : "Currency Transfer",
         statusLabel: "Completed",
       };
     });
@@ -173,7 +179,8 @@ export function ActivityScreen({
         ) : (
           decoratedTransactions.map((details) => {
             const incoming = details.received;
-            const title = incoming ? `Received from ${details.fromLabel}` : `Sent to ${details.toLabel}`;
+            const reward = incoming && details.transaction.from.toLowerCase() === FAUCET_ADDRESS;
+            const title = reward ? "Received Reward" : incoming ? `Received from ${details.fromLabel}` : `Sent to ${details.toLabel}`;
 
             return (
               <Pressable key={details.transaction.id} style={styles.card} onPress={() => setSelectedTransaction(details)}>

@@ -4,6 +4,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { AppContact, AppLocation, AppTransaction } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 
+const FAUCET_ADDRESS = "0x21df0dfce7420c2dc4c92ec335e9f9ad447e864a";
+
 type Props = {
   balance: string;
   smartAddress: string;
@@ -31,6 +33,9 @@ function shortAddress(address: string): string {
 }
 
 function formatTxTitle(tx: AppTransaction): string {
+  if (tx.direction !== "send" && tx.from.toLowerCase() === FAUCET_ADDRESS) {
+    return "Received Reward";
+  }
   return tx.direction === "send" ? "Sent" : "Received";
 }
 
@@ -50,6 +55,9 @@ function resolveAddressLabel(
   const normalizedAddress = address.toLowerCase();
   if (activeAddress && normalizedAddress === activeAddress.toLowerCase()) {
     return "You";
+  }
+  if (normalizedAddress === FAUCET_ADDRESS) {
+    return "SFLUV Faucet";
   }
   const contactName = contactNameByAddress[normalizedAddress];
   if (contactName) {
@@ -195,6 +203,7 @@ export function WalletHomeScreen({
         ) : (
           recentTransactions.slice(0, 5).map((tx) => {
             const incoming = tx.direction !== "send";
+            const reward = incoming && tx.from.toLowerCase() === FAUCET_ADDRESS;
             const counterpartyAddress = incoming ? tx.from : tx.to;
             const counterpartyLabel = resolveAddressLabel(
               counterpartyAddress,
@@ -203,7 +212,9 @@ export function WalletHomeScreen({
               merchantNameByAddress,
             );
             const counterpartyMeta =
-              counterpartyLabel === shortAddress(counterpartyAddress)
+              reward
+                ? formatTxDate(tx.timestamp)
+                : counterpartyLabel === shortAddress(counterpartyAddress)
                 ? formatTxDate(tx.timestamp)
                 : `${shortAddress(counterpartyAddress)} • ${formatTxDate(tx.timestamp)}`;
             return (
@@ -217,7 +228,7 @@ export function WalletHomeScreen({
                 </View>
                 <View style={styles.txBody}>
                   <Text style={styles.txTitle}>
-                    {formatTxTitle(tx)} {incoming ? "from" : "to"} {counterpartyLabel}
+                    {reward ? "Received Reward" : `${formatTxTitle(tx)} ${incoming ? "from" : "to"} ${counterpartyLabel}`}
                   </Text>
                   <Text style={styles.txMeta}>{counterpartyMeta}</Text>
                 </View>
