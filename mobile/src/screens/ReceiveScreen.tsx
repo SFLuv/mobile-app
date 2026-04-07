@@ -185,7 +185,7 @@ export function ReceiveScreen({ accountAddress, onRedeemCodeScanned }: Props) {
         }}
       >
         <View style={styles.scannerScreen}>
-          <View style={[styles.scannerHeader, { paddingTop: topInset + spacing.xxl }]}>
+          <View style={[styles.scannerHeader, { paddingTop: topInset + spacing.xxl + spacing.md }]}>
             <Text style={styles.scannerTitle}>Scan reward QR</Text>
             <Pressable
               style={styles.scannerClose}

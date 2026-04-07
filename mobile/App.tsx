@@ -93,6 +93,7 @@ type RedeemFlowState = {
   code: string;
   stage: "awaiting_wallet" | "redeeming" | "success" | "error";
   message?: string;
+  walletAddress?: string;
 };
 
 type ToastState = {
@@ -750,6 +751,7 @@ function WalletAppShellContent({
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const runtimeServiceRef = useRef<SmartWalletService | null>(runtime.service);
   const smartAddressRef = useRef(smartAddress);
+  const handledPendingLinkIdRef = useRef<number | null>(null);
   const walletTransactionsRef = useRef<AppTransaction[]>(walletTransactions);
   const activityTransactionsRef = useRef<AppTransaction[]>(activityTransactions);
   const merchantLabelsRef = useRef<Record<string, string>>(merchantLabelsByAddress);
@@ -994,9 +996,20 @@ function WalletAppShellContent({
   const openRedeemFlowForCode = React.useCallback((code: string) => {
     setTab("wallet");
     setWalletPane("home");
-    setRedeemFlow({
-      code,
-      stage: "awaiting_wallet",
+    const normalizedCode = code.trim().toLowerCase();
+    setRedeemFlow((current) => {
+      if (
+        current &&
+        current.code.trim().toLowerCase() === normalizedCode &&
+        (current.stage === "awaiting_wallet" || current.stage === "redeeming" || current.stage === "success")
+      ) {
+        return current;
+      }
+
+      return {
+        code,
+        stage: "awaiting_wallet",
+      };
     });
   }, []);
 
@@ -1004,6 +1017,10 @@ function WalletAppShellContent({
     if (!pendingLinkIntent) {
       return;
     }
+    if (handledPendingLinkIdRef.current === pendingLinkIntent.id) {
+      return;
+    }
+    handledPendingLinkIdRef.current = pendingLinkIntent.id;
 
     const { link } = pendingLinkIntent;
     if (link.type === "pay") {
@@ -1043,51 +1060,88 @@ function WalletAppShellContent({
     if (!runtime.service) {
       return;
     }
-    setRedeemFlow((current) =>
-      current && current.code === redeemFlow.code
-        ? {
-            code: current.code,
-            stage: "redeeming",
-          }
-        : current,
-    );
+
+    let cancelled = false;
+    const prepareRedeem = async () => {
+      try {
+        const walletAddress = await runtime.service?.smartAccountAddress();
+        if (!walletAddress || cancelled) {
+          return;
+        }
+        setRedeemFlow((current) =>
+          current && current.code === redeemFlow.code && current.stage === "awaiting_wallet"
+            ? {
+                code: current.code,
+                stage: "redeeming",
+                walletAddress,
+              }
+            : current,
+        );
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setRedeemFlow((current) =>
+          current && current.code === redeemFlow.code
+            ? {
+                code: current.code,
+                stage: "error",
+                message: (error as Error)?.message || "Unable to prepare this reward right now.",
+              }
+            : current,
+        );
+      }
+    };
+
+    void prepareRedeem();
+    return () => {
+      cancelled = true;
+    };
   }, [redeemFlow, runtime.error, runtime.service]);
 
   useEffect(() => {
     if (!redeemFlow || redeemFlow.stage !== "redeeming") {
       return;
     }
-    if (!runtime.service) {
+    if (!redeemFlow.walletAddress) {
       return;
     }
 
     let cancelled = false;
+    const code = redeemFlow.code;
+    const payoutAddress = redeemFlow.walletAddress;
     const redeem = async () => {
       try {
-        const payoutAddress = await runtime.service?.smartAccountAddress();
-        if (!payoutAddress || cancelled) {
-          return;
-        }
-        await publicBackendClient.redeemCode(redeemFlow.code, payoutAddress);
+        await publicBackendClient.redeemCode(code, payoutAddress);
         if (cancelled) {
           return;
         }
-        setRedeemFlow({
-          code: redeemFlow.code,
-          stage: "success",
-          message: "Your SFLUV perk was sent to this wallet.",
-        });
+        setRedeemFlow((current) =>
+          current && current.code === code && current.stage === "redeeming"
+            ? {
+                code,
+                stage: "success",
+                walletAddress: payoutAddress,
+                message: "Your SFLUV perk was sent to this wallet.",
+              }
+            : current,
+        );
         await refreshWalletSurface();
         await loadAppProfile();
       } catch (error) {
         if (cancelled) {
           return;
         }
-        setRedeemFlow({
-          code: redeemFlow.code,
-          stage: "error",
-          message: (error as Error)?.message || "Unable to redeem this QR code right now.",
-        });
+        setRedeemFlow((current) =>
+          current && current.code === code
+            ? {
+                code,
+                stage: "error",
+                walletAddress: payoutAddress,
+                message: (error as Error)?.message || "Unable to redeem this QR code right now.",
+              }
+            : current,
+        );
       }
     };
 
@@ -1095,7 +1149,7 @@ function WalletAppShellContent({
     return () => {
       cancelled = true;
     };
-  }, [publicBackendClient, redeemFlow, runtime.service]);
+  }, [publicBackendClient, redeemFlow]);
 
   const refreshSelectedWalletBalance = async (options?: {
     requestID?: number;
@@ -2011,6 +2065,9 @@ function PrivyWalletApp({
     () => new AppBackendClient(async () => (await getAccessToken()) ?? null),
     [getAccessToken],
   );
+  const consumePendingLink = React.useCallback(() => {
+    setPendingLinkIntent(null);
+  }, []);
 
   const presentLoginError = (error: unknown) => {
     const message = (error as Error)?.message?.trim() || "Unable to sign in right now.";
@@ -2505,7 +2562,7 @@ function PrivyWalletApp({
       walletPreferences={walletPreferences}
       onWalletPreferencesSync={syncWalletPreferences}
       pendingLinkIntent={pendingLinkIntent}
-      onConsumePendingLink={() => setPendingLinkIntent(null)}
+      onConsumePendingLink={consumePendingLink}
       preferences={preferences}
       onUpdatePreferences={onUpdatePreferences}
     />
