@@ -83,7 +83,7 @@ export function WalletHomeScreen({
 }: Props) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
-  const refreshAccent = isDark ? palette.primary : palette.primaryStrong;
+  const refreshAccent = palette.primaryStrong;
 
   const contactNameByAddress = useMemo(() => {
     const next: Record<string, string> = {};
@@ -116,7 +116,7 @@ export function WalletHomeScreen({
           onRefresh={() => void onRefresh()}
           tintColor={refreshAccent}
           colors={[refreshAccent]}
-          progressBackgroundColor={palette.surfaceStrong}
+          progressBackgroundColor={isDark ? palette.backgroundMuted : palette.surfaceStrong}
         />
       }
       showsVerticalScrollIndicator={false}
@@ -141,12 +141,6 @@ export function WalletHomeScreen({
         <Text style={styles.heroEyebrow}>Selected wallet</Text>
         <Text style={styles.heroBalance}>{balance}</Text>
         <Text style={styles.heroCurrency}>SFLUV available</Text>
-        <View style={styles.refreshHintRow}>
-          <Ionicons name={refreshing ? "refresh" : "refresh-outline"} size={14} color={refreshAccent} />
-          <Text style={[styles.refreshHint, refreshing ? styles.refreshHintActive : undefined]}>
-            {refreshing ? "Refreshing balance and activity…" : "Pull down to refresh balance and activity."}
-          </Text>
-        </View>
 
         <View style={styles.addressBar}>
           <Ionicons name="wallet-outline" size={16} color={palette.primaryStrong} />
@@ -330,20 +324,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       color: palette.textMuted,
       fontSize: 15,
       fontWeight: "600",
-    },
-    refreshHint: {
-      color: palette.textMuted,
-      fontSize: 12,
-      fontWeight: "700",
-    },
-    refreshHintRow: {
-      marginTop: 6,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6,
-    },
-    refreshHintActive: {
-      color: palette.primaryStrong,
     },
     addressBar: {
       marginTop: spacing.lg,

@@ -68,8 +68,9 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <SafeAreaView style={styles.safeArea}>
-        <Pressable style={styles.overlay} onPress={onClose}>
-          <Pressable style={styles.sheet} onPress={() => {}}>
+        <View style={styles.overlay}>
+          <Pressable style={styles.backdrop} onPress={onClose} />
+          <View style={styles.sheet}>
             <View style={styles.headerRow}>
               <View style={styles.headerCopy}>
                 <Text style={styles.title}>Transaction Details</Text>
@@ -88,7 +89,7 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
               </Pressable>
             </View>
 
-            <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+            <ScrollView style={styles.scrollArea} contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
               <View style={styles.amountCard}>
                 <Text style={[styles.amountText, details.received ? styles.amountReceive : styles.amountSend]}>
                   {signedAmount(details)}
@@ -165,8 +166,8 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
                 </Pressable>
               </View>
             </ScrollView>
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </SafeAreaView>
     </Modal>
   );
@@ -180,6 +181,9 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     overlay: {
       flex: 1,
       justifyContent: "flex-end",
+    },
+    backdrop: {
+      ...StyleSheet.absoluteFillObject,
       backgroundColor: "rgba(0,0,0,0.45)",
     },
     sheet: {
@@ -191,6 +195,9 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       paddingBottom: spacing.lg,
       maxHeight: "90%",
       gap: spacing.md,
+    },
+    scrollArea: {
+      flexShrink: 1,
     },
     container: {
       gap: spacing.md,
