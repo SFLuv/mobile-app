@@ -32,7 +32,7 @@ import {
 } from "../utils/location";
 import { parseSendTarget, parseSfluvUniversalLink, SfluvUniversalLink } from "../utils/universalLinks";
 
-type RecipientKind = "contact" | "merchant";
+type RecipientKind = "contact" | "merchant" | "payment-link";
 
 type RecipientSuggestion = {
   key: string;
@@ -370,6 +370,20 @@ export function SendScreen({
     };
   }, [parsed, recipientLookup]);
 
+  const paymentLinkRecipient = useMemo<RecipientSuggestion | null>(() => {
+    if (!parsed || parsed.source !== "citizenwallet-plugin-link") {
+      return null;
+    }
+
+    return {
+      key: `payment-link:${parsed.recipient.toLowerCase()}`,
+      kind: "payment-link",
+      label: "Payment Link Scanned",
+      address: parsed.recipient,
+      subtitle: shortAddress(parsed.recipient),
+    };
+  }, [parsed]);
+
   const resolvedRecipient = useMemo(() => {
     if (!parsed) {
       return null;
@@ -388,8 +402,12 @@ export function SendScreen({
       return draftRecipient;
     }
 
+    if (paymentLinkRecipient) {
+      return paymentLinkRecipient;
+    }
+
     return null;
-  }, [draftRecipient, lookedUpRecipient, parsed, suggestionByAddress]);
+  }, [draftRecipient, lookedUpRecipient, parsed, paymentLinkRecipient, suggestionByAddress]);
 
   const resolvedMerchantTipTarget = useMemo(() => {
     if (!parsed) {
@@ -409,6 +427,13 @@ export function SendScreen({
       };
     }
 
+    if (parsed.tipToAddress && parsed.tipToAddress.toLowerCase() !== parsed.recipient.toLowerCase()) {
+      return {
+        name: resolvedRecipient?.kind === "merchant" ? resolvedRecipient.label : "this merchant",
+        tipToAddress: parsed.tipToAddress,
+      };
+    }
+
     return (
       merchants.find(
         (merchant) =>
@@ -417,7 +442,7 @@ export function SendScreen({
           merchant.tipToAddress.toLowerCase() !== parsed.recipient.toLowerCase(),
       ) ?? null
     );
-  }, [merchants, parsed, recipientLookup, resolvedRecipient?.label]);
+  }, [merchants, parsed, recipientLookup, resolvedRecipient?.kind, resolvedRecipient?.label]);
 
   useEffect(() => {
     if (!draft) {
@@ -718,7 +743,11 @@ export function SendScreen({
                         <Text style={styles.recipientCardSubtitle}>{resolvedRecipient.subtitle}</Text>
                       ) : null}
                       <Text style={styles.recipientCardDetail}>
-                        {resolvedRecipient.kind === "merchant" ? "Merchant" : "Contact"}
+                        {resolvedRecipient.kind === "merchant"
+                          ? "Merchant"
+                          : resolvedRecipient.kind === "payment-link"
+                            ? "Payment link"
+                            : "Contact"}
                       </Text>
                       <Text style={styles.recipientCardAddress}>{shortAddress(parsed?.recipient ?? resolvedRecipient.address)}</Text>
                     </View>

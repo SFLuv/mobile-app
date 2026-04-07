@@ -1,4 +1,5 @@
 import { ethers } from "ethers";
+import { Buffer } from "buffer";
 import { mobileConfig } from "../config";
 import { AmountUnit } from "../services/smartWallet";
 import { parseTransferQR } from "./qr";
@@ -26,8 +27,81 @@ export type SendTarget = {
   recipient: string;
   amount?: string;
   memo?: string;
+  tipToAddress?: string;
+  source?: "sfluv-link" | "citizenwallet-plugin-link" | "transfer-qr";
   amountUnit: AmountUnit;
 };
+
+function normalizeBase64Url(rawValue: string): string {
+  const normalized = rawValue.trim().replace(/-/g, "+").replace(/_/g, "/");
+  const padLength = (4 - (normalized.length % 4)) % 4;
+  return `${normalized}${"=".repeat(padLength)}`;
+}
+
+function decodeBase64Address(rawValue: string | null): string | undefined {
+  if (!rawValue) {
+    return undefined;
+  }
+
+  try {
+    const decoded = Buffer.from(normalizeBase64Url(rawValue), "base64");
+    if (decoded.length !== 20) {
+      return undefined;
+    }
+    return ethers.utils.getAddress(`0x${decoded.toString("hex")}`);
+  } catch {
+    return undefined;
+  }
+}
+
+function parseQueryLikeString(rawValue: string): URLSearchParams {
+  const trimmed = rawValue.trim().replace(/^[#?]+/, "");
+  const withoutLeadingSlash = trimmed.startsWith("/") ? trimmed.slice(1) : trimmed;
+  const query = withoutLeadingSlash.startsWith("?") ? withoutLeadingSlash.slice(1) : withoutLeadingSlash;
+  const questionMarkIndex = query.indexOf("?");
+  return new URLSearchParams(questionMarkIndex >= 0 ? query.slice(questionMarkIndex + 1) : query);
+}
+
+function parseCitizenWalletPluginLink(rawValue: string): SendTarget | null {
+  const trimmed = rawValue.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  let outerURL: URL;
+  try {
+    outerURL = new URL(trimmed);
+  } catch {
+    return null;
+  }
+
+  const outerParams = outerURL.hash ? parseQueryLikeString(outerURL.hash) : outerURL.searchParams;
+  const pluginValue = outerParams.get("plugin");
+  if (!pluginValue) {
+    return null;
+  }
+
+  let innerURL: URL;
+  try {
+    innerURL = new URL(decodeURIComponent(pluginValue));
+  } catch {
+    return null;
+  }
+
+  const recipient = decodeBase64Address(innerURL.searchParams.get("t"));
+  if (!recipient) {
+    return null;
+  }
+
+  const tipToAddress = decodeBase64Address(innerURL.searchParams.get("tt"));
+
+  return {
+    recipient,
+    tipToAddress: tipToAddress && tipToAddress.toLowerCase() !== recipient.toLowerCase() ? tipToAddress : undefined,
+    amountUnit: "token",
+    source: "citizenwallet-plugin-link",
+  };
+}
 
 function normalizeOrigin(rawOrigin: string): string {
   return rawOrigin.trim().replace(/\/+$/, "");
@@ -146,6 +220,7 @@ export function parseSendTarget(rawValue: string): SendTarget | null {
     return {
       recipient: universalLink.address,
       amountUnit: "token",
+      source: "sfluv-link",
     };
   }
   if (universalLink?.type === "request") {
@@ -154,10 +229,16 @@ export function parseSendTarget(rawValue: string): SendTarget | null {
       amount: universalLink.amount,
       memo: universalLink.memo,
       amountUnit: "token",
+      source: "sfluv-link",
     };
   }
   if (universalLink?.type === "redeem") {
     return null;
+  }
+
+  const citizenWalletPluginLink = parseCitizenWalletPluginLink(rawValue);
+  if (citizenWalletPluginLink) {
+    return citizenWalletPluginLink;
   }
 
   const transferQR = parseTransferQR(rawValue);
@@ -170,5 +251,6 @@ export function parseSendTarget(rawValue: string): SendTarget | null {
     amount: transferQR.amount,
     memo: transferQR.memo,
     amountUnit: transferQR.amount ? "wei" : "token",
+    source: "transfer-qr",
   };
 }
