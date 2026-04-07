@@ -176,15 +176,29 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
 }
 
 function formatDisplayBalance(raw: string): string {
-  if (!raw.includes(".")) {
-    return raw;
+  try {
+    const normalized = raw.trim();
+    if (!normalized) {
+      return "0.00";
+    }
+
+    const parsed = ethers.utils.parseUnits(normalized, mobileConfig.tokenDecimals);
+    let roundedCents: ethers.BigNumber;
+    if (mobileConfig.tokenDecimals > 2) {
+      const centsDivisor = ethers.BigNumber.from(10).pow(mobileConfig.tokenDecimals - 2);
+      roundedCents = parsed.add(centsDivisor.div(2)).div(centsDivisor);
+    } else if (mobileConfig.tokenDecimals === 2) {
+      roundedCents = parsed;
+    } else {
+      const centsMultiplier = ethers.BigNumber.from(10).pow(2 - mobileConfig.tokenDecimals);
+      roundedCents = parsed.mul(centsMultiplier);
+    }
+    const whole = roundedCents.div(100).toString();
+    const fraction = roundedCents.mod(100).toString().padStart(2, "0");
+    return `${whole}.${fraction}`;
+  } catch {
+    return "0.00";
   }
-  const [intPart, decimalPart] = raw.split(".");
-  const trimmed = decimalPart.replace(/0+$/, "");
-  if (!trimmed) {
-    return intPart;
-  }
-  return `${intPart}.${trimmed.slice(0, 4)}`;
 }
 
 function shortAddress(value: string | undefined): string {
@@ -1167,10 +1181,10 @@ function WalletAppShellContent({
       if (walletSurfaceRequestRef.current !== requestID || runtimeServiceRef.current !== service) {
         return;
       }
-      const formattedBalance = formatDisplayBalance(balance);
-      setSmartBalance(formattedBalance);
+      const rawBalance = balance.trim();
+      setSmartBalance(rawBalance);
       const activeAddress = smartAddressRef.current || (await service.smartAccountAddress());
-      void AsyncStorage.setItem(walletBalanceCacheKey(activeAddress), formattedBalance).catch((storageError) => {
+      void AsyncStorage.setItem(walletBalanceCacheKey(activeAddress), rawBalance).catch((storageError) => {
         console.warn("Unable to cache wallet balance", storageError);
       });
     } catch (error) {
@@ -1738,7 +1752,7 @@ function WalletAppShellContent({
               />
             ) : (
               <WalletHomeScreen
-                balance={smartBalance}
+                balance={smartBalance === "..." ? smartBalance : formatDisplayBalance(smartBalance)}
                 smartAddress={smartAddress}
                 ownerBadge={ownerBadge}
                 selectedWalletLabel={selectedWalletLabel}
