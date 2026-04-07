@@ -3,6 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import {
   Linking,
   Modal,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -138,6 +139,41 @@ function normalizeWebsite(value: string): string {
     return trimmed;
   }
   return `https://${trimmed}`;
+}
+
+function googleMapsUrl(location: AppLocation): string {
+  if (location.mapsPage.trim()) {
+    return location.mapsPage.trim();
+  }
+
+  if (location.googleId.trim()) {
+    return `https://www.google.com/maps/place/?q=place_id:${location.googleId}`;
+  }
+
+  return `https://www.google.com/maps/search/?api=1&query=${location.lat},${location.lng}`;
+}
+
+async function openGoogleMaps(location: AppLocation): Promise<void> {
+  const lat = location.lat;
+  const lng = location.lng;
+  const label = encodeURIComponent(location.name);
+  const googleAppUrl =
+    Platform.OS === "android"
+      ? `geo:${lat},${lng}?q=${lat},${lng}(${label})`
+      : `comgooglemaps://?q=${label}&center=${lat},${lng}`;
+  const fallbackUrl = googleMapsUrl(location);
+
+  try {
+    const canOpenApp = await Linking.canOpenURL(googleAppUrl);
+    if (canOpenApp) {
+      await Linking.openURL(googleAppUrl);
+      return;
+    }
+  } catch {
+    // Fall back to the browser URL below.
+  }
+
+  await Linking.openURL(fallbackUrl);
 }
 
 function regionForPoints(points: Array<{ latitude: number; longitude: number }>): Region {
@@ -409,23 +445,22 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
                   <Pressable
                     style={styles.primaryButton}
                     onPress={() => {
-                      const url =
-                        selectedLocation.mapsPage ||
-                        `https://www.google.com/maps/place/?q=place_id:${selectedLocation.googleId}`;
-                      void Linking.openURL(url);
+                      void openGoogleMaps(selectedLocation);
                     }}
                   >
                     <Text style={styles.primaryButtonText}>Google Maps</Text>
                   </Pressable>
-                  <Pressable
-                    style={styles.secondaryButton}
-                    onPress={() => {
-                      const url = `https://maps.apple.com/?ll=${selectedLocation.lat},${selectedLocation.lng}&q=${encodeURIComponent(selectedLocation.name)}`;
-                      void Linking.openURL(url);
-                    }}
-                  >
-                    <Text style={styles.secondaryButtonText}>Apple Maps</Text>
-                  </Pressable>
+                  {Platform.OS === "ios" ? (
+                    <Pressable
+                      style={styles.secondaryButton}
+                      onPress={() => {
+                        const url = `https://maps.apple.com/?ll=${selectedLocation.lat},${selectedLocation.lng}&q=${encodeURIComponent(selectedLocation.name)}`;
+                        void Linking.openURL(url);
+                      }}
+                    >
+                      <Text style={styles.secondaryButtonText}>Apple Maps</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
               </>
             ) : null}
