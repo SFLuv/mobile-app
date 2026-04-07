@@ -32,6 +32,9 @@ export type SendTarget = {
   amountUnit: AmountUnit;
 };
 
+const UUID_EXACT_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_IN_TEXT_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
+
 function aliasHost(): string {
   try {
     return new URL(normalizeOrigin(mobileConfig.appOrigin)).host;
@@ -68,6 +71,99 @@ function parseQueryLikeString(rawValue: string): URLSearchParams {
   const query = withoutLeadingSlash.startsWith("?") ? withoutLeadingSlash.slice(1) : withoutLeadingSlash;
   const questionMarkIndex = query.indexOf("?");
   return new URLSearchParams(questionMarkIndex >= 0 ? query.slice(questionMarkIndex + 1) : query);
+}
+
+function normalizeRedeemCode(rawCode: string | null | undefined): string | undefined {
+  if (!rawCode) {
+    return undefined;
+  }
+
+  let code = rawCode.trim();
+  if (!code) {
+    return undefined;
+  }
+
+  try {
+    code = decodeURIComponent(code);
+  } catch {
+    // keep the raw value when percent-decoding fails
+  }
+
+  code = code.replace(/\s+/g, "");
+
+  if (UUID_EXACT_PATTERN.test(code)) {
+    return code.toLowerCase();
+  }
+
+  const trailingTrimmed = code.endsWith("26") ? code.slice(0, -2) : "";
+  if (trailingTrimmed && UUID_EXACT_PATTERN.test(trailingTrimmed)) {
+    return trailingTrimmed.toLowerCase();
+  }
+
+  const uuidMatch = code.match(UUID_IN_TEXT_PATTERN);
+  if (uuidMatch) {
+    return uuidMatch[0].toLowerCase();
+  }
+
+  return code.toLowerCase();
+}
+
+function extractRedeemCodeFromAppUrl(parsedURL: URL, configuredURL: URL): string | undefined {
+  if (parsedURL.protocol !== "https:" || parsedURL.host.toLowerCase() !== configuredURL.host.toLowerCase()) {
+    return undefined;
+  }
+
+  const pathSegments = parsedURL.pathname
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .map((segment) => segment.toLowerCase());
+  const hasLegacyRedeemQuery = parsedURL.searchParams.get("page")?.trim().toLowerCase() === "redeem";
+  const hasFaucetRedeemPath = pathSegments.length >= 2 && pathSegments[0] === "faucet" && pathSegments[1] === "redeem";
+
+  if (!hasLegacyRedeemQuery && !hasFaucetRedeemPath) {
+    return undefined;
+  }
+
+  return normalizeRedeemCode(parsedURL.searchParams.get("code"));
+}
+
+function parseCitizenWalletPluginRedeemLink(rawValue: string, configuredURL: URL): SfluvUniversalLink | null {
+  const trimmed = rawValue.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  let outerURL: URL;
+  try {
+    outerURL = new URL(trimmed);
+  } catch {
+    return null;
+  }
+
+  const outerParams = outerURL.hash ? parseQueryLikeString(outerURL.hash) : outerURL.searchParams;
+  const pluginValue = outerParams.get("plugin");
+  if (!pluginValue) {
+    return null;
+  }
+
+  let innerURL: URL;
+  try {
+    innerURL = new URL(decodeURIComponent(pluginValue));
+  } catch {
+    return null;
+  }
+
+  const code = extractRedeemCodeFromAppUrl(innerURL, configuredURL);
+  if (!code) {
+    return null;
+  }
+
+  return {
+    type: "redeem",
+    code,
+    href: trimmed,
+  };
 }
 
 function parseCitizenWalletPluginLink(rawValue: string): SendTarget | null {
@@ -228,6 +324,20 @@ export function parseSfluvUniversalLink(rawValue: string): SfluvUniversalLink | 
     configuredURL = new URL(normalizeOrigin(mobileConfig.appOrigin));
   } catch {
     return null;
+  }
+
+  const citizenWalletPluginRedeem = parseCitizenWalletPluginRedeemLink(trimmed, configuredURL);
+  if (citizenWalletPluginRedeem) {
+    return citizenWalletPluginRedeem;
+  }
+
+  const legacyRedeemCode = extractRedeemCodeFromAppUrl(parsedURL, configuredURL);
+  if (legacyRedeemCode) {
+    return {
+      type: "redeem",
+      code: legacyRedeemCode,
+      href: trimmed,
+    };
   }
 
   if (parsedURL.protocol !== "https:" || parsedURL.host.toLowerCase() !== configuredURL.host.toLowerCase()) {

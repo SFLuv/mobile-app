@@ -974,6 +974,15 @@ function WalletAppShellContent({
     setWalletPane("send");
   };
 
+  const openRedeemFlowForCode = React.useCallback((code: string) => {
+    setTab("wallet");
+    setWalletPane("home");
+    setRedeemFlow({
+      code,
+      stage: "awaiting_wallet",
+    });
+  }, []);
+
   useEffect(() => {
     if (!pendingLinkIntent) {
       return;
@@ -998,14 +1007,9 @@ function WalletAppShellContent({
       return;
     }
 
-    setTab("wallet");
-    setWalletPane("home");
-    setRedeemFlow({
-      code: link.code,
-      stage: "awaiting_wallet",
-    });
+    openRedeemFlowForCode(link.code);
     onConsumePendingLink();
-  }, [onConsumePendingLink, pendingLinkIntent]);
+  }, [onConsumePendingLink, openRedeemFlowForCode, pendingLinkIntent]);
 
   useEffect(() => {
     if (!redeemFlow || redeemFlow.stage !== "awaiting_wallet") {
@@ -1634,12 +1638,7 @@ function WalletAppShellContent({
                 }}
                 onOpenUniversalLink={(link) => {
                   if (link.type === "redeem") {
-                    setRedeemFlow({
-                      code: link.code,
-                      stage: "awaiting_wallet",
-                    });
-                    setTab("wallet");
-                    setWalletPane("home");
+                    openRedeemFlowForCode(link.code);
                     return;
                   }
                   openSendDraft({
@@ -1650,7 +1649,10 @@ function WalletAppShellContent({
                 }}
               />
             ) : walletPane === "receive" ? (
-              <ReceiveScreen accountAddress={smartAddress || runtime.discovery?.ownerAddress || ethers.constants.AddressZero} />
+              <ReceiveScreen
+                accountAddress={smartAddress || runtime.discovery?.ownerAddress || ethers.constants.AddressZero}
+                onRedeemCodeScanned={openRedeemFlowForCode}
+              />
             ) : (
               <WalletHomeScreen
                 balance={smartBalance}
