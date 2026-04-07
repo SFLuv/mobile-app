@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { AppTransaction } from "../types/app";
+import { AppContact, AppLocation, AppTransaction } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 
 type Props = {
@@ -11,6 +11,10 @@ type Props = {
   selectedWalletLabel?: string;
   recentTransactions: AppTransaction[];
   transactionsLoaded: boolean;
+  contacts: AppContact[];
+  merchants: AppLocation[];
+  merchantLabels: Record<string, string>;
+  activeAddress: string;
   onOpenSend: () => void;
   onOpenReceive: () => void;
   onOpenActivity: () => void;
@@ -30,6 +34,34 @@ function formatTxTitle(tx: AppTransaction): string {
   return tx.direction === "send" ? "Sent" : "Received";
 }
 
+function formatTxDate(timestamp: number): string {
+  return new Date(timestamp * 1000).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function resolveAddressLabel(
+  address: string,
+  activeAddress: string,
+  contactNameByAddress: Record<string, string>,
+  merchantNameByAddress: Record<string, string>,
+): string {
+  const normalizedAddress = address.toLowerCase();
+  if (activeAddress && normalizedAddress === activeAddress.toLowerCase()) {
+    return "You";
+  }
+  const contactName = contactNameByAddress[normalizedAddress];
+  if (contactName) {
+    return contactName;
+  }
+  const merchantName = merchantNameByAddress[normalizedAddress];
+  if (merchantName) {
+    return merchantName;
+  }
+  return shortAddress(address);
+}
+
 export function WalletHomeScreen({
   balance,
   smartAddress,
@@ -37,6 +69,10 @@ export function WalletHomeScreen({
   selectedWalletLabel,
   recentTransactions,
   transactionsLoaded,
+  contacts,
+  merchants,
+  merchantLabels,
+  activeAddress,
   onOpenSend,
   onOpenReceive,
   onOpenActivity,
@@ -47,6 +83,29 @@ export function WalletHomeScreen({
 }: Props) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
+  const refreshAccent = isDark ? palette.primary : palette.primaryStrong;
+
+  const contactNameByAddress = useMemo(() => {
+    const next: Record<string, string> = {};
+    for (const contact of contacts) {
+      next[contact.address.toLowerCase()] = contact.name;
+    }
+    return next;
+  }, [contacts]);
+
+  const merchantNameByAddress = useMemo(() => {
+    const next: Record<string, string> = { ...merchantLabels };
+    for (const merchant of merchants) {
+      if (!merchant.payToAddress) {
+        continue;
+      }
+      const normalizedAddress = merchant.payToAddress.toLowerCase();
+      if (!next[normalizedAddress]) {
+        next[normalizedAddress] = merchant.name.trim();
+      }
+    }
+    return next;
+  }, [merchantLabels, merchants]);
 
   return (
     <ScrollView
@@ -55,9 +114,9 @@ export function WalletHomeScreen({
         <RefreshControl
           refreshing={refreshing}
           onRefresh={() => void onRefresh()}
-          tintColor={palette.primaryStrong}
-          colors={[palette.primaryStrong]}
-          progressBackgroundColor={palette.surface}
+          tintColor={refreshAccent}
+          colors={[refreshAccent]}
+          progressBackgroundColor={palette.surfaceStrong}
         />
       }
       showsVerticalScrollIndicator={false}
@@ -82,7 +141,12 @@ export function WalletHomeScreen({
         <Text style={styles.heroEyebrow}>Selected wallet</Text>
         <Text style={styles.heroBalance}>{balance}</Text>
         <Text style={styles.heroCurrency}>SFLUV available</Text>
-        <Text style={styles.refreshHint}>Pull down to refresh balance and activity.</Text>
+        <View style={styles.refreshHintRow}>
+          <Ionicons name={refreshing ? "refresh" : "refresh-outline"} size={14} color={refreshAccent} />
+          <Text style={[styles.refreshHint, refreshing ? styles.refreshHintActive : undefined]}>
+            {refreshing ? "Refreshing balance and activity…" : "Pull down to refresh balance and activity."}
+          </Text>
+        </View>
 
         <View style={styles.addressBar}>
           <Ionicons name="wallet-outline" size={16} color={palette.primaryStrong} />
@@ -135,6 +199,17 @@ export function WalletHomeScreen({
         ) : (
           recentTransactions.slice(0, 5).map((tx) => {
             const incoming = tx.direction !== "send";
+            const counterpartyAddress = incoming ? tx.from : tx.to;
+            const counterpartyLabel = resolveAddressLabel(
+              counterpartyAddress,
+              activeAddress,
+              contactNameByAddress,
+              merchantNameByAddress,
+            );
+            const counterpartyMeta =
+              counterpartyLabel === shortAddress(counterpartyAddress)
+                ? formatTxDate(tx.timestamp)
+                : `${shortAddress(counterpartyAddress)} • ${formatTxDate(tx.timestamp)}`;
             return (
               <View key={tx.id} style={styles.txCard}>
                 <View style={[styles.txIconWrap, incoming ? styles.txIconReceive : styles.txIconSend]}>
@@ -145,8 +220,10 @@ export function WalletHomeScreen({
                   />
                 </View>
                 <View style={styles.txBody}>
-                  <Text style={styles.txTitle}>{formatTxTitle(tx)}</Text>
-                  <Text style={styles.txMeta}>{new Date(tx.timestamp * 1000).toLocaleDateString()}</Text>
+                  <Text style={styles.txTitle}>
+                    {formatTxTitle(tx)} {incoming ? "from" : "to"} {counterpartyLabel}
+                  </Text>
+                  <Text style={styles.txMeta}>{counterpartyMeta}</Text>
                 </View>
                 <View style={styles.txAmountWrap}>
                   <Text style={[styles.txAmount, incoming ? styles.txAmountReceive : styles.txAmountSend]}>
@@ -255,10 +332,18 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       fontWeight: "600",
     },
     refreshHint: {
-      marginTop: 6,
       color: palette.textMuted,
       fontSize: 12,
       fontWeight: "700",
+    },
+    refreshHintRow: {
+      marginTop: 6,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    refreshHintActive: {
+      color: palette.primaryStrong,
     },
     addressBar: {
       marginTop: spacing.lg,

@@ -79,6 +79,7 @@ export function ActivityScreen({
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const [selectedTransaction, setSelectedTransaction] = useState<TransactionDetailPayload | null>(null);
+  const refreshAccent = isDark ? palette.primary : palette.primaryStrong;
 
   const contactNameByAddress = useMemo(() => {
     const next: Record<string, string> = {};
@@ -127,9 +128,9 @@ export function ActivityScreen({
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => void onRefresh()}
-            tintColor={palette.primaryStrong}
-            colors={[palette.primaryStrong]}
-            progressBackgroundColor={palette.surface}
+            tintColor={refreshAccent}
+            colors={[refreshAccent]}
+            progressBackgroundColor={palette.surfaceStrong}
           />
         }
         showsVerticalScrollIndicator={false}
@@ -141,6 +142,12 @@ export function ActivityScreen({
             <Text style={styles.walletBarMeta}>
               {activeAddress ? shortAddress(activeAddress) : "Wallet not loaded yet"}
             </Text>
+            {refreshing ? (
+              <View style={styles.refreshState}>
+                <Ionicons name="refresh" size={14} color={refreshAccent} />
+                <Text style={styles.refreshStateText}>Refreshing history…</Text>
+              </View>
+            ) : null}
           </View>
           {showWalletChooser && onOpenWalletChooser ? (
             <Pressable style={styles.chooseWalletButton} onPress={onOpenWalletChooser}>
@@ -252,6 +259,17 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     walletBarMeta: {
       color: palette.textMuted,
       fontSize: 13,
+    },
+    refreshState: {
+      marginTop: 4,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    refreshStateText: {
+      color: palette.primaryStrong,
+      fontSize: 12,
+      fontWeight: "700",
     },
     chooseWalletButton: {
       flexDirection: "row",

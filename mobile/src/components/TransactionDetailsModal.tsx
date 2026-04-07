@@ -68,8 +68,8 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <SafeAreaView style={styles.safeArea}>
-        <View style={styles.overlay}>
-          <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        <Pressable style={styles.overlay} onPress={onClose}>
+          <Pressable style={styles.sheet} onPress={() => {}}>
             <View style={styles.headerRow}>
               <View style={styles.headerCopy}>
                 <Text style={styles.title}>Transaction Details</Text>
@@ -88,89 +88,85 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
               </Pressable>
             </View>
 
-            <View style={styles.amountCard}>
-              <Text style={[styles.amountText, details.received ? styles.amountReceive : styles.amountSend]}>
-                {signedAmount(details)}
-              </Text>
-              <Text style={styles.amountDate}>{formatDate(details.transaction.timestamp)}</Text>
-            </View>
-
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>From</Text>
-              <Text style={styles.sectionTitle}>{details.fromLabel}</Text>
-              <View style={styles.codeRow}>
-                <Text style={styles.codeText}>{details.transaction.from}</Text>
-                <Pressable style={styles.copyButton} onPress={() => void copyField(details.transaction.from, "from")}>
-                  <Ionicons
-                    name={copiedField === "from" ? "checkmark-circle" : "copy-outline"}
-                    size={16}
-                    color={copiedField === "from" ? palette.success : palette.primaryStrong}
-                  />
-                </Pressable>
+            <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+              <View style={styles.amountCard}>
+                <Text style={[styles.amountText, details.received ? styles.amountReceive : styles.amountSend]}>
+                  {signedAmount(details)}
+                </Text>
+                <Text style={styles.amountDate}>{formatDate(details.transaction.timestamp)}</Text>
               </View>
-            </View>
 
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>To</Text>
-              <Text style={styles.sectionTitle}>{details.toLabel}</Text>
-              <View style={styles.codeRow}>
-                <Text style={styles.codeText}>{details.transaction.to}</Text>
-                <Pressable style={styles.copyButton} onPress={() => void copyField(details.transaction.to, "to")}>
-                  <Ionicons
-                    name={copiedField === "to" ? "checkmark-circle" : "copy-outline"}
-                    size={16}
-                    color={copiedField === "to" ? palette.success : palette.primaryStrong}
-                  />
-                </Pressable>
-              </View>
-            </View>
-
-            {details.transaction.memo ? (
               <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Memo</Text>
+                <Text style={styles.sectionLabel}>From</Text>
+                <Text style={styles.sectionTitle}>{details.fromLabel}</Text>
                 <View style={styles.codeRow}>
-                  <Text style={styles.memoText}>{details.transaction.memo}</Text>
-                  <Pressable style={styles.copyButton} onPress={() => void copyField(details.transaction.memo || "", "memo")}>
+                  <Text style={styles.codeText}>{details.transaction.from}</Text>
+                  <Pressable style={styles.copyButton} onPress={() => void copyField(details.transaction.from, "from")}>
                     <Ionicons
-                      name={copiedField === "memo" ? "checkmark-circle" : "copy-outline"}
+                      name={copiedField === "from" ? "checkmark-circle" : "copy-outline"}
                       size={16}
-                      color={copiedField === "memo" ? palette.success : palette.primaryStrong}
+                      color={copiedField === "from" ? palette.success : palette.primaryStrong}
                     />
                   </Pressable>
                 </View>
               </View>
-            ) : null}
 
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>Transaction ID</Text>
-              <View style={styles.codeRow}>
-                <Text style={styles.codeText}>{details.transaction.hash}</Text>
-                <Pressable style={styles.copyButton} onPress={() => void copyField(details.transaction.hash, "hash")}>
-                  <Ionicons
-                    name={copiedField === "hash" ? "checkmark-circle" : "copy-outline"}
-                    size={16}
-                    color={copiedField === "hash" ? palette.success : palette.primaryStrong}
-                  />
+              <View style={styles.section}>
+                <Text style={styles.sectionLabel}>To</Text>
+                <Text style={styles.sectionTitle}>{details.toLabel}</Text>
+                <View style={styles.codeRow}>
+                  <Text style={styles.codeText}>{details.transaction.to}</Text>
+                  <Pressable style={styles.copyButton} onPress={() => void copyField(details.transaction.to, "to")}>
+                    <Ionicons
+                      name={copiedField === "to" ? "checkmark-circle" : "copy-outline"}
+                      size={16}
+                      color={copiedField === "to" ? palette.success : palette.primaryStrong}
+                    />
+                  </Pressable>
+                </View>
+              </View>
+
+              {details.transaction.memo ? (
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>Memo</Text>
+                  <View style={styles.codeRow}>
+                    <Text style={styles.memoText}>{details.transaction.memo}</Text>
+                    <Pressable style={styles.copyButton} onPress={() => void copyField(details.transaction.memo || "", "memo")}>
+                      <Ionicons
+                        name={copiedField === "memo" ? "checkmark-circle" : "copy-outline"}
+                        size={16}
+                        color={copiedField === "memo" ? palette.success : palette.primaryStrong}
+                      />
+                    </Pressable>
+                  </View>
+                </View>
+              ) : null}
+
+              <View style={styles.section}>
+                <Text style={styles.sectionLabel}>Transaction ID</Text>
+                <View style={styles.codeRow}>
+                  <Text style={styles.codeText}>{details.transaction.hash}</Text>
+                  <Pressable style={styles.copyButton} onPress={() => void copyField(details.transaction.hash, "hash")}>
+                    <Ionicons
+                      name={copiedField === "hash" ? "checkmark-circle" : "copy-outline"}
+                      size={16}
+                      color={copiedField === "hash" ? palette.success : palette.primaryStrong}
+                    />
+                  </Pressable>
+                </View>
+                <Pressable
+                  style={styles.inlineExplorerButton}
+                  onPress={() => {
+                    void Linking.openURL(explorerUrl(details.transaction.hash));
+                  }}
+                >
+                  <Ionicons name="open-outline" size={16} color={palette.primaryStrong} />
+                  <Text style={styles.inlineExplorerButtonText}>View on Explorer</Text>
                 </Pressable>
               </View>
-            </View>
-          </ScrollView>
-
-          <View style={styles.footer}>
-            <Pressable style={styles.secondaryButton} onPress={onClose}>
-              <Text style={styles.secondaryButtonText}>Close</Text>
-            </Pressable>
-            <Pressable
-              style={styles.primaryButton}
-              onPress={() => {
-                void Linking.openURL(explorerUrl(details.transaction.hash));
-              }}
-            >
-              <Ionicons name="open-outline" size={16} color={palette.white} />
-              <Text style={styles.primaryButtonText}>View on Explorer</Text>
-            </Pressable>
-          </View>
-        </View>
+            </ScrollView>
+          </Pressable>
+        </Pressable>
       </SafeAreaView>
     </Modal>
   );
@@ -180,21 +176,25 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
   return StyleSheet.create({
     safeArea: {
       flex: 1,
-      backgroundColor: "rgba(0,0,0,0.45)",
     },
     overlay: {
       flex: 1,
       justifyContent: "flex-end",
       backgroundColor: "rgba(0,0,0,0.45)",
     },
-    container: {
+    sheet: {
       backgroundColor: palette.background,
       borderTopLeftRadius: radii.xl,
       borderTopRightRadius: radii.xl,
-      padding: spacing.lg,
-      gap: spacing.md,
+      paddingTop: spacing.lg,
+      paddingHorizontal: spacing.lg,
       paddingBottom: spacing.lg,
-      maxHeight: "82%",
+      maxHeight: "90%",
+      gap: spacing.md,
+    },
+    container: {
+      gap: spacing.md,
+      paddingBottom: spacing.sm,
     },
     headerRow: {
       flexDirection: "row",
@@ -330,41 +330,23 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       borderWidth: 1,
       borderColor: palette.border,
     },
-    footer: {
+    inlineExplorerButton: {
+      marginTop: spacing.sm,
+      alignSelf: "flex-start",
       flexDirection: "row",
-      gap: spacing.sm,
-      backgroundColor: palette.background,
-      paddingHorizontal: spacing.lg,
-      paddingTop: spacing.sm,
-      paddingBottom: spacing.lg,
-    },
-    secondaryButton: {
-      flex: 1,
-      minHeight: 50,
-      borderRadius: radii.md,
-      backgroundColor: palette.surface,
+      alignItems: "center",
+      gap: 8,
+      borderRadius: radii.pill,
       borderWidth: 1,
-      borderColor: palette.borderStrong,
-      alignItems: "center",
-      justifyContent: "center",
+      borderColor: palette.primary,
+      backgroundColor: palette.primarySoft,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
     },
-    secondaryButtonText: {
-      color: palette.text,
+    inlineExplorerButtonText: {
+      color: palette.primaryStrong,
       fontWeight: "800",
-    },
-    primaryButton: {
-      flex: 1,
-      minHeight: 50,
-      borderRadius: radii.md,
-      backgroundColor: palette.primary,
-      alignItems: "center",
-      justifyContent: "center",
-      flexDirection: "row",
-      gap: spacing.xs,
-    },
-    primaryButtonText: {
-      color: palette.white,
-      fontWeight: "800",
+      fontSize: 12,
     },
   });
 }

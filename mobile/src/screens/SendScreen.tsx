@@ -249,7 +249,7 @@ export function SendScreen({
 
   const suggestions = useMemo(() => {
     const byAddress = new Map<string, RecipientSuggestion>();
-    for (const suggestion of [...contactSuggestions, ...merchantSuggestions]) {
+    for (const suggestion of [...merchantSuggestions, ...contactSuggestions]) {
       const key = suggestion.address.toLowerCase();
       if (!byAddress.has(key)) {
         byAddress.set(key, suggestion);
@@ -279,26 +279,21 @@ export function SendScreen({
   );
 
   const filteredSuggestions = useMemo(() => {
+    const selectedAddress = parsed?.recipient?.toLowerCase();
     if (!query) {
-      const featured = [...favoriteContacts, ...merchantSuggestions].slice(0, 6);
-      const seen = new Set<string>();
-      return featured.filter((suggestion) => {
-        const key = suggestion.address.toLowerCase();
-        if (seen.has(key)) {
-          return false;
-        }
-        seen.add(key);
-        return true;
-      });
+      return [];
     }
 
     return suggestions
       .filter((suggestion) => {
+        if (selectedAddress && suggestion.address.toLowerCase() === selectedAddress) {
+          return false;
+        }
         const haystack = `${suggestion.label} ${suggestion.address} ${suggestion.subtitle ?? ""}`.toLowerCase();
         return haystack.includes(query);
       })
       .slice(0, 6);
-  }, [favoriteContacts, merchantSuggestions, query, suggestions]);
+  }, [favoriteContacts, merchantSuggestions, parsed?.recipient, query, suggestions]);
 
   const displayedMerchants = useMemo(() => {
     const excludedAddress = parsed?.recipient?.toLowerCase();
@@ -625,7 +620,14 @@ export function SendScreen({
     Keyboard.dismiss();
   };
 
+  const clearRecipientSelection = () => {
+    setRecipientInput("");
+    setDraftRecipient(null);
+    setFeedback(null);
+  };
+
   const sendLabel = resolvedRecipient ? `Slide to pay ${resolvedRecipient.label}` : "Slide to send SFLUV";
+  const showAutocomplete = entryMode === "manual" && query.length > 0 && !resolvedRecipient;
 
   return (
     <View style={styles.flex}>
@@ -690,34 +692,6 @@ export function SendScreen({
                 </View>
               ) : null}
 
-              {entryMode === "manual" && suggestedNearbyMerchant?.payToAddress ? (
-                <Pressable
-                  style={styles.highlightCard}
-                  onPress={() => {
-                    setRecipientInput(suggestedNearbyMerchant.payToAddress!);
-                    setDraftRecipient({
-                      key: `merchant:${suggestedNearbyMerchant.id}`,
-                      kind: "merchant",
-                      label: suggestedNearbyMerchant.name,
-                      address: suggestedNearbyMerchant.payToAddress!,
-                      subtitle: [suggestedNearbyMerchant.type, suggestedNearbyMerchant.city].filter(Boolean).join(" • "),
-                    });
-                  }}
-                >
-                  <View style={styles.highlightHeader}>
-                    <Text style={styles.highlightEyebrow}>Suggested nearby payment</Text>
-                    <Ionicons name="location" size={16} color={palette.primaryStrong} />
-                  </View>
-                  <Text style={styles.highlightTitle}>{suggestedNearbyMerchant.name}</Text>
-                  <Text style={styles.highlightMeta}>
-                    {formatDistanceLabel(locationDistanceMeters(suggestedNearbyMerchant, userLocation) ?? 0)}
-                  </Text>
-                  <Text style={styles.highlightBody}>
-                    {suggestedNearbyMerchant.street}, {suggestedNearbyMerchant.city}
-                  </Text>
-                </Pressable>
-              ) : null}
-
               {entryMode === "scan" ? (
                 <View style={styles.scanHeroCard}>
                   <View style={styles.scanHeroIcon}>
@@ -762,42 +736,48 @@ export function SendScreen({
                   </Pressable>
                 </View>
 
-                <TextInput
-                  style={styles.recipientInput}
-                  value={recipientInput}
-                  onChangeText={setRecipientInput}
-                  placeholder="Search merchants, contacts, or paste an address"
-                  placeholderTextColor={palette.textMuted}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  multiline
-                  returnKeyType="done"
-                  blurOnSubmit
-                />
-
                 {resolvedRecipient ? (
-                  <View style={styles.recipientSummary}>
-                    <View style={styles.contactAvatar}>
+                  <View style={styles.recipientCard}>
+                    <View style={styles.recipientCardAvatar}>
                       <Text style={styles.contactAvatarText}>{initials(resolvedRecipient.label)}</Text>
                     </View>
-                    <View style={styles.recipientSummaryBody}>
-                      <View style={styles.recipientSummaryHeader}>
-                        <Text style={styles.recipientSummaryTitle}>{resolvedRecipient.label}</Text>
-                        <Text style={styles.recipientSummaryKind}>
-                          {resolvedRecipient.kind === "merchant" ? "Merchant" : "Contact"}
-                        </Text>
-                      </View>
-                      <Text style={styles.recipientSummaryMeta}>{shortAddress(parsed?.recipient ?? resolvedRecipient.address)}</Text>
+                    <View style={styles.recipientCardBody}>
+                      <Text style={styles.recipientCardTitle}>{resolvedRecipient.label}</Text>
+                      {resolvedRecipient.subtitle ? (
+                        <Text style={styles.recipientCardSubtitle}>{resolvedRecipient.subtitle}</Text>
+                      ) : null}
+                      <Text style={styles.recipientCardDetail}>
+                        {resolvedRecipient.kind === "merchant" ? "Merchant" : "Contact"}
+                      </Text>
+                      <Text style={styles.recipientCardAddress}>{shortAddress(parsed?.recipient ?? resolvedRecipient.address)}</Text>
                     </View>
+                    <Pressable style={styles.clearRecipientButton} onPress={clearRecipientSelection}>
+                      <Ionicons name="close" size={16} color={palette.primaryStrong} />
+                    </Pressable>
                   </View>
-                ) : parsed ? (
+                ) : (
+                  <TextInput
+                    style={styles.recipientInput}
+                    value={recipientInput}
+                    onChangeText={setRecipientInput}
+                    placeholder="Search merchants, contacts, or paste an address"
+                    placeholderTextColor={palette.textMuted}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    multiline
+                    returnKeyType="done"
+                    blurOnSubmit
+                  />
+                )}
+
+                {!resolvedRecipient && parsed ? (
                   <View style={styles.validRecipientRow}>
                     <Ionicons name="checkmark-circle" size={16} color={palette.success} />
                     <Text style={styles.validRecipientText}>Ready to pay {shortAddress(parsed.recipient)}</Text>
                   </View>
                 ) : null}
 
-                {filteredSuggestions.length > 0 ? (
+                {showAutocomplete && filteredSuggestions.length > 0 ? (
                   <View style={styles.suggestionList}>
                     {filteredSuggestions.map((suggestion) => (
                       <Pressable key={suggestion.key} style={styles.suggestionCard} onPress={() => selectSuggestion(suggestion)}>
@@ -831,6 +811,23 @@ export function SendScreen({
                     ))}
                   </View>
                 ) : null}
+              </View>
+
+              <View style={styles.amountCard}>
+                <View style={styles.amountRow}>
+                  <Text style={styles.currencyPrefix}>$</Text>
+                  <TextInput
+                    style={styles.amountInput}
+                    value={amountInput}
+                    onChangeText={setAmountInput}
+                    placeholder="0.00"
+                    placeholderTextColor={palette.textMuted}
+                    keyboardType={Platform.select({ ios: "decimal-pad", android: "numeric" })}
+                    returnKeyType="done"
+                    blurOnSubmit
+                  />
+                  <Text style={styles.amountToken}>SFLUV</Text>
+                </View>
               </View>
 
               {entryMode === "manual" && displayedMerchants.length > 0 ? (
@@ -884,6 +881,11 @@ export function SendScreen({
                             <Text style={styles.merchantOptionAddress}>{shortAddress(merchant.payToAddress || "")}</Text>
                           </View>
                           <View style={styles.merchantOptionMeta}>
+                            {suggestedNearbyMerchant?.id === merchant.id ? (
+                              <View style={styles.merchantOptionBadge}>
+                                <Text style={styles.merchantOptionBadgeText}>Closest</Text>
+                              </View>
+                            ) : null}
                             {distance !== null ? (
                               <Text style={styles.merchantOptionDistance}>{formatDistanceLabel(distance)}</Text>
                             ) : null}
@@ -895,23 +897,6 @@ export function SendScreen({
                   </View>
                 </View>
               ) : null}
-
-              <View style={styles.amountCard}>
-                <View style={styles.amountRow}>
-                  <Text style={styles.currencyPrefix}>$</Text>
-                  <TextInput
-                    style={styles.amountInput}
-                    value={amountInput}
-                    onChangeText={setAmountInput}
-                    placeholder="0.00"
-                    placeholderTextColor={palette.textMuted}
-                    keyboardType={Platform.select({ ios: "decimal-pad", android: "numeric" })}
-                    returnKeyType="done"
-                    blurOnSubmit
-                  />
-                  <Text style={styles.amountToken}>SFLUV</Text>
-                </View>
-              </View>
 
               <View style={styles.card}>
                 <Text style={styles.sectionLabel}>Add a note</Text>
@@ -1346,6 +1331,62 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       fontSize: 15,
       lineHeight: 20,
     },
+    recipientCard: {
+      backgroundColor: palette.surfaceStrong,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: palette.primary,
+      padding: spacing.md,
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: spacing.sm,
+    },
+    recipientCardAvatar: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      backgroundColor: palette.primarySoft,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: palette.primary,
+    },
+    recipientCardBody: {
+      flex: 1,
+      gap: 4,
+    },
+    recipientCardTitle: {
+      color: palette.text,
+      fontWeight: "900",
+      fontSize: 16,
+    },
+    recipientCardSubtitle: {
+      color: palette.textMuted,
+      fontSize: 13,
+      lineHeight: 18,
+    },
+    recipientCardDetail: {
+      color: palette.primaryStrong,
+      fontWeight: "800",
+      fontSize: 12,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+    },
+    recipientCardAddress: {
+      color: palette.text,
+      fontWeight: "700",
+      fontSize: 13,
+    },
+    clearRecipientButton: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: palette.surface,
+      borderWidth: 1,
+      borderColor: palette.border,
+    },
     recipientSummary: {
       flexDirection: "row",
       alignItems: "center",
@@ -1520,6 +1561,21 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     merchantOptionMeta: {
       alignItems: "flex-end",
       gap: 8,
+    },
+    merchantOptionBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: radii.pill,
+      backgroundColor: palette.primarySoft,
+      borderWidth: 1,
+      borderColor: palette.primary,
+    },
+    merchantOptionBadgeText: {
+      color: palette.primaryStrong,
+      fontWeight: "800",
+      fontSize: 10,
+      textTransform: "uppercase",
+      letterSpacing: 0.4,
     },
     merchantOptionDistance: {
       color: palette.primaryStrong,

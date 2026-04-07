@@ -1659,6 +1659,10 @@ function WalletAppShellContent({
                 selectedWalletLabel={selectedWalletLabel}
                 recentTransactions={walletTransactions}
                 transactionsLoaded={walletTransactionsLoaded}
+                contacts={contacts}
+                merchants={locations}
+                merchantLabels={merchantLabelsByAddress}
+                activeAddress={smartAddress}
                 refreshing={refreshingHome}
                 onRefresh={async () => {
                   setRefreshingHome(true);
