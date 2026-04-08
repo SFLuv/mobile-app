@@ -12,13 +12,6 @@ type Props = {
   activeWalletLabel?: string;
   syncNotice?: string | null;
   preferences: AppPreferences;
-  notificationPermissionStatus: "unknown" | "undetermined" | "granted" | "denied" | "unavailable";
-  notificationSyncState: "idle" | "syncing" | "success" | "error";
-  notificationTokenRegistered: boolean;
-  notificationAddressCount: number;
-  notificationSubscribedCount: number;
-  notificationStatusMessage?: string | null;
-  onSyncNotifications: () => void;
   onUpdatePreferences: (next: AppPreferences) => void;
   onRenameWallet: (wallet: AppWallet, nextName: string) => Promise<void>;
   onSetPrimaryWallet: (address: string) => Promise<void>;
@@ -48,21 +41,6 @@ function walletDisplayName(wallet: AppWallet): string {
 
 function walletAddress(wallet: AppWallet): string {
   return wallet.smartAddress ?? wallet.eoaAddress;
-}
-
-function formatPermissionStatus(status: Props["notificationPermissionStatus"]): string {
-  switch (status) {
-    case "granted":
-      return "Allowed";
-    case "denied":
-      return "Blocked";
-    case "undetermined":
-      return "Not decided";
-    case "unavailable":
-      return "Device required";
-    default:
-      return "Checking";
-  }
 }
 
 function ThemeOption({
@@ -276,13 +254,6 @@ export function SettingsScreen({
   activeWalletLabel,
   syncNotice,
   preferences,
-  notificationPermissionStatus,
-  notificationSyncState,
-  notificationTokenRegistered,
-  notificationAddressCount,
-  notificationSubscribedCount,
-  notificationStatusMessage,
-  onSyncNotifications,
   onUpdatePreferences,
   onRenameWallet,
   onSetPrimaryWallet,
@@ -325,35 +296,11 @@ export function SettingsScreen({
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>App behavior</Text>
         <PreferenceRow
-          title="Notifications"
-          body="Get phone alerts on this device when money lands in one of your wallets."
-          value={preferences.notificationsEnabled}
-          onValueChange={(notificationsEnabled) => onUpdatePreferences({ ...preferences, notificationsEnabled })}
-        />
-        <PreferenceRow
           title="Haptic feedback"
           body="Toggle whether your phone will buzz when you send or receive."
           value={preferences.hapticsEnabled}
           onValueChange={(hapticsEnabled) => onUpdatePreferences({ ...preferences, hapticsEnabled })}
         />
-        <View style={styles.pushStatusCard}>
-          <View style={styles.pushStatusHeader}>
-            <Text style={styles.pushStatusTitle}>Push status</Text>
-            <Pressable
-              style={[styles.syncButton, notificationSyncState === "syncing" ? styles.buttonDisabled : undefined]}
-              disabled={notificationSyncState === "syncing"}
-              onPress={onSyncNotifications}
-            >
-              <Text style={styles.syncButtonText}>{notificationSyncState === "syncing" ? "Syncing..." : "Sync now"}</Text>
-            </Pressable>
-          </View>
-          <Text style={styles.pushStatusMeta}>System permission: {formatPermissionStatus(notificationPermissionStatus)}</Text>
-          <Text style={styles.pushStatusMeta}>Device token: {notificationTokenRegistered ? "Registered" : "Missing"}</Text>
-          <Text style={styles.pushStatusMeta}>
-            Wallet subscriptions: {notificationSubscribedCount} / {notificationAddressCount}
-          </Text>
-          {notificationStatusMessage ? <Text style={styles.pushStatusMessage}>{notificationStatusMessage}</Text> : null}
-        </View>
       </View>
 
       <View style={styles.card}>
@@ -488,49 +435,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     themeOptionTextActive: {
       color: palette.primaryStrong,
-    },
-    pushStatusCard: {
-      borderRadius: radii.md,
-      borderWidth: 1,
-      borderColor: palette.border,
-      backgroundColor: palette.surfaceStrong,
-      padding: spacing.md,
-      gap: spacing.xs,
-    },
-    pushStatusHeader: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: spacing.sm,
-    },
-    pushStatusTitle: {
-      color: palette.text,
-      fontSize: 15,
-      fontWeight: "800",
-    },
-    pushStatusMeta: {
-      color: palette.textMuted,
-      lineHeight: 19,
-    },
-    pushStatusMessage: {
-      color: palette.text,
-      lineHeight: 20,
-      fontWeight: "600",
-    },
-    syncButton: {
-      borderRadius: radii.pill,
-      borderWidth: 1,
-      borderColor: palette.primary,
-      backgroundColor: palette.primarySoft,
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    syncButtonText: {
-      color: palette.primaryStrong,
-      fontWeight: "800",
-      fontSize: 13,
     },
     preferenceRow: {
       flexDirection: "row",

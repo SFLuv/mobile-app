@@ -74,7 +74,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         locationWhenInUsePermission: "SFLUV Wallet uses your location to show nearby merchants and your position on the merchant map.",
       },
     ],
-    "expo-notifications",
     "expo-secure-store",
     "expo-web-browser",
   ],
