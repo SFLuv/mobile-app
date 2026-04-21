@@ -51,6 +51,8 @@ export const mobileConfig = {
   rpcURL: process.env.EXPO_PUBLIC_RPC_URL ?? "https://rpc.berachain.com",
   tokenAddress: process.env.EXPO_PUBLIC_TOKEN_ADDRESS ?? "0x881cad4f885c6701d8481c0ed347f6d35444ea7e",
   tokenDecimals: parseNumber(process.env.EXPO_PUBLIC_TOKEN_DECIMALS, 18),
+  adminAddress:
+    process.env.EXPO_PUBLIC_ADMIN_ADDRESS ?? "0x05e2Fb34b4548990F96B3ba422eA3EF49D5dAa99",
   appBackendURL,
   appOrigin: process.env.EXPO_PUBLIC_APP_ORIGIN ?? "https://app.sfluv.org",
   googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? "",

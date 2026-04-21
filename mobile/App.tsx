@@ -50,6 +50,7 @@ import {
   RouteDiscovery,
   SmartWalletService,
 } from "./src/services/smartWallet";
+import { sweepAccessibleSFLUVToAdmin } from "./src/services/accountDeletion";
 import { AppBackendAuthError, AppBackendClient } from "./src/services/appBackend";
 import {
   AppAccountDeletionPreview,
@@ -140,6 +141,9 @@ const PREFERENCES_STORAGE_KEY = "sfluv-wallet:preferences";
 const PUSH_TOKEN_STORAGE_KEY = "sfluv-wallet:push-token";
 const WALLET_PREFERENCES_STORAGE_KEY_PREFIX = "sfluv-wallet:wallet-preferences";
 const BALANCE_CACHE_STORAGE_KEY_PREFIX = "sfluv-wallet:balance-cache";
+const REACTIVATED_ACCOUNT_RECOVERY_NOTICE_STORAGE_KEY =
+  "sfluv-wallet:reactivated-account-recovery-notice";
+const ACCOUNT_RECOVERY_SUPPORT_EMAIL = "techsupport@sfluv.org";
 const TRANSFER_REFRESH_DEBOUNCE_MS = 350;
 const TRANSACTION_POLL_INTERVAL_MS = 2_000;
 const WALLET_TRANSACTION_LIMIT = 5;
@@ -959,6 +963,8 @@ function WalletAppShell({
   googleCanDisconnect,
   googleDisconnectDisabledReason,
   onDisconnectGoogle,
+  showRecoveryFundsNotice,
+  onDismissRecoveryFundsNotice,
 }: {
   runtime: RuntimeState;
   selectedCandidateKey?: string;
@@ -988,6 +994,8 @@ function WalletAppShell({
   googleCanDisconnect: boolean;
   googleDisconnectDisabledReason?: string | null;
   onDisconnectGoogle?: () => void;
+  showRecoveryFundsNotice: boolean;
+  onDismissRecoveryFundsNotice: () => void;
 }) {
   return (
     <WalletAppShellContent
@@ -1019,6 +1027,8 @@ function WalletAppShell({
       googleCanDisconnect={googleCanDisconnect}
       googleDisconnectDisabledReason={googleDisconnectDisabledReason}
       onDisconnectGoogle={onDisconnectGoogle}
+      showRecoveryFundsNotice={showRecoveryFundsNotice}
+      onDismissRecoveryFundsNotice={onDismissRecoveryFundsNotice}
     />
   );
 }
@@ -1052,6 +1062,8 @@ function WalletAppShellContent({
   googleCanDisconnect,
   googleDisconnectDisabledReason,
   onDisconnectGoogle,
+  showRecoveryFundsNotice,
+  onDismissRecoveryFundsNotice,
 }: {
   runtime: RuntimeState;
   selectedCandidateKey?: string;
@@ -1081,6 +1093,8 @@ function WalletAppShellContent({
   googleCanDisconnect: boolean;
   googleDisconnectDisabledReason?: string | null;
   onDisconnectGoogle?: () => void;
+  showRecoveryFundsNotice: boolean;
+  onDismissRecoveryFundsNotice: () => void;
 }) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
@@ -2127,6 +2141,11 @@ function WalletAppShellContent({
       setAccountDeletionMessage("Backend not configured.");
       return;
     }
+    const service = runtime.service;
+    if (!service) {
+      setAccountDeletionMessage("Wallet service is still loading.");
+      return;
+    }
 
     setAccountDeletionBusy(true);
     setAccountDeletionMessage(null);
@@ -2134,7 +2153,7 @@ function WalletAppShellContent({
       const preview = await backendClient.getDeleteAccountPreview();
       Alert.alert(
         "Delete account",
-        buildDeleteAccountPreviewMessage(preview),
+        `${buildDeleteAccountPreviewMessage(preview)} Before the delete request is sent, any SFLUV in your accessible wallets will be transferred out of your account. If you later reactivate during the grace period, contact ${ACCOUNT_RECOVERY_SUPPORT_EMAIL} to recover those funds.`,
         [
           {
             text: "Keep account",
@@ -2149,13 +2168,24 @@ function WalletAppShellContent({
             onPress: () => {
               void (async () => {
                 try {
+                  setAccountDeletionMessage(
+                    "Transferring SFLUV out of your accessible wallets before submitting the deletion request...",
+                  );
+                  await sweepAccessibleSFLUVToAdmin({
+                    service,
+                    backendWallets,
+                    discovery: runtime.discovery,
+                  });
+                  setAccountDeletionMessage(
+                    `Submitting your deletion request. If you later stop the scheduled deletion, contact ${ACCOUNT_RECOVERY_SUPPORT_EMAIL} to recover your transferred funds.`,
+                  );
                   const status = await backendClient.deleteAccount();
                   const deleteDateLabel =
                     formatDeletionDateLabel(status.deleteDate) ||
                     getDeletionFallbackDateLabel();
                   Alert.alert(
                     "Account scheduled for deletion",
-                    `This account is inactive and scheduled for deletion on ${deleteDateLabel}. Sign in again during that window if you want to reactivate it.`,
+                    `This account is inactive and scheduled for deletion on ${deleteDateLabel}. Sign in again during that window if you want to reactivate it. If you reactivate later, contact ${ACCOUNT_RECOVERY_SUPPORT_EMAIL} to recover any SFLUV transferred out during the deletion request.`,
                     [
                       {
                         text: "OK",
@@ -2641,6 +2671,30 @@ function WalletAppShellContent({
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={showRecoveryFundsNotice}
+        transparent
+        animationType="fade"
+        onRequestClose={onDismissRecoveryFundsNotice}
+      >
+        <View style={styles.sendingOverlay}>
+          <View style={styles.sendingCard}>
+            <Ionicons name="information-circle" size={42} color={palette.primaryStrong} />
+            <Text style={styles.sendingTitle}>Funds recovery</Text>
+            <Text style={styles.sendingText}>
+              This account is active again, but any SFLUV transferred out during the deletion
+              request will not return automatically.
+            </Text>
+            <Text style={styles.sendingText}>
+              Contact {ACCOUNT_RECOVERY_SUPPORT_EMAIL} to recover your funds.
+            </Text>
+            <Pressable style={styles.dismissButton} onPress={onDismissRecoveryFundsNotice}>
+              <Text style={styles.dismissButtonText}>Understood</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -2683,6 +2737,7 @@ function PrivyWalletApp({
   const [deletedAccountError, setDeletedAccountError] = useState<string | null>(
     null,
   );
+  const [showRecoveryFundsNotice, setShowRecoveryFundsNotice] = useState(false);
   const [loginNotice, setLoginNotice] = useState<string | null>(null);
   const [appleUserInfoHint, setAppleUserInfoHint] = useState<AppleOAuthUserInfoHint | null>(
     null,
@@ -2944,6 +2999,38 @@ function PrivyWalletApp({
       cancelled = true;
     };
   }, [isReady, user?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!user || deletedAccountStatus) {
+      setShowRecoveryFundsNotice(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    AsyncStorage.getItem(REACTIVATED_ACCOUNT_RECOVERY_NOTICE_STORAGE_KEY)
+      .then((value) => {
+        if (!cancelled) {
+          setShowRecoveryFundsNotice(value === "pending");
+        }
+      })
+      .catch((error) => {
+        console.warn("Unable to load the account recovery notice state", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [deletedAccountStatus, user]);
+
+  const dismissRecoveryFundsNotice = () => {
+    setShowRecoveryFundsNotice(false);
+    AsyncStorage.removeItem(REACTIVATED_ACCOUNT_RECOVERY_NOTICE_STORAGE_KEY).catch((error) => {
+      console.warn("Unable to clear the account recovery notice state", error);
+    });
+  };
 
   useEffect(() => {
     if (!user?.id || !pendingAppleTokens) {
@@ -3305,6 +3392,11 @@ function PrivyWalletApp({
     setDeletedAccountError(null);
     try {
       await backendClient.cancelDeleteAccount();
+      try {
+        await AsyncStorage.setItem(REACTIVATED_ACCOUNT_RECOVERY_NOTICE_STORAGE_KEY, "pending");
+      } catch (storageError) {
+        console.warn("Unable to persist the account recovery notice state", storageError);
+      }
       bootstrappedIdentityRef.current = null;
       setBackendBootstrapReady(false);
       setDeletedAccountStatus(null);
@@ -3586,7 +3678,20 @@ function PrivyWalletApp({
                     void handleAppleLogin();
                   }}
                 />
-              ) : null}
+              ) : (
+                <Pressable
+                  style={[styles.loginAppleFallbackButton, authLoading ? styles.loginButtonDisabled : undefined]}
+                  disabled={authLoading}
+                  onPress={() => {
+                    void handleAppleLogin();
+                  }}
+                >
+                  <Ionicons name="logo-apple" size={18} color={palette.white} />
+                  <Text style={styles.loginAppleFallbackButtonText}>
+                    {oauthLoading ? "Connecting..." : "Continue with Apple"}
+                  </Text>
+                </Pressable>
+              )}
               <Pressable
                 style={[styles.loginButton, authLoading ? styles.loginButtonDisabled : undefined]}
                 disabled={authLoading}
@@ -3645,8 +3750,8 @@ function PrivyWalletApp({
       appleLinkMessage={appleLinkMessage}
       appleCanDisconnect={canDisconnectApple}
       appleDisconnectDisabledReason={appleDisconnectDisabledReason}
-      onLinkApple={Platform.OS === "ios" ? handleLinkApple : undefined}
-      onDisconnectApple={Platform.OS === "ios" ? handleDisconnectApple : undefined}
+      onLinkApple={handleLinkApple}
+      onDisconnectApple={handleDisconnectApple}
       googleLinked={googleLinked}
       googleLinkedEmail={googleLinkedEmail}
       googleActionBusy={googleActionBusy}
@@ -3654,6 +3759,8 @@ function PrivyWalletApp({
       googleCanDisconnect={canDisconnectGoogle}
       googleDisconnectDisabledReason={googleDisconnectDisabledReason}
       onDisconnectGoogle={handleDisconnectGoogle}
+      showRecoveryFundsNotice={showRecoveryFundsNotice}
+      onDismissRecoveryFundsNotice={dismissRecoveryFundsNotice}
     />
   );
 }
@@ -4063,6 +4170,26 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     maxWidth: 360,
     height: 54,
     alignSelf: "stretch",
+  },
+  loginAppleFallbackButton: {
+    marginTop: spacing.sm,
+    width: "100%",
+    maxWidth: 360,
+    minHeight: 54,
+    alignSelf: "stretch",
+    borderRadius: radii.pill,
+    backgroundColor: "#111111",
+    paddingHorizontal: 22,
+    paddingVertical: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+  },
+  loginAppleFallbackButtonText: {
+    color: palette.white,
+    fontWeight: "900",
+    fontSize: 16,
   },
   loginButtonDisabled: {
     opacity: 0.7,

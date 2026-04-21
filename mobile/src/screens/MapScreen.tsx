@@ -310,7 +310,7 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
                 mapRef.current = instance;
               }}
               style={styles.map}
-              provider={Platform.OS === "ios" ? PROVIDER_GOOGLE : undefined}
+              provider={PROVIDER_GOOGLE}
               initialRegion={mapRegion}
               onMapReady={() => setMapReady(true)}
               toolbarEnabled={false}
@@ -451,17 +451,6 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
                   >
                     <Text style={styles.primaryButtonText}>Google Maps</Text>
                   </Pressable>
-                  {Platform.OS === "ios" ? (
-                    <Pressable
-                      style={styles.secondaryButton}
-                      onPress={() => {
-                        const url = `https://maps.apple.com/?ll=${selectedLocation.lat},${selectedLocation.lng}&q=${encodeURIComponent(selectedLocation.name)}`;
-                        void Linking.openURL(url);
-                      }}
-                    >
-                      <Text style={styles.secondaryButtonText}>Apple Maps</Text>
-                    </Pressable>
-                  ) : null}
                 </View>
               </>
             ) : null}
@@ -721,19 +710,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       flexDirection: "row",
       gap: spacing.sm,
       marginTop: "auto",
-    },
-    secondaryButton: {
-      flex: 1,
-      borderRadius: radii.md,
-      borderWidth: 1,
-      borderColor: palette.borderStrong,
-      backgroundColor: palette.surface,
-      paddingVertical: 14,
-      alignItems: "center",
-    },
-    secondaryButtonText: {
-      color: palette.text,
-      fontWeight: "700",
     },
     primaryButton: {
       flex: 1,

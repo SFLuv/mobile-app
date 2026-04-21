@@ -466,8 +466,8 @@ export function SettingsScreen({
           <Text style={styles.sectionTitle}>Apple sign-in</Text>
           <Text style={styles.body}>
             {appleLinked
-              ? "Apple is linked to this account for future iPhone sign-ins."
-              : "Link Apple so future iPhone sign-ins land on this account."}
+              ? "Apple is linked to this account for future Apple sign-ins."
+              : "Link Apple so future Apple sign-ins land on this account."}
           </Text>
           {appleLinkedEmail ? <Text style={styles.meta}>Apple email: {appleLinkedEmail}</Text> : null}
           {appleDisconnectDisabledReason ? (
@@ -501,7 +501,9 @@ export function SettingsScreen({
         <View style={[styles.card, styles.deleteAccountCard]}>
           <Text style={styles.sectionTitle}>Delete account</Text>
           <Text style={styles.body}>
-            Delete your account and log out. Your account will be recoverable for the next 30 days.
+            Delete your account and log out. Your account will be recoverable for the next 30 days,
+            but any SFLUV in your accessible wallets will be transferred out of your account before
+            the deletion request is submitted.
           </Text>
           {accountDeletionMessage ? (
             <Text style={styles.inlineError}>{accountDeletionMessage}</Text>

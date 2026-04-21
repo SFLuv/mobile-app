@@ -265,6 +265,14 @@ export class SmartWalletService {
     return this.owner;
   }
 
+  signer(): ethers.Signer {
+    return this.ownerSigner;
+  }
+
+  accessTokenProvider(): (() => Promise<string | null>) | undefined {
+    return this.getAccessToken;
+  }
+
   routeConfig(): WalletConfig {
     return this.walletConfig;
   }
