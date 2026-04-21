@@ -12,7 +12,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import MapView, { Marker, Region } from "react-native-maps";
+import MapView, { Marker, PROVIDER_GOOGLE, Region } from "react-native-maps";
 import { useCurrentLocation } from "../hooks/useCurrentLocation";
 import { AppLocation } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
@@ -310,6 +310,7 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
                 mapRef.current = instance;
               }}
               style={styles.map}
+              provider={Platform.OS === "ios" ? PROVIDER_GOOGLE : undefined}
               initialRegion={mapRegion}
               onMapReady={() => setMapReady(true)}
               toolbarEnabled={false}

@@ -17,14 +17,20 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
+import * as AppleAuthentication from "expo-apple-authentication";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
+import * as Device from "expo-device";
 import * as Linking from "expo-linking";
+import * as Notifications from "expo-notifications";
 import { ethers } from "ethers";
 import {
   PrivyProvider,
   useEmbeddedEthereumWallet,
+  useLinkWithOAuth,
   useLoginWithEmail,
   useLoginWithOAuth,
+  useOAuthTokens,
   usePrivy,
   useUnlinkOAuth,
 } from "@privy-io/expo";
@@ -48,6 +54,7 @@ import { AppBackendAuthError, AppBackendClient } from "./src/services/appBackend
 import {
   AppAccountDeletionPreview,
   AppAccountDeletionStatusResponse,
+  AppAppleRecoveryResponse,
   AppContact,
   AppLocation,
   AppTransaction,
@@ -77,6 +84,12 @@ type PendingLinkIntent = {
   link: SfluvUniversalLink;
 };
 
+type AppleOAuthUserInfoHint = {
+  email?: string | null;
+};
+
+type AppleAccountPromptAction = "idle" | "continuing" | "returning";
+
 type SendDraft = {
   recipient: string;
   amount?: string;
@@ -102,10 +115,29 @@ type ToastState = {
   message: string;
 };
 
+type PushPermissionStatus = "unknown" | "undetermined" | "granted" | "denied" | "unavailable";
+
+type PushRegistrationResult = {
+  token: string | null;
+  permissionStatus: PushPermissionStatus;
+  error?: string;
+};
+
+type PushSyncState = {
+  permissionStatus: PushPermissionStatus;
+  syncState: "idle" | "syncing" | "success" | "error";
+  addressCount: number;
+  subscribedCount: number;
+  token: string | null;
+  message: string | null;
+  lastSyncedAt?: number;
+};
+
 type Tab = "wallet" | "activity" | "map" | "contacts" | "settings";
 type WalletPane = "home" | "send" | "receive";
 
 const PREFERENCES_STORAGE_KEY = "sfluv-wallet:preferences";
+const PUSH_TOKEN_STORAGE_KEY = "sfluv-wallet:push-token";
 const WALLET_PREFERENCES_STORAGE_KEY_PREFIX = "sfluv-wallet:wallet-preferences";
 const BALANCE_CACHE_STORAGE_KEY_PREFIX = "sfluv-wallet:balance-cache";
 const TRANSFER_REFRESH_DEBOUNCE_MS = 350;
@@ -114,8 +146,148 @@ const WALLET_TRANSACTION_LIMIT = 5;
 const ACTIVITY_TRANSACTION_PAGE_SIZE = 10;
 const LINK_DEDUPE_WINDOW_MS = 4_000;
 
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
+
 function blankRuntime(loading = false): RuntimeState {
   return { loading, service: null, discovery: null, error: null };
+}
+
+function resolveExpoProjectId(): string | undefined {
+  const configuredProjectId = mobileConfig.expoProjectId.trim();
+  if (configuredProjectId) {
+    return configuredProjectId;
+  }
+
+  const fromConstants =
+    Constants.easConfig?.projectId ??
+    ((Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined)?.eas?.projectId ?? "");
+  return typeof fromConstants === "string" && fromConstants.trim().length > 0 ? fromConstants.trim() : undefined;
+}
+
+async function registerForPushNotificationsAsync(): Promise<string | null> {
+  if (Platform.OS === "android") {
+    await Notifications.setNotificationChannelAsync("wallet-activity", {
+      name: "Wallet activity",
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 200, 250],
+      lightColor: "#ef6d66",
+    });
+  }
+
+  if (!Device.isDevice) {
+    console.warn("Push notifications require a physical device.");
+    return null;
+  }
+
+  const projectId = resolveExpoProjectId();
+  if (!projectId) {
+    console.warn("Expo project ID is required to register for push notifications.");
+    return null;
+  }
+
+  let { status } = await Notifications.getPermissionsAsync();
+  if (status !== "granted") {
+    const requested = await Notifications.requestPermissionsAsync();
+    status = requested.status;
+  }
+  if (status !== "granted") {
+    console.warn("Notification permissions were not granted.");
+    return null;
+  }
+
+  const token = await Notifications.getExpoPushTokenAsync({ projectId });
+  return token.data;
+}
+
+function normalizePushPermissionStatus(status: string | null | undefined): PushPermissionStatus {
+  if (status === "granted") {
+    return "granted";
+  }
+  if (status === "denied") {
+    return "denied";
+  }
+  if (status === "undetermined") {
+    return "undetermined";
+  }
+  return "unknown";
+}
+
+async function readPushPermissionStatus(): Promise<PushPermissionStatus> {
+  if (Platform.OS === "android") {
+    try {
+      await Notifications.setNotificationChannelAsync("wallet-activity", {
+        name: "Wallet activity",
+        importance: Notifications.AndroidImportance.HIGH,
+        vibrationPattern: [0, 250, 200, 250],
+        lightColor: "#ef6d66",
+      });
+    } catch {
+      // Ignore Android channel errors while checking permission state.
+    }
+  }
+
+  if (!Device.isDevice) {
+    return "unavailable";
+  }
+
+  try {
+    const permissions = await Notifications.getPermissionsAsync();
+    return normalizePushPermissionStatus(permissions.status);
+  } catch {
+    return "unknown";
+  }
+}
+
+async function ensurePushRegistration(): Promise<PushRegistrationResult> {
+  if (!Device.isDevice) {
+    return {
+      token: null,
+      permissionStatus: "unavailable",
+      error: "Push notifications require a physical device.",
+    };
+  }
+
+  const projectId = resolveExpoProjectId();
+  if (!projectId) {
+    return {
+      token: null,
+      permissionStatus: "unknown",
+      error: "Expo project ID is required to register this device for push notifications.",
+    };
+  }
+
+  try {
+    const token = await registerForPushNotificationsAsync();
+    const permissionStatus = await readPushPermissionStatus();
+    if (!token) {
+      return {
+        token: null,
+        permissionStatus,
+        error:
+          permissionStatus === "denied"
+            ? "Push notifications are blocked for this app in system settings."
+            : "Unable to register this device for push notifications right now.",
+      };
+    }
+
+    return {
+      token,
+      permissionStatus,
+    };
+  } catch (error) {
+    return {
+      token: null,
+      permissionStatus: await readPushPermissionStatus(),
+      error: (error as Error)?.message || "Unable to register this device for push notifications.",
+    };
+  }
 }
 
 function formatDisplayBalance(raw: string): string {
@@ -554,7 +726,10 @@ function buildDeleteAccountPreviewMessage(preview: AppAccountDeletionPreview): s
   return `Your account will be marked inactive immediately and scheduled for permanent deletion on ${scheduledDate}.${summary} You can reactivate it any time during the 30-day window by signing in again.`;
 }
 
-function getLinkedGoogleAccount(currentUser: unknown): {
+function getLinkedOAuthAccount(
+  currentUser: unknown,
+  accountType: "apple_oauth" | "google_oauth",
+): {
   email?: string | null;
   subject?: string;
 } | null {
@@ -573,7 +748,7 @@ function getLinkedGoogleAccount(currentUser: unknown): {
       continue;
     }
     const typedAccount = account as { type?: string; email?: string | null; subject?: string };
-    if (typedAccount.type !== "google_oauth") {
+    if (typedAccount.type !== accountType) {
       continue;
     }
     return {
@@ -583,6 +758,14 @@ function getLinkedGoogleAccount(currentUser: unknown): {
   }
 
   return null;
+}
+
+function getLinkedAppleAccount(currentUser: unknown) {
+  return getLinkedOAuthAccount(currentUser, "apple_oauth");
+}
+
+function getLinkedGoogleAccount(currentUser: unknown) {
+  return getLinkedOAuthAccount(currentUser, "google_oauth");
 }
 
 function getLinkedEmailAccount(currentUser: unknown): {
@@ -614,6 +797,53 @@ function getLinkedEmailAccount(currentUser: unknown): {
   return null;
 }
 
+function describeAppleRecoveryPrompt(
+  recovery: AppAppleRecoveryResponse,
+): {
+  title: string;
+  body: string;
+  primaryLabel: string;
+  secondaryLabel: string;
+} {
+  if (recovery.resolution === "recovery_suggested") {
+    const existingAccountLabel =
+      recovery.suggestedExistingAccount?.contactName?.trim() ||
+      recovery.suggestedExistingAccount?.verifiedEmail?.trim() ||
+      "your existing SFLUV account";
+    return {
+      title: "We found an existing account",
+      body: `Apple signed you into a new Privy identity, but ${existingAccountLabel} already exists in SFLUV. To keep using that account and wallet, go back, sign in with Google or email, then link Apple in Settings. If you continue here and Apple does not share your real email with us, we will not be able to link the accounts together and you will end up with two separate SFLUV accounts.`,
+      primaryLabel: "Use my existing account",
+      secondaryLabel: "Continue with Apple anyway",
+    };
+  }
+
+  if (recovery.isPrivateRelay || !recovery.appleEmail) {
+    return {
+      title: "Continue with Apple?",
+      body: "Apple may have hidden your real email. If you create an Apple account without sharing your real email with us, we will not be able to link it to an existing SFLUV account and you will end up with two separate accounts. Go back and sign in with Google or email first if you already have an account.",
+      primaryLabel: "I already have an account",
+      secondaryLabel: "Continue with Apple anyway",
+    };
+  }
+
+  if (recovery.resolution === "ambiguous_match") {
+    return {
+      title: "Multiple accounts found",
+      body: `Apple shared ${recovery.appleEmail}, but more than one active SFLUV account is associated with that address. Go back and sign in with the account you want to keep, then link Apple in Settings. If you continue here, you may create a separate Apple account.`,
+      primaryLabel: "Go back to sign in",
+      secondaryLabel: "Continue with Apple anyway",
+    };
+  }
+
+  return {
+    title: "Continue with Apple?",
+    body: "If you already have an SFLUV account, go back and sign in with Google or email first, then link Apple in Settings. Otherwise continue to create a new Apple account here.",
+    primaryLabel: "I already have an account",
+    secondaryLabel: "Continue with Apple",
+  };
+}
+
 function mergePreferences(input: unknown): AppPreferences {
   if (!input || typeof input !== "object") {
     return defaultAppPreferences;
@@ -625,6 +855,10 @@ function mergePreferences(input: unknown): AppPreferences {
       candidate.themePreference === "light" || candidate.themePreference === "dark" || candidate.themePreference === "system"
         ? candidate.themePreference
         : defaultAppPreferences.themePreference,
+    notificationsEnabled:
+      typeof candidate.notificationsEnabled === "boolean"
+        ? candidate.notificationsEnabled
+        : defaultAppPreferences.notificationsEnabled,
     hapticsEnabled:
       typeof candidate.hapticsEnabled === "boolean" ? candidate.hapticsEnabled : defaultAppPreferences.hapticsEnabled,
   };
@@ -710,6 +944,14 @@ function WalletAppShell({
   onConsumePendingLink,
   preferences,
   onUpdatePreferences,
+  appleLinked,
+  appleLinkedEmail,
+  appleLinkBusy,
+  appleLinkMessage,
+  appleCanDisconnect,
+  appleDisconnectDisabledReason,
+  onLinkApple,
+  onDisconnectApple,
   googleLinked,
   googleLinkedEmail,
   googleActionBusy,
@@ -731,6 +973,14 @@ function WalletAppShell({
   onConsumePendingLink: () => void;
   preferences: AppPreferences;
   onUpdatePreferences: (next: AppPreferences) => void;
+  appleLinked: boolean;
+  appleLinkedEmail?: string;
+  appleLinkBusy: boolean;
+  appleLinkMessage?: string | null;
+  appleCanDisconnect: boolean;
+  appleDisconnectDisabledReason?: string | null;
+  onLinkApple?: () => void;
+  onDisconnectApple?: () => void;
   googleLinked: boolean;
   googleLinkedEmail?: string;
   googleActionBusy: boolean;
@@ -754,6 +1004,14 @@ function WalletAppShell({
       onConsumePendingLink={onConsumePendingLink}
       preferences={preferences}
       onUpdatePreferences={onUpdatePreferences}
+      appleLinked={appleLinked}
+      appleLinkedEmail={appleLinkedEmail}
+      appleLinkBusy={appleLinkBusy}
+      appleLinkMessage={appleLinkMessage}
+      appleCanDisconnect={appleCanDisconnect}
+      appleDisconnectDisabledReason={appleDisconnectDisabledReason}
+      onLinkApple={onLinkApple}
+      onDisconnectApple={onDisconnectApple}
       googleLinked={googleLinked}
       googleLinkedEmail={googleLinkedEmail}
       googleActionBusy={googleActionBusy}
@@ -779,6 +1037,14 @@ function WalletAppShellContent({
   onConsumePendingLink,
   preferences,
   onUpdatePreferences,
+  appleLinked,
+  appleLinkedEmail,
+  appleLinkBusy,
+  appleLinkMessage,
+  appleCanDisconnect,
+  appleDisconnectDisabledReason,
+  onLinkApple,
+  onDisconnectApple,
   googleLinked,
   googleLinkedEmail,
   googleActionBusy,
@@ -800,6 +1066,14 @@ function WalletAppShellContent({
   onConsumePendingLink: () => void;
   preferences: AppPreferences;
   onUpdatePreferences: (next: AppPreferences) => void;
+  appleLinked: boolean;
+  appleLinkedEmail?: string;
+  appleLinkBusy: boolean;
+  appleLinkMessage?: string | null;
+  appleCanDisconnect: boolean;
+  appleDisconnectDisabledReason?: string | null;
+  onLinkApple?: () => void;
+  onDisconnectApple?: () => void;
   googleLinked: boolean;
   googleLinkedEmail?: string;
   googleActionBusy: boolean;
@@ -823,8 +1097,18 @@ function WalletAppShellContent({
   const [backendWallets, setBackendWallets] = useState<AppWallet[]>([]);
   const [merchantLabelsByAddress, setMerchantLabelsByAddress] = useState<Record<string, string>>({});
   const [appUser, setAppUser] = useState<AppUser | null>(null);
+  const [storedPushToken, setStoredPushToken] = useState<string | null>(null);
+  const [pushSyncState, setPushSyncState] = useState<PushSyncState>({
+    permissionStatus: "unknown",
+    syncState: "idle",
+    addressCount: 0,
+    subscribedCount: 0,
+    token: null,
+    message: null,
+  });
   const [accountDeletionBusy, setAccountDeletionBusy] = useState(false);
   const [accountDeletionMessage, setAccountDeletionMessage] = useState<string | null>(null);
+  const [pushSyncRequestVersion, setPushSyncRequestVersion] = useState(0);
   const [refreshingHome, setRefreshingHome] = useState(false);
   const [refreshingActivity, setRefreshingActivity] = useState(false);
   const [loadingMoreActivity, setLoadingMoreActivity] = useState(false);
@@ -880,6 +1164,30 @@ function WalletAppShellContent({
   const walletSyncReady = backendBootstrapReady && Boolean(appUser) && Boolean(runtime.discovery);
   const walletHistoryActive = tab === "wallet" && walletPane === "home";
   const activityHistoryActive = tab === "activity";
+  const notificationAddresses = useMemo(() => {
+    const seen = new Set<string>();
+    const addresses: string[] = [];
+    if (smartAddress) {
+      const normalized = smartAddress.toLowerCase();
+      if (!seen.has(normalized)) {
+        seen.add(normalized);
+        addresses.push(smartAddress);
+      }
+    }
+    for (const wallet of backendWallets) {
+      const address = wallet.smartAddress ?? wallet.eoaAddress;
+      if (!address || wallet.isEoa) {
+        continue;
+      }
+      const normalized = address.toLowerCase();
+      if (seen.has(normalized)) {
+        continue;
+      }
+      seen.add(normalized);
+      addresses.push(address);
+    }
+    return addresses;
+  }, [backendWallets, smartAddress]);
 
   const publicBackendClient = useMemo(
     () => backendClient ?? new AppBackendClient(async () => null),
@@ -955,6 +1263,53 @@ function WalletAppShellContent({
       return changed ? next : current;
     });
   }, [locations]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    AsyncStorage.getItem(PUSH_TOKEN_STORAGE_KEY)
+      .then((value) => {
+        if (!cancelled) {
+          setStoredPushToken(value);
+          setPushSyncState((current) => ({
+            ...current,
+            token: value,
+          }));
+        }
+      })
+      .catch((error) => {
+        console.warn("Unable to load saved push token", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void readPushPermissionStatus().then((permissionStatus) => {
+      if (cancelled) {
+        return;
+      }
+      setPushSyncState((current) => ({
+        ...current,
+        permissionStatus,
+      }));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    setPushSyncState((current) => ({
+      ...current,
+      addressCount: notificationAddresses.length,
+    }));
+  }, [notificationAddresses.length]);
 
   const emitTransferHaptic = () => {
     if (!preferences.hapticsEnabled) {
@@ -1477,6 +1832,9 @@ function WalletAppShellContent({
           void loadAppProfile();
         }
         void loadPublicLocations();
+        if (preferences.notificationsEnabled) {
+          setPushSyncRequestVersion((current) => current + 1);
+        }
       }
     });
 
@@ -1492,6 +1850,7 @@ function WalletAppShellContent({
     runtime.discovery,
     selectedCandidateKey,
     walletHistoryActive,
+    preferences.notificationsEnabled,
   ]);
 
   useEffect(() => {
@@ -1563,6 +1922,168 @@ function WalletAppShellContent({
     }
     void refreshWalletSurface();
   }, [runtime.service, selectedCandidateKey]);
+
+  useEffect(() => {
+    if (!backendClient || !appUser || !walletSyncReady) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const runPushNotificationSync = async () => {
+      const addressCount = notificationAddresses.length;
+      const baseState = {
+        addressCount,
+        syncState: "syncing" as const,
+        message: preferences.notificationsEnabled ? "Syncing push notifications..." : "Removing push notifications...",
+      };
+
+      setPushSyncState((current) => ({
+        ...current,
+        ...baseState,
+      }));
+
+      if (!preferences.notificationsEnabled) {
+        try {
+          const subscriptions = await backendClient.getNotificationSubscriptions();
+          const pushSubscriptions = subscriptions.filter((subscription) => subscription.type === "push");
+          await Promise.all(pushSubscriptions.map((subscription) => backendClient.disableNotification(subscription.id)));
+          await AsyncStorage.removeItem(PUSH_TOKEN_STORAGE_KEY);
+          if (cancelled) {
+            return;
+          }
+          setStoredPushToken(null);
+          const permissionStatus = await readPushPermissionStatus();
+          if (cancelled) {
+            return;
+          }
+          setPushSyncState((current) => ({
+            ...current,
+            permissionStatus,
+            syncState: "success",
+            token: null,
+            addressCount,
+            subscribedCount: 0,
+            message: "Push notifications are off for this device.",
+            lastSyncedAt: Date.now(),
+          }));
+        } catch (error) {
+          if (cancelled) {
+            return;
+          }
+          console.warn("Unable to disable push notifications", error);
+          setPushSyncState((current) => ({
+            ...current,
+            syncState: "error",
+            addressCount,
+            message: (error as Error)?.message || "Unable to disable push notifications right now.",
+          }));
+        }
+        return;
+      }
+
+      const registration = storedPushToken
+        ? { token: storedPushToken, permissionStatus: await readPushPermissionStatus() }
+        : await ensurePushRegistration();
+
+      if (cancelled) {
+        return;
+      }
+
+      setPushSyncState((current) => ({
+        ...current,
+        permissionStatus: registration.permissionStatus,
+        token: registration.token,
+      }));
+
+      if (!registration.token) {
+        setPushSyncState((current) => ({
+          ...current,
+          syncState: "error",
+          addressCount,
+          subscribedCount: 0,
+          token: null,
+          message: registration.error || "Unable to register this device for push notifications.",
+        }));
+        return;
+      }
+
+      await AsyncStorage.setItem(PUSH_TOKEN_STORAGE_KEY, registration.token);
+      if (cancelled) {
+        return;
+      }
+      setStoredPushToken(registration.token);
+
+      if (addressCount === 0) {
+        setPushSyncState((current) => ({
+          ...current,
+          syncState: "idle",
+          addressCount,
+          subscribedCount: 0,
+          token: registration.token,
+          message: "Push permission is ready. Waiting for your wallets to finish loading before subscribing.",
+        }));
+        return;
+      }
+
+      try {
+        await backendClient.syncPushNotifications(registration.token, notificationAddresses);
+        const subscriptions = await backendClient.getNotificationSubscriptions();
+        if (cancelled) {
+          return;
+        }
+        const subscribedAddresses = new Set(
+          subscriptions
+            .filter((subscription) => subscription.type === "push")
+            .map((subscription) => subscription.address.toLowerCase())
+            .filter((address) => notificationAddresses.some((candidate) => candidate.toLowerCase() === address)),
+        );
+        const subscribedCount = subscribedAddresses.size;
+        setPushSyncState((current) => ({
+          ...current,
+          permissionStatus: registration.permissionStatus,
+          syncState: "success",
+          addressCount,
+          subscribedCount,
+          token: registration.token,
+          message:
+            subscribedCount > 0
+              ? `Push notifications are active for ${subscribedCount} wallet${subscribedCount === 1 ? "" : "s"} on this device.`
+              : "This device has permission to receive notifications, but no wallet subscriptions were created yet.",
+          lastSyncedAt: Date.now(),
+        }));
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        console.warn("Unable to sync push notifications", error);
+        setPushSyncState((current) => ({
+          ...current,
+          permissionStatus: registration.permissionStatus,
+          syncState: "error",
+          addressCount,
+          message: (error as Error)?.message || "Unable to sync push notifications right now.",
+        }));
+      }
+    };
+
+    void runPushNotificationSync();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    appUser,
+    backendClient,
+    notificationAddresses,
+    preferences.notificationsEnabled,
+    pushSyncRequestVersion,
+    walletSyncReady,
+  ]);
+
+  const handleSyncPushNotifications = () => {
+    setPushSyncRequestVersion((current) => current + 1);
+  };
 
   const finishSendFlow = () => {
     const returnTab = sendReturnTab;
@@ -1938,6 +2459,13 @@ function WalletAppShellContent({
               activeWalletLabel={selectedWalletLabel}
               syncNotice={syncNotice}
               preferences={preferences}
+              notificationPermissionStatus={pushSyncState.permissionStatus}
+              notificationSyncState={pushSyncState.syncState}
+              notificationTokenRegistered={Boolean(pushSyncState.token)}
+              notificationAddressCount={pushSyncState.addressCount}
+              notificationSubscribedCount={pushSyncState.subscribedCount}
+              notificationStatusMessage={pushSyncState.message}
+              onSyncNotifications={handleSyncPushNotifications}
               onLogout={onLogout}
               googleLinked={googleLinked}
               googleLinkedEmail={googleLinkedEmail}
@@ -1946,6 +2474,14 @@ function WalletAppShellContent({
               googleCanDisconnect={googleCanDisconnect}
               googleDisconnectDisabledReason={googleDisconnectDisabledReason}
               onDisconnectGoogle={onDisconnectGoogle}
+              appleLinked={appleLinked}
+              appleLinkedEmail={appleLinkedEmail}
+              appleLinkBusy={appleLinkBusy}
+              appleLinkMessage={appleLinkMessage}
+              appleCanDisconnect={appleCanDisconnect}
+              appleDisconnectDisabledReason={appleDisconnectDisabledReason}
+              onLinkApple={onLinkApple}
+              onDisconnectApple={onDisconnectApple}
               onRenameWallet={handleRenameWallet}
               onSetPrimaryWallet={handleSetPrimaryWallet}
               onSetWalletVisibility={handleSetWalletVisibility}
@@ -2120,6 +2656,7 @@ function PrivyWalletApp({
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const { user, isReady, logout, getAccessToken } = usePrivy();
   const { login, state: oauthState } = useLoginWithOAuth();
+  const { link, state: linkOauthState } = useLinkWithOAuth();
   const { unlinkOAuth } = useUnlinkOAuth();
   const { sendCode, loginWithCode } = useLoginWithEmail();
   const { wallets, create } = useEmbeddedEthereumWallet();
@@ -2146,6 +2683,29 @@ function PrivyWalletApp({
   const [deletedAccountError, setDeletedAccountError] = useState<string | null>(
     null,
   );
+  const [loginNotice, setLoginNotice] = useState<string | null>(null);
+  const [appleUserInfoHint, setAppleUserInfoHint] = useState<AppleOAuthUserInfoHint | null>(
+    null,
+  );
+  const [pendingAppleTokens, setPendingAppleTokens] = useState<{
+    accessToken: string;
+    refreshToken?: string;
+    accessTokenExpiresInSeconds?: number;
+    refreshTokenExpiresInSeconds?: number;
+    scopes?: string[];
+    providerSubject?: string;
+    providerEmail?: string;
+    isPrivateRelay?: boolean;
+  } | null>(null);
+  const [appleRecovery, setAppleRecovery] = useState<AppAppleRecoveryResponse | null>(null);
+  const [appleRecoveryState, setAppleRecoveryState] = useState<
+    "idle" | "checking" | "ready"
+  >("idle");
+  const [appleRecoveryAction, setAppleRecoveryAction] =
+    useState<AppleAccountPromptAction>("idle");
+  const [appleRecoveryError, setAppleRecoveryError] = useState<string | null>(null);
+  const [appleLinkMessage, setAppleLinkMessage] = useState<string | null>(null);
+  const [appleUnlinkBusy, setAppleUnlinkBusy] = useState(false);
   const [googleMessage, setGoogleMessage] = useState<string | null>(null);
   const [googleUnlinkBusy, setGoogleUnlinkBusy] = useState(false);
   const creatingWalletRef = useRef(false);
@@ -2159,18 +2719,46 @@ function PrivyWalletApp({
     () => new AppBackendClient(async () => (await getAccessToken()) ?? null),
     [getAccessToken],
   );
+  const linkedAppleAccount = useMemo(() => getLinkedAppleAccount(user), [user]);
   const linkedGoogleAccount = useMemo(() => getLinkedGoogleAccount(user), [user]);
   const linkedEmailAccount = useMemo(() => getLinkedEmailAccount(user), [user]);
+  const appleLinked = Boolean(linkedAppleAccount?.subject || linkedAppleAccount?.email);
   const googleLinked = Boolean(linkedGoogleAccount?.subject || linkedGoogleAccount?.email);
   const emailLinked = Boolean(linkedEmailAccount?.address);
-  const canDisconnectGoogle = googleLinked && (Number(googleLinked) + Number(emailLinked) > 1);
+  const signInMethodCount = Number(appleLinked) + Number(googleLinked) + Number(emailLinked);
+  const canDisconnectApple = appleLinked && signInMethodCount > 1;
+  const canDisconnectGoogle = googleLinked && signInMethodCount > 1;
+  const appleDisconnectDisabledReason =
+    appleLinked && !canDisconnectApple ? "Add email or Google before disconnecting Apple." : null;
   const googleDisconnectDisabledReason =
-    googleLinked && !canDisconnectGoogle ? "Add email before disconnecting Google." : null;
-  const googleLinkedEmail = linkedGoogleAccount?.email?.trim() || undefined;
+    googleLinked && !canDisconnectGoogle ? "Add email or Apple before disconnecting Google." : null;
+  const appleActionBusy = linkOauthState.status === "loading" || appleUnlinkBusy;
   const googleActionBusy = googleUnlinkBusy;
+  const googleLinkedEmail = linkedGoogleAccount?.email?.trim() || undefined;
   const consumePendingLink = React.useCallback(() => {
     setPendingLinkIntent(null);
   }, []);
+
+  useOAuthTokens({
+    onOAuthTokenGrant: (tokens) => {
+      if (tokens.provider !== "apple") {
+        return;
+      }
+      setPendingAppleTokens((current) => ({
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        accessTokenExpiresInSeconds: tokens.access_token_expires_in_seconds,
+        refreshTokenExpiresInSeconds: tokens.refresh_token_expires_in_seconds,
+        scopes: tokens.scopes,
+        providerSubject: linkedAppleAccount?.subject,
+        providerEmail: linkedAppleAccount?.email ?? appleUserInfoHint?.email ?? undefined,
+        isPrivateRelay:
+          Boolean(linkedAppleAccount?.email?.toLowerCase().endsWith("@privaterelay.appleid.com")) ||
+          Boolean(appleUserInfoHint?.email?.toLowerCase().endsWith("@privaterelay.appleid.com")) ||
+          current?.isPrivateRelay === true,
+      }));
+    },
+  });
 
   const presentLoginError = (error: unknown) => {
     const message = (error as Error)?.message?.trim() || "Unable to sign in right now.";
@@ -2273,11 +2861,21 @@ function PrivyWalletApp({
       setDeletedAccountStatus(null);
       setDeletedAccountAction("idle");
       setDeletedAccountError(null);
+      setAppleUserInfoHint(null);
+      setPendingAppleTokens(null);
+      setAppleRecovery(null);
+      setAppleRecoveryState("idle");
+      setAppleRecoveryAction("idle");
+      setAppleRecoveryError(null);
+      setAppleLinkMessage(null);
       manualWalletSelectionRef.current = false;
       bootstrappedIdentityRef.current = null;
       return;
     }
     if (deletedAccountStatus) {
+      return;
+    }
+    if (appleRecoveryState !== "ready" || appleRecovery) {
       return;
     }
     if (wallets.length > 0 || creatingWalletRef.current) {
@@ -2292,7 +2890,7 @@ function PrivyWalletApp({
       .finally(() => {
         creatingWalletRef.current = false;
       });
-  }, [create, deletedAccountStatus, isReady, user, wallets.length]);
+  }, [appleRecovery, appleRecoveryState, create, deletedAccountStatus, isReady, user, wallets.length]);
 
   useEffect(() => {
     if (!isReady || !user?.id) {
@@ -2348,7 +2946,133 @@ function PrivyWalletApp({
   }, [isReady, user?.id]);
 
   useEffect(() => {
-    if (!isReady || !user || !embeddedWallet || !walletPreferencesReady || deletedAccountStatus) {
+    if (!user?.id || !pendingAppleTokens) {
+      return;
+    }
+
+    let cancelled = false;
+    const persistAppleTokens = async () => {
+      try {
+        await backendClient.storeAppleOAuthCredential({
+          accessToken: pendingAppleTokens.accessToken,
+          refreshToken: pendingAppleTokens.refreshToken,
+          accessTokenExpiresInSeconds: pendingAppleTokens.accessTokenExpiresInSeconds,
+          refreshTokenExpiresInSeconds: pendingAppleTokens.refreshTokenExpiresInSeconds,
+          scopes: pendingAppleTokens.scopes,
+          providerSubject: pendingAppleTokens.providerSubject || linkedAppleAccount?.subject,
+          providerEmail:
+            pendingAppleTokens.providerEmail || linkedAppleAccount?.email || appleUserInfoHint?.email || undefined,
+          isPrivateRelay:
+            pendingAppleTokens.isPrivateRelay ||
+            Boolean(
+              (pendingAppleTokens.providerEmail || linkedAppleAccount?.email || appleUserInfoHint?.email || "")
+                .toLowerCase()
+                .endsWith("@privaterelay.appleid.com"),
+            ),
+        });
+        if (!cancelled) {
+          setPendingAppleTokens(null);
+        }
+      } catch (error) {
+        console.warn("Unable to persist Apple OAuth credentials", error);
+      }
+    };
+
+    void persistAppleTokens();
+    return () => {
+      cancelled = true;
+    };
+  }, [appleUserInfoHint?.email, backendClient, linkedAppleAccount?.email, linkedAppleAccount?.subject, pendingAppleTokens, user?.id]);
+
+  useEffect(() => {
+    if (!isReady || !user || deletedAccountStatus || appleRecoveryState !== "idle") {
+      return;
+    }
+
+    let cancelled = false;
+    const resolveAppleRecovery = async () => {
+      setAppleRecoveryState("checking");
+      setAppleRecoveryError(null);
+      try {
+        const status = await backendClient.getDeleteAccountStatus();
+        if (cancelled) {
+          return;
+        }
+        if (status && status.status !== "active") {
+          showDeletedAccountGate(status);
+          setAppleRecoveryState("ready");
+          return;
+        }
+
+        const recovery = await backendClient.resolveAppleRecovery({
+          providerSubject: linkedAppleAccount?.subject,
+          providerEmail: linkedAppleAccount?.email || appleUserInfoHint?.email || undefined,
+          isPrivateRelay: Boolean(
+            (linkedAppleAccount?.email || appleUserInfoHint?.email || "")
+              .toLowerCase()
+              .endsWith("@privaterelay.appleid.com"),
+          ),
+        });
+        if (cancelled) {
+          return;
+        }
+
+        if (recovery.resolution === "current_account_exists" || recovery.resolution === "no_apple_account") {
+          setAppleRecovery(null);
+        } else {
+          setAppleRecovery(recovery);
+        }
+        setAppleRecoveryState("ready");
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        if (linkedAppleAccount || appleUserInfoHint?.email) {
+          setAppleRecovery({
+            currentUserId: user.id,
+            currentUserExists: false,
+            appleLinked: true,
+            appleEmail: linkedAppleAccount?.email || appleUserInfoHint?.email || undefined,
+            isPrivateRelay: Boolean(
+              (linkedAppleAccount?.email || appleUserInfoHint?.email || "")
+                .toLowerCase()
+                .endsWith("@privaterelay.appleid.com"),
+            ),
+            resolution: "no_match",
+          });
+        } else {
+          setAppleRecovery(null);
+        }
+        setAppleRecoveryState("ready");
+        console.warn("Unable to resolve Apple recovery state", error);
+      }
+    };
+
+    void resolveAppleRecovery();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    appleRecoveryState,
+    appleUserInfoHint?.email,
+    backendClient,
+    deletedAccountStatus,
+    isReady,
+    linkedAppleAccount?.email,
+    linkedAppleAccount?.subject,
+    user,
+  ]);
+
+  useEffect(() => {
+    if (
+      !isReady ||
+      !user ||
+      !embeddedWallet ||
+      !walletPreferencesReady ||
+      deletedAccountStatus ||
+      appleRecoveryState !== "ready" ||
+      Boolean(appleRecovery)
+    ) {
       return;
     }
 
@@ -2462,6 +3186,8 @@ function PrivyWalletApp({
       cancelled = true;
     };
   }, [
+    appleRecovery,
+    appleRecoveryState,
     backendClient,
     deletedAccountStatus,
     embeddedWallet,
@@ -2498,7 +3224,8 @@ function PrivyWalletApp({
     walletPreferences.hiddenWalletAddresses,
   ]);
 
-  const oauthLoading = oauthState.status === "loading";
+  const oauthLoading =
+    oauthState.status === "loading" || linkOauthState.status === "loading";
   const authLoading = oauthLoading || emailLoading;
   const selectedCandidateKey = runtime.discovery?.selectedCandidateKey;
   const walletInitializing =
@@ -2508,7 +3235,25 @@ function PrivyWalletApp({
 
   const handleGoogleLogin = async () => {
     try {
+      setLoginNotice(null);
       await login({ provider: "google" });
+    } catch (error) {
+      presentLoginError(error);
+    }
+  };
+
+  const handleAppleLogin = async () => {
+    try {
+      setLoginNotice(null);
+      setAppleUserInfoHint(null);
+      await login({
+        provider: "apple",
+        onAppleOAuthUserInfo: (userInfo) => {
+          setAppleUserInfoHint({
+            email: userInfo.email ?? undefined,
+          });
+        },
+      });
     } catch (error) {
       presentLoginError(error);
     }
@@ -2582,6 +3327,87 @@ function PrivyWalletApp({
     }
   };
 
+  const handleContinueWithNewAppleAccount = () => {
+    setAppleRecoveryAction("continuing");
+    setAppleRecoveryError(null);
+    setAppleRecovery(null);
+    setAppleRecoveryState("ready");
+    setAppleRecoveryAction("idle");
+  };
+
+  const handleReturnFromAppleRecovery = async () => {
+    setAppleRecoveryAction("returning");
+    setAppleRecoveryError(null);
+    try {
+      await logout();
+      setLoginNotice("Sign in with Google or email, then link Apple from Settings.");
+    } catch (error) {
+      setAppleRecoveryError((error as Error)?.message || "Unable to sign out right now.");
+    } finally {
+      setAppleRecoveryAction("idle");
+    }
+  };
+
+  const handleLinkApple = async () => {
+    try {
+      setAppleLinkMessage(null);
+      await link({
+        provider: "apple",
+        onAppleOAuthUserInfo: (userInfo) => {
+          setAppleUserInfoHint({
+            email: userInfo.email ?? undefined,
+          });
+        },
+      });
+      setAppleLinkMessage("Apple is now linked to this account.");
+    } catch (error) {
+      setAppleLinkMessage((error as Error)?.message || "Unable to link Apple right now.");
+    }
+  };
+
+  const handleDisconnectApple = () => {
+    if (!linkedAppleAccount?.subject) {
+      setAppleLinkMessage("Apple is not linked to this account.");
+      return;
+    }
+    if (!canDisconnectApple) {
+      setAppleLinkMessage(appleDisconnectDisabledReason);
+      return;
+    }
+    const appleSubject = linkedAppleAccount.subject;
+
+    Alert.alert(
+      "Disconnect Apple",
+      "Apple will no longer be able to sign in to this SFLUV account until you link it again.",
+      [
+        { text: "Keep Apple", style: "cancel" },
+        {
+          text: "Disconnect Apple",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              setAppleUnlinkBusy(true);
+              setAppleLinkMessage(null);
+              try {
+                await unlinkOAuth({
+                  provider: "apple",
+                  subject: appleSubject,
+                });
+                setAppleLinkMessage("Apple has been disconnected from this account.");
+              } catch (error) {
+                setAppleLinkMessage(
+                  (error as Error)?.message || "Unable to disconnect Apple right now.",
+                );
+              } finally {
+                setAppleUnlinkBusy(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  };
+
   const handleDisconnectGoogle = () => {
     if (!linkedGoogleAccount?.subject) {
       setGoogleMessage("Google is not linked to this account.");
@@ -2613,7 +3439,7 @@ function PrivyWalletApp({
                 setGoogleMessage("Google has been disconnected from this account.");
               } catch (error) {
                 setGoogleMessage(
-                  (error as Error)?.message?.trim() || "Unable to disconnect Google right now.",
+                  (error as Error)?.message || "Unable to disconnect Google right now.",
                 );
               } finally {
                 setGoogleUnlinkBusy(false);
@@ -2652,6 +3478,20 @@ function PrivyWalletApp({
     );
   }
 
+  if (user && appleRecovery) {
+    return (
+      <AppleRecoveryPromptScreen
+        recovery={appleRecovery}
+        action={appleRecoveryAction}
+        error={appleRecoveryError}
+        onUseExistingAccount={() => {
+          void handleReturnFromAppleRecovery();
+        }}
+        onContinueWithApple={handleContinueWithNewAppleAccount}
+      />
+    );
+  }
+
   if (!user) {
     return (
       <SafeAreaView style={styles.safe}>
@@ -2659,6 +3499,7 @@ function PrivyWalletApp({
           <Text style={styles.loginBrand}>SFLUV</Text>
           <Text style={styles.loginTitle}>A community currency for San Francisco</Text>
           <Text style={styles.loginBody}>Sign in to send, receive, and redeem SFLUV.</Text>
+          {loginNotice ? <Text style={styles.loginNotice}>{loginNotice}</Text> : null}
           {loginMode === "email" ? (
             <>
               <TextInput
@@ -2723,6 +3564,7 @@ function PrivyWalletApp({
                   setLoginMode("choice");
                   setEmailCode("");
                   setEmailCodeSent(false);
+                  setLoginNotice(null);
                   setRuntime((state) => ({ ...state, error: null }));
                 }}
               >
@@ -2731,6 +3573,20 @@ function PrivyWalletApp({
             </>
           ) : (
             <>
+              {Platform.OS === "ios" ? (
+                <AppleAuthentication.AppleAuthenticationButton
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                  cornerRadius={999}
+                  style={[styles.appleLoginButton, authLoading ? styles.loginButtonDisabled : undefined]}
+                  onPress={() => {
+                    if (authLoading) {
+                      return;
+                    }
+                    void handleAppleLogin();
+                  }}
+                />
+              ) : null}
               <Pressable
                 style={[styles.loginButton, authLoading ? styles.loginButtonDisabled : undefined]}
                 disabled={authLoading}
@@ -2745,6 +3601,7 @@ function PrivyWalletApp({
                 disabled={authLoading}
                 onPress={() => {
                   setLoginMode("email");
+                  setLoginNotice(null);
                   setRuntime((state) => ({ ...state, error: null }));
                 }}
               >
@@ -2782,6 +3639,14 @@ function PrivyWalletApp({
       onConsumePendingLink={consumePendingLink}
       preferences={preferences}
       onUpdatePreferences={onUpdatePreferences}
+      appleLinked={appleLinked}
+      appleLinkedEmail={linkedAppleAccount?.email || undefined}
+      appleLinkBusy={appleActionBusy}
+      appleLinkMessage={appleLinkMessage}
+      appleCanDisconnect={canDisconnectApple}
+      appleDisconnectDisabledReason={appleDisconnectDisabledReason}
+      onLinkApple={Platform.OS === "ios" ? handleLinkApple : undefined}
+      onDisconnectApple={Platform.OS === "ios" ? handleDisconnectApple : undefined}
       googleLinked={googleLinked}
       googleLinkedEmail={googleLinkedEmail}
       googleActionBusy={googleActionBusy}
@@ -2859,6 +3724,64 @@ function DeletedAccountScreen({
   );
 }
 
+function AppleRecoveryPromptScreen({
+  recovery,
+  action,
+  error,
+  onUseExistingAccount,
+  onContinueWithApple,
+}: {
+  recovery: AppAppleRecoveryResponse;
+  action: AppleAccountPromptAction;
+  error: string | null;
+  onUseExistingAccount: () => void;
+  onContinueWithApple: () => void;
+}) {
+  const { palette, shadows, isDark } = useAppTheme();
+  const styles = useMemo(
+    () => createStyles(palette, shadows, isDark),
+    [palette, shadows, isDark],
+  );
+  const prompt = describeAppleRecoveryPrompt(recovery);
+  const busy = action !== "idle";
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.loginWrap}>
+        <Text style={styles.loginBrand}>SFLUV</Text>
+        <Text style={styles.loginTitle}>{prompt.title}</Text>
+        <Text style={styles.loginBody}>{prompt.body}</Text>
+        {recovery.suggestedExistingAccount?.primaryWalletAddress ? (
+          <View style={styles.deletedAccountNotice}>
+            <Text style={styles.deletedAccountNoticeText}>
+              Existing wallet: {shortAddress(recovery.suggestedExistingAccount.primaryWalletAddress)}
+            </Text>
+          </View>
+        ) : null}
+        <Pressable
+          style={[styles.loginButton, busy ? styles.loginButtonDisabled : undefined]}
+          disabled={busy}
+          onPress={onUseExistingAccount}
+        >
+          <Text style={styles.loginButtonText}>
+            {action === "returning" ? "Returning..." : prompt.primaryLabel}
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.loginSecondaryButton, busy ? styles.loginButtonDisabled : undefined]}
+          disabled={busy}
+          onPress={onContinueWithApple}
+        >
+          <Text style={styles.loginSecondaryButtonText}>
+            {action === "continuing" ? "Continuing..." : prompt.secondaryLabel}
+          </Text>
+        </Pressable>
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      </View>
+    </SafeAreaView>
+  );
+}
+
 function MissingPrivyConfigScreen() {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
@@ -2897,7 +3820,7 @@ export default function App() {
           config={{
             embedded: {
               ethereum: {
-                createOnLogin: "users-without-wallets",
+                createOnLogin: "off",
               },
             },
           }}
@@ -2914,6 +3837,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   safe: {
     flex: 1,
     backgroundColor: palette.background,
+    paddingBottom: Platform.OS === "android" ? spacing.sm : 0,
   },
   topBackdrop: {
     ...StyleSheet.absoluteFillObject,
@@ -3041,8 +3965,10 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   bottomDock: {
     flexDirection: "row",
     marginHorizontal: spacing.lg,
-    marginBottom: spacing.lg,
-    padding: 8,
+    marginBottom: Platform.OS === "android" ? spacing.xl : spacing.lg,
+    paddingTop: 8,
+    paddingHorizontal: 8,
+    paddingBottom: Platform.OS === "android" ? 14 : 8,
     borderRadius: radii.lg,
     backgroundColor: palette.surface,
     borderWidth: 1,
@@ -3092,16 +4018,24 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     lineHeight: 22,
     maxWidth: 340,
   },
+  loginNotice: {
+    color: palette.primaryStrong,
+    lineHeight: 20,
+    fontWeight: "700",
+    maxWidth: 360,
+  },
   deletedAccountNotice: {
     borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: palette.border,
-    backgroundColor: palette.surfaceStrong,
-    padding: spacing.md,
+    borderColor: palette.primary,
+    backgroundColor: palette.primarySoft,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
   deletedAccountNoticeText: {
-    color: palette.text,
+    color: palette.primaryStrong,
     lineHeight: 20,
+    fontWeight: "700",
   },
   loginInput: {
     backgroundColor: palette.surface,
@@ -3122,6 +4056,13 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     minWidth: 240,
     alignItems: "center",
     justifyContent: "center",
+  },
+  appleLoginButton: {
+    marginTop: spacing.sm,
+    width: "100%",
+    maxWidth: 360,
+    height: 54,
+    alignSelf: "stretch",
   },
   loginButtonDisabled: {
     opacity: 0.7,
