@@ -837,18 +837,32 @@ export class AppBackendClient {
   }
 
   async getNotificationSubscriptions(): Promise<PonderSubscription[]> {
-    const response = await this.authFetch("/ponder");
-    if (!response.ok) {
+    const [merchantResponse, pushResponse] = await Promise.all([
+      this.authFetch("/ponder"),
+      this.authFetch("/ponder/push"),
+    ]);
+    if (!merchantResponse.ok || !pushResponse.ok) {
       throw new Error("Unable to load wallet notifications.");
     }
-    const body = (await response.json()) as PonderResponse;
-    return body.map((entry) => ({
+    const merchantBody = (await merchantResponse.json()) as PonderResponse;
+    const pushBody = (await pushResponse.json()) as PonderResponse;
+
+    const merchantSubscriptions = merchantBody.map((entry) => ({
       id: entry.id,
       address: entry.address,
       type: entry.type,
       email: entry.type === "merchant" ? entry.data : undefined,
       token: entry.type === "push" ? entry.data : undefined,
     }));
+    const pushSubscriptions = pushBody.map((entry) => ({
+      id: -Math.abs(entry.id),
+      address: entry.address,
+      type: entry.type,
+      email: entry.type === "merchant" ? entry.data : undefined,
+      token: entry.type === "push" ? entry.data : undefined,
+    }));
+
+    return [...merchantSubscriptions, ...pushSubscriptions];
   }
 
   async enableNotification(email: string, address: string): Promise<void> {
@@ -863,7 +877,10 @@ export class AppBackendClient {
   }
 
   async disableNotification(id: number): Promise<void> {
-    const response = await this.authFetch(`/ponder?id=${id}`, { method: "DELETE" });
+    const isPushSubscription = id < 0;
+    const normalizedID = Math.abs(id);
+    const endpoint = isPushSubscription ? "/ponder/push" : "/ponder";
+    const response = await this.authFetch(`${endpoint}?id=${normalizedID}`, { method: "DELETE" });
     if (!response.ok) {
       throw new Error("Unable to disable notifications.");
     }
