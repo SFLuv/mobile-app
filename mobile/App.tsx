@@ -51,7 +51,11 @@ import {
   SmartWalletService,
 } from "./src/services/smartWallet";
 import { sweepAccessibleSFLUVToAdmin } from "./src/services/accountDeletion";
-import { AppBackendAuthError, AppBackendClient } from "./src/services/appBackend";
+import {
+  AppBackendAuthError,
+  AppBackendClient,
+  AppBackendPolicyRequiredError,
+} from "./src/services/appBackend";
 import {
   AppAccountDeletionPreview,
   AppAccountDeletionStatusResponse,
@@ -60,6 +64,7 @@ import {
   AppLocation,
   AppTransaction,
   AppUser,
+  AppUserPolicyStatus,
   AppWallet,
 } from "./src/types/app";
 import { AppPreferences, defaultAppPreferences } from "./src/types/preferences";
@@ -144,6 +149,8 @@ const BALANCE_CACHE_STORAGE_KEY_PREFIX = "sfluv-wallet:balance-cache";
 const REACTIVATED_ACCOUNT_RECOVERY_NOTICE_STORAGE_KEY =
   "sfluv-wallet:reactivated-account-recovery-notice";
 const ACCOUNT_RECOVERY_SUPPORT_EMAIL = "techsupport@sfluv.org";
+const PRIVACY_POLICY_PATH = "/privacy-policy";
+const EMAIL_OPT_IN_POLICY_PATH = "/email-opt-in-policy";
 const TRANSFER_REFRESH_DEBOUNCE_MS = 350;
 const TRANSACTION_POLL_INTERVAL_MS = 2_000;
 const WALLET_TRANSACTION_LIMIT = 5;
@@ -161,6 +168,10 @@ Notifications.setNotificationHandler({
 
 function blankRuntime(loading = false): RuntimeState {
   return { loading, service: null, discovery: null, error: null };
+}
+
+function buildPublicPolicyURL(path: string): string {
+  return `${mobileConfig.appOrigin.replace(/\/+$/, "")}${path}`;
 }
 
 function resolveExpoProjectId(): string | undefined {
@@ -965,6 +976,7 @@ function WalletAppShell({
   onDisconnectGoogle,
   showRecoveryFundsNotice,
   onDismissRecoveryFundsNotice,
+  onPolicyRequired,
 }: {
   runtime: RuntimeState;
   selectedCandidateKey?: string;
@@ -996,6 +1008,7 @@ function WalletAppShell({
   onDisconnectGoogle?: () => void;
   showRecoveryFundsNotice: boolean;
   onDismissRecoveryFundsNotice: () => void;
+  onPolicyRequired?: (status: AppUserPolicyStatus) => void;
 }) {
   return (
     <WalletAppShellContent
@@ -1029,6 +1042,7 @@ function WalletAppShell({
       onDisconnectGoogle={onDisconnectGoogle}
       showRecoveryFundsNotice={showRecoveryFundsNotice}
       onDismissRecoveryFundsNotice={onDismissRecoveryFundsNotice}
+      onPolicyRequired={onPolicyRequired}
     />
   );
 }
@@ -1064,6 +1078,7 @@ function WalletAppShellContent({
   onDisconnectGoogle,
   showRecoveryFundsNotice,
   onDismissRecoveryFundsNotice,
+  onPolicyRequired,
 }: {
   runtime: RuntimeState;
   selectedCandidateKey?: string;
@@ -1095,6 +1110,7 @@ function WalletAppShellContent({
   onDisconnectGoogle?: () => void;
   showRecoveryFundsNotice: boolean;
   onDismissRecoveryFundsNotice: () => void;
+  onPolicyRequired?: (status: AppUserPolicyStatus) => void;
 }) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
@@ -1356,6 +1372,11 @@ function WalletAppShellContent({
       backendAuthFailureHandledRef.current = false;
     } catch (error) {
       console.warn("Unable to load app profile", error);
+      if (error instanceof AppBackendPolicyRequiredError && error.policyStatus) {
+        setSyncNotice(null);
+        onPolicyRequired?.(error.policyStatus);
+        return;
+      }
       const message = describeAppBackendIssue(error);
       setSyncNotice(message);
       if (error instanceof AppBackendAuthError && onLogout && !backendAuthFailureHandledRef.current) {
@@ -2739,6 +2760,11 @@ function PrivyWalletApp({
   );
   const [showRecoveryFundsNotice, setShowRecoveryFundsNotice] = useState(false);
   const [loginNotice, setLoginNotice] = useState<string | null>(null);
+  const [policyStatus, setPolicyStatus] = useState<AppUserPolicyStatus | null>(null);
+  const [policyAction, setPolicyAction] = useState<
+    "idle" | "submitting" | "returning"
+  >("idle");
+  const [policyError, setPolicyError] = useState<string | null>(null);
   const [appleUserInfoHint, setAppleUserInfoHint] = useState<AppleOAuthUserInfoHint | null>(
     null,
   );
@@ -2835,6 +2861,14 @@ function PrivyWalletApp({
     setRuntime(blankRuntime(false));
   };
 
+  const showPolicyGate = (nextPolicyStatus: AppUserPolicyStatus) => {
+    setPolicyStatus(nextPolicyStatus);
+    setPolicyAction("idle");
+    setPolicyError(null);
+    setBackendBootstrapReady(false);
+    setRuntime(blankRuntime(false));
+  };
+
   const syncWalletPreferences = (nextUser: AppUser, nextWallets: AppWallet[]) => {
     const storageUserID = nextUser.id || user?.id;
     if (!storageUserID) {
@@ -2916,6 +2950,9 @@ function PrivyWalletApp({
       setDeletedAccountStatus(null);
       setDeletedAccountAction("idle");
       setDeletedAccountError(null);
+      setPolicyStatus(null);
+      setPolicyAction("idle");
+      setPolicyError(null);
       setAppleUserInfoHint(null);
       setPendingAppleTokens(null);
       setAppleRecovery(null);
@@ -2928,6 +2965,9 @@ function PrivyWalletApp({
       return;
     }
     if (deletedAccountStatus) {
+      return;
+    }
+    if (policyStatus) {
       return;
     }
     if (appleRecoveryState !== "ready" || appleRecovery) {
@@ -2945,7 +2985,7 @@ function PrivyWalletApp({
       .finally(() => {
         creatingWalletRef.current = false;
       });
-  }, [appleRecovery, appleRecoveryState, create, deletedAccountStatus, isReady, user, wallets.length]);
+  }, [appleRecovery, appleRecoveryState, create, deletedAccountStatus, isReady, policyStatus, user, wallets.length]);
 
   useEffect(() => {
     if (!isReady || !user?.id) {
@@ -3003,7 +3043,7 @@ function PrivyWalletApp({
   useEffect(() => {
     let cancelled = false;
 
-    if (!user || deletedAccountStatus) {
+    if (!user || deletedAccountStatus || policyStatus) {
       setShowRecoveryFundsNotice(false);
       return () => {
         cancelled = true;
@@ -3023,7 +3063,7 @@ function PrivyWalletApp({
     return () => {
       cancelled = true;
     };
-  }, [deletedAccountStatus, user]);
+  }, [deletedAccountStatus, policyStatus, user]);
 
   const dismissRecoveryFundsNotice = () => {
     setShowRecoveryFundsNotice(false);
@@ -3157,6 +3197,7 @@ function PrivyWalletApp({
       !embeddedWallet ||
       !walletPreferencesReady ||
       deletedAccountStatus ||
+      policyStatus ||
       appleRecoveryState !== "ready" ||
       Boolean(appleRecovery)
     ) {
@@ -3253,6 +3294,10 @@ function PrivyWalletApp({
           return;
         }
         setBackendBootstrapReady(false);
+        if (error instanceof AppBackendPolicyRequiredError && error.policyStatus) {
+          showPolicyGate(error.policyStatus);
+          return;
+        }
         if (error instanceof AppBackendAuthError) {
           try {
             const status = await backendClient.getDeleteAccountStatus();
@@ -3280,6 +3325,7 @@ function PrivyWalletApp({
     embeddedWallet,
     getAccessToken,
     isReady,
+    policyStatus,
     preferredCandidateKey,
     user,
     walletPreferences.defaultWalletAddress,
@@ -3323,6 +3369,9 @@ function PrivyWalletApp({
   const handleGoogleLogin = async () => {
     try {
       setLoginNotice(null);
+      setPolicyStatus(null);
+      setPolicyAction("idle");
+      setPolicyError(null);
       await login({ provider: "google" });
     } catch (error) {
       presentLoginError(error);
@@ -3333,6 +3382,9 @@ function PrivyWalletApp({
     try {
       setLoginNotice(null);
       setAppleUserInfoHint(null);
+      setPolicyStatus(null);
+      setPolicyAction("idle");
+      setPolicyError(null);
       await login({
         provider: "apple",
         onAppleOAuthUserInfo: (userInfo) => {
@@ -3379,11 +3431,40 @@ function PrivyWalletApp({
 
     setEmailLoading(true);
     try {
+      setPolicyStatus(null);
+      setPolicyAction("idle");
+      setPolicyError(null);
       await loginWithCode({ email: normalizedEmail, code: normalizedCode });
     } catch (error) {
       presentLoginError(error);
     } finally {
       setEmailLoading(false);
+    }
+  };
+
+  const handleAcceptPolicies = async (mailingListOptIn: boolean) => {
+    setPolicyAction("submitting");
+    setPolicyError(null);
+    try {
+      await backendClient.acceptUserPolicies(mailingListOptIn);
+      setPolicyStatus(null);
+      setBackendBootstrapReady(false);
+      setRuntime(blankRuntime(true));
+      bootstrappedIdentityRef.current = null;
+    } catch (error) {
+      setPolicyError(describeAppBackendIssue(error));
+    } finally {
+      setPolicyAction("idle");
+    }
+  };
+
+  const handlePolicyReturnToLogin = async () => {
+    setPolicyAction("returning");
+    setPolicyError(null);
+    try {
+      await logout();
+    } finally {
+      setPolicyAction("idle");
     }
   };
 
@@ -3570,6 +3651,21 @@ function PrivyWalletApp({
     );
   }
 
+  if (user && policyStatus) {
+    return (
+      <PolicyAcceptanceScreen
+        action={policyAction}
+        error={policyError}
+        onAccept={(mailingListOptIn) => {
+          void handleAcceptPolicies(mailingListOptIn);
+        }}
+        onReturnToLogin={() => {
+          void handlePolicyReturnToLogin();
+        }}
+      />
+    );
+  }
+
   if (user && appleRecovery) {
     return (
       <AppleRecoveryPromptScreen
@@ -3714,6 +3810,25 @@ function PrivyWalletApp({
               </Pressable>
             </>
           )}
+          <View style={styles.loginPolicyLinks}>
+            <Pressable
+              disabled={authLoading}
+              onPress={() => {
+                void Linking.openURL(buildPublicPolicyURL(PRIVACY_POLICY_PATH));
+              }}
+            >
+              <Text style={styles.loginPolicyLinkText}>Privacy Policy</Text>
+            </Pressable>
+            <Text style={styles.loginPolicyLinkDivider}>•</Text>
+            <Pressable
+              disabled={authLoading}
+              onPress={() => {
+                void Linking.openURL(buildPublicPolicyURL(EMAIL_OPT_IN_POLICY_PATH));
+              }}
+            >
+              <Text style={styles.loginPolicyLinkText}>Email Opt-In Policy</Text>
+            </Pressable>
+          </View>
           {runtime.error ? <Text style={styles.errorText}>{runtime.error}</Text> : null}
         </View>
       </SafeAreaView>
@@ -3761,6 +3876,7 @@ function PrivyWalletApp({
       onDisconnectGoogle={handleDisconnectGoogle}
       showRecoveryFundsNotice={showRecoveryFundsNotice}
       onDismissRecoveryFundsNotice={dismissRecoveryFundsNotice}
+      onPolicyRequired={showPolicyGate}
     />
   );
 }
@@ -3827,6 +3943,140 @@ function DeletedAccountScreen({
         </Pressable>
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
       </View>
+    </SafeAreaView>
+  );
+}
+
+function PolicyAcceptanceScreen({
+  action,
+  error,
+  onAccept,
+  onReturnToLogin,
+}: {
+  action: "idle" | "submitting" | "returning";
+  error: string | null;
+  onAccept: (mailingListOptIn: boolean) => void;
+  onReturnToLogin: () => void;
+}) {
+  const { palette, shadows, isDark } = useAppTheme();
+  const styles = useMemo(
+    () => createStyles(palette, shadows, isDark),
+    [palette, shadows, isDark],
+  );
+  const [acceptedPrivacyPolicy, setAcceptedPrivacyPolicy] = useState(false);
+  const [mailingListOptIn, setMailingListOptIn] = useState(true);
+  const busy = action !== "idle";
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <ScrollView
+        style={styles.safe}
+        contentContainerStyle={styles.policyScreenScrollContent}
+      >
+        <View style={styles.loginWrap}>
+          <Text style={styles.loginBrand}>SFLUV</Text>
+          <Text style={styles.loginTitle}>Accept the Privacy Policy to keep using SFLUV.</Text>
+          <Text style={styles.loginBody}>
+            Review the Privacy Policy and choose whether to receive SFLUV email updates. The
+            privacy-policy checkbox is required to continue.
+          </Text>
+
+          <View style={styles.policyCard}>
+            <Pressable
+              style={styles.policyCheckboxRow}
+              disabled={busy}
+              onPress={() => {
+                setAcceptedPrivacyPolicy((current) => !current);
+              }}
+            >
+              <View
+                style={[
+                  styles.policyCheckbox,
+                  acceptedPrivacyPolicy ? styles.policyCheckboxChecked : undefined,
+                ]}
+              >
+                {acceptedPrivacyPolicy ? (
+                  <Ionicons name="checkmark" size={16} color={palette.white} />
+                ) : null}
+              </View>
+              <Text style={styles.policyCheckboxText}>
+                I have read and accept the Privacy Policy.
+              </Text>
+            </Pressable>
+
+            <View style={styles.policyLinkRow}>
+              <Pressable
+                disabled={busy}
+                onPress={() => {
+                  void Linking.openURL(buildPublicPolicyURL(PRIVACY_POLICY_PATH));
+                }}
+              >
+                <Text style={styles.policyInlineLink}>Open Privacy Policy</Text>
+              </Pressable>
+            </View>
+
+            <Pressable
+              style={styles.policyCheckboxRow}
+              disabled={busy}
+              onPress={() => {
+                setMailingListOptIn((current) => !current);
+              }}
+            >
+              <View
+                style={[
+                  styles.policyCheckbox,
+                  mailingListOptIn ? styles.policyCheckboxChecked : undefined,
+                ]}
+              >
+                {mailingListOptIn ? (
+                  <Ionicons name="checkmark" size={16} color={palette.white} />
+                ) : null}
+              </View>
+              <Text style={styles.policyCheckboxText}>
+                I want to receive SFLUV emails in line with the Email Opt-In Policy.
+              </Text>
+            </Pressable>
+
+            <View style={styles.policyLinkRow}>
+              <Pressable
+                disabled={busy}
+                onPress={() => {
+                  void Linking.openURL(buildPublicPolicyURL(EMAIL_OPT_IN_POLICY_PATH));
+                }}
+              >
+                <Text style={styles.policyInlineLink}>Open Email Opt-In Policy</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          <Text style={styles.loginBody}>
+            Email opt-in is optional, and you can unsubscribe later at any time.
+          </Text>
+
+          <Pressable
+            style={[
+              styles.loginButton,
+              (!acceptedPrivacyPolicy || busy) ? styles.loginButtonDisabled : undefined,
+            ]}
+            disabled={!acceptedPrivacyPolicy || busy}
+            onPress={() => onAccept(mailingListOptIn)}
+          >
+            <Text style={styles.loginButtonText}>
+              {action === "submitting" ? "Saving..." : "Continue"}
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.loginSecondaryButton, busy ? styles.loginButtonDisabled : undefined]}
+            disabled={busy}
+            onPress={onReturnToLogin}
+          >
+            <Text style={styles.loginSecondaryButtonText}>
+              {action === "returning" ? "Logging out..." : "Log out"}
+            </Text>
+          </Pressable>
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -4131,6 +4381,22 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     fontWeight: "700",
     maxWidth: 360,
   },
+  loginPolicyLinks: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  loginPolicyLinkText: {
+    color: palette.primaryStrong,
+    fontWeight: "700",
+    textDecorationLine: "underline",
+  },
+  loginPolicyLinkDivider: {
+    color: palette.textMuted,
+    fontSize: 12,
+  },
   deletedAccountNotice: {
     borderRadius: radii.md,
     borderWidth: 1,
@@ -4223,6 +4489,52 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   loginTertiaryButtonText: {
     color: palette.textMuted,
     fontWeight: "700",
+  },
+  policyScreenScrollContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+  },
+  policyCard: {
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.surfaceMuted,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    gap: spacing.sm,
+  },
+  policyCheckboxRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+  },
+  policyCheckbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 2,
+  },
+  policyCheckboxChecked: {
+    borderColor: palette.primaryStrong,
+    backgroundColor: palette.primaryStrong,
+  },
+  policyCheckboxText: {
+    flex: 1,
+    color: palette.text,
+    lineHeight: 22,
+  },
+  policyLinkRow: {
+    paddingLeft: 36,
+  },
+  policyInlineLink: {
+    color: palette.primaryStrong,
+    fontWeight: "700",
+    textDecorationLine: "underline",
   },
   sendingOverlay: {
     flex: 1,

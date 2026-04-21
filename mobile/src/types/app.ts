@@ -15,6 +15,23 @@ export interface AppUser {
   isAffiliate: boolean;
   paypalEthAddress: string;
   lastRedemption: number;
+  acceptedPrivacyPolicy: boolean;
+  acceptedPrivacyPolicyAt?: string | null;
+  privacyPolicyVersion: string;
+  mailingListOptIn: boolean;
+  mailingListOptInAt?: string | null;
+  mailingListPolicyVersion: string;
+}
+
+export interface AppUserPolicyStatus {
+  userId: string;
+  active: boolean;
+  acceptedPrivacyPolicy: boolean;
+  acceptedPrivacyPolicyAt?: string | null;
+  privacyPolicyVersion: string;
+  mailingListOptIn: boolean;
+  mailingListOptInAt?: string | null;
+  mailingListPolicyVersion: string;
 }
 
 export interface AppWallet {

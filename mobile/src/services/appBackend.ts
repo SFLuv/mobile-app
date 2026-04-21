@@ -9,6 +9,7 @@ import {
   AppOwnedLocation,
   AppTransaction,
   AppUser,
+  AppUserPolicyStatus,
   AppWallet,
   AppWalletOwnerLookup,
   MerchantApplicationDraft,
@@ -36,6 +37,16 @@ export class AppBackendRequestError extends Error {
   }
 }
 
+export class AppBackendPolicyRequiredError extends AppBackendAuthError {
+  readonly policyStatus?: AppUserPolicyStatus;
+
+  constructor(message: string, status?: number, policyStatus?: AppUserPolicyStatus) {
+    super(message, status);
+    this.name = "AppBackendPolicyRequiredError";
+    this.policyStatus = policyStatus;
+  }
+}
+
 type GetUserResponse = {
   user: {
     id: string;
@@ -54,6 +65,12 @@ type GetUserResponse = {
     primary_wallet_address?: string;
     paypal_eth: string;
     last_redemption: number;
+    accepted_privacy_policy: boolean;
+    accepted_privacy_policy_at?: string | null;
+    privacy_policy_version: string;
+    mailing_list_opt_in: boolean;
+    mailing_list_opt_in_at?: string | null;
+    mailing_list_policy_version: string;
   };
   wallets: Array<{
     id?: number;
@@ -192,6 +209,20 @@ type AppleRecoveryResponse = {
   } | null;
 };
 
+type UserPolicyStatusResponse = {
+  user_id: string;
+  active: boolean;
+  accepted_privacy_policy: boolean;
+  accepted_privacy_policy_at?: string | null;
+  privacy_policy_version: string;
+  mailing_list_opt_in: boolean;
+  mailing_list_opt_in_at?: string | null;
+  mailing_list_policy_version: string;
+};
+
+const POLICY_REQUIRED_HEADER = "X-SFLUV-Auth-Reason";
+const POLICY_REQUIRED_REASON = "privacy-policy-required";
+
 function endpoint(path: string): string {
   return `${mobileConfig.appBackendURL.replace(/\/+$/, "")}${path}`;
 }
@@ -240,6 +271,37 @@ function mapUser(input: GetUserResponse["user"]): AppUser {
     isAffiliate: input.is_affiliate,
     paypalEthAddress: input.paypal_eth,
     lastRedemption: input.last_redemption,
+    acceptedPrivacyPolicy: input.accepted_privacy_policy === true,
+    acceptedPrivacyPolicyAt:
+      typeof input.accepted_privacy_policy_at === "string"
+        ? input.accepted_privacy_policy_at
+        : undefined,
+    privacyPolicyVersion: asString(input.privacy_policy_version),
+    mailingListOptIn: input.mailing_list_opt_in === true,
+    mailingListOptInAt:
+      typeof input.mailing_list_opt_in_at === "string"
+        ? input.mailing_list_opt_in_at
+        : undefined,
+    mailingListPolicyVersion: asString(input.mailing_list_policy_version),
+  };
+}
+
+function mapUserPolicyStatus(input: UserPolicyStatusResponse): AppUserPolicyStatus {
+  return {
+    userId: input.user_id,
+    active: input.active === true,
+    acceptedPrivacyPolicy: input.accepted_privacy_policy === true,
+    acceptedPrivacyPolicyAt:
+      typeof input.accepted_privacy_policy_at === "string"
+        ? input.accepted_privacy_policy_at
+        : undefined,
+    privacyPolicyVersion: asString(input.privacy_policy_version),
+    mailingListOptIn: input.mailing_list_opt_in === true,
+    mailingListOptInAt:
+      typeof input.mailing_list_opt_in_at === "string"
+        ? input.mailing_list_opt_in_at
+        : undefined,
+    mailingListPolicyVersion: asString(input.mailing_list_policy_version),
   };
 }
 
@@ -424,7 +486,7 @@ function formatTokenAmount(raw: string): string {
 export class AppBackendClient {
   constructor(private readonly getAccessToken: () => Promise<string | null>) {}
 
-  private async authFetch(path: string, options: RequestInit = {}): Promise<Response> {
+  private async rawAuthFetch(path: string, options: RequestInit = {}): Promise<Response> {
     const accessToken = await this.getAccessToken();
     if (!accessToken) {
       throw new AppBackendAuthError("Privy could not provide a backend access token. Please sign out and sign in again.");
@@ -443,7 +505,29 @@ export class AppBackendClient {
       );
     }
 
+    return response;
+  }
+
+  private async authFetch(path: string, options: RequestInit = {}): Promise<Response> {
+    const response = await this.rawAuthFetch(path, options);
     if (response.status === 401 || response.status === 403) {
+      if (
+        response.status === 403 &&
+        response.headers.get(POLICY_REQUIRED_HEADER) === POLICY_REQUIRED_REASON
+      ) {
+        let policyStatus: AppUserPolicyStatus | undefined;
+        try {
+          policyStatus = (await this.getUserPolicyStatus()) ?? undefined;
+        } catch {
+          policyStatus = undefined;
+        }
+        const detail = await readResponseDetail(response);
+        const message = detail
+          ? `Shared app backend requires privacy policy acceptance (${response.status}): ${detail}`
+          : "Shared app backend requires privacy policy acceptance before this request can continue.";
+        throw new AppBackendPolicyRequiredError(message, response.status, policyStatus);
+      }
+
       const detail = await readResponseDetail(response);
       const message = detail
         ? `Shared app backend rejected this Privy session (${response.status}): ${detail}`
@@ -460,15 +544,23 @@ export class AppBackendClient {
     contacts: AppContact[];
     locations: AppOwnedLocation[];
   }> {
-    let response = await this.authFetch("/users");
-    if (response.status === 404) {
-      const created = await this.authFetch("/users", { method: "POST" });
+    let policyStatus = await this.getUserPolicyStatus();
+    if (policyStatus === null) {
+      const created = await this.rawAuthFetch("/users", { method: "POST" });
       if (!created.ok) {
         await throwRequestError(created, "Unable to create user profile in the shared app backend");
       }
-      response = await this.authFetch("/users");
+      policyStatus = await this.getUserPolicyStatus();
+    }
+    if (policyStatus && !policyStatus.acceptedPrivacyPolicy) {
+      throw new AppBackendPolicyRequiredError(
+        "You need to accept the privacy policy before using the shared app features.",
+        403,
+        policyStatus,
+      );
     }
 
+    const response = await this.authFetch("/users");
     if (!response.ok) {
       await throwRequestError(response, "Unable to load user profile from the shared app backend");
     }
@@ -482,8 +574,36 @@ export class AppBackendClient {
     };
   }
 
+  async getUserPolicyStatus(): Promise<AppUserPolicyStatus | null> {
+    const response = await this.rawAuthFetch("/users/policy-status");
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load the shared app privacy-policy status");
+    }
+    const body = (await response.json()) as UserPolicyStatusResponse;
+    return mapUserPolicyStatus(body);
+  }
+
+  async acceptUserPolicies(mailingListOptIn: boolean): Promise<AppUserPolicyStatus> {
+    const response = await this.rawAuthFetch("/users/policies/accept", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        accepted_privacy_policy: true,
+        mailing_list_opt_in: mailingListOptIn,
+      }),
+    });
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to save the shared app privacy-policy preferences");
+    }
+    const body = (await response.json()) as UserPolicyStatusResponse;
+    return mapUserPolicyStatus(body);
+  }
+
   async getDeleteAccountStatus(): Promise<AppAccountDeletionStatusResponse | null> {
-    const response = await this.authFetch("/users/delete-account/status");
+    const response = await this.rawAuthFetch("/users/delete-account/status");
     if (response.status === 404) {
       return null;
     }
@@ -515,7 +635,7 @@ export class AppBackendClient {
   }
 
   async cancelDeleteAccount(): Promise<AppAccountDeletionStatusResponse> {
-    const response = await this.authFetch("/users/delete-account/cancel", {
+    const response = await this.rawAuthFetch("/users/delete-account/cancel", {
       method: "POST",
     });
     if (!response.ok) {
