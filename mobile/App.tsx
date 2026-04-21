@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
+import * as AppleAuthentication from "expo-apple-authentication";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
@@ -26,9 +27,12 @@ import { ethers } from "ethers";
 import {
   PrivyProvider,
   useEmbeddedEthereumWallet,
+  useLinkWithOAuth,
   useLoginWithEmail,
   useLoginWithOAuth,
+  useOAuthTokens,
   usePrivy,
+  useUnlinkOAuth,
 } from "@privy-io/expo";
 import { SendScreen } from "./src/screens/SendScreen";
 import { ReceiveScreen } from "./src/screens/ReceiveScreen";
@@ -48,6 +52,9 @@ import {
 } from "./src/services/smartWallet";
 import { AppBackendAuthError, AppBackendClient } from "./src/services/appBackend";
 import {
+  AppAccountDeletionPreview,
+  AppAccountDeletionStatusResponse,
+  AppAppleRecoveryResponse,
   AppContact,
   AppLocation,
   AppTransaction,
@@ -76,6 +83,12 @@ type PendingLinkIntent = {
   id: number;
   link: SfluvUniversalLink;
 };
+
+type AppleOAuthUserInfoHint = {
+  email?: string | null;
+};
+
+type AppleAccountPromptAction = "idle" | "continuing" | "returning";
 
 type SendDraft = {
   recipient: string;
@@ -669,6 +682,168 @@ function describeAppBackendIssue(error: unknown): string {
   return message;
 }
 
+function formatDeletionDateLabel(value?: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(parsed);
+}
+
+function getDeletionFallbackDateLabel(): string {
+  return (
+    formatDeletionDateLabel(
+      new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    ) || "30 days from now"
+  );
+}
+
+function buildDeleteAccountPreviewMessage(preview: AppAccountDeletionPreview): string {
+  const scheduledDate =
+    formatDeletionDateLabel(preview.deleteDate) || getDeletionFallbackDateLabel();
+  const summaryParts = [
+    preview.counts.wallets > 0 ? `${preview.counts.wallets} wallets` : null,
+    preview.counts.contacts > 0 ? `${preview.counts.contacts} contacts` : null,
+    preview.counts.locations > 0 ? `${preview.counts.locations} locations` : null,
+    preview.counts.verifiedEmails > 0 ? `${preview.counts.verifiedEmails} verified emails` : null,
+    preview.counts.ponderSubscriptions > 0 ? `${preview.counts.ponderSubscriptions} notification subscriptions` : null,
+    preview.counts.memos > 0 ? `${preview.counts.memos} memos` : null,
+  ].filter((value): value is string => Boolean(value));
+
+  const summary = summaryParts.length > 0 ? ` This includes ${summaryParts.join(", ")}.` : "";
+
+  return `Your account will be marked inactive immediately and scheduled for permanent deletion on ${scheduledDate}.${summary} You can reactivate it any time during the 30-day window by signing in again.`;
+}
+
+function getLinkedOAuthAccount(
+  currentUser: unknown,
+  accountType: "apple_oauth" | "google_oauth",
+): {
+  email?: string | null;
+  subject?: string;
+} | null {
+  if (!currentUser || typeof currentUser !== "object") {
+    return null;
+  }
+
+  const rawLinkedAccounts = Array.isArray((currentUser as { linked_accounts?: unknown[] }).linked_accounts)
+    ? (currentUser as { linked_accounts: unknown[] }).linked_accounts
+    : Array.isArray((currentUser as { linkedAccounts?: unknown[] }).linkedAccounts)
+      ? (currentUser as { linkedAccounts: unknown[] }).linkedAccounts
+      : [];
+
+  for (const account of rawLinkedAccounts) {
+    if (!account || typeof account !== "object") {
+      continue;
+    }
+    const typedAccount = account as { type?: string; email?: string | null; subject?: string };
+    if (typedAccount.type !== accountType) {
+      continue;
+    }
+    return {
+      email: typedAccount.email ?? undefined,
+      subject: typedAccount.subject,
+    };
+  }
+
+  return null;
+}
+
+function getLinkedAppleAccount(currentUser: unknown) {
+  return getLinkedOAuthAccount(currentUser, "apple_oauth");
+}
+
+function getLinkedGoogleAccount(currentUser: unknown) {
+  return getLinkedOAuthAccount(currentUser, "google_oauth");
+}
+
+function getLinkedEmailAccount(currentUser: unknown): {
+  address?: string;
+} | null {
+  if (!currentUser || typeof currentUser !== "object") {
+    return null;
+  }
+
+  const rawLinkedAccounts = Array.isArray((currentUser as { linked_accounts?: unknown[] }).linked_accounts)
+    ? (currentUser as { linked_accounts: unknown[] }).linked_accounts
+    : Array.isArray((currentUser as { linkedAccounts?: unknown[] }).linkedAccounts)
+      ? (currentUser as { linkedAccounts: unknown[] }).linkedAccounts
+      : [];
+
+  for (const account of rawLinkedAccounts) {
+    if (!account || typeof account !== "object") {
+      continue;
+    }
+    const typedAccount = account as { type?: string; address?: string };
+    if (typedAccount.type !== "email") {
+      continue;
+    }
+    return {
+      address: typedAccount.address?.trim() || undefined,
+    };
+  }
+
+  return null;
+}
+
+function describeAppleRecoveryPrompt(
+  recovery: AppAppleRecoveryResponse,
+): {
+  title: string;
+  body: string;
+  primaryLabel: string;
+  secondaryLabel: string;
+} {
+  if (recovery.resolution === "recovery_suggested") {
+    const existingAccountLabel =
+      recovery.suggestedExistingAccount?.contactName?.trim() ||
+      recovery.suggestedExistingAccount?.verifiedEmail?.trim() ||
+      "your existing SFLUV account";
+    return {
+      title: "We found an existing account",
+      body: `Apple signed you into a new Privy identity, but ${existingAccountLabel} already exists in SFLUV. To keep using that account and wallet, go back, sign in with Google or email, then link Apple in Settings. If you continue here and Apple does not share your real email with us, we will not be able to link the accounts together and you will end up with two separate SFLUV accounts.`,
+      primaryLabel: "Use my existing account",
+      secondaryLabel: "Continue with Apple anyway",
+    };
+  }
+
+  if (recovery.isPrivateRelay || !recovery.appleEmail) {
+    return {
+      title: "Continue with Apple?",
+      body: "Apple may have hidden your real email. If you create an Apple account without sharing your real email with us, we will not be able to link it to an existing SFLUV account and you will end up with two separate accounts. Go back and sign in with Google or email first if you already have an account.",
+      primaryLabel: "I already have an account",
+      secondaryLabel: "Continue with Apple anyway",
+    };
+  }
+
+  if (recovery.resolution === "ambiguous_match") {
+    return {
+      title: "Multiple accounts found",
+      body: `Apple shared ${recovery.appleEmail}, but more than one active SFLUV account is associated with that address. Go back and sign in with the account you want to keep, then link Apple in Settings. If you continue here, you may create a separate Apple account.`,
+      primaryLabel: "Go back to sign in",
+      secondaryLabel: "Continue with Apple anyway",
+    };
+  }
+
+  return {
+    title: "Continue with Apple?",
+    body: "If you already have an SFLUV account, go back and sign in with Google or email first, then link Apple in Settings. Otherwise continue to create a new Apple account here.",
+    primaryLabel: "I already have an account",
+    secondaryLabel: "Continue with Apple",
+  };
+}
+
 function mergePreferences(input: unknown): AppPreferences {
   if (!input || typeof input !== "object") {
     return defaultAppPreferences;
@@ -769,6 +944,21 @@ function WalletAppShell({
   onConsumePendingLink,
   preferences,
   onUpdatePreferences,
+  appleLinked,
+  appleLinkedEmail,
+  appleLinkBusy,
+  appleLinkMessage,
+  appleCanDisconnect,
+  appleDisconnectDisabledReason,
+  onLinkApple,
+  onDisconnectApple,
+  googleLinked,
+  googleLinkedEmail,
+  googleActionBusy,
+  googleMessage,
+  googleCanDisconnect,
+  googleDisconnectDisabledReason,
+  onDisconnectGoogle,
 }: {
   runtime: RuntimeState;
   selectedCandidateKey?: string;
@@ -783,6 +973,21 @@ function WalletAppShell({
   onConsumePendingLink: () => void;
   preferences: AppPreferences;
   onUpdatePreferences: (next: AppPreferences) => void;
+  appleLinked: boolean;
+  appleLinkedEmail?: string;
+  appleLinkBusy: boolean;
+  appleLinkMessage?: string | null;
+  appleCanDisconnect: boolean;
+  appleDisconnectDisabledReason?: string | null;
+  onLinkApple?: () => void;
+  onDisconnectApple?: () => void;
+  googleLinked: boolean;
+  googleLinkedEmail?: string;
+  googleActionBusy: boolean;
+  googleMessage?: string | null;
+  googleCanDisconnect: boolean;
+  googleDisconnectDisabledReason?: string | null;
+  onDisconnectGoogle?: () => void;
 }) {
   return (
     <WalletAppShellContent
@@ -799,6 +1004,21 @@ function WalletAppShell({
       onConsumePendingLink={onConsumePendingLink}
       preferences={preferences}
       onUpdatePreferences={onUpdatePreferences}
+      appleLinked={appleLinked}
+      appleLinkedEmail={appleLinkedEmail}
+      appleLinkBusy={appleLinkBusy}
+      appleLinkMessage={appleLinkMessage}
+      appleCanDisconnect={appleCanDisconnect}
+      appleDisconnectDisabledReason={appleDisconnectDisabledReason}
+      onLinkApple={onLinkApple}
+      onDisconnectApple={onDisconnectApple}
+      googleLinked={googleLinked}
+      googleLinkedEmail={googleLinkedEmail}
+      googleActionBusy={googleActionBusy}
+      googleMessage={googleMessage}
+      googleCanDisconnect={googleCanDisconnect}
+      googleDisconnectDisabledReason={googleDisconnectDisabledReason}
+      onDisconnectGoogle={onDisconnectGoogle}
     />
   );
 }
@@ -817,6 +1037,21 @@ function WalletAppShellContent({
   onConsumePendingLink,
   preferences,
   onUpdatePreferences,
+  appleLinked,
+  appleLinkedEmail,
+  appleLinkBusy,
+  appleLinkMessage,
+  appleCanDisconnect,
+  appleDisconnectDisabledReason,
+  onLinkApple,
+  onDisconnectApple,
+  googleLinked,
+  googleLinkedEmail,
+  googleActionBusy,
+  googleMessage,
+  googleCanDisconnect,
+  googleDisconnectDisabledReason,
+  onDisconnectGoogle,
 }: {
   runtime: RuntimeState;
   selectedCandidateKey?: string;
@@ -831,6 +1066,21 @@ function WalletAppShellContent({
   onConsumePendingLink: () => void;
   preferences: AppPreferences;
   onUpdatePreferences: (next: AppPreferences) => void;
+  appleLinked: boolean;
+  appleLinkedEmail?: string;
+  appleLinkBusy: boolean;
+  appleLinkMessage?: string | null;
+  appleCanDisconnect: boolean;
+  appleDisconnectDisabledReason?: string | null;
+  onLinkApple?: () => void;
+  onDisconnectApple?: () => void;
+  googleLinked: boolean;
+  googleLinkedEmail?: string;
+  googleActionBusy: boolean;
+  googleMessage?: string | null;
+  googleCanDisconnect: boolean;
+  googleDisconnectDisabledReason?: string | null;
+  onDisconnectGoogle?: () => void;
 }) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
@@ -856,6 +1106,8 @@ function WalletAppShellContent({
     token: null,
     message: null,
   });
+  const [accountDeletionBusy, setAccountDeletionBusy] = useState(false);
+  const [accountDeletionMessage, setAccountDeletionMessage] = useState<string | null>(null);
   const [pushSyncRequestVersion, setPushSyncRequestVersion] = useState(0);
   const [refreshingHome, setRefreshingHome] = useState(false);
   const [refreshingActivity, setRefreshingActivity] = useState(false);
@@ -1870,6 +2122,65 @@ function WalletAppShellContent({
     await loadAppProfile();
   };
 
+  const handleDeleteAccount = async () => {
+    if (!backendClient) {
+      setAccountDeletionMessage("Backend not configured.");
+      return;
+    }
+
+    setAccountDeletionBusy(true);
+    setAccountDeletionMessage(null);
+    try {
+      const preview = await backendClient.getDeleteAccountPreview();
+      Alert.alert(
+        "Delete account",
+        buildDeleteAccountPreviewMessage(preview),
+        [
+          {
+            text: "Keep account",
+            style: "cancel",
+            onPress: () => {
+              setAccountDeletionBusy(false);
+            },
+          },
+          {
+            text: "Delete account",
+            style: "destructive",
+            onPress: () => {
+              void (async () => {
+                try {
+                  const status = await backendClient.deleteAccount();
+                  const deleteDateLabel =
+                    formatDeletionDateLabel(status.deleteDate) ||
+                    getDeletionFallbackDateLabel();
+                  Alert.alert(
+                    "Account scheduled for deletion",
+                    `This account is inactive and scheduled for deletion on ${deleteDateLabel}. Sign in again during that window if you want to reactivate it.`,
+                    [
+                      {
+                        text: "OK",
+                        onPress: () => {
+                          onLogout?.();
+                        },
+                      },
+                    ],
+                  );
+                } catch (error) {
+                  setAccountDeletionMessage(describeAppBackendIssue(error));
+                } finally {
+                  setAccountDeletionBusy(false);
+                }
+              })();
+            },
+          },
+        ],
+      );
+    } catch (error) {
+      setAccountDeletionBusy(false);
+      setAccountDeletionMessage(describeAppBackendIssue(error));
+    }
+  };
+
   const handleSend = async (recipient: string, amount: string, unit: "wei" | "token", memo: string) => {
     if (!runtime.service) {
       throw new Error("Wallet signer is not ready.");
@@ -2156,9 +2467,27 @@ function WalletAppShellContent({
               notificationStatusMessage={pushSyncState.message}
               onSyncNotifications={handleSyncPushNotifications}
               onLogout={onLogout}
+              googleLinked={googleLinked}
+              googleLinkedEmail={googleLinkedEmail}
+              googleActionBusy={googleActionBusy}
+              googleMessage={googleMessage}
+              googleCanDisconnect={googleCanDisconnect}
+              googleDisconnectDisabledReason={googleDisconnectDisabledReason}
+              onDisconnectGoogle={onDisconnectGoogle}
+              appleLinked={appleLinked}
+              appleLinkedEmail={appleLinkedEmail}
+              appleLinkBusy={appleLinkBusy}
+              appleLinkMessage={appleLinkMessage}
+              appleCanDisconnect={appleCanDisconnect}
+              appleDisconnectDisabledReason={appleDisconnectDisabledReason}
+              onLinkApple={onLinkApple}
+              onDisconnectApple={onDisconnectApple}
               onRenameWallet={handleRenameWallet}
               onSetPrimaryWallet={handleSetPrimaryWallet}
               onSetWalletVisibility={handleSetWalletVisibility}
+              accountDeletionBusy={accountDeletionBusy}
+              accountDeletionMessage={accountDeletionMessage}
+              onDeleteAccount={handleDeleteAccount}
               onUpdatePreferences={(next) => {
                 onUpdatePreferences(next);
               }}
@@ -2327,6 +2656,8 @@ function PrivyWalletApp({
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const { user, isReady, logout, getAccessToken } = usePrivy();
   const { login, state: oauthState } = useLoginWithOAuth();
+  const { link, state: linkOauthState } = useLinkWithOAuth();
+  const { unlinkOAuth } = useUnlinkOAuth();
   const { sendCode, loginWithCode } = useLoginWithEmail();
   const { wallets, create } = useEmbeddedEthereumWallet();
 
@@ -2344,6 +2675,39 @@ function PrivyWalletApp({
   const [emailCode, setEmailCode] = useState("");
   const [emailCodeSent, setEmailCodeSent] = useState(false);
   const [emailLoading, setEmailLoading] = useState(false);
+  const [deletedAccountStatus, setDeletedAccountStatus] =
+    useState<AppAccountDeletionStatusResponse | null>(null);
+  const [deletedAccountAction, setDeletedAccountAction] = useState<
+    "idle" | "reactivating" | "returning"
+  >("idle");
+  const [deletedAccountError, setDeletedAccountError] = useState<string | null>(
+    null,
+  );
+  const [loginNotice, setLoginNotice] = useState<string | null>(null);
+  const [appleUserInfoHint, setAppleUserInfoHint] = useState<AppleOAuthUserInfoHint | null>(
+    null,
+  );
+  const [pendingAppleTokens, setPendingAppleTokens] = useState<{
+    accessToken: string;
+    refreshToken?: string;
+    accessTokenExpiresInSeconds?: number;
+    refreshTokenExpiresInSeconds?: number;
+    scopes?: string[];
+    providerSubject?: string;
+    providerEmail?: string;
+    isPrivateRelay?: boolean;
+  } | null>(null);
+  const [appleRecovery, setAppleRecovery] = useState<AppAppleRecoveryResponse | null>(null);
+  const [appleRecoveryState, setAppleRecoveryState] = useState<
+    "idle" | "checking" | "ready"
+  >("idle");
+  const [appleRecoveryAction, setAppleRecoveryAction] =
+    useState<AppleAccountPromptAction>("idle");
+  const [appleRecoveryError, setAppleRecoveryError] = useState<string | null>(null);
+  const [appleLinkMessage, setAppleLinkMessage] = useState<string | null>(null);
+  const [appleUnlinkBusy, setAppleUnlinkBusy] = useState(false);
+  const [googleMessage, setGoogleMessage] = useState<string | null>(null);
+  const [googleUnlinkBusy, setGoogleUnlinkBusy] = useState(false);
   const creatingWalletRef = useRef(false);
   const bootstrappedIdentityRef = useRef<string | null>(null);
   const manualWalletSelectionRef = useRef(false);
@@ -2355,9 +2719,46 @@ function PrivyWalletApp({
     () => new AppBackendClient(async () => (await getAccessToken()) ?? null),
     [getAccessToken],
   );
+  const linkedAppleAccount = useMemo(() => getLinkedAppleAccount(user), [user]);
+  const linkedGoogleAccount = useMemo(() => getLinkedGoogleAccount(user), [user]);
+  const linkedEmailAccount = useMemo(() => getLinkedEmailAccount(user), [user]);
+  const appleLinked = Boolean(linkedAppleAccount?.subject || linkedAppleAccount?.email);
+  const googleLinked = Boolean(linkedGoogleAccount?.subject || linkedGoogleAccount?.email);
+  const emailLinked = Boolean(linkedEmailAccount?.address);
+  const signInMethodCount = Number(appleLinked) + Number(googleLinked) + Number(emailLinked);
+  const canDisconnectApple = appleLinked && signInMethodCount > 1;
+  const canDisconnectGoogle = googleLinked && signInMethodCount > 1;
+  const appleDisconnectDisabledReason =
+    appleLinked && !canDisconnectApple ? "Add email or Google before disconnecting Apple." : null;
+  const googleDisconnectDisabledReason =
+    googleLinked && !canDisconnectGoogle ? "Add email or Apple before disconnecting Google." : null;
+  const appleActionBusy = linkOauthState.status === "loading" || appleUnlinkBusy;
+  const googleActionBusy = googleUnlinkBusy;
+  const googleLinkedEmail = linkedGoogleAccount?.email?.trim() || undefined;
   const consumePendingLink = React.useCallback(() => {
     setPendingLinkIntent(null);
   }, []);
+
+  useOAuthTokens({
+    onOAuthTokenGrant: (tokens) => {
+      if (tokens.provider !== "apple") {
+        return;
+      }
+      setPendingAppleTokens((current) => ({
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        accessTokenExpiresInSeconds: tokens.access_token_expires_in_seconds,
+        refreshTokenExpiresInSeconds: tokens.refresh_token_expires_in_seconds,
+        scopes: tokens.scopes,
+        providerSubject: linkedAppleAccount?.subject,
+        providerEmail: linkedAppleAccount?.email ?? appleUserInfoHint?.email ?? undefined,
+        isPrivateRelay:
+          Boolean(linkedAppleAccount?.email?.toLowerCase().endsWith("@privaterelay.appleid.com")) ||
+          Boolean(appleUserInfoHint?.email?.toLowerCase().endsWith("@privaterelay.appleid.com")) ||
+          current?.isPrivateRelay === true,
+      }));
+    },
+  });
 
   const presentLoginError = (error: unknown) => {
     const message = (error as Error)?.message?.trim() || "Unable to sign in right now.";
@@ -2367,6 +2768,16 @@ function PrivyWalletApp({
       discovery: null,
       error: message,
     });
+  };
+
+  const showDeletedAccountGate = (
+    nextDeletedAccountStatus: AppAccountDeletionStatusResponse,
+  ) => {
+    setDeletedAccountStatus(nextDeletedAccountStatus);
+    setDeletedAccountAction("idle");
+    setDeletedAccountError(null);
+    setBackendBootstrapReady(false);
+    setRuntime(blankRuntime(false));
   };
 
   const syncWalletPreferences = (nextUser: AppUser, nextWallets: AppWallet[]) => {
@@ -2447,8 +2858,24 @@ function PrivyWalletApp({
       setEmailCode("");
       setEmailCodeSent(false);
       setEmailLoading(false);
+      setDeletedAccountStatus(null);
+      setDeletedAccountAction("idle");
+      setDeletedAccountError(null);
+      setAppleUserInfoHint(null);
+      setPendingAppleTokens(null);
+      setAppleRecovery(null);
+      setAppleRecoveryState("idle");
+      setAppleRecoveryAction("idle");
+      setAppleRecoveryError(null);
+      setAppleLinkMessage(null);
       manualWalletSelectionRef.current = false;
       bootstrappedIdentityRef.current = null;
+      return;
+    }
+    if (deletedAccountStatus) {
+      return;
+    }
+    if (appleRecoveryState !== "ready" || appleRecovery) {
       return;
     }
     if (wallets.length > 0 || creatingWalletRef.current) {
@@ -2463,7 +2890,7 @@ function PrivyWalletApp({
       .finally(() => {
         creatingWalletRef.current = false;
       });
-  }, [create, isReady, user, wallets.length]);
+  }, [appleRecovery, appleRecoveryState, create, deletedAccountStatus, isReady, user, wallets.length]);
 
   useEffect(() => {
     if (!isReady || !user?.id) {
@@ -2519,7 +2946,133 @@ function PrivyWalletApp({
   }, [isReady, user?.id]);
 
   useEffect(() => {
-    if (!isReady || !user || !embeddedWallet || !walletPreferencesReady) {
+    if (!user?.id || !pendingAppleTokens) {
+      return;
+    }
+
+    let cancelled = false;
+    const persistAppleTokens = async () => {
+      try {
+        await backendClient.storeAppleOAuthCredential({
+          accessToken: pendingAppleTokens.accessToken,
+          refreshToken: pendingAppleTokens.refreshToken,
+          accessTokenExpiresInSeconds: pendingAppleTokens.accessTokenExpiresInSeconds,
+          refreshTokenExpiresInSeconds: pendingAppleTokens.refreshTokenExpiresInSeconds,
+          scopes: pendingAppleTokens.scopes,
+          providerSubject: pendingAppleTokens.providerSubject || linkedAppleAccount?.subject,
+          providerEmail:
+            pendingAppleTokens.providerEmail || linkedAppleAccount?.email || appleUserInfoHint?.email || undefined,
+          isPrivateRelay:
+            pendingAppleTokens.isPrivateRelay ||
+            Boolean(
+              (pendingAppleTokens.providerEmail || linkedAppleAccount?.email || appleUserInfoHint?.email || "")
+                .toLowerCase()
+                .endsWith("@privaterelay.appleid.com"),
+            ),
+        });
+        if (!cancelled) {
+          setPendingAppleTokens(null);
+        }
+      } catch (error) {
+        console.warn("Unable to persist Apple OAuth credentials", error);
+      }
+    };
+
+    void persistAppleTokens();
+    return () => {
+      cancelled = true;
+    };
+  }, [appleUserInfoHint?.email, backendClient, linkedAppleAccount?.email, linkedAppleAccount?.subject, pendingAppleTokens, user?.id]);
+
+  useEffect(() => {
+    if (!isReady || !user || deletedAccountStatus || appleRecoveryState !== "idle") {
+      return;
+    }
+
+    let cancelled = false;
+    const resolveAppleRecovery = async () => {
+      setAppleRecoveryState("checking");
+      setAppleRecoveryError(null);
+      try {
+        const status = await backendClient.getDeleteAccountStatus();
+        if (cancelled) {
+          return;
+        }
+        if (status && status.status !== "active") {
+          showDeletedAccountGate(status);
+          setAppleRecoveryState("ready");
+          return;
+        }
+
+        const recovery = await backendClient.resolveAppleRecovery({
+          providerSubject: linkedAppleAccount?.subject,
+          providerEmail: linkedAppleAccount?.email || appleUserInfoHint?.email || undefined,
+          isPrivateRelay: Boolean(
+            (linkedAppleAccount?.email || appleUserInfoHint?.email || "")
+              .toLowerCase()
+              .endsWith("@privaterelay.appleid.com"),
+          ),
+        });
+        if (cancelled) {
+          return;
+        }
+
+        if (recovery.resolution === "current_account_exists" || recovery.resolution === "no_apple_account") {
+          setAppleRecovery(null);
+        } else {
+          setAppleRecovery(recovery);
+        }
+        setAppleRecoveryState("ready");
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        if (linkedAppleAccount || appleUserInfoHint?.email) {
+          setAppleRecovery({
+            currentUserId: user.id,
+            currentUserExists: false,
+            appleLinked: true,
+            appleEmail: linkedAppleAccount?.email || appleUserInfoHint?.email || undefined,
+            isPrivateRelay: Boolean(
+              (linkedAppleAccount?.email || appleUserInfoHint?.email || "")
+                .toLowerCase()
+                .endsWith("@privaterelay.appleid.com"),
+            ),
+            resolution: "no_match",
+          });
+        } else {
+          setAppleRecovery(null);
+        }
+        setAppleRecoveryState("ready");
+        console.warn("Unable to resolve Apple recovery state", error);
+      }
+    };
+
+    void resolveAppleRecovery();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    appleRecoveryState,
+    appleUserInfoHint?.email,
+    backendClient,
+    deletedAccountStatus,
+    isReady,
+    linkedAppleAccount?.email,
+    linkedAppleAccount?.subject,
+    user,
+  ]);
+
+  useEffect(() => {
+    if (
+      !isReady ||
+      !user ||
+      !embeddedWallet ||
+      !walletPreferencesReady ||
+      deletedAccountStatus ||
+      appleRecoveryState !== "ready" ||
+      Boolean(appleRecovery)
+    ) {
       return;
     }
 
@@ -2613,6 +3166,17 @@ function PrivyWalletApp({
           return;
         }
         setBackendBootstrapReady(false);
+        if (error instanceof AppBackendAuthError) {
+          try {
+            const status = await backendClient.getDeleteAccountStatus();
+            if (status && status.status !== "active") {
+              showDeletedAccountGate(status);
+              return;
+            }
+          } catch (statusError) {
+            console.warn("Unable to load deleted-account status", statusError);
+          }
+        }
         presentLoginError(error);
       }
     };
@@ -2622,7 +3186,10 @@ function PrivyWalletApp({
       cancelled = true;
     };
   }, [
+    appleRecovery,
+    appleRecoveryState,
     backendClient,
+    deletedAccountStatus,
     embeddedWallet,
     getAccessToken,
     isReady,
@@ -2657,7 +3224,8 @@ function PrivyWalletApp({
     walletPreferences.hiddenWalletAddresses,
   ]);
 
-  const oauthLoading = oauthState.status === "loading";
+  const oauthLoading =
+    oauthState.status === "loading" || linkOauthState.status === "loading";
   const authLoading = oauthLoading || emailLoading;
   const selectedCandidateKey = runtime.discovery?.selectedCandidateKey;
   const walletInitializing =
@@ -2667,7 +3235,25 @@ function PrivyWalletApp({
 
   const handleGoogleLogin = async () => {
     try {
+      setLoginNotice(null);
       await login({ provider: "google" });
+    } catch (error) {
+      presentLoginError(error);
+    }
+  };
+
+  const handleAppleLogin = async () => {
+    try {
+      setLoginNotice(null);
+      setAppleUserInfoHint(null);
+      await login({
+        provider: "apple",
+        onAppleOAuthUserInfo: (userInfo) => {
+          setAppleUserInfoHint({
+            email: userInfo.email ?? undefined,
+          });
+        },
+      });
     } catch (error) {
       presentLoginError(error);
     }
@@ -2714,6 +3300,157 @@ function PrivyWalletApp({
     }
   };
 
+  const handleDeletedAccountReactivate = async () => {
+    setDeletedAccountAction("reactivating");
+    setDeletedAccountError(null);
+    try {
+      await backendClient.cancelDeleteAccount();
+      bootstrappedIdentityRef.current = null;
+      setBackendBootstrapReady(false);
+      setDeletedAccountStatus(null);
+      setRuntime(blankRuntime(true));
+    } catch (error) {
+      setDeletedAccountError(describeAppBackendIssue(error));
+      setDeletedAccountAction("idle");
+      return;
+    }
+    setDeletedAccountAction("idle");
+  };
+
+  const handleDeletedAccountReturnToLogin = async () => {
+    setDeletedAccountAction("returning");
+    setDeletedAccountError(null);
+    try {
+      await logout();
+    } finally {
+      setDeletedAccountAction("idle");
+    }
+  };
+
+  const handleContinueWithNewAppleAccount = () => {
+    setAppleRecoveryAction("continuing");
+    setAppleRecoveryError(null);
+    setAppleRecovery(null);
+    setAppleRecoveryState("ready");
+    setAppleRecoveryAction("idle");
+  };
+
+  const handleReturnFromAppleRecovery = async () => {
+    setAppleRecoveryAction("returning");
+    setAppleRecoveryError(null);
+    try {
+      await logout();
+      setLoginNotice("Sign in with Google or email, then link Apple from Settings.");
+    } catch (error) {
+      setAppleRecoveryError((error as Error)?.message || "Unable to sign out right now.");
+    } finally {
+      setAppleRecoveryAction("idle");
+    }
+  };
+
+  const handleLinkApple = async () => {
+    try {
+      setAppleLinkMessage(null);
+      await link({
+        provider: "apple",
+        onAppleOAuthUserInfo: (userInfo) => {
+          setAppleUserInfoHint({
+            email: userInfo.email ?? undefined,
+          });
+        },
+      });
+      setAppleLinkMessage("Apple is now linked to this account.");
+    } catch (error) {
+      setAppleLinkMessage((error as Error)?.message || "Unable to link Apple right now.");
+    }
+  };
+
+  const handleDisconnectApple = () => {
+    if (!linkedAppleAccount?.subject) {
+      setAppleLinkMessage("Apple is not linked to this account.");
+      return;
+    }
+    if (!canDisconnectApple) {
+      setAppleLinkMessage(appleDisconnectDisabledReason);
+      return;
+    }
+    const appleSubject = linkedAppleAccount.subject;
+
+    Alert.alert(
+      "Disconnect Apple",
+      "Apple will no longer be able to sign in to this SFLUV account until you link it again.",
+      [
+        { text: "Keep Apple", style: "cancel" },
+        {
+          text: "Disconnect Apple",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              setAppleUnlinkBusy(true);
+              setAppleLinkMessage(null);
+              try {
+                await unlinkOAuth({
+                  provider: "apple",
+                  subject: appleSubject,
+                });
+                setAppleLinkMessage("Apple has been disconnected from this account.");
+              } catch (error) {
+                setAppleLinkMessage(
+                  (error as Error)?.message || "Unable to disconnect Apple right now.",
+                );
+              } finally {
+                setAppleUnlinkBusy(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  };
+
+  const handleDisconnectGoogle = () => {
+    if (!linkedGoogleAccount?.subject) {
+      setGoogleMessage("Google is not linked to this account.");
+      return;
+    }
+    if (!canDisconnectGoogle) {
+      setGoogleMessage(googleDisconnectDisabledReason);
+      return;
+    }
+    const googleSubject = linkedGoogleAccount.subject;
+
+    Alert.alert(
+      "Disconnect Google",
+      "Google will no longer be able to sign in to this SFLUV account until you link it again.",
+      [
+        { text: "Keep Google", style: "cancel" },
+        {
+          text: "Disconnect Google",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              setGoogleUnlinkBusy(true);
+              setGoogleMessage(null);
+              try {
+                await unlinkOAuth({
+                  provider: "google",
+                  subject: googleSubject,
+                });
+                setGoogleMessage("Google has been disconnected from this account.");
+              } catch (error) {
+                setGoogleMessage(
+                  (error as Error)?.message || "Unable to disconnect Google right now.",
+                );
+              } finally {
+                setGoogleUnlinkBusy(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  };
+
   if (!isReady) {
     return (
       <SafeAreaView style={styles.safe}>
@@ -2725,6 +3462,36 @@ function PrivyWalletApp({
     );
   }
 
+  if (user && deletedAccountStatus) {
+    return (
+      <DeletedAccountScreen
+        status={deletedAccountStatus}
+        action={deletedAccountAction}
+        error={deletedAccountError}
+        onReactivate={() => {
+          void handleDeletedAccountReactivate();
+        }}
+        onReturnToLogin={() => {
+          void handleDeletedAccountReturnToLogin();
+        }}
+      />
+    );
+  }
+
+  if (user && appleRecovery) {
+    return (
+      <AppleRecoveryPromptScreen
+        recovery={appleRecovery}
+        action={appleRecoveryAction}
+        error={appleRecoveryError}
+        onUseExistingAccount={() => {
+          void handleReturnFromAppleRecovery();
+        }}
+        onContinueWithApple={handleContinueWithNewAppleAccount}
+      />
+    );
+  }
+
   if (!user) {
     return (
       <SafeAreaView style={styles.safe}>
@@ -2732,6 +3499,7 @@ function PrivyWalletApp({
           <Text style={styles.loginBrand}>SFLUV</Text>
           <Text style={styles.loginTitle}>A community currency for San Francisco</Text>
           <Text style={styles.loginBody}>Sign in to send, receive, and redeem SFLUV.</Text>
+          {loginNotice ? <Text style={styles.loginNotice}>{loginNotice}</Text> : null}
           {loginMode === "email" ? (
             <>
               <TextInput
@@ -2796,6 +3564,7 @@ function PrivyWalletApp({
                   setLoginMode("choice");
                   setEmailCode("");
                   setEmailCodeSent(false);
+                  setLoginNotice(null);
                   setRuntime((state) => ({ ...state, error: null }));
                 }}
               >
@@ -2804,6 +3573,20 @@ function PrivyWalletApp({
             </>
           ) : (
             <>
+              {Platform.OS === "ios" ? (
+                <AppleAuthentication.AppleAuthenticationButton
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                  cornerRadius={999}
+                  style={[styles.appleLoginButton, authLoading ? styles.loginButtonDisabled : undefined]}
+                  onPress={() => {
+                    if (authLoading) {
+                      return;
+                    }
+                    void handleAppleLogin();
+                  }}
+                />
+              ) : null}
               <Pressable
                 style={[styles.loginButton, authLoading ? styles.loginButtonDisabled : undefined]}
                 disabled={authLoading}
@@ -2818,6 +3601,7 @@ function PrivyWalletApp({
                 disabled={authLoading}
                 onPress={() => {
                   setLoginMode("email");
+                  setLoginNotice(null);
                   setRuntime((state) => ({ ...state, error: null }));
                 }}
               >
@@ -2855,7 +3639,146 @@ function PrivyWalletApp({
       onConsumePendingLink={consumePendingLink}
       preferences={preferences}
       onUpdatePreferences={onUpdatePreferences}
+      appleLinked={appleLinked}
+      appleLinkedEmail={linkedAppleAccount?.email || undefined}
+      appleLinkBusy={appleActionBusy}
+      appleLinkMessage={appleLinkMessage}
+      appleCanDisconnect={canDisconnectApple}
+      appleDisconnectDisabledReason={appleDisconnectDisabledReason}
+      onLinkApple={Platform.OS === "ios" ? handleLinkApple : undefined}
+      onDisconnectApple={Platform.OS === "ios" ? handleDisconnectApple : undefined}
+      googleLinked={googleLinked}
+      googleLinkedEmail={googleLinkedEmail}
+      googleActionBusy={googleActionBusy}
+      googleMessage={googleMessage}
+      googleCanDisconnect={canDisconnectGoogle}
+      googleDisconnectDisabledReason={googleDisconnectDisabledReason}
+      onDisconnectGoogle={handleDisconnectGoogle}
     />
+  );
+}
+
+function DeletedAccountScreen({
+  status,
+  action,
+  error,
+  onReactivate,
+  onReturnToLogin,
+}: {
+  status: AppAccountDeletionStatusResponse;
+  action: "idle" | "reactivating" | "returning";
+  error: string | null;
+  onReactivate: () => void;
+  onReturnToLogin: () => void;
+}) {
+  const { palette, shadows, isDark } = useAppTheme();
+  const styles = useMemo(
+    () => createStyles(palette, shadows, isDark),
+    [palette, shadows, isDark],
+  );
+  const deleteDateLabel =
+    formatDeletionDateLabel(status.deleteDate) || "the current 30-day window";
+  const busy = action !== "idle";
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.loginWrap}>
+        <Text style={styles.loginBrand}>SFLUV</Text>
+        <Text style={styles.loginTitle}>
+          This account has been recently deleted. Do you want to re-activate it?
+        </Text>
+        <Text style={styles.loginBody}>
+          The account is scheduled for permanent deletion on {deleteDateLabel}.
+          If you reactivate it now, your profile and wallets will become active
+          again.
+        </Text>
+        {status.status === "ready_for_manual_purge" ? (
+          <View style={styles.deletedAccountNotice}>
+            <Text style={styles.deletedAccountNoticeText}>
+              This account is already at the end of its deletion window. If
+              reactivation fails, it may need manual recovery.
+            </Text>
+          </View>
+        ) : null}
+        <Pressable
+          style={[styles.loginButton, busy ? styles.loginButtonDisabled : undefined]}
+          disabled={busy}
+          onPress={onReactivate}
+        >
+          <Text style={styles.loginButtonText}>
+            {action === "reactivating" ? "Re-activating..." : "Yes, re-activate it"}
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.loginSecondaryButton, busy ? styles.loginButtonDisabled : undefined]}
+          disabled={busy}
+          onPress={onReturnToLogin}
+        >
+          <Text style={styles.loginSecondaryButtonText}>
+            {action === "returning" ? "Returning..." : "No, take me back"}
+          </Text>
+        </Pressable>
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      </View>
+    </SafeAreaView>
+  );
+}
+
+function AppleRecoveryPromptScreen({
+  recovery,
+  action,
+  error,
+  onUseExistingAccount,
+  onContinueWithApple,
+}: {
+  recovery: AppAppleRecoveryResponse;
+  action: AppleAccountPromptAction;
+  error: string | null;
+  onUseExistingAccount: () => void;
+  onContinueWithApple: () => void;
+}) {
+  const { palette, shadows, isDark } = useAppTheme();
+  const styles = useMemo(
+    () => createStyles(palette, shadows, isDark),
+    [palette, shadows, isDark],
+  );
+  const prompt = describeAppleRecoveryPrompt(recovery);
+  const busy = action !== "idle";
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.loginWrap}>
+        <Text style={styles.loginBrand}>SFLUV</Text>
+        <Text style={styles.loginTitle}>{prompt.title}</Text>
+        <Text style={styles.loginBody}>{prompt.body}</Text>
+        {recovery.suggestedExistingAccount?.primaryWalletAddress ? (
+          <View style={styles.deletedAccountNotice}>
+            <Text style={styles.deletedAccountNoticeText}>
+              Existing wallet: {shortAddress(recovery.suggestedExistingAccount.primaryWalletAddress)}
+            </Text>
+          </View>
+        ) : null}
+        <Pressable
+          style={[styles.loginButton, busy ? styles.loginButtonDisabled : undefined]}
+          disabled={busy}
+          onPress={onUseExistingAccount}
+        >
+          <Text style={styles.loginButtonText}>
+            {action === "returning" ? "Returning..." : prompt.primaryLabel}
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.loginSecondaryButton, busy ? styles.loginButtonDisabled : undefined]}
+          disabled={busy}
+          onPress={onContinueWithApple}
+        >
+          <Text style={styles.loginSecondaryButtonText}>
+            {action === "continuing" ? "Continuing..." : prompt.secondaryLabel}
+          </Text>
+        </Pressable>
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      </View>
+    </SafeAreaView>
   );
 }
 
@@ -2897,7 +3820,7 @@ export default function App() {
           config={{
             embedded: {
               ethereum: {
-                createOnLogin: "users-without-wallets",
+                createOnLogin: "off",
               },
             },
           }}
@@ -3095,6 +4018,25 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     lineHeight: 22,
     maxWidth: 340,
   },
+  loginNotice: {
+    color: palette.primaryStrong,
+    lineHeight: 20,
+    fontWeight: "700",
+    maxWidth: 360,
+  },
+  deletedAccountNotice: {
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: palette.primary,
+    backgroundColor: palette.primarySoft,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  deletedAccountNoticeText: {
+    color: palette.primaryStrong,
+    lineHeight: 20,
+    fontWeight: "700",
+  },
   loginInput: {
     backgroundColor: palette.surface,
     borderRadius: radii.pill,
@@ -3114,6 +4056,13 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     minWidth: 240,
     alignItems: "center",
     justifyContent: "center",
+  },
+  appleLoginButton: {
+    marginTop: spacing.sm,
+    width: "100%",
+    maxWidth: 360,
+    height: 54,
+    alignSelf: "stretch",
   },
   loginButtonDisabled: {
     opacity: 0.7,

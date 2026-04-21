@@ -1,6 +1,9 @@
 import { ethers } from "ethers";
 import { mobileConfig } from "../config";
 import {
+  AppAccountDeletionPreview,
+  AppAccountDeletionStatusResponse,
+  AppAppleRecoveryResponse,
   AppContact,
   AppLocation,
   AppOwnedLocation,
@@ -134,6 +137,59 @@ type WalletLookupResponse = {
   matched_payment_wallet?: boolean;
   pay_to_address?: string;
   tip_to_address?: string;
+};
+
+type AccountDeletionPreviewResponse = {
+  user_id: string;
+  status: "active" | "scheduled_for_deletion" | "ready_for_manual_purge";
+  delete_date?: string | null;
+  requested_at?: string | null;
+  can_cancel: boolean;
+  primary_wallet_address: string;
+  wallet_addresses: string[];
+  counts: {
+    wallets: number;
+    contacts: number;
+    locations: number;
+    location_hours: number;
+    location_wallets: number;
+    ponder_subscriptions: number;
+    verified_emails: number;
+    memos: number;
+  };
+  purge_enabled: boolean;
+};
+
+type AccountDeletionStatusResponse = {
+  user_id: string;
+  status: "active" | "scheduled_for_deletion" | "ready_for_manual_purge";
+  delete_date?: string | null;
+  requested_at?: string | null;
+  canceled_at?: string | null;
+  completed_at?: string | null;
+  can_cancel: boolean;
+  purge_enabled: boolean;
+  purge_enabled_by?: string;
+};
+
+type AppleRecoveryResponse = {
+  current_user_id: string;
+  current_user_exists: boolean;
+  apple_linked: boolean;
+  apple_email?: string | null;
+  is_private_relay: boolean;
+  resolution:
+    | "current_account_exists"
+    | "recovery_suggested"
+    | "no_match"
+    | "ambiguous_match"
+    | "no_apple_account";
+  suggested_existing_account?: {
+    user_id: string;
+    contact_name?: string;
+    verified_email?: string;
+    primary_wallet_address?: string;
+  } | null;
 };
 
 function endpoint(path: string): string {
@@ -286,6 +342,71 @@ function mapWalletOwnerLookup(input: WalletLookupResponse, fallbackAddress: stri
   };
 }
 
+function mapAccountDeletionPreview(input: AccountDeletionPreviewResponse): AppAccountDeletionPreview {
+  return {
+    userId: input.user_id,
+    status: input.status,
+    deleteDate: input.delete_date || undefined,
+    requestedAt: input.requested_at || undefined,
+    canCancel: input.can_cancel,
+    primaryWalletAddress: input.primary_wallet_address,
+    walletAddresses: Array.isArray(input.wallet_addresses) ? input.wallet_addresses : [],
+    counts: {
+      wallets: asNumber(input.counts?.wallets),
+      contacts: asNumber(input.counts?.contacts),
+      locations: asNumber(input.counts?.locations),
+      locationHours: asNumber(input.counts?.location_hours),
+      locationWallets: asNumber(input.counts?.location_wallets),
+      ponderSubscriptions: asNumber(input.counts?.ponder_subscriptions),
+      verifiedEmails: asNumber(input.counts?.verified_emails),
+      memos: asNumber(input.counts?.memos),
+    },
+    purgeEnabled: input.purge_enabled === true,
+  };
+}
+
+function mapAccountDeletionStatus(input: AccountDeletionStatusResponse): AppAccountDeletionStatusResponse {
+  return {
+    userId: input.user_id,
+    status: input.status,
+    deleteDate: input.delete_date || undefined,
+    requestedAt: input.requested_at || undefined,
+    canceledAt: input.canceled_at || undefined,
+    completedAt: input.completed_at || undefined,
+    canCancel: input.can_cancel,
+    purgeEnabled: input.purge_enabled === true,
+    purgeEnabledBy: typeof input.purge_enabled_by === "string" ? input.purge_enabled_by : undefined,
+  };
+}
+
+function mapAppleRecovery(input: AppleRecoveryResponse): AppAppleRecoveryResponse {
+  return {
+    currentUserId: input.current_user_id,
+    currentUserExists: input.current_user_exists === true,
+    appleLinked: input.apple_linked === true,
+    appleEmail: typeof input.apple_email === "string" ? input.apple_email : undefined,
+    isPrivateRelay: input.is_private_relay === true,
+    resolution: input.resolution,
+    suggestedExistingAccount: input.suggested_existing_account
+      ? {
+          userId: input.suggested_existing_account.user_id,
+          contactName:
+            typeof input.suggested_existing_account.contact_name === "string"
+              ? input.suggested_existing_account.contact_name
+              : undefined,
+          verifiedEmail:
+            typeof input.suggested_existing_account.verified_email === "string"
+              ? input.suggested_existing_account.verified_email
+              : undefined,
+          primaryWalletAddress:
+            typeof input.suggested_existing_account.primary_wallet_address === "string"
+              ? input.suggested_existing_account.primary_wallet_address
+              : undefined,
+        }
+      : undefined,
+  };
+}
+
 function formatTokenAmount(raw: string): string {
   try {
     const formatted = ethers.utils.formatUnits(raw, mobileConfig.tokenDecimals);
@@ -359,6 +480,102 @@ export class AppBackendClient {
       contacts: Array.isArray(body.contacts) ? body.contacts.map(mapContact) : [],
       locations: Array.isArray(body.locations) ? body.locations.map(mapOwnedLocation) : [],
     };
+  }
+
+  async getDeleteAccountStatus(): Promise<AppAccountDeletionStatusResponse | null> {
+    const response = await this.authFetch("/users/delete-account/status");
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load account deletion status from the shared app backend");
+    }
+    const body = (await response.json()) as AccountDeletionStatusResponse;
+    return mapAccountDeletionStatus(body);
+  }
+
+  async getDeleteAccountPreview(): Promise<AppAccountDeletionPreview> {
+    const response = await this.authFetch("/users/delete-account/preview");
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load account deletion preview from the shared app backend");
+    }
+    const body = (await response.json()) as AccountDeletionPreviewResponse;
+    return mapAccountDeletionPreview(body);
+  }
+
+  async deleteAccount(): Promise<AppAccountDeletionStatusResponse> {
+    const response = await this.authFetch("/users/delete-account", {
+      method: "POST",
+    });
+    if (response.status !== 202) {
+      await throwRequestError(response, "Unable to schedule account deletion in the shared app backend");
+    }
+    const body = (await response.json()) as AccountDeletionStatusResponse;
+    return mapAccountDeletionStatus(body);
+  }
+
+  async cancelDeleteAccount(): Promise<AppAccountDeletionStatusResponse> {
+    const response = await this.authFetch("/users/delete-account/cancel", {
+      method: "POST",
+    });
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to reactivate this account in the shared app backend");
+    }
+    const body = (await response.json()) as AccountDeletionStatusResponse;
+    return mapAccountDeletionStatus(body);
+  }
+
+  async storeAppleOAuthCredential(input: {
+    accessToken: string;
+    refreshToken?: string;
+    accessTokenExpiresInSeconds?: number;
+    refreshTokenExpiresInSeconds?: number;
+    scopes?: string[];
+    providerSubject?: string;
+    providerEmail?: string;
+    isPrivateRelay?: boolean;
+  }): Promise<void> {
+    const response = await this.authFetch("/users/oauth/apple", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        access_token: input.accessToken,
+        refresh_token: input.refreshToken ?? "",
+        access_token_expires_in_seconds: input.accessTokenExpiresInSeconds ?? 0,
+        refresh_token_expires_in_seconds: input.refreshTokenExpiresInSeconds ?? 0,
+        scopes: Array.isArray(input.scopes) ? input.scopes : [],
+        provider_subject: input.providerSubject ?? "",
+        provider_email: input.providerEmail ?? "",
+        is_private_relay: input.isPrivateRelay === true,
+      }),
+    });
+
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to store Apple OAuth credentials in the shared app backend");
+    }
+  }
+
+  async resolveAppleRecovery(input?: {
+    providerSubject?: string;
+    providerEmail?: string;
+    isPrivateRelay?: boolean;
+  }): Promise<AppAppleRecoveryResponse> {
+    const response = await this.authFetch("/users/apple/recovery", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider_subject: input?.providerSubject ?? "",
+        provider_email: input?.providerEmail ?? "",
+        is_private_relay: input?.isPrivateRelay === true,
+      }),
+    });
+
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to resolve Apple account recovery status from the shared app backend");
+    }
+
+    const body = (await response.json()) as AppleRecoveryResponse;
+    return mapAppleRecovery(body);
   }
 
   async getWallets(): Promise<AppWallet[]> {
