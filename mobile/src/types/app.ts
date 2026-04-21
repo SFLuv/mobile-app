@@ -125,6 +125,46 @@ export interface PonderSubscription {
   email?: string;
 }
 
+export type AppAccountDeletionStatus =
+  | "active"
+  | "scheduled_for_deletion"
+  | "ready_for_manual_purge";
+
+export interface AppAccountDeletionCounts {
+  wallets: number;
+  contacts: number;
+  locations: number;
+  locationHours: number;
+  locationWallets: number;
+  ponderSubscriptions: number;
+  verifiedEmails: number;
+  memos: number;
+}
+
+export interface AppAccountDeletionPreview {
+  userId: string;
+  status: AppAccountDeletionStatus;
+  deleteDate?: string;
+  requestedAt?: string;
+  canCancel: boolean;
+  primaryWalletAddress: string;
+  walletAddresses: string[];
+  counts: AppAccountDeletionCounts;
+  purgeEnabled: boolean;
+}
+
+export interface AppAccountDeletionStatusResponse {
+  userId: string;
+  status: AppAccountDeletionStatus;
+  deleteDate?: string;
+  requestedAt?: string;
+  canceledAt?: string;
+  completedAt?: string;
+  canCancel: boolean;
+  purgeEnabled: boolean;
+  purgeEnabledBy?: string;
+}
+
 export interface MerchantPlaceCandidate {
   googleId: string;
   name: string;

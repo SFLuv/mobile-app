@@ -26,6 +26,7 @@ import {
   useLoginWithEmail,
   useLoginWithOAuth,
   usePrivy,
+  useUnlinkOAuth,
 } from "@privy-io/expo";
 import { SendScreen } from "./src/screens/SendScreen";
 import { ReceiveScreen } from "./src/screens/ReceiveScreen";
@@ -45,6 +46,8 @@ import {
 } from "./src/services/smartWallet";
 import { AppBackendAuthError, AppBackendClient } from "./src/services/appBackend";
 import {
+  AppAccountDeletionPreview,
+  AppAccountDeletionStatusResponse,
   AppContact,
   AppLocation,
   AppTransaction,
@@ -507,6 +510,110 @@ function describeAppBackendIssue(error: unknown): string {
   return message;
 }
 
+function formatDeletionDateLabel(value?: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(parsed);
+}
+
+function getDeletionFallbackDateLabel(): string {
+  return (
+    formatDeletionDateLabel(
+      new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    ) || "30 days from now"
+  );
+}
+
+function buildDeleteAccountPreviewMessage(preview: AppAccountDeletionPreview): string {
+  const scheduledDate =
+    formatDeletionDateLabel(preview.deleteDate) || getDeletionFallbackDateLabel();
+  const summaryParts = [
+    preview.counts.wallets > 0 ? `${preview.counts.wallets} wallets` : null,
+    preview.counts.contacts > 0 ? `${preview.counts.contacts} contacts` : null,
+    preview.counts.locations > 0 ? `${preview.counts.locations} locations` : null,
+    preview.counts.verifiedEmails > 0 ? `${preview.counts.verifiedEmails} verified emails` : null,
+    preview.counts.ponderSubscriptions > 0 ? `${preview.counts.ponderSubscriptions} notification subscriptions` : null,
+    preview.counts.memos > 0 ? `${preview.counts.memos} memos` : null,
+  ].filter((value): value is string => Boolean(value));
+
+  const summary = summaryParts.length > 0 ? ` This includes ${summaryParts.join(", ")}.` : "";
+
+  return `Your account will be marked inactive immediately and scheduled for permanent deletion on ${scheduledDate}.${summary} You can reactivate it any time during the 30-day window by signing in again.`;
+}
+
+function getLinkedGoogleAccount(currentUser: unknown): {
+  email?: string | null;
+  subject?: string;
+} | null {
+  if (!currentUser || typeof currentUser !== "object") {
+    return null;
+  }
+
+  const rawLinkedAccounts = Array.isArray((currentUser as { linked_accounts?: unknown[] }).linked_accounts)
+    ? (currentUser as { linked_accounts: unknown[] }).linked_accounts
+    : Array.isArray((currentUser as { linkedAccounts?: unknown[] }).linkedAccounts)
+      ? (currentUser as { linkedAccounts: unknown[] }).linkedAccounts
+      : [];
+
+  for (const account of rawLinkedAccounts) {
+    if (!account || typeof account !== "object") {
+      continue;
+    }
+    const typedAccount = account as { type?: string; email?: string | null; subject?: string };
+    if (typedAccount.type !== "google_oauth") {
+      continue;
+    }
+    return {
+      email: typedAccount.email ?? undefined,
+      subject: typedAccount.subject,
+    };
+  }
+
+  return null;
+}
+
+function getLinkedEmailAccount(currentUser: unknown): {
+  address?: string;
+} | null {
+  if (!currentUser || typeof currentUser !== "object") {
+    return null;
+  }
+
+  const rawLinkedAccounts = Array.isArray((currentUser as { linked_accounts?: unknown[] }).linked_accounts)
+    ? (currentUser as { linked_accounts: unknown[] }).linked_accounts
+    : Array.isArray((currentUser as { linkedAccounts?: unknown[] }).linkedAccounts)
+      ? (currentUser as { linkedAccounts: unknown[] }).linkedAccounts
+      : [];
+
+  for (const account of rawLinkedAccounts) {
+    if (!account || typeof account !== "object") {
+      continue;
+    }
+    const typedAccount = account as { type?: string; address?: string };
+    if (typedAccount.type !== "email") {
+      continue;
+    }
+    return {
+      address: typedAccount.address?.trim() || undefined,
+    };
+  }
+
+  return null;
+}
+
 function mergePreferences(input: unknown): AppPreferences {
   if (!input || typeof input !== "object") {
     return defaultAppPreferences;
@@ -603,6 +710,13 @@ function WalletAppShell({
   onConsumePendingLink,
   preferences,
   onUpdatePreferences,
+  googleLinked,
+  googleLinkedEmail,
+  googleActionBusy,
+  googleMessage,
+  googleCanDisconnect,
+  googleDisconnectDisabledReason,
+  onDisconnectGoogle,
 }: {
   runtime: RuntimeState;
   selectedCandidateKey?: string;
@@ -617,6 +731,13 @@ function WalletAppShell({
   onConsumePendingLink: () => void;
   preferences: AppPreferences;
   onUpdatePreferences: (next: AppPreferences) => void;
+  googleLinked: boolean;
+  googleLinkedEmail?: string;
+  googleActionBusy: boolean;
+  googleMessage?: string | null;
+  googleCanDisconnect: boolean;
+  googleDisconnectDisabledReason?: string | null;
+  onDisconnectGoogle?: () => void;
 }) {
   return (
     <WalletAppShellContent
@@ -633,6 +754,13 @@ function WalletAppShell({
       onConsumePendingLink={onConsumePendingLink}
       preferences={preferences}
       onUpdatePreferences={onUpdatePreferences}
+      googleLinked={googleLinked}
+      googleLinkedEmail={googleLinkedEmail}
+      googleActionBusy={googleActionBusy}
+      googleMessage={googleMessage}
+      googleCanDisconnect={googleCanDisconnect}
+      googleDisconnectDisabledReason={googleDisconnectDisabledReason}
+      onDisconnectGoogle={onDisconnectGoogle}
     />
   );
 }
@@ -651,6 +779,13 @@ function WalletAppShellContent({
   onConsumePendingLink,
   preferences,
   onUpdatePreferences,
+  googleLinked,
+  googleLinkedEmail,
+  googleActionBusy,
+  googleMessage,
+  googleCanDisconnect,
+  googleDisconnectDisabledReason,
+  onDisconnectGoogle,
 }: {
   runtime: RuntimeState;
   selectedCandidateKey?: string;
@@ -665,6 +800,13 @@ function WalletAppShellContent({
   onConsumePendingLink: () => void;
   preferences: AppPreferences;
   onUpdatePreferences: (next: AppPreferences) => void;
+  googleLinked: boolean;
+  googleLinkedEmail?: string;
+  googleActionBusy: boolean;
+  googleMessage?: string | null;
+  googleCanDisconnect: boolean;
+  googleDisconnectDisabledReason?: string | null;
+  onDisconnectGoogle?: () => void;
 }) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
@@ -681,6 +823,8 @@ function WalletAppShellContent({
   const [backendWallets, setBackendWallets] = useState<AppWallet[]>([]);
   const [merchantLabelsByAddress, setMerchantLabelsByAddress] = useState<Record<string, string>>({});
   const [appUser, setAppUser] = useState<AppUser | null>(null);
+  const [accountDeletionBusy, setAccountDeletionBusy] = useState(false);
+  const [accountDeletionMessage, setAccountDeletionMessage] = useState<string | null>(null);
   const [refreshingHome, setRefreshingHome] = useState(false);
   const [refreshingActivity, setRefreshingActivity] = useState(false);
   const [loadingMoreActivity, setLoadingMoreActivity] = useState(false);
@@ -1457,6 +1601,65 @@ function WalletAppShellContent({
     await loadAppProfile();
   };
 
+  const handleDeleteAccount = async () => {
+    if (!backendClient) {
+      setAccountDeletionMessage("Backend not configured.");
+      return;
+    }
+
+    setAccountDeletionBusy(true);
+    setAccountDeletionMessage(null);
+    try {
+      const preview = await backendClient.getDeleteAccountPreview();
+      Alert.alert(
+        "Delete account",
+        buildDeleteAccountPreviewMessage(preview),
+        [
+          {
+            text: "Keep account",
+            style: "cancel",
+            onPress: () => {
+              setAccountDeletionBusy(false);
+            },
+          },
+          {
+            text: "Delete account",
+            style: "destructive",
+            onPress: () => {
+              void (async () => {
+                try {
+                  const status = await backendClient.deleteAccount();
+                  const deleteDateLabel =
+                    formatDeletionDateLabel(status.deleteDate) ||
+                    getDeletionFallbackDateLabel();
+                  Alert.alert(
+                    "Account scheduled for deletion",
+                    `This account is inactive and scheduled for deletion on ${deleteDateLabel}. Sign in again during that window if you want to reactivate it.`,
+                    [
+                      {
+                        text: "OK",
+                        onPress: () => {
+                          onLogout?.();
+                        },
+                      },
+                    ],
+                  );
+                } catch (error) {
+                  setAccountDeletionMessage(describeAppBackendIssue(error));
+                } finally {
+                  setAccountDeletionBusy(false);
+                }
+              })();
+            },
+          },
+        ],
+      );
+    } catch (error) {
+      setAccountDeletionBusy(false);
+      setAccountDeletionMessage(describeAppBackendIssue(error));
+    }
+  };
+
   const handleSend = async (recipient: string, amount: string, unit: "wei" | "token", memo: string) => {
     if (!runtime.service) {
       throw new Error("Wallet signer is not ready.");
@@ -1736,9 +1939,19 @@ function WalletAppShellContent({
               syncNotice={syncNotice}
               preferences={preferences}
               onLogout={onLogout}
+              googleLinked={googleLinked}
+              googleLinkedEmail={googleLinkedEmail}
+              googleActionBusy={googleActionBusy}
+              googleMessage={googleMessage}
+              googleCanDisconnect={googleCanDisconnect}
+              googleDisconnectDisabledReason={googleDisconnectDisabledReason}
+              onDisconnectGoogle={onDisconnectGoogle}
               onRenameWallet={handleRenameWallet}
               onSetPrimaryWallet={handleSetPrimaryWallet}
               onSetWalletVisibility={handleSetWalletVisibility}
+              accountDeletionBusy={accountDeletionBusy}
+              accountDeletionMessage={accountDeletionMessage}
+              onDeleteAccount={handleDeleteAccount}
               onUpdatePreferences={(next) => {
                 onUpdatePreferences(next);
               }}
@@ -1907,6 +2120,7 @@ function PrivyWalletApp({
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const { user, isReady, logout, getAccessToken } = usePrivy();
   const { login, state: oauthState } = useLoginWithOAuth();
+  const { unlinkOAuth } = useUnlinkOAuth();
   const { sendCode, loginWithCode } = useLoginWithEmail();
   const { wallets, create } = useEmbeddedEthereumWallet();
 
@@ -1924,6 +2138,16 @@ function PrivyWalletApp({
   const [emailCode, setEmailCode] = useState("");
   const [emailCodeSent, setEmailCodeSent] = useState(false);
   const [emailLoading, setEmailLoading] = useState(false);
+  const [deletedAccountStatus, setDeletedAccountStatus] =
+    useState<AppAccountDeletionStatusResponse | null>(null);
+  const [deletedAccountAction, setDeletedAccountAction] = useState<
+    "idle" | "reactivating" | "returning"
+  >("idle");
+  const [deletedAccountError, setDeletedAccountError] = useState<string | null>(
+    null,
+  );
+  const [googleMessage, setGoogleMessage] = useState<string | null>(null);
+  const [googleUnlinkBusy, setGoogleUnlinkBusy] = useState(false);
   const creatingWalletRef = useRef(false);
   const bootstrappedIdentityRef = useRef<string | null>(null);
   const manualWalletSelectionRef = useRef(false);
@@ -1935,6 +2159,15 @@ function PrivyWalletApp({
     () => new AppBackendClient(async () => (await getAccessToken()) ?? null),
     [getAccessToken],
   );
+  const linkedGoogleAccount = useMemo(() => getLinkedGoogleAccount(user), [user]);
+  const linkedEmailAccount = useMemo(() => getLinkedEmailAccount(user), [user]);
+  const googleLinked = Boolean(linkedGoogleAccount?.subject || linkedGoogleAccount?.email);
+  const emailLinked = Boolean(linkedEmailAccount?.address);
+  const canDisconnectGoogle = googleLinked && (Number(googleLinked) + Number(emailLinked) > 1);
+  const googleDisconnectDisabledReason =
+    googleLinked && !canDisconnectGoogle ? "Add email before disconnecting Google." : null;
+  const googleLinkedEmail = linkedGoogleAccount?.email?.trim() || undefined;
+  const googleActionBusy = googleUnlinkBusy;
   const consumePendingLink = React.useCallback(() => {
     setPendingLinkIntent(null);
   }, []);
@@ -1947,6 +2180,16 @@ function PrivyWalletApp({
       discovery: null,
       error: message,
     });
+  };
+
+  const showDeletedAccountGate = (
+    nextDeletedAccountStatus: AppAccountDeletionStatusResponse,
+  ) => {
+    setDeletedAccountStatus(nextDeletedAccountStatus);
+    setDeletedAccountAction("idle");
+    setDeletedAccountError(null);
+    setBackendBootstrapReady(false);
+    setRuntime(blankRuntime(false));
   };
 
   const syncWalletPreferences = (nextUser: AppUser, nextWallets: AppWallet[]) => {
@@ -2027,8 +2270,14 @@ function PrivyWalletApp({
       setEmailCode("");
       setEmailCodeSent(false);
       setEmailLoading(false);
+      setDeletedAccountStatus(null);
+      setDeletedAccountAction("idle");
+      setDeletedAccountError(null);
       manualWalletSelectionRef.current = false;
       bootstrappedIdentityRef.current = null;
+      return;
+    }
+    if (deletedAccountStatus) {
       return;
     }
     if (wallets.length > 0 || creatingWalletRef.current) {
@@ -2043,7 +2292,7 @@ function PrivyWalletApp({
       .finally(() => {
         creatingWalletRef.current = false;
       });
-  }, [create, isReady, user, wallets.length]);
+  }, [create, deletedAccountStatus, isReady, user, wallets.length]);
 
   useEffect(() => {
     if (!isReady || !user?.id) {
@@ -2099,7 +2348,7 @@ function PrivyWalletApp({
   }, [isReady, user?.id]);
 
   useEffect(() => {
-    if (!isReady || !user || !embeddedWallet || !walletPreferencesReady) {
+    if (!isReady || !user || !embeddedWallet || !walletPreferencesReady || deletedAccountStatus) {
       return;
     }
 
@@ -2193,6 +2442,17 @@ function PrivyWalletApp({
           return;
         }
         setBackendBootstrapReady(false);
+        if (error instanceof AppBackendAuthError) {
+          try {
+            const status = await backendClient.getDeleteAccountStatus();
+            if (status && status.status !== "active") {
+              showDeletedAccountGate(status);
+              return;
+            }
+          } catch (statusError) {
+            console.warn("Unable to load deleted-account status", statusError);
+          }
+        }
         presentLoginError(error);
       }
     };
@@ -2203,6 +2463,7 @@ function PrivyWalletApp({
     };
   }, [
     backendClient,
+    deletedAccountStatus,
     embeddedWallet,
     getAccessToken,
     isReady,
@@ -2294,6 +2555,76 @@ function PrivyWalletApp({
     }
   };
 
+  const handleDeletedAccountReactivate = async () => {
+    setDeletedAccountAction("reactivating");
+    setDeletedAccountError(null);
+    try {
+      await backendClient.cancelDeleteAccount();
+      bootstrappedIdentityRef.current = null;
+      setBackendBootstrapReady(false);
+      setDeletedAccountStatus(null);
+      setRuntime(blankRuntime(true));
+    } catch (error) {
+      setDeletedAccountError(describeAppBackendIssue(error));
+      setDeletedAccountAction("idle");
+      return;
+    }
+    setDeletedAccountAction("idle");
+  };
+
+  const handleDeletedAccountReturnToLogin = async () => {
+    setDeletedAccountAction("returning");
+    setDeletedAccountError(null);
+    try {
+      await logout();
+    } finally {
+      setDeletedAccountAction("idle");
+    }
+  };
+
+  const handleDisconnectGoogle = () => {
+    if (!linkedGoogleAccount?.subject) {
+      setGoogleMessage("Google is not linked to this account.");
+      return;
+    }
+    if (!canDisconnectGoogle) {
+      setGoogleMessage(googleDisconnectDisabledReason);
+      return;
+    }
+    const googleSubject = linkedGoogleAccount.subject;
+
+    Alert.alert(
+      "Disconnect Google",
+      "Google will no longer be able to sign in to this SFLUV account until you link it again.",
+      [
+        { text: "Keep Google", style: "cancel" },
+        {
+          text: "Disconnect Google",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              setGoogleUnlinkBusy(true);
+              setGoogleMessage(null);
+              try {
+                await unlinkOAuth({
+                  provider: "google",
+                  subject: googleSubject,
+                });
+                setGoogleMessage("Google has been disconnected from this account.");
+              } catch (error) {
+                setGoogleMessage(
+                  (error as Error)?.message?.trim() || "Unable to disconnect Google right now.",
+                );
+              } finally {
+                setGoogleUnlinkBusy(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  };
+
   if (!isReady) {
     return (
       <SafeAreaView style={styles.safe}>
@@ -2302,6 +2633,22 @@ function PrivyWalletApp({
           <Text style={styles.stateText}>Initializing Privy…</Text>
         </View>
       </SafeAreaView>
+    );
+  }
+
+  if (user && deletedAccountStatus) {
+    return (
+      <DeletedAccountScreen
+        status={deletedAccountStatus}
+        action={deletedAccountAction}
+        error={deletedAccountError}
+        onReactivate={() => {
+          void handleDeletedAccountReactivate();
+        }}
+        onReturnToLogin={() => {
+          void handleDeletedAccountReturnToLogin();
+        }}
+      />
     );
   }
 
@@ -2435,7 +2782,80 @@ function PrivyWalletApp({
       onConsumePendingLink={consumePendingLink}
       preferences={preferences}
       onUpdatePreferences={onUpdatePreferences}
+      googleLinked={googleLinked}
+      googleLinkedEmail={googleLinkedEmail}
+      googleActionBusy={googleActionBusy}
+      googleMessage={googleMessage}
+      googleCanDisconnect={canDisconnectGoogle}
+      googleDisconnectDisabledReason={googleDisconnectDisabledReason}
+      onDisconnectGoogle={handleDisconnectGoogle}
     />
+  );
+}
+
+function DeletedAccountScreen({
+  status,
+  action,
+  error,
+  onReactivate,
+  onReturnToLogin,
+}: {
+  status: AppAccountDeletionStatusResponse;
+  action: "idle" | "reactivating" | "returning";
+  error: string | null;
+  onReactivate: () => void;
+  onReturnToLogin: () => void;
+}) {
+  const { palette, shadows, isDark } = useAppTheme();
+  const styles = useMemo(
+    () => createStyles(palette, shadows, isDark),
+    [palette, shadows, isDark],
+  );
+  const deleteDateLabel =
+    formatDeletionDateLabel(status.deleteDate) || "the current 30-day window";
+  const busy = action !== "idle";
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.loginWrap}>
+        <Text style={styles.loginBrand}>SFLUV</Text>
+        <Text style={styles.loginTitle}>
+          This account has been recently deleted. Do you want to re-activate it?
+        </Text>
+        <Text style={styles.loginBody}>
+          The account is scheduled for permanent deletion on {deleteDateLabel}.
+          If you reactivate it now, your profile and wallets will become active
+          again.
+        </Text>
+        {status.status === "ready_for_manual_purge" ? (
+          <View style={styles.deletedAccountNotice}>
+            <Text style={styles.deletedAccountNoticeText}>
+              This account is already at the end of its deletion window. If
+              reactivation fails, it may need manual recovery.
+            </Text>
+          </View>
+        ) : null}
+        <Pressable
+          style={[styles.loginButton, busy ? styles.loginButtonDisabled : undefined]}
+          disabled={busy}
+          onPress={onReactivate}
+        >
+          <Text style={styles.loginButtonText}>
+            {action === "reactivating" ? "Re-activating..." : "Yes, re-activate it"}
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.loginSecondaryButton, busy ? styles.loginButtonDisabled : undefined]}
+          disabled={busy}
+          onPress={onReturnToLogin}
+        >
+          <Text style={styles.loginSecondaryButtonText}>
+            {action === "returning" ? "Returning..." : "No, take me back"}
+          </Text>
+        </Pressable>
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      </View>
+    </SafeAreaView>
   );
 }
 
@@ -2671,6 +3091,17 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     color: palette.textMuted,
     lineHeight: 22,
     maxWidth: 340,
+  },
+  deletedAccountNotice: {
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.surfaceStrong,
+    padding: spacing.md,
+  },
+  deletedAccountNoticeText: {
+    color: palette.text,
+    lineHeight: 20,
   },
   loginInput: {
     backgroundColor: palette.surface,

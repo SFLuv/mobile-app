@@ -1,6 +1,8 @@
 import { ethers } from "ethers";
 import { mobileConfig } from "../config";
 import {
+  AppAccountDeletionPreview,
+  AppAccountDeletionStatusResponse,
   AppContact,
   AppLocation,
   AppOwnedLocation,
@@ -136,6 +138,39 @@ type WalletLookupResponse = {
   tip_to_address?: string;
 };
 
+type AccountDeletionPreviewResponse = {
+  user_id: string;
+  status: "active" | "scheduled_for_deletion" | "ready_for_manual_purge";
+  delete_date?: string | null;
+  requested_at?: string | null;
+  can_cancel: boolean;
+  primary_wallet_address: string;
+  wallet_addresses: string[];
+  counts: {
+    wallets: number;
+    contacts: number;
+    locations: number;
+    location_hours: number;
+    location_wallets: number;
+    ponder_subscriptions: number;
+    verified_emails: number;
+    memos: number;
+  };
+  purge_enabled: boolean;
+};
+
+type AccountDeletionStatusResponse = {
+  user_id: string;
+  status: "active" | "scheduled_for_deletion" | "ready_for_manual_purge";
+  delete_date?: string | null;
+  requested_at?: string | null;
+  canceled_at?: string | null;
+  completed_at?: string | null;
+  can_cancel: boolean;
+  purge_enabled: boolean;
+  purge_enabled_by?: string;
+};
+
 function endpoint(path: string): string {
   return `${mobileConfig.appBackendURL.replace(/\/+$/, "")}${path}`;
 }
@@ -261,6 +296,43 @@ function mapOwnedLocation(input: Record<string, unknown>): AppOwnedLocation {
   };
 }
 
+function mapAccountDeletionPreview(input: AccountDeletionPreviewResponse): AppAccountDeletionPreview {
+  return {
+    userId: input.user_id,
+    status: input.status,
+    deleteDate: input.delete_date || undefined,
+    requestedAt: input.requested_at || undefined,
+    canCancel: input.can_cancel,
+    primaryWalletAddress: input.primary_wallet_address,
+    walletAddresses: Array.isArray(input.wallet_addresses) ? input.wallet_addresses : [],
+    counts: {
+      wallets: asNumber(input.counts?.wallets),
+      contacts: asNumber(input.counts?.contacts),
+      locations: asNumber(input.counts?.locations),
+      locationHours: asNumber(input.counts?.location_hours),
+      locationWallets: asNumber(input.counts?.location_wallets),
+      ponderSubscriptions: asNumber(input.counts?.ponder_subscriptions),
+      verifiedEmails: asNumber(input.counts?.verified_emails),
+      memos: asNumber(input.counts?.memos),
+    },
+    purgeEnabled: input.purge_enabled === true,
+  };
+}
+
+function mapAccountDeletionStatus(input: AccountDeletionStatusResponse): AppAccountDeletionStatusResponse {
+  return {
+    userId: input.user_id,
+    status: input.status,
+    deleteDate: input.delete_date || undefined,
+    requestedAt: input.requested_at || undefined,
+    canceledAt: input.canceled_at || undefined,
+    completedAt: input.completed_at || undefined,
+    canCancel: input.can_cancel,
+    purgeEnabled: input.purge_enabled === true,
+    purgeEnabledBy: typeof input.purge_enabled_by === "string" ? input.purge_enabled_by : undefined,
+  };
+}
+
 function mapWalletOwnerLookup(input: WalletLookupResponse, fallbackAddress: string): AppWalletOwnerLookup | null {
   if (!input.found) {
     return null;
@@ -359,6 +431,49 @@ export class AppBackendClient {
       contacts: Array.isArray(body.contacts) ? body.contacts.map(mapContact) : [],
       locations: Array.isArray(body.locations) ? body.locations.map(mapOwnedLocation) : [],
     };
+  }
+
+  async getDeleteAccountStatus(): Promise<AppAccountDeletionStatusResponse | null> {
+    const response = await this.authFetch("/users/delete-account/status");
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load account deletion status from the shared app backend");
+    }
+    const body = (await response.json()) as AccountDeletionStatusResponse;
+    return mapAccountDeletionStatus(body);
+  }
+
+  async getDeleteAccountPreview(): Promise<AppAccountDeletionPreview> {
+    const response = await this.authFetch("/users/delete-account/preview");
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load account deletion preview from the shared app backend");
+    }
+    const body = (await response.json()) as AccountDeletionPreviewResponse;
+    return mapAccountDeletionPreview(body);
+  }
+
+  async deleteAccount(): Promise<AppAccountDeletionStatusResponse> {
+    const response = await this.authFetch("/users/delete-account", {
+      method: "POST",
+    });
+    if (response.status !== 202) {
+      await throwRequestError(response, "Unable to schedule account deletion in the shared app backend");
+    }
+    const body = (await response.json()) as AccountDeletionStatusResponse;
+    return mapAccountDeletionStatus(body);
+  }
+
+  async cancelDeleteAccount(): Promise<AppAccountDeletionStatusResponse> {
+    const response = await this.authFetch("/users/delete-account/cancel", {
+      method: "POST",
+    });
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to reactivate this account in the shared app backend");
+    }
+    const body = (await response.json()) as AccountDeletionStatusResponse;
+    return mapAccountDeletionStatus(body);
   }
 
   async getWallets(): Promise<AppWallet[]> {

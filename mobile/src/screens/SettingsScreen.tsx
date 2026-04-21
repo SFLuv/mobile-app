@@ -16,6 +16,16 @@ type Props = {
   onRenameWallet: (wallet: AppWallet, nextName: string) => Promise<void>;
   onSetPrimaryWallet: (address: string) => Promise<void>;
   onSetWalletVisibility: (wallet: AppWallet, shouldShow: boolean) => Promise<void>;
+  googleLinked?: boolean;
+  googleLinkedEmail?: string;
+  googleActionBusy?: boolean;
+  googleMessage?: string | null;
+  googleCanDisconnect?: boolean;
+  googleDisconnectDisabledReason?: string | null;
+  onDisconnectGoogle?: () => void;
+  accountDeletionBusy?: boolean;
+  accountDeletionMessage?: string | null;
+  onDeleteAccount?: () => void;
   onLogout?: () => void;
 };
 
@@ -258,6 +268,16 @@ export function SettingsScreen({
   onRenameWallet,
   onSetPrimaryWallet,
   onSetWalletVisibility,
+  googleLinked,
+  googleLinkedEmail,
+  googleActionBusy,
+  googleMessage,
+  googleCanDisconnect,
+  googleDisconnectDisabledReason,
+  onDisconnectGoogle,
+  accountDeletionBusy,
+  accountDeletionMessage,
+  onDeleteAccount,
   onLogout,
 }: Props) {
   const { palette, shadows } = useAppTheme();
@@ -340,6 +360,56 @@ export function SettingsScreen({
         <Pressable style={styles.logoutButton} onPress={onLogout}>
           <Text style={styles.logoutButtonText}>Log out</Text>
         </Pressable>
+      ) : null}
+
+      {googleLinked ? (
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Google sign-in</Text>
+          <Text style={styles.body}>
+            Google is linked to this account for future sign-ins.
+          </Text>
+          {googleLinkedEmail ? <Text style={styles.meta}>Google email: {googleLinkedEmail}</Text> : null}
+          {googleDisconnectDisabledReason ? (
+            <Text style={styles.meta}>{googleDisconnectDisabledReason}</Text>
+          ) : null}
+          {googleMessage ? (
+            <Text style={styles.inlineError}>{googleMessage}</Text>
+          ) : null}
+          <Pressable
+            style={[styles.primaryActionButton, googleActionBusy || !googleCanDisconnect ? styles.buttonDisabled : undefined]}
+            disabled={googleActionBusy || !googleCanDisconnect}
+            onPress={onDisconnectGoogle}
+          >
+            <Text style={styles.primaryActionButtonText}>
+              {googleCanDisconnect
+                ? googleActionBusy
+                  ? "Disconnecting..."
+                  : "Disconnect Google"
+                : "Google linked"}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {onDeleteAccount ? (
+        <View style={[styles.card, styles.deleteAccountCard]}>
+          <Text style={styles.sectionTitle}>Delete account</Text>
+          <Text style={styles.body}>
+            Delete your account and log out. Your account will be recoverable for the next 30 days.
+          </Text>
+          {accountDeletionMessage ? (
+            <Text style={styles.inlineError}>{accountDeletionMessage}</Text>
+          ) : null}
+          <Pressable
+            style={[styles.deleteAccountButton, accountDeletionBusy ? styles.buttonDisabled : undefined]}
+            disabled={accountDeletionBusy}
+            onPress={onDeleteAccount}
+          >
+            <Text style={styles.deleteAccountButtonText}>
+              {accountDeletionBusy ? "Preparing..." : "Delete account"}
+            </Text>
+          </Pressable>
+        </View>
       ) : null}
     </ScrollView>
   );
@@ -586,6 +656,23 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     logoutButtonText: {
       color: palette.danger,
+      fontWeight: "900",
+      fontSize: 15,
+    },
+    deleteAccountCard: {
+      borderColor: palette.danger,
+      backgroundColor: palette.surface,
+    },
+    deleteAccountButton: {
+      minHeight: 48,
+      borderRadius: radii.md,
+      backgroundColor: palette.danger,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: spacing.md,
+    },
+    deleteAccountButtonText: {
+      color: palette.white,
       fontWeight: "900",
       fontSize: 15,
     },
