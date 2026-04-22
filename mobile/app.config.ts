@@ -1,7 +1,10 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
 const DEFAULT_EAS_PROJECT_ID = "ee7c9c8e-f237-44cf-917c-ee424401e299";
 const DEFAULT_IOS_BUNDLE_IDENTIFIER = "org.sfluv.wallet";
+const DEFAULT_ANDROID_PACKAGE = "org.sfluv.wallet";
 
 function buildExtra(config: ConfigContext["config"]): ExpoConfig["extra"] {
   const baseExtra =
@@ -20,6 +23,19 @@ function buildExtra(config: ConfigContext["config"]): ExpoConfig["extra"] {
     },
   };
 }
+
+function resolveGoogleServicesFile(): string | undefined {
+  const configuredPath = process.env.GOOGLE_SERVICES_FILE?.trim();
+  if (configuredPath) {
+    return configuredPath;
+  }
+
+  const defaultRelativePath = "./google-services.json";
+  const defaultAbsolutePath = path.join(__dirname, "google-services.json");
+  return fs.existsSync(defaultAbsolutePath) ? defaultRelativePath : undefined;
+}
+
+const googleServicesFile = resolveGoogleServicesFile();
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
@@ -44,7 +60,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
   },
   android: {
-    package: "org.sfluv.wallet",
+    package: DEFAULT_ANDROID_PACKAGE,
+    ...(googleServicesFile ? { googleServicesFile } : {}),
     config: {
       googleMaps: {
         apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() || "",
