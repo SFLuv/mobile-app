@@ -89,6 +89,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   plugins: [
     "expo-asset",
     "expo-apple-authentication",
+    [
+      "expo-camera",
+      {
+        cameraPermission: "SFLUV Wallet uses your camera to scan payment, reward, and contact QR codes.",
+        recordAudioAndroid: false,
+      },
+    ],
     "expo-dev-client",
     [
       "expo-location",
