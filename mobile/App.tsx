@@ -17,7 +17,6 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
-import * as AppleAuthentication from "expo-apple-authentication";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
@@ -4050,16 +4049,32 @@ function PrivyWalletApp({
           ) : (
             <>
               <Pressable
-                style={[styles.loginButton, authLoading ? styles.loginButtonDisabled : undefined]}
+                style={[
+                  styles.loginOptionButton,
+                  styles.loginOptionButtonLight,
+                  authLoading ? styles.loginButtonDisabled : undefined,
+                ]}
                 disabled={authLoading}
                 onPress={() => {
                   void handleGoogleLogin();
                 }}
               >
-                <Text style={styles.loginButtonText}>{oauthLoading ? "Connecting..." : "Continue with Google"}</Text>
+                <View style={styles.loginOptionContent}>
+                  <View style={styles.loginOptionIconSlot}>
+                    <Ionicons name="logo-google" size={20} color={palette.text} />
+                  </View>
+                  <Text style={styles.loginOptionButtonText}>
+                    {oauthLoading ? "Connecting..." : "Continue with Google"}
+                  </Text>
+                  <View style={styles.loginOptionIconSlot} />
+                </View>
               </Pressable>
               <Pressable
-                style={[styles.loginSecondaryButton, authLoading ? styles.loginButtonDisabled : undefined]}
+                style={[
+                  styles.loginOptionButton,
+                  styles.loginOptionButtonOutline,
+                  authLoading ? styles.loginButtonDisabled : undefined,
+                ]}
                 disabled={authLoading}
                 onPress={() => {
                   setLoginMode("email");
@@ -4067,32 +4082,35 @@ function PrivyWalletApp({
                   setRuntime((state) => ({ ...state, error: null }));
                 }}
               >
-                <Text style={styles.loginSecondaryButtonText}>Continue with Email</Text>
+                <View style={styles.loginOptionContent}>
+                  <View style={styles.loginOptionIconSlot}>
+                    <Ionicons name="mail-outline" size={20} color={palette.primaryStrong} />
+                  </View>
+                  <Text style={styles.loginOptionOutlineText}>Continue with Email</Text>
+                  <View style={styles.loginOptionIconSlot} />
+                </View>
               </Pressable>
-              {Platform.OS === "ios" ? (
-                <AppleAuthentication.AppleAuthenticationButton
-                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-                  cornerRadius={999}
-                  style={[styles.appleLoginButton, authLoading ? styles.loginButtonDisabled : undefined]}
-                  onPress={() => {
-                    handleAppleLogin();
-                  }}
-                />
-              ) : (
-                <Pressable
-                  style={[styles.loginAppleFallbackButton, authLoading ? styles.loginButtonDisabled : undefined]}
-                  disabled={authLoading}
-                  onPress={() => {
-                    handleAppleLogin();
-                  }}
-                >
-                  <Ionicons name="logo-apple" size={18} color={palette.white} />
-                  <Text style={styles.loginAppleFallbackButtonText}>
+              <Pressable
+                style={[
+                  styles.loginOptionButton,
+                  styles.loginOptionButtonDark,
+                  authLoading ? styles.loginButtonDisabled : undefined,
+                ]}
+                disabled={authLoading}
+                onPress={() => {
+                  handleAppleLogin();
+                }}
+              >
+                <View style={styles.loginOptionContent}>
+                  <View style={styles.loginOptionIconSlot}>
+                    <Ionicons name="logo-apple" size={20} color={palette.white} />
+                  </View>
+                  <Text style={styles.loginOptionButtonTextDark}>
                     {oauthLoading ? "Connecting..." : "Continue with Apple"}
                   </Text>
-                </Pressable>
-              )}
+                  <View style={styles.loginOptionIconSlot} />
+                </View>
+              </Pressable>
             </>
           )}
           <View style={styles.loginPolicyLinks}>
@@ -4832,6 +4850,63 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     color: palette.text,
     fontSize: 16,
   },
+  loginOptionButton: {
+    marginTop: spacing.sm,
+    width: "100%",
+    maxWidth: 360,
+    minHeight: 58,
+    alignSelf: "stretch",
+    borderRadius: radii.pill,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+  },
+  loginOptionButtonLight: {
+    backgroundColor: palette.surface,
+    borderColor: palette.surface,
+  },
+  loginOptionButtonOutline: {
+    backgroundColor: "transparent",
+    borderColor: palette.border,
+  },
+  loginOptionButtonDark: {
+    backgroundColor: "#111111",
+    borderColor: "#111111",
+  },
+  loginOptionContent: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  loginOptionIconSlot: {
+    width: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loginOptionButtonText: {
+    flex: 1,
+    color: palette.text,
+    fontWeight: "900",
+    fontSize: 16,
+    textAlign: "center",
+  },
+  loginOptionOutlineText: {
+    flex: 1,
+    color: palette.primaryStrong,
+    fontWeight: "900",
+    fontSize: 16,
+    textAlign: "center",
+  },
+  loginOptionButtonTextDark: {
+    flex: 1,
+    color: palette.white,
+    fontWeight: "900",
+    fontSize: 16,
+    textAlign: "center",
+  },
   loginButton: {
     marginTop: spacing.sm,
     backgroundColor: palette.surface,
@@ -4841,33 +4916,6 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     minWidth: 240,
     alignItems: "center",
     justifyContent: "center",
-  },
-  appleLoginButton: {
-    marginTop: spacing.sm,
-    width: "100%",
-    maxWidth: 360,
-    height: 54,
-    alignSelf: "stretch",
-  },
-  loginAppleFallbackButton: {
-    marginTop: spacing.sm,
-    width: "100%",
-    maxWidth: 360,
-    minHeight: 54,
-    alignSelf: "stretch",
-    borderRadius: radii.pill,
-    backgroundColor: "#111111",
-    paddingHorizontal: 22,
-    paddingVertical: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.xs,
-  },
-  loginAppleFallbackButtonText: {
-    color: palette.white,
-    fontWeight: "900",
-    fontSize: 16,
   },
   loginButtonDisabled: {
     opacity: 0.7,
