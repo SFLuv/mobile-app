@@ -1,17 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import QRCode from "react-native-qrcode-svg";
 import { ethers } from "ethers";
 import { AppContact } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
-import { buildUniversalPayLink, parseSendTarget } from "../utils/universalLinks";
+import { buildUniversalAddContactLink, parseSendTarget, parseSfluvUniversalLink } from "../utils/universalLinks";
 
 type Props = {
   contacts: AppContact[];
   shareAddress?: string;
   syncNotice?: string | null;
+  incomingContactAddress?: string | null;
+  onIncomingContactAddressHandled?: () => void;
   onAddContact: (name: string, address: string) => Promise<void>;
   onUpdateContact: (contact: AppContact) => Promise<void>;
   onToggleFavorite: (contact: AppContact) => Promise<void>;
@@ -41,6 +43,11 @@ function resolveScannedAddress(rawValue: string): string | null {
     return ethers.utils.getAddress(parsedTarget.recipient);
   }
 
+  const universalLink = parseSfluvUniversalLink(rawValue);
+  if (universalLink?.type === "addcontact") {
+    return ethers.utils.getAddress(universalLink.address);
+  }
+
   const trimmed = rawValue.trim();
   if (ethers.utils.isAddress(trimmed)) {
     return ethers.utils.getAddress(trimmed);
@@ -53,6 +60,8 @@ export function ContactsScreen({
   contacts,
   shareAddress,
   syncNotice,
+  incomingContactAddress,
+  onIncomingContactAddressHandled,
   onAddContact,
   onUpdateContact,
   onToggleFavorite,
@@ -87,7 +96,7 @@ export function ContactsScreen({
     if (!shareAddress || !ethers.utils.isAddress(shareAddress)) {
       return null;
     }
-    return buildUniversalPayLink({ address: shareAddress });
+    return buildUniversalAddContactLink({ address: shareAddress });
   }, [shareAddress]);
 
   useEffect(() => {
@@ -107,6 +116,34 @@ export function ContactsScreen({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!incomingContactAddress) {
+      return;
+    }
+
+    const trimmed = incomingContactAddress.trim();
+    if (!ethers.utils.isAddress(trimmed)) {
+      onIncomingContactAddressHandled?.();
+      return;
+    }
+
+    const normalizedAddress = ethers.utils.getAddress(trimmed);
+    const existingContact = contacts.find((contact) => contact.address.toLowerCase() === normalizedAddress.toLowerCase());
+
+    setContactMode("scan");
+    if (existingContact) {
+      setPendingScannedAddress(null);
+      setPendingScannedName("");
+      setScanErrorMessage(`${existingContact.name} is already saved in your contacts.`);
+    } else {
+      setPendingScannedAddress(normalizedAddress);
+      setPendingScannedName("");
+      setScanErrorMessage(null);
+    }
+
+    onIncomingContactAddressHandled?.();
+  }, [contacts, incomingContactAddress, onIncomingContactAddressHandled]);
 
   const beginEdit = (contact: AppContact) => {
     setEditingID(contact.id);
@@ -160,11 +197,17 @@ export function ContactsScreen({
 
     setShareErrorMessage(null);
     try {
-      await Share.share({
-        title: "SFLuv contact",
-        message: `Save my SFLuv contact: ${shareQRValue}`,
-        url: shareQRValue,
-      });
+      await Share.share(
+        Platform.OS === "ios"
+          ? {
+              title: "SFLuv contact",
+              url: shareQRValue,
+            }
+          : {
+              title: "SFLuv contact",
+              message: shareQRValue,
+            },
+      );
     } catch (error) {
       setShareErrorMessage((error as Error)?.message || "Unable to open the share sheet right now.");
     }

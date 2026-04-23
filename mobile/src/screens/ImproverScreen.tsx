@@ -34,7 +34,6 @@ type Props = {
   user: AppUser | null;
   improver: AppImprover | null;
   backendClient?: AppBackendClient | null;
-  primaryWalletAddress?: string;
   onRefreshProfile: () => Promise<void>;
 };
 
@@ -247,7 +246,6 @@ export function ImproverScreen({
   user,
   improver,
   backendClient,
-  primaryWalletAddress,
   onRefreshProfile,
 }: Props) {
   const { palette, shadows, isDark } = useAppTheme();
@@ -279,9 +277,6 @@ export function ImproverScreen({
   const [requestEmailInput, setRequestEmailInput] = useState("");
   const [selectedVerifiedEmailId, setSelectedVerifiedEmailId] = useState<string | null>(null);
   const [selectedCredentialType, setSelectedCredentialType] = useState<string | null>(null);
-  const [rewardsWalletDraft, setRewardsWalletDraft] = useState(
-    improver?.primaryRewardsAccount || primaryWalletAddress || "",
-  );
   const [absenceTargetMode, setAbsenceTargetMode] = useState<"single" | "all">("single");
   const [absenceSelection, setAbsenceSelection] = useState<string | null>(null);
   const [absenceFrom, setAbsenceFrom] = useState("");
@@ -320,10 +315,6 @@ export function ImproverScreen({
       setRequestLastName(parsed.lastName);
     }
   }, [requestFirstName, requestLastName, user?.name]);
-
-  useEffect(() => {
-    setRewardsWalletDraft(improver?.primaryRewardsAccount || primaryWalletAddress || "");
-  }, [improver?.primaryRewardsAccount, primaryWalletAddress]);
 
   const requestableCredentialTypes = useMemo(
     () =>
@@ -1126,30 +1117,6 @@ export function ImproverScreen({
     }
   };
 
-  const updateRewardsWallet = async () => {
-    if (!backendClient) {
-      return;
-    }
-    if (!rewardsWalletDraft.trim()) {
-      setError("Enter a rewards wallet address.");
-      setNotice(null);
-      return;
-    }
-    setActionKey("update-rewards-wallet");
-    try {
-      await backendClient.updateImproverPrimaryRewardsAccount(rewardsWalletDraft.trim());
-      await onRefreshProfile();
-      await refreshAllData();
-      setNotice("Improver rewards wallet updated.");
-      setError(null);
-    } catch (nextError) {
-      setError((nextError as Error)?.message || "Unable to update the rewards wallet.");
-      setNotice(null);
-    } finally {
-      setActionKey("");
-    }
-  };
-
   const parseAbsenceSelection = (value: string | null) => {
     if (!value) {
       return null;
@@ -1383,13 +1350,6 @@ export function ImproverScreen({
 
     return (
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-        <View style={styles.heroCard}>
-          <Text style={styles.title}>Improver Access</Text>
-          <Text style={styles.subtitle}>
-            Request improver status here, then come back once your role has been approved.
-          </Text>
-        </View>
-
         {improver ? (
           <View style={styles.card}>
             <View style={styles.cardHeaderRow}>
@@ -2365,13 +2325,6 @@ export function ImproverScreen({
   return (
     <>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-        <View style={styles.heroCard}>
-          <Text style={styles.title}>Improver</Text>
-          <Text style={styles.subtitle}>
-            Claim workflow steps, complete assigned work, track payouts, and manage credentials.
-          </Text>
-        </View>
-
         {error ? (
           <View style={styles.errorCard}>
             <Ionicons name="alert-circle-outline" size={18} color={palette.danger} />
@@ -2385,43 +2338,6 @@ export function ImproverScreen({
             <Text style={styles.noticeCardText}>{notice}</Text>
           </View>
         ) : null}
-
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Improver Profile</Text>
-          <Text style={styles.meta}>Status: {formatStatusLabel(improver?.status || "approved")}</Text>
-          <Text style={styles.meta}>Rewards wallet: {shortAddress(improver?.primaryRewardsAccount)}</Text>
-          <Text style={styles.meta}>Primary app wallet: {shortAddress(primaryWalletAddress)}</Text>
-          <TextInput
-            style={styles.input}
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder="Improver rewards wallet"
-            placeholderTextColor={palette.textMuted}
-            value={rewardsWalletDraft}
-            onChangeText={setRewardsWalletDraft}
-          />
-          <View style={styles.inlineActions}>
-            <Pressable
-              style={[styles.primaryButton, actionKey === "update-rewards-wallet" ? styles.buttonDisabled : undefined]}
-              disabled={actionKey === "update-rewards-wallet"}
-              onPress={() => {
-                void updateRewardsWallet();
-              }}
-            >
-              <Text style={styles.primaryButtonText}>
-                {actionKey === "update-rewards-wallet" ? "Saving..." : "Save rewards wallet"}
-              </Text>
-            </Pressable>
-            {primaryWalletAddress ? (
-              <Pressable
-                style={styles.secondaryButton}
-                onPress={() => setRewardsWalletDraft(primaryWalletAddress)}
-              >
-                <Text style={styles.secondaryButtonText}>Use primary wallet</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        </View>
 
         <View style={styles.segmentWrap}>
           {(

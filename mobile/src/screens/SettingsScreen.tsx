@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Ionicons } from "@expo/vector-icons";
+import { ethers } from "ethers";
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { AppImprover, AppUser, AppWallet } from "../types/app";
 import { AppPreferences, ThemePreference } from "../types/preferences";
@@ -9,8 +11,6 @@ type Props = {
   improver?: AppImprover | null;
   wallets: AppWallet[];
   primaryWalletAddress?: string;
-  activeWalletAddress?: string;
-  activeWalletLabel?: string;
   syncNotice?: string | null;
   preferences: AppPreferences;
   notificationPermissionStatus: "unknown" | "undetermined" | "granted" | "denied" | "unavailable";
@@ -32,6 +32,7 @@ type Props = {
   googleMessage?: string | null;
   googleCanDisconnect?: boolean;
   googleDisconnectDisabledReason?: string | null;
+  onLinkGoogle?: () => void;
   onDisconnectGoogle?: () => void;
   appleLinked?: boolean;
   appleLinkedEmail?: string;
@@ -41,12 +42,13 @@ type Props = {
   appleDisconnectDisabledReason?: string | null;
   onLinkApple?: () => void;
   onDisconnectApple?: () => void;
+  onUpdateImproverRewardsWallet?: (address: string) => Promise<void>;
   onOpenImprover?: () => void;
   onDeleteAccount?: () => void;
   onLogout?: () => void;
 };
 
-type SettingsSection = "general" | "wallets" | "account";
+type SettingsSection = "general" | "wallets" | "account" | "improver";
 
 function shortAddress(address: string): string {
   if (address.length <= 16) return address;
@@ -149,6 +151,86 @@ function PreferenceRow({
         value={value}
         onValueChange={onValueChange}
       />
+    </View>
+  );
+}
+
+function SocialAccountRow({
+  provider,
+  iconName,
+  iconColor,
+  linked,
+  description,
+  email,
+  message,
+  disabledReason,
+  buttonLabel,
+  buttonBusyLabel,
+  busy,
+  buttonDisabled,
+  actionVariant,
+  onPress,
+}: {
+  provider: string;
+  iconName: React.ComponentProps<typeof Ionicons>["name"];
+  iconColor: string;
+  linked: boolean;
+  description: string;
+  email?: string;
+  message?: string | null;
+  disabledReason?: string | null;
+  buttonLabel: string;
+  buttonBusyLabel: string;
+  busy?: boolean;
+  buttonDisabled?: boolean;
+  actionVariant: "outline" | "primary";
+  onPress?: () => void;
+}) {
+  const { palette } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
+
+  return (
+    <View style={styles.socialRow}>
+      <View style={styles.socialRowHeader}>
+        <View style={styles.socialIdentityWrap}>
+          <View style={styles.socialIconBadge}>
+            <Ionicons name={iconName} size={24} color={iconColor} />
+          </View>
+          <View style={styles.socialCopy}>
+            <Text style={styles.socialProviderTitle}>{provider}</Text>
+            <Text style={styles.socialProviderBody}>{description}</Text>
+            {email ? <Text style={styles.socialProviderMeta}>{provider} email: {email}</Text> : null}
+            {disabledReason ? <Text style={styles.socialProviderMeta}>{disabledReason}</Text> : null}
+            {message ? <Text style={styles.socialProviderMeta}>{message}</Text> : null}
+          </View>
+        </View>
+        <Pressable
+          style={[
+            styles.socialActionButton,
+            actionVariant === "primary" ? styles.socialActionButtonPrimary : undefined,
+            busy || buttonDisabled ? styles.buttonDisabled : undefined,
+          ]}
+          disabled={busy || buttonDisabled || !onPress}
+          onPress={onPress}
+        >
+          <View style={styles.socialActionContent}>
+            <Ionicons
+              name={iconName}
+              size={18}
+              color={actionVariant === "primary" ? palette.white : palette.text}
+            />
+            <Text
+              style={[
+                styles.socialActionButtonText,
+                actionVariant === "primary" ? styles.socialActionButtonTextPrimary : undefined,
+              ]}
+            >
+              {busy ? buttonBusyLabel : buttonLabel}
+            </Text>
+          </View>
+        </Pressable>
+      </View>
+      {linked ? <View style={styles.socialLinkedPill}><Text style={styles.socialLinkedPillText}>Linked</Text></View> : null}
     </View>
   );
 }
@@ -312,8 +394,6 @@ export function SettingsScreen({
   improver,
   wallets,
   primaryWalletAddress,
-  activeWalletAddress,
-  activeWalletLabel,
   syncNotice,
   preferences,
   notificationPermissionStatus,
@@ -335,6 +415,7 @@ export function SettingsScreen({
   googleMessage,
   googleCanDisconnect,
   googleDisconnectDisabledReason,
+  onLinkGoogle,
   onDisconnectGoogle,
   appleLinked,
   appleLinkedEmail,
@@ -344,6 +425,7 @@ export function SettingsScreen({
   appleDisconnectDisabledReason,
   onLinkApple,
   onDisconnectApple,
+  onUpdateImproverRewardsWallet,
   onOpenImprover,
   onDeleteAccount,
   onLogout,
@@ -351,20 +433,67 @@ export function SettingsScreen({
   const { palette, shadows } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
   const [section, setSection] = useState<SettingsSection>("general");
+  const [rewardsWalletDraft, setRewardsWalletDraft] = useState(
+    improver?.primaryRewardsAccount?.trim() || primaryWalletAddress || "",
+  );
+  const [improverBusy, setImproverBusy] = useState(false);
+  const [improverMessage, setImproverMessage] = useState<string | null>(null);
+  const [improverError, setImproverError] = useState<string | null>(null);
+
+  const hasImproverSection = Boolean(onOpenImprover || improver || user?.isImprover);
 
   const applyThemePreference = (themePreference: ThemePreference) => {
     onUpdatePreferences({ ...preferences, themePreference });
   };
 
+  useEffect(() => {
+    if (!hasImproverSection && section === "improver") {
+      setSection("account");
+    }
+  }, [hasImproverSection, section]);
+
+  useEffect(() => {
+    setRewardsWalletDraft(improver?.primaryRewardsAccount?.trim() || primaryWalletAddress || "");
+  }, [improver?.primaryRewardsAccount, primaryWalletAddress]);
+
   const normalizedPrimaryWallet = primaryWalletAddress?.toLowerCase();
+  const saveRewardsWalletDisabled =
+    improverBusy || !rewardsWalletDraft.trim() || !onUpdateImproverRewardsWallet;
+  const googleLinkedNow = Boolean(googleLinked);
+  const appleLinkedNow = Boolean(appleLinked);
+
+  const handleSaveImproverRewardsWallet = async () => {
+    if (!onUpdateImproverRewardsWallet) {
+      return;
+    }
+
+    const trimmedAddress = rewardsWalletDraft.trim();
+    if (!trimmedAddress) {
+      setImproverError("Enter a rewards wallet address.");
+      setImproverMessage(null);
+      return;
+    }
+    if (!ethers.utils.isAddress(trimmedAddress)) {
+      setImproverError("Enter a valid rewards wallet address.");
+      setImproverMessage(null);
+      return;
+    }
+
+    setImproverBusy(true);
+    setImproverError(null);
+    setImproverMessage(null);
+    try {
+      await onUpdateImproverRewardsWallet(ethers.utils.getAddress(trimmedAddress));
+      setImproverMessage("Improver rewards wallet updated.");
+    } catch (error) {
+      setImproverError((error as Error)?.message || "Unable to update the rewards wallet.");
+    } finally {
+      setImproverBusy(false);
+    }
+  };
 
   return (
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-      <View style={styles.heroCard}>
-        <Text style={styles.title}>Settings</Text>
-        <Text style={styles.subtitle}>App preferences, wallet defaults, and display settings for the account you currently have open.</Text>
-      </View>
-
       {syncNotice ? (
         <View style={styles.noticeCard}>
           <Text style={styles.noticeTitle}>App Sync</Text>
@@ -391,6 +520,14 @@ export function SettingsScreen({
         >
           <Text style={[styles.segmentText, section === "account" ? styles.segmentTextActive : undefined]}>Account</Text>
         </Pressable>
+        {hasImproverSection ? (
+          <Pressable
+            style={[styles.segmentButton, section === "improver" ? styles.segmentButtonActive : undefined]}
+            onPress={() => setSection("improver")}
+          >
+            <Text style={[styles.segmentText, section === "improver" ? styles.segmentTextActive : undefined]}>Improver</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       {section === "general" ? (
@@ -442,33 +579,24 @@ export function SettingsScreen({
       ) : null}
 
       {section === "wallets" ? (
-        <>
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Current wallet</Text>
-            <Text style={styles.body}>This is the smart account currently active in the app.</Text>
-            {activeWalletLabel ? <Text style={styles.currentWalletLabel}>{activeWalletLabel}</Text> : null}
-            <Text style={styles.walletAddress}>{activeWalletAddress ? shortAddress(activeWalletAddress) : "Wallet not loaded yet"}</Text>
-          </View>
-
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Wallet settings</Text>
-            <Text style={styles.body}>Wallet names come from the shared backend. You can rename them here, choose your primary wallet, and decide which smart wallets appear in the chooser.</Text>
-            {wallets.length === 0 ? (
-              <Text style={styles.meta}>No wallets are loaded yet.</Text>
-            ) : (
-              wallets.map((wallet) => (
-                <WalletSettingsRow
-                  key={`${wallet.id ?? walletAddress(wallet)}:${walletAddress(wallet)}`}
-                  wallet={wallet}
-                  isPrimary={walletAddress(wallet).toLowerCase() === normalizedPrimaryWallet}
-                  onRenameWallet={onRenameWallet}
-                  onSetPrimaryWallet={onSetPrimaryWallet}
-                  onSetWalletVisibility={onSetWalletVisibility}
-                />
-              ))
-            )}
-          </View>
-        </>
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Wallet settings</Text>
+          <Text style={styles.body}>Wallet names come from the shared backend. You can rename them here, choose your primary wallet, and decide which smart wallets appear in the chooser.</Text>
+          {wallets.length === 0 ? (
+            <Text style={styles.meta}>No wallets are loaded yet.</Text>
+          ) : (
+            wallets.map((wallet) => (
+              <WalletSettingsRow
+                key={`${wallet.id ?? walletAddress(wallet)}:${walletAddress(wallet)}`}
+                wallet={wallet}
+                isPrimary={walletAddress(wallet).toLowerCase() === normalizedPrimaryWallet}
+                onRenameWallet={onRenameWallet}
+                onSetPrimaryWallet={onSetPrimaryWallet}
+                onSetWalletVisibility={onSetWalletVisibility}
+              />
+            ))
+          )}
+        </View>
       ) : null}
 
       {section === "account" ? (
@@ -480,6 +608,97 @@ export function SettingsScreen({
             {user?.contactPhone ? <Text style={styles.meta}>Phone: {user.contactPhone}</Text> : null}
           </View>
 
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Link Socials</Text>
+            <Text style={styles.body}>Manage the Google and Apple sign-in methods attached to this account.</Text>
+            <SocialAccountRow
+              provider="Google"
+              iconName="logo-google"
+              iconColor={palette.primaryStrong}
+              linked={googleLinkedNow}
+              description={
+                googleLinkedNow
+                  ? "Google is linked to this account for future sign-ins."
+                  : "Link Google so future Google sign-ins land on this account."
+              }
+              email={googleLinkedEmail}
+              message={googleMessage}
+              disabledReason={googleLinkedNow ? googleDisconnectDisabledReason : null}
+              buttonLabel={
+                googleLinkedNow
+                  ? googleCanDisconnect
+                    ? "Disconnect Google"
+                    : "Google linked"
+                  : "Link Google"
+              }
+              buttonBusyLabel={googleLinkedNow ? "Disconnecting Google..." : "Linking Google..."}
+              busy={googleActionBusy}
+              buttonDisabled={googleLinkedNow ? !googleCanDisconnect : !onLinkGoogle}
+              actionVariant={googleLinkedNow ? "outline" : "primary"}
+              onPress={googleLinkedNow ? onDisconnectGoogle : onLinkGoogle}
+            />
+            <View style={styles.socialDivider} />
+            <SocialAccountRow
+              provider="Apple"
+              iconName="logo-apple"
+              iconColor={palette.text}
+              linked={appleLinkedNow}
+              description={
+                appleLinkedNow
+                  ? "Apple is linked to this account for future sign-ins."
+                  : "Link Apple so future Apple sign-ins land on this account."
+              }
+              email={appleLinkedEmail}
+              message={appleLinkMessage}
+              disabledReason={appleLinkedNow ? appleDisconnectDisabledReason : null}
+              buttonLabel={
+                appleLinkedNow
+                  ? appleCanDisconnect
+                    ? "Disconnect Apple"
+                    : "Apple linked"
+                  : "Link Apple"
+              }
+              buttonBusyLabel={appleLinkedNow ? "Disconnecting Apple..." : "Linking Apple..."}
+              busy={appleLinkBusy}
+              buttonDisabled={appleLinkedNow ? !appleCanDisconnect : !onLinkApple}
+              actionVariant={appleLinkedNow ? "outline" : "primary"}
+              onPress={appleLinkedNow ? onDisconnectApple : onLinkApple}
+            />
+          </View>
+
+          {onLogout ? (
+            <Pressable style={styles.logoutButton} onPress={onLogout}>
+              <Text style={styles.logoutButtonText}>Log out</Text>
+            </Pressable>
+          ) : null}
+
+          {onDeleteAccount ? (
+            <View style={[styles.card, styles.deleteAccountCard]}>
+              <View style={styles.dangerZoneHeader}>
+                <Ionicons name="warning-outline" size={18} color={palette.danger} />
+                <Text style={styles.dangerZoneTitle}>Danger Zone</Text>
+              </View>
+              <Text style={styles.body}>
+                Delete your account and log out. Your account stays recoverable for 30 days, but any SFLUV in your accessible wallets will be transferred out before the deletion request is submitted.
+              </Text>
+              <Text style={styles.dangerZoneNote}>Only use this if you really want to remove this account.</Text>
+              {accountDeletionMessage ? <Text style={styles.inlineError}>{accountDeletionMessage}</Text> : null}
+              <Pressable
+                style={[styles.deleteAccountButton, accountDeletionBusy ? styles.buttonDisabled : undefined]}
+                disabled={accountDeletionBusy}
+                onPress={onDeleteAccount}
+              >
+                <Text style={styles.deleteAccountButtonText}>
+                  {accountDeletionBusy ? "Preparing..." : "Delete account"}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </>
+      ) : null}
+
+      {section === "improver" ? (
+        <>
           {onOpenImprover ? (
             <View style={styles.card}>
               <Text style={styles.sectionTitle}>
@@ -487,7 +706,7 @@ export function SettingsScreen({
               </Text>
               <Text style={styles.body}>
                 {user?.isImprover || improver?.status === "approved"
-                  ? "Open the mobile improver panel to claim workflows, manage badges, track payouts, and handle credentials."
+                  ? "Open the improver panel to claim workflows, manage badges, track payouts, and handle credentials."
                   : improver
                     ? "View your improver request and finish any remaining setup steps."
                     : "Request improver status and manage the verified email used for approval."}
@@ -506,99 +725,57 @@ export function SettingsScreen({
             </View>
           ) : null}
 
-          {googleLinked ? (
+          {improver || user?.isImprover ? (
             <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Google Sign-In</Text>
-              <Text style={styles.body}>
-                Google is linked to this account for future sign-ins.
-              </Text>
-              {googleLinkedEmail ? <Text style={styles.meta}>Google email: {googleLinkedEmail}</Text> : null}
-              {googleDisconnectDisabledReason ? (
-                <Text style={styles.meta}>{googleDisconnectDisabledReason}</Text>
-              ) : null}
-              {googleMessage ? <Text style={styles.meta}>{googleMessage}</Text> : null}
-              <Pressable
-                style={[
-                  styles.secondaryButton,
-                  googleActionBusy || !googleCanDisconnect ? styles.buttonDisabled : undefined,
-                ]}
-                disabled={googleActionBusy || !googleCanDisconnect}
-                onPress={onDisconnectGoogle}
-              >
-                <Text style={styles.secondaryButtonText}>
-                  {googleCanDisconnect
-                    ? googleActionBusy
-                      ? "Disconnecting Google..."
-                      : "Disconnect Google"
-                    : "Google linked"}
-                </Text>
-              </Pressable>
+              <Text style={styles.sectionTitle}>Improver Profile</Text>
+              <Text style={styles.body}>Manage the wallet used for improver payouts and review the improver profile tied to this account.</Text>
+              {improver ? <Text style={styles.meta}>Status: {formatStatusLabel(improver.status)}</Text> : null}
+              {improver?.email ? <Text style={styles.meta}>Improver email: {improver.email}</Text> : null}
+              <Text style={styles.meta}>Rewards wallet: {shortAddress(improver?.primaryRewardsAccount || rewardsWalletDraft || "Not set")}</Text>
+              <Text style={styles.meta}>Primary app wallet: {shortAddress(primaryWalletAddress || "Not set")}</Text>
+              <TextInput
+                style={styles.walletNameInput}
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder="Improver rewards wallet"
+                placeholderTextColor={palette.textMuted}
+                value={rewardsWalletDraft}
+                onChangeText={(value) => {
+                  setRewardsWalletDraft(value);
+                  if (improverError || improverMessage) {
+                    setImproverError(null);
+                    setImproverMessage(null);
+                  }
+                }}
+              />
+              <View style={styles.walletActionRow}>
+                <Pressable
+                  style={[styles.primaryActionButton, saveRewardsWalletDisabled ? styles.buttonDisabled : undefined]}
+                  disabled={saveRewardsWalletDisabled}
+                  onPress={() => {
+                    void handleSaveImproverRewardsWallet();
+                  }}
+                >
+                  <Text style={styles.primaryActionButtonText}>
+                    {improverBusy ? "Saving..." : "Save rewards wallet"}
+                  </Text>
+                </Pressable>
+                {primaryWalletAddress ? (
+                  <Pressable
+                    style={styles.secondaryButton}
+                    onPress={() => {
+                      setRewardsWalletDraft(primaryWalletAddress);
+                      setImproverError(null);
+                      setImproverMessage(null);
+                    }}
+                  >
+                    <Text style={styles.secondaryButtonText}>Use primary wallet</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+              {improverError ? <Text style={styles.inlineError}>{improverError}</Text> : null}
+              {improverMessage ? <Text style={styles.inlineSuccess}>{improverMessage}</Text> : null}
             </View>
-          ) : null}
-
-          {onLinkApple ? (
-            <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Apple Sign-In</Text>
-              <Text style={styles.body}>
-                {appleLinked
-                  ? "Apple is linked to this account for future Apple sign-ins."
-                  : "Link Apple so future Apple sign-ins land on this account."}
-              </Text>
-              {appleLinkedEmail ? <Text style={styles.meta}>Apple email: {appleLinkedEmail}</Text> : null}
-              {appleDisconnectDisabledReason ? (
-                <Text style={styles.meta}>{appleDisconnectDisabledReason}</Text>
-              ) : null}
-              {appleLinkMessage ? <Text style={styles.meta}>{appleLinkMessage}</Text> : null}
-              <Pressable
-                style={[
-                  appleLinked ? styles.secondaryButton : styles.primaryActionButton,
-                  appleLinkBusy || (appleLinked ? !appleCanDisconnect : false) ? styles.buttonDisabled : undefined,
-                ]}
-                disabled={appleLinkBusy || (appleLinked ? !appleCanDisconnect : false)}
-                onPress={appleLinked ? onDisconnectApple : onLinkApple}
-              >
-                <Text style={appleLinked ? styles.secondaryButtonText : styles.primaryActionButtonText}>
-                  {appleLinked
-                    ? appleCanDisconnect
-                      ? appleLinkBusy
-                        ? "Disconnecting Apple..."
-                        : "Disconnect Apple"
-                      : "Apple linked"
-                    : appleLinkBusy
-                      ? "Linking Apple..."
-                      : "Link Apple"}
-                </Text>
-              </Pressable>
-            </View>
-          ) : null}
-
-          {onDeleteAccount ? (
-            <View style={[styles.card, styles.deleteAccountCard]}>
-              <Text style={styles.sectionTitle}>Delete account</Text>
-              <Text style={styles.body}>
-                Delete your account and log out. Your account will be recoverable for the next 30 days,
-                but any SFLUV in your accessible wallets will be transferred out of your account before
-                the deletion request is submitted.
-              </Text>
-              {accountDeletionMessage ? (
-                <Text style={styles.inlineError}>{accountDeletionMessage}</Text>
-              ) : null}
-              <Pressable
-                style={[styles.deleteAccountButton, accountDeletionBusy ? styles.buttonDisabled : undefined]}
-                disabled={accountDeletionBusy}
-                onPress={onDeleteAccount}
-              >
-                <Text style={styles.deleteAccountButtonText}>
-                  {accountDeletionBusy ? "Preparing..." : "Delete account"}
-                </Text>
-              </Pressable>
-            </View>
-          ) : null}
-
-          {onLogout ? (
-            <Pressable style={styles.logoutButton} onPress={onLogout}>
-              <Text style={styles.logoutButtonText}>Log out</Text>
-            </Pressable>
           ) : null}
         </>
       ) : null}
@@ -666,7 +843,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     segmentWrap: {
       flexDirection: "row",
-      gap: spacing.sm,
+      gap: spacing.xs,
       backgroundColor: palette.surfaceStrong,
       borderRadius: radii.lg,
       padding: 6,
@@ -685,7 +862,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     segmentText: {
       color: palette.textMuted,
       fontWeight: "800",
-      fontSize: 13,
+      fontSize: 12,
     },
     segmentTextActive: {
       color: palette.white,
@@ -693,11 +870,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     meta: {
       color: palette.textMuted,
       lineHeight: 20,
-    },
-    currentWalletLabel: {
-      color: palette.text,
-      fontSize: 18,
-      fontWeight: "800",
     },
     themeRow: {
       flexDirection: "row",
@@ -783,6 +955,93 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     preferenceBody: {
       color: palette.textMuted,
       lineHeight: 20,
+    },
+    socialRow: {
+      gap: spacing.sm,
+    },
+    socialRowHeader: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: spacing.md,
+    },
+    socialIdentityWrap: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: spacing.md,
+    },
+    socialIconBadge: {
+      width: 56,
+      height: 56,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surfaceStrong,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    socialCopy: {
+      flex: 1,
+      gap: 4,
+    },
+    socialProviderTitle: {
+      color: palette.text,
+      fontSize: 16,
+      fontWeight: "900",
+    },
+    socialProviderBody: {
+      color: palette.textMuted,
+      lineHeight: 20,
+    },
+    socialProviderMeta: {
+      color: palette.textMuted,
+      lineHeight: 20,
+    },
+    socialActionButton: {
+      minHeight: 48,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surfaceStrong,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: spacing.md,
+      alignSelf: "flex-start",
+    },
+    socialActionButtonPrimary: {
+      backgroundColor: palette.primary,
+      borderColor: palette.primary,
+    },
+    socialActionContent: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+    },
+    socialActionButtonText: {
+      color: palette.text,
+      fontWeight: "800",
+    },
+    socialActionButtonTextPrimary: {
+      color: palette.white,
+    },
+    socialLinkedPill: {
+      alignSelf: "flex-start",
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: palette.primary,
+      backgroundColor: palette.primarySoft,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+    },
+    socialLinkedPillText: {
+      color: palette.primaryStrong,
+      fontWeight: "800",
+      fontSize: 12,
+    },
+    socialDivider: {
+      height: 1,
+      backgroundColor: palette.border,
     },
     walletAddress: {
       color: palette.text,
@@ -918,6 +1177,21 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       color: palette.danger,
       fontWeight: "900",
       fontSize: 15,
+    },
+    dangerZoneHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+    },
+    dangerZoneTitle: {
+      color: palette.danger,
+      fontSize: 18,
+      fontWeight: "900",
+    },
+    dangerZoneNote: {
+      color: palette.danger,
+      lineHeight: 20,
+      fontWeight: "700",
     },
     deleteAccountCard: {
       borderColor: palette.danger,

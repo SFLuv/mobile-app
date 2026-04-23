@@ -370,6 +370,8 @@ function linkSignature(link: SfluvUniversalLink): string {
   switch (link.type) {
     case "pay":
       return `pay:${link.address.toLowerCase()}`;
+    case "addcontact":
+      return `addcontact:${link.address.toLowerCase()}`;
     case "redeem":
       return `redeem:${link.code.trim().toLowerCase()}`;
     case "request":
@@ -998,6 +1000,7 @@ function WalletAppShell({
   googleMessage,
   googleCanDisconnect,
   googleDisconnectDisabledReason,
+  onLinkGoogle,
   onDisconnectGoogle,
   showRecoveryFundsNotice,
   onDismissRecoveryFundsNotice,
@@ -1030,6 +1033,7 @@ function WalletAppShell({
   googleMessage?: string | null;
   googleCanDisconnect: boolean;
   googleDisconnectDisabledReason?: string | null;
+  onLinkGoogle?: () => void;
   onDisconnectGoogle?: () => void;
   showRecoveryFundsNotice: boolean;
   onDismissRecoveryFundsNotice: () => void;
@@ -1064,6 +1068,7 @@ function WalletAppShell({
       googleMessage={googleMessage}
       googleCanDisconnect={googleCanDisconnect}
       googleDisconnectDisabledReason={googleDisconnectDisabledReason}
+      onLinkGoogle={onLinkGoogle}
       onDisconnectGoogle={onDisconnectGoogle}
       showRecoveryFundsNotice={showRecoveryFundsNotice}
       onDismissRecoveryFundsNotice={onDismissRecoveryFundsNotice}
@@ -1100,6 +1105,7 @@ function WalletAppShellContent({
   googleMessage,
   googleCanDisconnect,
   googleDisconnectDisabledReason,
+  onLinkGoogle,
   onDisconnectGoogle,
   showRecoveryFundsNotice,
   onDismissRecoveryFundsNotice,
@@ -1132,6 +1138,7 @@ function WalletAppShellContent({
   googleMessage?: string | null;
   googleCanDisconnect: boolean;
   googleDisconnectDisabledReason?: string | null;
+  onLinkGoogle?: () => void;
   onDisconnectGoogle?: () => void;
   showRecoveryFundsNotice: boolean;
   onDismissRecoveryFundsNotice: () => void;
@@ -1174,6 +1181,7 @@ function WalletAppShellContent({
   const [showWalletChooser, setShowWalletChooser] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [merchantMapViewMode, setMerchantMapViewMode] = useState<"map" | "list">("map");
+  const [pendingContactAddress, setPendingContactAddress] = useState<string | null>(null);
   const [sendDraft, setSendDraft] = useState<SendDraft | null>(null);
   const [sendReturnTab, setSendReturnTab] = useState<Tab | null>(null);
   const [redeemFlow, setRedeemFlow] = useState<RedeemFlowState | null>(null);
@@ -1531,6 +1539,13 @@ function WalletAppShellContent({
         amount: link.amount,
         memo: link.memo,
       });
+      onConsumePendingLink();
+      return;
+    }
+
+    if (link.type === "addcontact") {
+      setPendingContactAddress(link.address);
+      setTab("contacts");
       onConsumePendingLink();
       return;
     }
@@ -2442,6 +2457,11 @@ function WalletAppShellContent({
                     openRedeemFlowForCode(link.code);
                     return;
                   }
+                  if (link.type === "addcontact") {
+                    setPendingContactAddress(link.address);
+                    setTab("contacts");
+                    return;
+                  }
                   openSendDraft({
                     recipient: link.address,
                     amount: link.type === "request" ? link.amount : undefined,
@@ -2524,7 +2544,6 @@ function WalletAppShellContent({
               user={appUser}
               improver={appImprover}
               backendClient={backendClient}
-              primaryWalletAddress={appUser?.primaryWalletAddress}
               onRefreshProfile={loadAppProfile}
             />
           ) : tab === "map" ? (
@@ -2549,6 +2568,10 @@ function WalletAppShellContent({
               contacts={contacts}
               shareAddress={smartAddress}
               syncNotice={syncNotice}
+              incomingContactAddress={pendingContactAddress}
+              onIncomingContactAddressHandled={() => {
+                setPendingContactAddress(null);
+              }}
               onAddContact={async (name, address) => {
                 if (!backendClient) {
                   throw new Error("Backend not configured.");
@@ -2588,8 +2611,6 @@ function WalletAppShellContent({
               improver={appImprover}
               wallets={settingsWallets}
               primaryWalletAddress={appUser?.primaryWalletAddress}
-              activeWalletAddress={smartAddress}
-              activeWalletLabel={selectedWalletLabel}
               syncNotice={syncNotice}
               preferences={preferences}
               notificationPermissionStatus={pushSyncState.permissionStatus}
@@ -2606,6 +2627,7 @@ function WalletAppShellContent({
               googleMessage={googleMessage}
               googleCanDisconnect={googleCanDisconnect}
               googleDisconnectDisabledReason={googleDisconnectDisabledReason}
+              onLinkGoogle={onLinkGoogle}
               onDisconnectGoogle={onDisconnectGoogle}
               appleLinked={appleLinked}
               appleLinkedEmail={appleLinkedEmail}
@@ -2620,6 +2642,13 @@ function WalletAppShellContent({
               onSetWalletVisibility={handleSetWalletVisibility}
               accountDeletionBusy={accountDeletionBusy}
               accountDeletionMessage={accountDeletionMessage}
+              onUpdateImproverRewardsWallet={async (address) => {
+                if (!backendClient) {
+                  throw new Error("Backend not configured.");
+                }
+                await backendClient.updateImproverPrimaryRewardsAccount(address.trim());
+                await loadAppProfile();
+              }}
               onOpenImprover={() => {
                 setTab("improver");
               }}
@@ -2995,7 +3024,7 @@ function PrivyWalletApp({
   const googleDisconnectDisabledReason =
     googleLinked && !canDisconnectGoogle ? "Add email or Apple before disconnecting Google." : null;
   const appleActionBusy = linkOauthState.status === "loading" || appleUnlinkBusy;
-  const googleActionBusy = googleUnlinkBusy;
+  const googleActionBusy = linkOauthState.status === "loading" || googleUnlinkBusy;
   const googleLinkedEmail = linkedGoogleAccount?.email?.trim() || undefined;
   const consumePendingLink = React.useCallback(() => {
     setPendingLinkIntent(null);
@@ -3825,6 +3854,18 @@ function PrivyWalletApp({
     }
   };
 
+  const handleLinkGoogle = async () => {
+    try {
+      setGoogleMessage(null);
+      await link({
+        provider: "google",
+      });
+      setGoogleMessage("Google is now linked to this account.");
+    } catch (error) {
+      setGoogleMessage((error as Error)?.message || "Unable to link Google right now.");
+    }
+  };
+
   const handleDisconnectApple = () => {
     if (!linkedAppleAccount?.subject) {
       setAppleLinkMessage("Apple is not linked to this account.");
@@ -4231,6 +4272,7 @@ function PrivyWalletApp({
       googleMessage={googleMessage}
       googleCanDisconnect={canDisconnectGoogle}
       googleDisconnectDisabledReason={googleDisconnectDisabledReason}
+      onLinkGoogle={handleLinkGoogle}
       onDisconnectGoogle={handleDisconnectGoogle}
       showRecoveryFundsNotice={showRecoveryFundsNotice}
       onDismissRecoveryFundsNotice={dismissRecoveryFundsNotice}

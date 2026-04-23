@@ -11,6 +11,11 @@ export type SfluvUniversalLink =
       href: string;
     }
   | {
+      type: "addcontact";
+      address: string;
+      href: string;
+    }
+  | {
       type: "redeem";
       code: string;
       href: string;
@@ -326,6 +331,12 @@ export function buildUniversalPayLink(input: {
   return `${normalizeOrigin(mobileConfig.appOrigin)}/pay/${ethers.utils.getAddress(input.address)}`;
 }
 
+export function buildUniversalAddContactLink(input: {
+  address: string;
+}): string {
+  return `${normalizeOrigin(mobileConfig.appOrigin)}/addcontact/${ethers.utils.getAddress(input.address)}`;
+}
+
 export function parseSfluvUniversalLink(rawValue: string): SfluvUniversalLink | null {
   const trimmed = rawValue.trim();
   if (!trimmed) {
@@ -389,6 +400,17 @@ export function parseSfluvUniversalLink(rawValue: string): SfluvUniversalLink | 
     };
   }
 
+  if (action === "addcontact") {
+    if (!ethers.utils.isAddress(rawParam)) {
+      return null;
+    }
+    return {
+      type: "addcontact",
+      address: ethers.utils.getAddress(rawParam),
+      href: trimmed,
+    };
+  }
+
   if (action === "request") {
     if (!ethers.utils.isAddress(rawParam)) {
       return null;
@@ -432,6 +454,9 @@ export function parseSendTarget(rawValue: string): SendTarget | null {
     };
   }
   if (universalLink?.type === "redeem") {
+    return null;
+  }
+  if (universalLink?.type === "addcontact") {
     return null;
   }
 
