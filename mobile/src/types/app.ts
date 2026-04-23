@@ -23,6 +23,20 @@ export interface AppUser {
   mailingListPolicyVersion: string;
 }
 
+export type AppImproverStatus = "pending" | "approved" | "rejected";
+
+export interface AppImprover {
+  userId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  primaryRewardsAccount: string;
+  activeCredentials: string[];
+  status: AppImproverStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AppUserPolicyStatus {
   userId: string;
   active: boolean;
@@ -132,6 +146,252 @@ export interface VerifiedEmail {
   verificationTokenExpiresAt?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export type AppCredentialType = string;
+export type AppCredentialVisibility = "public" | "private" | "unlisted";
+
+export interface AppGlobalCredentialType {
+  value: string;
+  label: string;
+  visibility: AppCredentialVisibility;
+  badgeContentType?: string | null;
+  badgeDataBase64?: string | null;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface AppCredentialRequest {
+  id: string;
+  userId: string;
+  credentialType: AppCredentialType;
+  status: "pending" | "approved" | "rejected";
+  requestedAt: string;
+  resolvedAt?: string | null;
+  resolvedBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  requesterName: string;
+  requesterFirstName: string;
+  requesterLastName: string;
+  requesterEmail: string;
+}
+
+export type AppWorkflowRecurrence = "one_time" | "daily" | "weekly" | "monthly";
+export type AppWorkflowPhotoAspectRatio = "vertical" | "square" | "horizontal";
+
+export interface AppWorkflowDropdownOption {
+  value: string;
+  label: string;
+  requiresWrittenResponse: boolean;
+  requiresPhotoAttachment?: boolean;
+  cameraCaptureOnly?: boolean;
+  photoInstructions?: string;
+  notifyEmailCount?: number;
+  sendPicturesWithEmail?: boolean;
+}
+
+export interface AppWorkflowWorkItem {
+  id: string;
+  stepId: string;
+  itemOrder: number;
+  title: string;
+  description: string;
+  optional: boolean;
+  requiresPhoto: boolean;
+  cameraCaptureOnly: boolean;
+  photoRequiredCount: number;
+  photoAllowAnyCount: boolean;
+  photoAspectRatio: AppWorkflowPhotoAspectRatio;
+  requiresWrittenResponse: boolean;
+  requiresDropdown: boolean;
+  dropdownOptions: AppWorkflowDropdownOption[];
+  dropdownRequiresWrittenResponse: Record<string, boolean>;
+}
+
+export interface AppWorkflowSubmissionPhoto {
+  id: string;
+  workflowId: string;
+  stepId: string;
+  itemId: string;
+  submissionId: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  createdAt: number;
+}
+
+export interface AppWorkflowStepItemResponse {
+  itemId: string;
+  photoUrls?: string[];
+  photoIds?: string[];
+  photos?: AppWorkflowSubmissionPhoto[];
+  writtenResponse?: string;
+  dropdownValue?: string;
+}
+
+export interface AppWorkflowStepSubmission {
+  id: string;
+  workflowId: string;
+  stepId: string;
+  improverId: string;
+  stepNotPossible: boolean;
+  stepNotPossibleDetails?: string | null;
+  itemResponses: AppWorkflowStepItemResponse[];
+  submittedAt: number;
+  updatedAt: number;
+}
+
+export interface AppWorkflowRole {
+  id: string;
+  workflowId: string;
+  title: string;
+  requiredCredentials: AppCredentialType[];
+}
+
+export interface AppWorkflowStep {
+  id: string;
+  workflowId: string;
+  stepOrder: number;
+  title: string;
+  description: string;
+  bounty: number;
+  allowStepNotPossible: boolean;
+  roleId?: string | null;
+  assignedImproverId?: string | null;
+  assignedImproverName?: string | null;
+  status: "locked" | "available" | "in_progress" | "completed" | "paid_out";
+  startedAt?: number | null;
+  completedAt?: number | null;
+  payoutError?: string | null;
+  payoutLastTryAt?: number | null;
+  retryRequestedAt?: number | null;
+  retryRequestedBy?: string | null;
+  submission?: AppWorkflowStepSubmission | null;
+  workItems: AppWorkflowWorkItem[];
+}
+
+export interface AppWorkflowVotes {
+  approve: number;
+  deny: number;
+  votesCast: number;
+  totalVoters: number;
+  quorumReached: boolean;
+  quorumThreshold: number;
+  quorumReachedAt?: number | null;
+  finalizeAt?: number | null;
+  finalizedAt?: number | null;
+  decision?: "approve" | "deny" | "admin_approve" | null;
+  myDecision?: "approve" | "deny" | null;
+}
+
+export interface AppWorkflowSupervisorDataField {
+  key: string;
+  value: string;
+}
+
+export interface AppWorkflow {
+  id: string;
+  seriesId: string;
+  workflowStateId?: string | null;
+  proposerId: string;
+  title: string;
+  description: string;
+  recurrence: AppWorkflowRecurrence;
+  recurrenceEndAt?: number | null;
+  startAt: number;
+  status:
+    | "pending"
+    | "approved"
+    | "rejected"
+    | "in_progress"
+    | "completed"
+    | "paid_out"
+    | "blocked"
+    | "expired"
+    | "failed"
+    | "skipped"
+    | "deleted";
+  isStartBlocked: boolean;
+  blockedByWorkflowId?: string | null;
+  totalBounty: number;
+  weeklyBountyRequirement: number;
+  budgetWeeklyDeducted: number;
+  budgetOneTimeDeducted: number;
+  voteQuorumReachedAt?: number | null;
+  voteFinalizeAt?: number | null;
+  voteFinalizedAt?: number | null;
+  voteFinalizedByUserId?: string | null;
+  voteDecision?: "approve" | "deny" | "admin_approve" | null;
+  supervisorRequired: boolean;
+  supervisorUserId?: string | null;
+  supervisorBounty: number;
+  supervisorDataFields?: AppWorkflowSupervisorDataField[];
+  supervisorPaidOutAt?: number | null;
+  supervisorPayoutError?: string | null;
+  supervisorPayoutLastTryAt?: number | null;
+  supervisorRetryRequestedAt?: number | null;
+  supervisorRetryRequestedBy?: string | null;
+  supervisorTitle?: string | null;
+  supervisorOrganization?: string | null;
+  createdAt: number;
+  updatedAt: number;
+  roles: AppWorkflowRole[];
+  steps: AppWorkflowStep[];
+  votes: AppWorkflowVotes;
+}
+
+export interface AppImproverWorkflowFeed {
+  activeCredentials: AppCredentialType[];
+  workflows: AppWorkflow[];
+}
+
+export interface AppImproverAbsencePeriod {
+  id: string;
+  improverId: string;
+  seriesId: string;
+  stepOrder: number;
+  absentFrom: number;
+  absentUntil: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AppImproverAbsencePeriodCreateResult {
+  absence: AppImproverAbsencePeriod;
+  releasedCount: number;
+  skippedCount: number;
+}
+
+export interface AppImproverAbsencePeriodDeleteResult {
+  id: string;
+}
+
+export interface AppImproverWorkflowSeriesUnclaimResult {
+  seriesId: string;
+  stepOrder: number;
+  releasedCount: number;
+  skippedCount: number;
+}
+
+export interface AppWorkflowPhotoUpload {
+  fileName: string;
+  contentType: string;
+  dataBase64: string;
+}
+
+export interface AppWorkflowStepCompletionItemInput {
+  itemId: string;
+  photoIds?: string[];
+  photoUploads?: AppWorkflowPhotoUpload[];
+  writtenResponse?: string;
+  dropdownValue?: string;
+}
+
+export interface AppWorkflowStepCompletionInput {
+  stepNotPossible?: boolean;
+  stepNotPossibleDetails?: string;
+  items: AppWorkflowStepCompletionItemInput[];
 }
 
 export interface PonderSubscription {

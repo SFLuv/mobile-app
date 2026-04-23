@@ -41,6 +41,7 @@ import { ActivityScreen } from "./src/screens/ActivityScreen";
 import { MapScreen } from "./src/screens/MapScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { ContactsScreen } from "./src/screens/ContactsScreen";
+import { ImproverScreen } from "./src/screens/ImproverScreen";
 import { mobileConfig } from "./src/config";
 import {
   clearCachedRouteDiscovery,
@@ -60,6 +61,7 @@ import {
   AppAccountDeletionStatusResponse,
   AppAppleRecoveryResponse,
   AppContact,
+  AppImprover,
   AppLocation,
   AppTransaction,
   AppUser,
@@ -139,7 +141,7 @@ type PushSyncState = {
   lastSyncedAt?: number;
 };
 
-type Tab = "wallet" | "activity" | "map" | "contacts" | "settings";
+type Tab = "wallet" | "activity" | "improver" | "map" | "contacts" | "settings";
 type WalletPane = "home" | "send" | "receive";
 
 const PREFERENCES_STORAGE_KEY = "sfluv-wallet:preferences";
@@ -1151,6 +1153,7 @@ function WalletAppShellContent({
   const [backendWallets, setBackendWallets] = useState<AppWallet[]>([]);
   const [merchantLabelsByAddress, setMerchantLabelsByAddress] = useState<Record<string, string>>({});
   const [appUser, setAppUser] = useState<AppUser | null>(null);
+  const [appImprover, setAppImprover] = useState<AppImprover | null>(null);
   const [storedPushToken, setStoredPushToken] = useState<string | null>(null);
   const [pushSyncState, setPushSyncState] = useState<PushSyncState>({
     permissionStatus: "unknown",
@@ -1170,6 +1173,7 @@ function WalletAppShellContent({
   const [activityHasMore, setActivityHasMore] = useState(true);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [showWalletChooser, setShowWalletChooser] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [merchantMapViewMode, setMerchantMapViewMode] = useState<"map" | "list">("map");
   const [sendDraft, setSendDraft] = useState<SendDraft | null>(null);
   const [sendReturnTab, setSendReturnTab] = useState<Tab | null>(null);
@@ -1214,6 +1218,8 @@ function WalletAppShellContent({
         : undefined,
     [backendWallets, selectedCandidate],
   );
+  const hasImproverTab = Boolean(appUser?.isImprover || appImprover?.status === "approved");
+  const moreTabActive = hasImproverTab && (tab === "activity" || tab === "contacts");
   const canChooseWallet = walletChooserCandidates.length > 1;
   const walletSyncReady = backendBootstrapReady && Boolean(appUser) && Boolean(runtime.discovery);
   const walletHistoryActive = tab === "wallet" && walletPane === "home";
@@ -1267,6 +1273,18 @@ function WalletAppShellContent({
   useEffect(() => {
     merchantLabelsRef.current = merchantLabelsByAddress;
   }, [merchantLabelsByAddress]);
+
+  useEffect(() => {
+    if (!hasImproverTab && tab === "improver") {
+      setTab("wallet");
+    }
+  }, [hasImproverTab, tab]);
+
+  useEffect(() => {
+    if (!hasImproverTab && showMoreMenu) {
+      setShowMoreMenu(false);
+    }
+  }, [hasImproverTab, showMoreMenu]);
 
   useEffect(() => {
     if (!toast) {
@@ -1389,6 +1407,7 @@ function WalletAppShellContent({
     try {
       const profile = await backendClient.ensureUser();
       setAppUser(profile.user);
+      setAppImprover(profile.improver);
       setBackendWallets(profile.wallets);
       onWalletPreferencesSync(profile.user, profile.wallets);
       setContacts(profile.contacts);
@@ -2326,6 +2345,8 @@ function WalletAppShellContent({
           : "Wallet"
       : tab === "activity"
         ? "Activity"
+      : tab === "improver"
+        ? "Improver"
       : tab === "map"
         ? "Merchant Map"
         : tab === "contacts"
@@ -2348,12 +2369,16 @@ function WalletAppShellContent({
           <Text style={styles.brand}>{activeTitle}</Text>
           <Text style={styles.topMeta}>
             {tab === "settings"
-                  ? "Preferences and account details"
-                : tab === "contacts"
-                  ? "People and wallets you trust"
-                : selectedWalletLabel
-                  ? `${selectedWalletLabel} selected`
-                  : "Fast SFLUV payments"}
+              ? "Preferences and account details"
+              : tab === "contacts"
+                ? "People and wallets you trust"
+                : tab === "activity"
+                  ? "Recent wallet transfers and rewards"
+                  : tab === "improver"
+                    ? "Claims, payouts, badges, and credentials"
+                    : selectedWalletLabel
+                      ? `${selectedWalletLabel} selected`
+                      : "Fast SFLUV payments"}
           </Text>
         </View>
         <View style={styles.topActions}>
@@ -2495,6 +2520,14 @@ function WalletAppShellContent({
               }}
               onLoadMore={loadMoreActivityTransactions}
             />
+          ) : tab === "improver" ? (
+            <ImproverScreen
+              user={appUser}
+              improver={appImprover}
+              backendClient={backendClient}
+              primaryWalletAddress={appUser?.primaryWalletAddress}
+              onRefreshProfile={loadAppProfile}
+            />
           ) : tab === "map" ? (
             <MapScreen
               locations={locations}
@@ -2553,6 +2586,7 @@ function WalletAppShellContent({
           ) : (
             <SettingsScreen
               user={appUser}
+              improver={appImprover}
               wallets={settingsWallets}
               primaryWalletAddress={appUser?.primaryWalletAddress}
               activeWalletAddress={smartAddress}
@@ -2587,6 +2621,9 @@ function WalletAppShellContent({
               onSetWalletVisibility={handleSetWalletVisibility}
               accountDeletionBusy={accountDeletionBusy}
               accountDeletionMessage={accountDeletionMessage}
+              onOpenImprover={() => {
+                setTab("improver");
+              }}
               onDeleteAccount={handleDeleteAccount}
               onUpdatePreferences={(next) => {
                 onUpdatePreferences(next);
@@ -2605,31 +2642,63 @@ function WalletAppShellContent({
               setWalletPane("home");
             }}
           />
-          <BottomTab
-            label="Activity"
-            icon={tab === "activity" ? "pulse" : "pulse-outline"}
-            active={tab === "activity"}
-            onPress={() => {
-              setTab("activity");
-            }}
-          />
-          <BottomTab
-            label="Map"
-            icon={tab === "map" ? "map" : "map-outline"}
-            active={tab === "map"}
-            onPress={() => {
-              setMerchantMapViewMode("map");
-              setTab("map");
-            }}
-          />
-          <BottomTab
-            label="Contacts"
-            icon={tab === "contacts" ? "people" : "people-outline"}
-            active={tab === "contacts"}
-            onPress={() => {
-              setTab("contacts");
-            }}
-          />
+          {hasImproverTab ? (
+            <>
+              <BottomTab
+                label="Improver"
+                icon={tab === "improver" ? "construct" : "construct-outline"}
+                active={tab === "improver"}
+                onPress={() => {
+                  setTab("improver");
+                }}
+              />
+              <BottomTab
+                label="Map"
+                icon={tab === "map" ? "map" : "map-outline"}
+                active={tab === "map"}
+                onPress={() => {
+                  setMerchantMapViewMode("map");
+                  setTab("map");
+                }}
+              />
+              <BottomTab
+                label="More"
+                icon={moreTabActive ? "ellipsis-horizontal-circle" : "ellipsis-horizontal-circle-outline"}
+                active={moreTabActive}
+                onPress={() => {
+                  setShowMoreMenu(true);
+                }}
+              />
+            </>
+          ) : (
+            <>
+              <BottomTab
+                label="Activity"
+                icon={tab === "activity" ? "pulse" : "pulse-outline"}
+                active={tab === "activity"}
+                onPress={() => {
+                  setTab("activity");
+                }}
+              />
+              <BottomTab
+                label="Map"
+                icon={tab === "map" ? "map" : "map-outline"}
+                active={tab === "map"}
+                onPress={() => {
+                  setMerchantMapViewMode("map");
+                  setTab("map");
+                }}
+              />
+              <BottomTab
+                label="Contacts"
+                icon={tab === "contacts" ? "people" : "people-outline"}
+                active={tab === "contacts"}
+                onPress={() => {
+                  setTab("contacts");
+                }}
+              />
+            </>
+          )}
         </View>
 
         {toast ? (
@@ -2702,6 +2771,65 @@ function WalletAppShellContent({
                 );
               })}
             </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={showMoreMenu && hasImproverTab}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMoreMenu(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setShowMoreMenu(false)}>
+          <Pressable style={styles.moreMenuCard} onPress={() => {}}>
+            <View style={styles.moreMenuHeader}>
+              <View style={styles.moreMenuHeaderCopy}>
+                <Text style={styles.moreMenuTitle}>More</Text>
+                <Text style={styles.moreMenuSubtitle}>Open additional wallet tools.</Text>
+              </View>
+              <Pressable style={styles.walletChooserClose} onPress={() => setShowMoreMenu(false)}>
+                <Ionicons name="close" size={20} color={palette.primaryStrong} />
+              </Pressable>
+            </View>
+
+            <View style={styles.moreMenuList}>
+              <Pressable
+                style={[styles.moreMenuItem, tab === "activity" ? styles.moreMenuItemActive : undefined]}
+                onPress={() => {
+                  setShowMoreMenu(false);
+                  setTab("activity");
+                }}
+              >
+                <View style={styles.moreMenuCopy}>
+                  <Text style={styles.moreMenuLabel}>Activity</Text>
+                  <Text style={styles.moreMenuBody}>Recent wallet transfers and rewards.</Text>
+                </View>
+                <Ionicons
+                  name={tab === "activity" ? "pulse" : "pulse-outline"}
+                  size={18}
+                  color={tab === "activity" ? palette.primaryStrong : palette.textMuted}
+                />
+              </Pressable>
+
+              <Pressable
+                style={[styles.moreMenuItem, tab === "contacts" ? styles.moreMenuItemActive : undefined]}
+                onPress={() => {
+                  setShowMoreMenu(false);
+                  setTab("contacts");
+                }}
+              >
+                <View style={styles.moreMenuCopy}>
+                  <Text style={styles.moreMenuLabel}>Contacts</Text>
+                  <Text style={styles.moreMenuBody}>People and wallet addresses you trust.</Text>
+                </View>
+                <Ionicons
+                  name={tab === "contacts" ? "people" : "people-outline"}
+                  size={18}
+                  color={tab === "contacts" ? palette.primaryStrong : palette.textMuted}
+                />
+              </Pressable>
+            </View>
           </Pressable>
         </Pressable>
       </Modal>
@@ -4878,6 +5006,64 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     padding: spacing.lg,
     maxHeight: "72%",
     ...shadows.card,
+  },
+  moreMenuCard: {
+    backgroundColor: palette.surface,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: palette.primary,
+    padding: spacing.lg,
+    gap: spacing.lg,
+    ...shadows.card,
+  },
+  moreMenuHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: spacing.md,
+  },
+  moreMenuHeaderCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  moreMenuTitle: {
+    color: palette.primaryStrong,
+    fontSize: 24,
+    fontWeight: "900",
+  },
+  moreMenuSubtitle: {
+    color: palette.textMuted,
+    marginTop: 4,
+  },
+  moreMenuList: {
+    gap: spacing.sm,
+  },
+  moreMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.surfaceMuted,
+    padding: spacing.md,
+  },
+  moreMenuItemActive: {
+    borderColor: palette.primary,
+    backgroundColor: palette.primarySoft,
+  },
+  moreMenuCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  moreMenuLabel: {
+    color: palette.text,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  moreMenuBody: {
+    color: palette.textMuted,
+    lineHeight: 18,
   },
   walletChooserHeader: {
     flexDirection: "row",

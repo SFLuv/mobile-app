@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
-import { AppUser, AppWallet } from "../types/app";
+import { AppImprover, AppUser, AppWallet } from "../types/app";
 import { AppPreferences, ThemePreference } from "../types/preferences";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 
 type Props = {
   user: AppUser | null;
+  improver?: AppImprover | null;
   wallets: AppWallet[];
   primaryWalletAddress?: string;
   activeWalletAddress?: string;
@@ -40,6 +41,7 @@ type Props = {
   appleDisconnectDisabledReason?: string | null;
   onLinkApple?: () => void;
   onDisconnectApple?: () => void;
+  onOpenImprover?: () => void;
   onDeleteAccount?: () => void;
   onLogout?: () => void;
 };
@@ -83,6 +85,23 @@ function formatPermissionStatus(status: Props["notificationPermissionStatus"]): 
     default:
       return "Checking";
   }
+}
+
+function formatStatusLabel(value?: string | null): string {
+  if (!value) {
+    return "";
+  }
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, "_");
+  if (normalized === "paid_out") {
+    return "Finalized";
+  }
+  return value
+    .replace(/_/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(" ");
 }
 
 function ThemeOption({
@@ -290,6 +309,7 @@ function WalletSettingsRow({
 
 export function SettingsScreen({
   user,
+  improver,
   wallets,
   primaryWalletAddress,
   activeWalletAddress,
@@ -324,6 +344,7 @@ export function SettingsScreen({
   appleDisconnectDisabledReason,
   onLinkApple,
   onDisconnectApple,
+  onOpenImprover,
   onDeleteAccount,
   onLogout,
 }: Props) {
@@ -458,6 +479,32 @@ export function SettingsScreen({
             {user?.contactEmail ? <Text style={styles.meta}>Email: {user.contactEmail}</Text> : null}
             {user?.contactPhone ? <Text style={styles.meta}>Phone: {user.contactPhone}</Text> : null}
           </View>
+
+          {onOpenImprover ? (
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>
+                {user?.isImprover || improver?.status === "approved" ? "Improver Panel" : "Improver Access"}
+              </Text>
+              <Text style={styles.body}>
+                {user?.isImprover || improver?.status === "approved"
+                  ? "Open the mobile improver panel to claim workflows, manage badges, track payouts, and handle credentials."
+                  : improver
+                    ? "View your improver request and finish any remaining setup steps."
+                    : "Request improver status and manage the verified email used for approval."}
+              </Text>
+              {improver ? <Text style={styles.meta}>Status: {formatStatusLabel(improver.status)}</Text> : null}
+              {improver?.email ? <Text style={styles.meta}>Improver email: {improver.email}</Text> : null}
+              <Pressable style={styles.primaryActionButton} onPress={onOpenImprover}>
+                <Text style={styles.primaryActionButtonText}>
+                  {user?.isImprover || improver?.status === "approved"
+                    ? "Open improver panel"
+                    : improver
+                      ? "View improver request"
+                      : "Request improver status"}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
 
           {googleLinked ? (
             <View style={styles.card}>

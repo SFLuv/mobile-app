@@ -5,6 +5,14 @@ import {
   AppAccountDeletionStatusResponse,
   AppAppleRecoveryResponse,
   AppContact,
+  AppCredentialRequest,
+  AppGlobalCredentialType,
+  AppImprover,
+  AppImproverAbsencePeriod,
+  AppImproverAbsencePeriodCreateResult,
+  AppImproverAbsencePeriodDeleteResult,
+  AppImproverWorkflowFeed,
+  AppImproverWorkflowSeriesUnclaimResult,
   AppLocation,
   AppOwnedLocation,
   AppTransaction,
@@ -12,6 +20,9 @@ import {
   AppUserPolicyStatus,
   AppWallet,
   AppWalletOwnerLookup,
+  AppWorkflow,
+  AppWorkflowPhotoUpload,
+  AppWorkflowStepCompletionInput,
   MerchantApplicationDraft,
   PonderSubscription,
   VerifiedEmail,
@@ -92,6 +103,19 @@ type GetUserResponse = {
     is_favorite: boolean;
   }>;
   locations: Array<Record<string, unknown>>;
+  improver?: ImproverResponse | null;
+};
+
+type ImproverResponse = {
+  user_id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  primary_rewards_account: string;
+  active_credentials: string[];
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+  updated_at: string;
 };
 
 type PublicLocationsResponse = {
@@ -122,6 +146,214 @@ type VerifiedEmailResponse = Array<{
   created_at: string;
   updated_at: string;
 }>;
+
+type GlobalCredentialTypeResponse = Array<{
+  value: string;
+  label: string;
+  visibility?: "public" | "private" | "unlisted" | null;
+  badge_content_type?: string | null;
+  badge_data_base64?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+}>;
+
+type CredentialRequestResponse = Array<{
+  id: string;
+  user_id: string;
+  credential_type: string;
+  status: "pending" | "approved" | "rejected";
+  requested_at: string;
+  resolved_at?: string | null;
+  resolved_by?: string | null;
+  created_at: string;
+  updated_at: string;
+  requester_name: string;
+  requester_first_name: string;
+  requester_last_name: string;
+  requester_email: string;
+}>;
+
+type WorkflowResponse = {
+  id: string;
+  series_id: string;
+  workflow_state_id?: string | null;
+  proposer_id: string;
+  title: string;
+  description: string;
+  recurrence: "one_time" | "daily" | "weekly" | "monthly";
+  recurrence_end_at?: number | null;
+  start_at: number;
+  status:
+    | "pending"
+    | "approved"
+    | "rejected"
+    | "in_progress"
+    | "completed"
+    | "paid_out"
+    | "blocked"
+    | "expired"
+    | "failed"
+    | "skipped"
+    | "deleted";
+  is_start_blocked: boolean;
+  blocked_by_workflow_id?: string | null;
+  total_bounty: number;
+  weekly_bounty_requirement: number;
+  budget_weekly_deducted: number;
+  budget_one_time_deducted: number;
+  vote_quorum_reached_at?: number | null;
+  vote_finalize_at?: number | null;
+  vote_finalized_at?: number | null;
+  vote_finalized_by_user_id?: string | null;
+  vote_decision?: "approve" | "deny" | "admin_approve" | null;
+  supervisor_required: boolean;
+  supervisor_user_id?: string | null;
+  supervisor_bounty: number;
+  supervisor_data_fields?: Array<{ key: string; value: string }> | null;
+  supervisor_paid_out_at?: number | null;
+  supervisor_payout_error?: string | null;
+  supervisor_payout_last_try_at?: number | null;
+  supervisor_retry_requested_at?: number | null;
+  supervisor_retry_requested_by?: string | null;
+  supervisor_title?: string | null;
+  supervisor_organization?: string | null;
+  created_at: number;
+  updated_at: number;
+  roles: Array<{
+    id: string;
+    workflow_id: string;
+    title: string;
+    required_credentials: string[];
+  }>;
+  steps: Array<{
+    id: string;
+    workflow_id: string;
+    step_order: number;
+    title: string;
+    description: string;
+    bounty: number;
+    allow_step_not_possible: boolean;
+    role_id?: string | null;
+    assigned_improver_id?: string | null;
+    assigned_improver_name?: string | null;
+    status: "locked" | "available" | "in_progress" | "completed" | "paid_out";
+    started_at?: number | null;
+    completed_at?: number | null;
+    payout_error?: string | null;
+    payout_last_try_at?: number | null;
+    retry_requested_at?: number | null;
+    retry_requested_by?: string | null;
+    submission?: {
+      id: string;
+      workflow_id: string;
+      step_id: string;
+      improver_id: string;
+      step_not_possible: boolean;
+      step_not_possible_details?: string | null;
+      item_responses: Array<{
+        item_id: string;
+        photo_urls?: string[];
+        photo_ids?: string[];
+        photos?: Array<{
+          id: string;
+          workflow_id: string;
+          step_id: string;
+          item_id: string;
+          submission_id: string;
+          file_name: string;
+          content_type: string;
+          size_bytes: number;
+          created_at: number;
+        }>;
+        written_response?: string | null;
+        dropdown_value?: string | null;
+      }>;
+      submitted_at: number;
+      updated_at: number;
+    } | null;
+    work_items: Array<{
+      id: string;
+      step_id: string;
+      item_order: number;
+      title: string;
+      description: string;
+      optional: boolean;
+      requires_photo: boolean;
+      camera_capture_only: boolean;
+      photo_required_count: number;
+      photo_allow_any_count: boolean;
+      photo_aspect_ratio: "vertical" | "square" | "horizontal";
+      requires_written_response: boolean;
+      requires_dropdown: boolean;
+      dropdown_options: Array<{
+        value: string;
+        label: string;
+        requires_written_response: boolean;
+        requires_photo_attachment?: boolean;
+        camera_capture_only?: boolean;
+        photo_instructions?: string;
+        notify_email_count?: number;
+        send_pictures_with_email?: boolean;
+      }>;
+      dropdown_requires_written_response?: Record<string, boolean>;
+    }>;
+  }>;
+  votes: {
+    approve: number;
+    deny: number;
+    votes_cast: number;
+    total_voters: number;
+    quorum_reached: boolean;
+    quorum_threshold: number;
+    quorum_reached_at?: number | null;
+    finalize_at?: number | null;
+    finalized_at?: number | null;
+    decision?: "approve" | "deny" | "admin_approve" | null;
+    my_decision?: "approve" | "deny" | null;
+  };
+};
+
+type ImproverWorkflowFeedResponse = {
+  active_credentials: string[];
+  workflows: WorkflowResponse[];
+};
+
+type ImproverAbsencePeriodResponse = Array<{
+  id: string;
+  improver_id: string;
+  series_id: string;
+  step_order: number;
+  absent_from: number;
+  absent_until: number;
+  created_at: number;
+  updated_at: number;
+}>;
+
+type ImproverAbsencePeriodCreateResponse = {
+  absence: {
+    id: string;
+    improver_id: string;
+    series_id: string;
+    step_order: number;
+    absent_from: number;
+    absent_until: number;
+    created_at: number;
+    updated_at: number;
+  };
+  released_count: number;
+  skipped_count: number;
+};
+
+type ImproverAbsencePeriodDeleteResponse = {
+  id: string;
+};
+
+type ImproverWorkflowSeriesUnclaimResponse = {
+  series_id: string;
+  step_order: number;
+  released_count: number;
+  skipped_count: number;
+};
 
 type PonderResponse =
   | Array<{
@@ -322,6 +554,333 @@ function mapUserPolicyStatus(input: UserPolicyStatusResponse): AppUserPolicyStat
         ? input.mailing_list_opt_in_at
         : undefined,
     mailingListPolicyVersion: asString(input.mailing_list_policy_version),
+  };
+}
+
+function mapImprover(input: ImproverResponse): AppImprover {
+  return {
+    userId: input.user_id,
+    firstName: input.first_name,
+    lastName: input.last_name,
+    email: input.email,
+    primaryRewardsAccount: input.primary_rewards_account,
+    activeCredentials: Array.isArray(input.active_credentials) ? input.active_credentials : [],
+    status: input.status,
+    createdAt: input.created_at,
+    updatedAt: input.updated_at,
+  };
+}
+
+function normalizeCredentialVisibility(
+  value: unknown,
+): AppGlobalCredentialType["visibility"] {
+  return value === "private" || value === "unlisted" ? value : "public";
+}
+
+function mapGlobalCredentialType(
+  input: GlobalCredentialTypeResponse[number],
+): AppGlobalCredentialType {
+  return {
+    value: input.value,
+    label: input.label,
+    visibility: normalizeCredentialVisibility(input.visibility),
+    badgeContentType:
+      typeof input.badge_content_type === "string" ? input.badge_content_type : undefined,
+    badgeDataBase64:
+      typeof input.badge_data_base64 === "string" ? input.badge_data_base64 : undefined,
+    createdAt: input.created_at,
+    updatedAt: typeof input.updated_at === "string" ? input.updated_at : undefined,
+  };
+}
+
+function mapCredentialRequest(
+  input: CredentialRequestResponse[number],
+): AppCredentialRequest {
+  return {
+    id: input.id,
+    userId: input.user_id,
+    credentialType: input.credential_type,
+    status: input.status,
+    requestedAt: input.requested_at,
+    resolvedAt: typeof input.resolved_at === "string" ? input.resolved_at : undefined,
+    resolvedBy: typeof input.resolved_by === "string" ? input.resolved_by : undefined,
+    createdAt: input.created_at,
+    updatedAt: input.updated_at,
+    requesterName: input.requester_name,
+    requesterFirstName: input.requester_first_name,
+    requesterLastName: input.requester_last_name,
+    requesterEmail: input.requester_email,
+  };
+}
+
+function mapWorkflowSubmissionPhoto(
+  input: NonNullable<
+    NonNullable<
+      NonNullable<WorkflowResponse["steps"][number]["submission"]>["item_responses"][number]["photos"]
+    >[number]
+  >,
+) {
+  return {
+    id: input.id,
+    workflowId: input.workflow_id,
+    stepId: input.step_id,
+    itemId: input.item_id,
+    submissionId: input.submission_id,
+    fileName: input.file_name,
+    contentType: input.content_type,
+    sizeBytes: input.size_bytes,
+    createdAt: input.created_at,
+  };
+}
+
+function mapWorkflowStepItemResponse(
+  input: NonNullable<
+    NonNullable<WorkflowResponse["steps"][number]["submission"]>["item_responses"]
+  >[number],
+) {
+  return {
+    itemId: input.item_id,
+    photoUrls: Array.isArray(input.photo_urls) ? input.photo_urls : undefined,
+    photoIds: Array.isArray(input.photo_ids) ? input.photo_ids : undefined,
+    photos: Array.isArray(input.photos)
+      ? input.photos.map(mapWorkflowSubmissionPhoto)
+      : undefined,
+    writtenResponse:
+      typeof input.written_response === "string" ? input.written_response : undefined,
+    dropdownValue:
+      typeof input.dropdown_value === "string" ? input.dropdown_value : undefined,
+  };
+}
+
+function mapWorkflowStepSubmission(
+  input: NonNullable<WorkflowResponse["steps"][number]["submission"]>,
+) {
+  return {
+    id: input.id,
+    workflowId: input.workflow_id,
+    stepId: input.step_id,
+    improverId: input.improver_id,
+    stepNotPossible: input.step_not_possible === true,
+    stepNotPossibleDetails:
+      typeof input.step_not_possible_details === "string"
+        ? input.step_not_possible_details
+        : undefined,
+    itemResponses: Array.isArray(input.item_responses)
+      ? input.item_responses.map(mapWorkflowStepItemResponse)
+      : [],
+    submittedAt: input.submitted_at,
+    updatedAt: input.updated_at,
+  };
+}
+
+function mapWorkflowDropdownOption(
+  input: WorkflowResponse["steps"][number]["work_items"][number]["dropdown_options"][number],
+) {
+  return {
+    value: input.value,
+    label: input.label,
+    requiresWrittenResponse: input.requires_written_response === true,
+    requiresPhotoAttachment: input.requires_photo_attachment === true,
+    cameraCaptureOnly: input.camera_capture_only === true,
+    photoInstructions:
+      typeof input.photo_instructions === "string" ? input.photo_instructions : undefined,
+    notifyEmailCount:
+      typeof input.notify_email_count === "number" ? input.notify_email_count : undefined,
+    sendPicturesWithEmail: input.send_pictures_with_email === true,
+  };
+}
+
+function normalizePhotoAspectRatio(
+  value: unknown,
+): "vertical" | "square" | "horizontal" {
+  return value === "vertical" || value === "horizontal" ? value : "square";
+}
+
+function mapWorkflowWorkItem(
+  input: WorkflowResponse["steps"][number]["work_items"][number],
+) {
+  return {
+    id: input.id,
+    stepId: input.step_id,
+    itemOrder: input.item_order,
+    title: input.title,
+    description: input.description,
+    optional: input.optional === true,
+    requiresPhoto: input.requires_photo === true,
+    cameraCaptureOnly: input.camera_capture_only === true,
+    photoRequiredCount: input.photo_required_count,
+    photoAllowAnyCount: input.photo_allow_any_count === true,
+    photoAspectRatio: normalizePhotoAspectRatio(input.photo_aspect_ratio),
+    requiresWrittenResponse: input.requires_written_response === true,
+    requiresDropdown: input.requires_dropdown === true,
+    dropdownOptions: Array.isArray(input.dropdown_options)
+      ? input.dropdown_options.map(mapWorkflowDropdownOption)
+      : [],
+    dropdownRequiresWrittenResponse:
+      input.dropdown_requires_written_response &&
+      typeof input.dropdown_requires_written_response === "object"
+        ? input.dropdown_requires_written_response
+        : {},
+  };
+}
+
+function mapWorkflowStep(input: WorkflowResponse["steps"][number]) {
+  return {
+    id: input.id,
+    workflowId: input.workflow_id,
+    stepOrder: input.step_order,
+    title: input.title,
+    description: input.description,
+    bounty: input.bounty,
+    allowStepNotPossible: input.allow_step_not_possible === true,
+    roleId: typeof input.role_id === "string" ? input.role_id : undefined,
+    assignedImproverId:
+      typeof input.assigned_improver_id === "string" ? input.assigned_improver_id : undefined,
+    assignedImproverName:
+      typeof input.assigned_improver_name === "string"
+        ? input.assigned_improver_name
+        : undefined,
+    status: input.status,
+    startedAt: typeof input.started_at === "number" ? input.started_at : undefined,
+    completedAt:
+      typeof input.completed_at === "number" ? input.completed_at : undefined,
+    payoutError:
+      typeof input.payout_error === "string" ? input.payout_error : undefined,
+    payoutLastTryAt:
+      typeof input.payout_last_try_at === "number" ? input.payout_last_try_at : undefined,
+    retryRequestedAt:
+      typeof input.retry_requested_at === "number"
+        ? input.retry_requested_at
+        : undefined,
+    retryRequestedBy:
+      typeof input.retry_requested_by === "string" ? input.retry_requested_by : undefined,
+    submission: input.submission ? mapWorkflowStepSubmission(input.submission) : undefined,
+    workItems: Array.isArray(input.work_items)
+      ? input.work_items.map(mapWorkflowWorkItem)
+      : [],
+  };
+}
+
+function mapWorkflowVotes(input: WorkflowResponse["votes"]) {
+  return {
+    approve: input.approve,
+    deny: input.deny,
+    votesCast: input.votes_cast,
+    totalVoters: input.total_voters,
+    quorumReached: input.quorum_reached === true,
+    quorumThreshold: input.quorum_threshold,
+    quorumReachedAt:
+      typeof input.quorum_reached_at === "number" ? input.quorum_reached_at : undefined,
+    finalizeAt:
+      typeof input.finalize_at === "number" ? input.finalize_at : undefined,
+    finalizedAt:
+      typeof input.finalized_at === "number" ? input.finalized_at : undefined,
+    decision: input.decision,
+    myDecision: input.my_decision,
+  };
+}
+
+function mapWorkflow(input: WorkflowResponse): AppWorkflow {
+  return {
+    id: input.id,
+    seriesId: input.series_id,
+    workflowStateId:
+      typeof input.workflow_state_id === "string" ? input.workflow_state_id : undefined,
+    proposerId: input.proposer_id,
+    title: input.title,
+    description: input.description,
+    recurrence: input.recurrence,
+    recurrenceEndAt:
+      typeof input.recurrence_end_at === "number" ? input.recurrence_end_at : undefined,
+    startAt: input.start_at,
+    status: input.status,
+    isStartBlocked: input.is_start_blocked === true,
+    blockedByWorkflowId:
+      typeof input.blocked_by_workflow_id === "string"
+        ? input.blocked_by_workflow_id
+        : undefined,
+    totalBounty: input.total_bounty,
+    weeklyBountyRequirement: input.weekly_bounty_requirement,
+    budgetWeeklyDeducted: input.budget_weekly_deducted,
+    budgetOneTimeDeducted: input.budget_one_time_deducted,
+    voteQuorumReachedAt:
+      typeof input.vote_quorum_reached_at === "number"
+        ? input.vote_quorum_reached_at
+        : undefined,
+    voteFinalizeAt:
+      typeof input.vote_finalize_at === "number" ? input.vote_finalize_at : undefined,
+    voteFinalizedAt:
+      typeof input.vote_finalized_at === "number" ? input.vote_finalized_at : undefined,
+    voteFinalizedByUserId:
+      typeof input.vote_finalized_by_user_id === "string"
+        ? input.vote_finalized_by_user_id
+        : undefined,
+    voteDecision: input.vote_decision,
+    supervisorRequired: input.supervisor_required === true,
+    supervisorUserId:
+      typeof input.supervisor_user_id === "string" ? input.supervisor_user_id : undefined,
+    supervisorBounty: input.supervisor_bounty,
+    supervisorDataFields: Array.isArray(input.supervisor_data_fields)
+      ? input.supervisor_data_fields.map((field) => ({
+          key: field.key,
+          value: field.value,
+        }))
+      : [],
+    supervisorPaidOutAt:
+      typeof input.supervisor_paid_out_at === "number"
+        ? input.supervisor_paid_out_at
+        : undefined,
+    supervisorPayoutError:
+      typeof input.supervisor_payout_error === "string"
+        ? input.supervisor_payout_error
+        : undefined,
+    supervisorPayoutLastTryAt:
+      typeof input.supervisor_payout_last_try_at === "number"
+        ? input.supervisor_payout_last_try_at
+        : undefined,
+    supervisorRetryRequestedAt:
+      typeof input.supervisor_retry_requested_at === "number"
+        ? input.supervisor_retry_requested_at
+        : undefined,
+    supervisorRetryRequestedBy:
+      typeof input.supervisor_retry_requested_by === "string"
+        ? input.supervisor_retry_requested_by
+        : undefined,
+    supervisorTitle:
+      typeof input.supervisor_title === "string" ? input.supervisor_title : undefined,
+    supervisorOrganization:
+      typeof input.supervisor_organization === "string"
+        ? input.supervisor_organization
+        : undefined,
+    createdAt: input.created_at,
+    updatedAt: input.updated_at,
+    roles: Array.isArray(input.roles)
+      ? input.roles.map((role) => ({
+          id: role.id,
+          workflowId: role.workflow_id,
+          title: role.title,
+          requiredCredentials: Array.isArray(role.required_credentials)
+            ? role.required_credentials
+            : [],
+        }))
+      : [],
+    steps: Array.isArray(input.steps) ? input.steps.map(mapWorkflowStep) : [],
+    votes: mapWorkflowVotes(input.votes),
+  };
+}
+
+function mapImproverAbsencePeriod(
+  input: ImproverAbsencePeriodResponse[number],
+): AppImproverAbsencePeriod {
+  return {
+    id: input.id,
+    improverId: input.improver_id,
+    seriesId: input.series_id,
+    stepOrder: input.step_order,
+    absentFrom: input.absent_from,
+    absentUntil: input.absent_until,
+    createdAt: input.created_at,
+    updatedAt: input.updated_at,
   };
 }
 
@@ -567,6 +1126,7 @@ export class AppBackendClient {
     wallets: AppWallet[];
     contacts: AppContact[];
     locations: AppOwnedLocation[];
+    improver: AppImprover | null;
   }> {
     let policyStatus = await this.getUserPolicyStatus();
     if (policyStatus === null) {
@@ -595,6 +1155,7 @@ export class AppBackendClient {
       wallets: Array.isArray(body.wallets) ? body.wallets.map(mapWallet) : [],
       contacts: Array.isArray(body.contacts) ? body.contacts.map(mapContact) : [],
       locations: Array.isArray(body.locations) ? body.locations.map(mapOwnedLocation) : [],
+      improver: body.improver ? mapImprover(body.improver) : null,
     };
   }
 
@@ -720,6 +1281,314 @@ export class AppBackendClient {
 
     const body = (await response.json()) as AppleRecoveryResponse;
     return mapAppleRecovery(body);
+  }
+
+  async updateUserInfo(input: {
+    name?: string;
+    email?: string;
+    phone?: string;
+  }): Promise<void> {
+    const response = await this.authFetch("/users", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contact_name: input.name?.trim() || undefined,
+        contact_email: input.email?.trim() || undefined,
+        contact_phone: input.phone?.trim() || undefined,
+      }),
+    });
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to update your user profile");
+    }
+  }
+
+  async requestImproverStatus(input: {
+    firstName: string;
+    lastName: string;
+    email: string;
+  }): Promise<AppImprover> {
+    const response = await this.authFetch("/improvers/request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        first_name: input.firstName.trim(),
+        last_name: input.lastName.trim(),
+        email: input.email.trim(),
+      }),
+    });
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to request improver status");
+    }
+    const body = (await response.json()) as ImproverResponse;
+    return mapImprover(body);
+  }
+
+  async getCredentialTypes(): Promise<AppGlobalCredentialType[]> {
+    const response = await this.authFetch("/credentials/types");
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load credential types");
+    }
+    const body = (await response.json()) as GlobalCredentialTypeResponse;
+    return Array.isArray(body) ? body.map(mapGlobalCredentialType) : [];
+  }
+
+  async getImproverWorkflows(): Promise<AppImproverWorkflowFeed> {
+    const response = await this.authFetch("/improvers/workflows");
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load improver workflows");
+    }
+    const body = (await response.json()) as ImproverWorkflowFeedResponse;
+    return {
+      activeCredentials: Array.isArray(body.active_credentials)
+        ? body.active_credentials
+        : [],
+      workflows: Array.isArray(body.workflows) ? body.workflows.map(mapWorkflow) : [],
+    };
+  }
+
+  async getImproverUnpaidWorkflows(): Promise<AppWorkflow[]> {
+    const response = await this.authFetch("/improvers/unpaid-workflows");
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load unpaid workflows");
+    }
+    const body = (await response.json()) as WorkflowResponse[];
+    return Array.isArray(body) ? body.map(mapWorkflow) : [];
+  }
+
+  async updateImproverPrimaryRewardsAccount(
+    primaryRewardsAccount: string,
+  ): Promise<AppImprover> {
+    const response = await this.authFetch("/improvers/primary-rewards-account", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        primary_rewards_account: primaryRewardsAccount.trim(),
+      }),
+    });
+    if (!response.ok) {
+      await throwRequestError(
+        response,
+        "Unable to update your improver rewards wallet",
+      );
+    }
+    const body = (await response.json()) as ImproverResponse;
+    return mapImprover(body);
+  }
+
+  async getImproverCredentialRequests(): Promise<AppCredentialRequest[]> {
+    const response = await this.authFetch("/improvers/credential-requests");
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load credential requests");
+    }
+    const body = (await response.json()) as CredentialRequestResponse;
+    return Array.isArray(body) ? body.map(mapCredentialRequest) : [];
+  }
+
+  async createImproverCredentialRequest(
+    credentialType: string,
+    allowUnlisted = false,
+  ): Promise<AppCredentialRequest> {
+    const response = await this.authFetch("/improvers/credential-requests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        credential_type: credentialType.trim(),
+        allow_unlisted: allowUnlisted,
+      }),
+    });
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to submit credential request");
+    }
+    const body = (await response.json()) as CredentialRequestResponse[number];
+    return mapCredentialRequest(body);
+  }
+
+  async getImproverAbsencePeriods(): Promise<AppImproverAbsencePeriod[]> {
+    const response = await this.authFetch("/improvers/workflows/absence-periods");
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load improver absence coverage");
+    }
+    const body = (await response.json()) as ImproverAbsencePeriodResponse;
+    return Array.isArray(body) ? body.map(mapImproverAbsencePeriod) : [];
+  }
+
+  async createImproverAbsencePeriod(input: {
+    seriesId: string;
+    stepOrder: number;
+    absentFrom: string;
+    absentUntil: string;
+  }): Promise<AppImproverAbsencePeriodCreateResult> {
+    const response = await this.authFetch("/improvers/workflows/absence-periods", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        series_id: input.seriesId,
+        step_order: input.stepOrder,
+        absent_from: input.absentFrom,
+        absent_until: input.absentUntil,
+      }),
+    });
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to create improver absence period");
+    }
+    const body = (await response.json()) as ImproverAbsencePeriodCreateResponse;
+    return {
+      absence: mapImproverAbsencePeriod(body.absence),
+      releasedCount: body.released_count,
+      skippedCount: body.skipped_count,
+    };
+  }
+
+  async updateImproverAbsencePeriod(
+    absenceId: string,
+    input: { absentFrom: string; absentUntil: string },
+  ): Promise<AppImproverAbsencePeriodCreateResult> {
+    const response = await this.authFetch(
+      `/improvers/workflows/absence-periods/${encodeURIComponent(absenceId)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          absent_from: input.absentFrom,
+          absent_until: input.absentUntil,
+        }),
+      },
+    );
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to update improver absence period");
+    }
+    const body = (await response.json()) as ImproverAbsencePeriodCreateResponse;
+    return {
+      absence: mapImproverAbsencePeriod(body.absence),
+      releasedCount: body.released_count,
+      skippedCount: body.skipped_count,
+    };
+  }
+
+  async deleteImproverAbsencePeriod(
+    absenceId: string,
+  ): Promise<AppImproverAbsencePeriodDeleteResult> {
+    const response = await this.authFetch(
+      `/improvers/workflows/absence-periods/${encodeURIComponent(absenceId)}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to delete improver absence period");
+    }
+    const body = (await response.json()) as ImproverAbsencePeriodDeleteResponse;
+    return { id: body.id };
+  }
+
+  async unclaimImproverWorkflowSeries(
+    seriesId: string,
+    stepOrder: number,
+  ): Promise<AppImproverWorkflowSeriesUnclaimResult> {
+    const response = await this.authFetch("/improvers/workflow-series/unclaim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        series_id: seriesId,
+        step_order: stepOrder,
+      }),
+    });
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to unclaim this workflow series");
+    }
+    const body = (await response.json()) as ImproverWorkflowSeriesUnclaimResponse;
+    return {
+      seriesId: body.series_id,
+      stepOrder: body.step_order,
+      releasedCount: body.released_count,
+      skippedCount: body.skipped_count,
+    };
+  }
+
+  async claimWorkflowStep(workflowId: string, stepId: string): Promise<AppWorkflow> {
+    const response = await this.authFetch(
+      `/improvers/workflows/${encodeURIComponent(workflowId)}/steps/${encodeURIComponent(stepId)}/claim`,
+      { method: "POST" },
+    );
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to claim this workflow step");
+    }
+    const body = (await response.json()) as WorkflowResponse;
+    return mapWorkflow(body);
+  }
+
+  async startWorkflowStep(workflowId: string, stepId: string): Promise<AppWorkflow> {
+    const response = await this.authFetch(
+      `/improvers/workflows/${encodeURIComponent(workflowId)}/steps/${encodeURIComponent(stepId)}/start`,
+      { method: "POST" },
+    );
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to start this workflow step");
+    }
+    const body = (await response.json()) as WorkflowResponse;
+    return mapWorkflow(body);
+  }
+
+  async completeWorkflowStep(
+    workflowId: string,
+    stepId: string,
+    input: AppWorkflowStepCompletionInput,
+  ): Promise<AppWorkflow> {
+    const normalizedItems = Array.isArray(input.items)
+      ? input.items.map((item) => ({
+          item_id: item.itemId,
+          photo_ids: Array.isArray(item.photoIds) ? item.photoIds : undefined,
+          photo_uploads: Array.isArray(item.photoUploads)
+            ? item.photoUploads.map((upload: AppWorkflowPhotoUpload) => ({
+                file_name: upload.fileName,
+                content_type: upload.contentType,
+                data_base64: upload.dataBase64,
+              }))
+            : undefined,
+          written_response: item.writtenResponse?.trim() || undefined,
+          dropdown_value: item.dropdownValue?.trim() || undefined,
+        }))
+      : [];
+
+    const response = await this.authFetch(
+      `/improvers/workflows/${encodeURIComponent(workflowId)}/steps/${encodeURIComponent(stepId)}/complete`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          step_not_possible: input.stepNotPossible === true,
+          step_not_possible_details: input.stepNotPossibleDetails?.trim() || undefined,
+          items: normalizedItems,
+        }),
+      },
+    );
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to complete this workflow step");
+    }
+    const body = (await response.json()) as WorkflowResponse;
+    return mapWorkflow(body);
+  }
+
+  async requestWorkflowStepPayoutRetry(
+    workflowId: string,
+    stepId: string,
+  ): Promise<AppWorkflow> {
+    const response = await this.authFetch(
+      `/improvers/workflows/${encodeURIComponent(workflowId)}/steps/${encodeURIComponent(stepId)}/payout-request`,
+      { method: "POST" },
+    );
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to request payout retry");
+    }
+    const body = (await response.json()) as WorkflowResponse;
+    return mapWorkflow(body);
+  }
+
+  async getWorkflow(workflowId: string): Promise<AppWorkflow> {
+    const response = await this.authFetch(`/workflows/${encodeURIComponent(workflowId)}`);
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load workflow details");
+    }
+    const body = (await response.json()) as WorkflowResponse;
+    return mapWorkflow(body);
   }
 
   async getWallets(): Promise<AppWallet[]> {
@@ -978,6 +1847,51 @@ export class AppBackendClient {
       createdAt: entry.created_at,
       updatedAt: entry.updated_at,
     }));
+  }
+
+  async requestVerifiedEmail(email: string): Promise<VerifiedEmail> {
+    const response = await this.authFetch("/users/verified-emails", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email.trim() }),
+    });
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to request email verification");
+    }
+    const body = (await response.json()) as VerifiedEmailResponse[number];
+    return {
+      id: body.id,
+      userId: body.user_id,
+      email: body.email,
+      status: body.status,
+      verifiedAt: body.verified_at,
+      verificationSentAt: body.verification_sent_at,
+      verificationTokenExpiresAt: body.verification_token_expires_at,
+      createdAt: body.created_at,
+      updatedAt: body.updated_at,
+    };
+  }
+
+  async resendVerifiedEmail(emailId: string): Promise<VerifiedEmail> {
+    const response = await this.authFetch(
+      `/users/verified-emails/${encodeURIComponent(emailId)}/resend`,
+      { method: "POST" },
+    );
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to resend email verification");
+    }
+    const body = (await response.json()) as VerifiedEmailResponse[number];
+    return {
+      id: body.id,
+      userId: body.user_id,
+      email: body.email,
+      status: body.status,
+      verifiedAt: body.verified_at,
+      verificationSentAt: body.verification_sent_at,
+      verificationTokenExpiresAt: body.verification_token_expires_at,
+      createdAt: body.created_at,
+      updatedAt: body.updated_at,
+    };
   }
 
   async getNotificationSubscriptions(): Promise<PonderSubscription[]> {
