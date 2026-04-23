@@ -39,14 +39,14 @@ const googleServicesFile = resolveGoogleServicesFile();
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: "SFLUV Wallet",
+  name: "SFLuv",
   slug: "sfluv-wallet",
   owner: "sanchez0",
   version: "0.1.0",
   scheme: "sfluvwallet",
   orientation: "portrait",
   icon: "./assets/icon.png",
-  userInterfaceStyle: "light",
+  userInterfaceStyle: "automatic",
   ios: {
     supportsTablet: false,
     bundleIdentifier: process.env.IOS_BUNDLE_IDENTIFIER?.trim() || DEFAULT_IOS_BUNDLE_IDENTIFIER,
@@ -56,6 +56,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
     associatedDomains: ["applinks:app.sfluv.org"],
     infoPlist: {
+      CFBundleDisplayName: "SFLuv",
       ITSAppUsesNonExemptEncryption: false,
     },
   },
@@ -92,7 +93,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       "expo-camera",
       {
-        cameraPermission: "SFLUV Wallet uses your camera to scan payment, reward, and contact QR codes.",
+        cameraPermission: "SFLuv uses your camera to scan payment, reward, and contact QR codes.",
         recordAudioAndroid: false,
       },
     ],
@@ -100,7 +101,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       "expo-location",
       {
-        locationWhenInUsePermission: "SFLUV Wallet uses your location to show nearby merchants and your position on the merchant map.",
+        locationWhenInUsePermission: "SFLuv uses your location to show nearby merchants and your position on the merchant map.",
       },
     ],
     "expo-notifications",

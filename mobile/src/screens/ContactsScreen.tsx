@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import QRCode from "react-native-qrcode-svg";
@@ -67,6 +67,7 @@ export function ContactsScreen({
   const [busyID, setBusyID] = useState<number | "scan" | null>(null);
   const [listErrorMessage, setListErrorMessage] = useState<string | null>(null);
   const [scanErrorMessage, setScanErrorMessage] = useState<string | null>(null);
+  const [shareErrorMessage, setShareErrorMessage] = useState<string | null>(null);
   const [pendingScannedAddress, setPendingScannedAddress] = useState<string | null>(null);
   const [pendingScannedName, setPendingScannedName] = useState("");
   const [permission, requestPermission] = useCameraPermissions();
@@ -151,6 +152,24 @@ export function ContactsScreen({
     setScanErrorMessage(null);
   };
 
+  const handleShareContact = async () => {
+    if (!shareQRValue) {
+      setShareErrorMessage("Your wallet is still loading, so there is no contact link to share yet.");
+      return;
+    }
+
+    setShareErrorMessage(null);
+    try {
+      await Share.share({
+        title: "SFLuv contact",
+        message: `Save my SFLuv contact: ${shareQRValue}`,
+        url: shareQRValue,
+      });
+    } catch (error) {
+      setShareErrorMessage((error as Error)?.message || "Unable to open the share sheet right now.");
+    }
+  };
+
   return (
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       {syncNotice ? (
@@ -195,6 +214,13 @@ export function ContactsScreen({
                 <QRCode value={shareQRValue} size={216} backgroundColor={palette.white} color="#111111" />
               </View>
               <Text style={styles.qrAddress}>{shortAddress(shareAddress || "")}</Text>
+              <Pressable style={[styles.primaryButton, styles.shareButton]} onPress={() => void handleShareContact()}>
+                <View style={styles.primaryButtonContent}>
+                  <Ionicons name="share-social-outline" size={16} color={palette.white} />
+                  <Text style={styles.primaryButtonText}>Share contact</Text>
+                </View>
+              </Pressable>
+              {shareErrorMessage ? <Text style={styles.errorText}>{shareErrorMessage}</Text> : null}
             </View>
           ) : (
             <View style={styles.emptyStateCard}>
@@ -591,6 +617,16 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       alignItems: "center",
       justifyContent: "center",
       paddingHorizontal: 12,
+    },
+    shareButton: {
+      flex: 0,
+      alignSelf: "stretch",
+    },
+    primaryButtonContent: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: spacing.xs,
     },
     primaryButtonText: {
       color: palette.white,

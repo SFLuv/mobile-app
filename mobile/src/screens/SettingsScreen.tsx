@@ -44,6 +44,8 @@ type Props = {
   onLogout?: () => void;
 };
 
+type SettingsSection = "general" | "wallets" | "account";
+
 function shortAddress(address: string): string {
   if (address.length <= 16) return address;
   return `${address.slice(0, 8)}...${address.slice(-6)}`;
@@ -327,6 +329,7 @@ export function SettingsScreen({
 }: Props) {
   const { palette, shadows } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
+  const [section, setSection] = useState<SettingsSection>("general");
 
   const applyThemePreference = (themePreference: ThemePreference) => {
     onUpdatePreferences({ ...preferences, themePreference });
@@ -348,176 +351,209 @@ export function SettingsScreen({
         </View>
       ) : null}
 
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Appearance</Text>
-        <Text style={styles.body}>System now follows your phone preference, while light and dark remain manual overrides on this device.</Text>
-        <View style={styles.themeRow}>
-          <ThemeOption label="System" active={preferences.themePreference === "system"} onPress={() => applyThemePreference("system")} />
-          <ThemeOption label="Light" active={preferences.themePreference === "light"} onPress={() => applyThemePreference("light")} />
-          <ThemeOption label="Dark" active={preferences.themePreference === "dark"} onPress={() => applyThemePreference("dark")} />
-        </View>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>App behavior</Text>
-        <PreferenceRow
-          title="Notifications"
-          body="Get phone alerts on this device when money lands in one of your wallets."
-          value={preferences.notificationsEnabled}
-          onValueChange={(notificationsEnabled) => onUpdatePreferences({ ...preferences, notificationsEnabled })}
-        />
-        <PreferenceRow
-          title="Haptic feedback"
-          body="Toggle whether your phone will buzz when you send or receive."
-          value={preferences.hapticsEnabled}
-          onValueChange={(hapticsEnabled) => onUpdatePreferences({ ...preferences, hapticsEnabled })}
-        />
-        <View style={styles.pushStatusCard}>
-          <View style={styles.pushStatusHeader}>
-            <Text style={styles.pushStatusTitle}>Push status</Text>
-            <Pressable
-              style={[styles.syncButton, notificationSyncState === "syncing" ? styles.buttonDisabled : undefined]}
-              disabled={notificationSyncState === "syncing"}
-              onPress={onSyncNotifications}
-            >
-              <Text style={styles.syncButtonText}>{notificationSyncState === "syncing" ? "Syncing..." : "Sync now"}</Text>
-            </Pressable>
-          </View>
-          <Text style={styles.pushStatusMeta}>System permission: {formatPermissionStatus(notificationPermissionStatus)}</Text>
-          <Text style={styles.pushStatusMeta}>Device token: {notificationTokenRegistered ? "Registered" : "Missing"}</Text>
-          <Text style={styles.pushStatusMeta}>
-            Wallet subscriptions: {notificationSubscribedCount} / {notificationAddressCount}
-          </Text>
-          {notificationStatusMessage ? <Text style={styles.pushStatusMessage}>{notificationStatusMessage}</Text> : null}
-        </View>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>{user?.name || "SFLUV User"}</Text>
-        <Text style={styles.meta}>User ID: {user?.id || "Not loaded"}</Text>
-        {user?.contactEmail ? <Text style={styles.meta}>Email: {user.contactEmail}</Text> : null}
-        {user?.contactPhone ? <Text style={styles.meta}>Phone: {user.contactPhone}</Text> : null}
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Current wallet</Text>
-        <Text style={styles.body}>This is the smart account currently active in the app.</Text>
-        {activeWalletLabel ? <Text style={styles.currentWalletLabel}>{activeWalletLabel}</Text> : null}
-        <Text style={styles.walletAddress}>{activeWalletAddress ? shortAddress(activeWalletAddress) : "Wallet not loaded yet"}</Text>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Wallet settings</Text>
-        <Text style={styles.body}>Wallet names come from the shared backend. You can rename them here, choose your primary wallet, and decide which smart wallets appear in the chooser.</Text>
-        {wallets.length === 0 ? (
-          <Text style={styles.meta}>No wallets are loaded yet.</Text>
-        ) : (
-          wallets.map((wallet) => (
-            <WalletSettingsRow
-              key={`${wallet.id ?? walletAddress(wallet)}:${walletAddress(wallet)}`}
-              wallet={wallet}
-              isPrimary={walletAddress(wallet).toLowerCase() === normalizedPrimaryWallet}
-              onRenameWallet={onRenameWallet}
-              onSetPrimaryWallet={onSetPrimaryWallet}
-              onSetWalletVisibility={onSetWalletVisibility}
-            />
-          ))
-        )}
-      </View>
-
-      {onLogout ? (
-        <Pressable style={styles.logoutButton} onPress={onLogout}>
-          <Text style={styles.logoutButtonText}>Log out</Text>
+      <View style={styles.segmentWrap}>
+        <Pressable
+          style={[styles.segmentButton, section === "general" ? styles.segmentButtonActive : undefined]}
+          onPress={() => setSection("general")}
+        >
+          <Text style={[styles.segmentText, section === "general" ? styles.segmentTextActive : undefined]}>General</Text>
         </Pressable>
+        <Pressable
+          style={[styles.segmentButton, section === "wallets" ? styles.segmentButtonActive : undefined]}
+          onPress={() => setSection("wallets")}
+        >
+          <Text style={[styles.segmentText, section === "wallets" ? styles.segmentTextActive : undefined]}>Wallets</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.segmentButton, section === "account" ? styles.segmentButtonActive : undefined]}
+          onPress={() => setSection("account")}
+        >
+          <Text style={[styles.segmentText, section === "account" ? styles.segmentTextActive : undefined]}>Account</Text>
+        </Pressable>
+      </View>
+
+      {section === "general" ? (
+        <>
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Appearance</Text>
+            <Text style={styles.body}>System now follows your phone preference, while light and dark remain manual overrides on this device.</Text>
+            <View style={styles.themeRow}>
+              <ThemeOption label="System" active={preferences.themePreference === "system"} onPress={() => applyThemePreference("system")} />
+              <ThemeOption label="Light" active={preferences.themePreference === "light"} onPress={() => applyThemePreference("light")} />
+              <ThemeOption label="Dark" active={preferences.themePreference === "dark"} onPress={() => applyThemePreference("dark")} />
+            </View>
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>App behavior</Text>
+            <PreferenceRow
+              title="Notifications"
+              body="Get phone alerts on this device when money lands in one of your wallets."
+              value={preferences.notificationsEnabled}
+              onValueChange={(notificationsEnabled) => onUpdatePreferences({ ...preferences, notificationsEnabled })}
+            />
+            <PreferenceRow
+              title="Haptic feedback"
+              body="Toggle whether your phone will buzz when you send or receive."
+              value={preferences.hapticsEnabled}
+              onValueChange={(hapticsEnabled) => onUpdatePreferences({ ...preferences, hapticsEnabled })}
+            />
+            <View style={styles.pushStatusCard}>
+              <View style={styles.pushStatusHeader}>
+                <Text style={styles.pushStatusTitle}>Push status</Text>
+                <Pressable
+                  style={[styles.syncButton, notificationSyncState === "syncing" ? styles.buttonDisabled : undefined]}
+                  disabled={notificationSyncState === "syncing"}
+                  onPress={onSyncNotifications}
+                >
+                  <Text style={styles.syncButtonText}>{notificationSyncState === "syncing" ? "Syncing..." : "Sync now"}</Text>
+                </Pressable>
+              </View>
+              <Text style={styles.pushStatusMeta}>System permission: {formatPermissionStatus(notificationPermissionStatus)}</Text>
+              <Text style={styles.pushStatusMeta}>Device token: {notificationTokenRegistered ? "Registered" : "Missing"}</Text>
+              <Text style={styles.pushStatusMeta}>
+                Wallet subscriptions: {notificationSubscribedCount} / {notificationAddressCount}
+              </Text>
+              {notificationStatusMessage ? <Text style={styles.pushStatusMessage}>{notificationStatusMessage}</Text> : null}
+            </View>
+          </View>
+        </>
       ) : null}
 
-      {googleLinked ? (
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Google sign-in</Text>
-          <Text style={styles.body}>
-            Google is linked to this account for future sign-ins.
-          </Text>
-          {googleLinkedEmail ? <Text style={styles.meta}>Google email: {googleLinkedEmail}</Text> : null}
-          {googleDisconnectDisabledReason ? (
-            <Text style={styles.meta}>{googleDisconnectDisabledReason}</Text>
-          ) : null}
-          {googleMessage ? <Text style={styles.inlineError}>{googleMessage}</Text> : null}
-          <Pressable
-            style={[
-              styles.primaryActionButton,
-              googleActionBusy || !googleCanDisconnect ? styles.buttonDisabled : undefined,
-            ]}
-            disabled={googleActionBusy || !googleCanDisconnect}
-            onPress={onDisconnectGoogle}
-          >
-            <Text style={styles.primaryActionButtonText}>
-              {googleCanDisconnect
-                ? googleActionBusy
-                  ? "Disconnecting..."
-                  : "Disconnect Google"
-                : "Google linked"}
-            </Text>
-          </Pressable>
-        </View>
+      {section === "wallets" ? (
+        <>
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Current wallet</Text>
+            <Text style={styles.body}>This is the smart account currently active in the app.</Text>
+            {activeWalletLabel ? <Text style={styles.currentWalletLabel}>{activeWalletLabel}</Text> : null}
+            <Text style={styles.walletAddress}>{activeWalletAddress ? shortAddress(activeWalletAddress) : "Wallet not loaded yet"}</Text>
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Wallet settings</Text>
+            <Text style={styles.body}>Wallet names come from the shared backend. You can rename them here, choose your primary wallet, and decide which smart wallets appear in the chooser.</Text>
+            {wallets.length === 0 ? (
+              <Text style={styles.meta}>No wallets are loaded yet.</Text>
+            ) : (
+              wallets.map((wallet) => (
+                <WalletSettingsRow
+                  key={`${wallet.id ?? walletAddress(wallet)}:${walletAddress(wallet)}`}
+                  wallet={wallet}
+                  isPrimary={walletAddress(wallet).toLowerCase() === normalizedPrimaryWallet}
+                  onRenameWallet={onRenameWallet}
+                  onSetPrimaryWallet={onSetPrimaryWallet}
+                  onSetWalletVisibility={onSetWalletVisibility}
+                />
+              ))
+            )}
+          </View>
+        </>
       ) : null}
 
-      {onLinkApple ? (
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Apple sign-in</Text>
-          <Text style={styles.body}>
-            {appleLinked
-              ? "Apple is linked to this account for future Apple sign-ins."
-              : "Link Apple so future Apple sign-ins land on this account."}
-          </Text>
-          {appleLinkedEmail ? <Text style={styles.meta}>Apple email: {appleLinkedEmail}</Text> : null}
-          {appleDisconnectDisabledReason ? (
-            <Text style={styles.meta}>{appleDisconnectDisabledReason}</Text>
-          ) : null}
-          {appleLinkMessage ? <Text style={styles.inlineError}>{appleLinkMessage}</Text> : null}
-          <Pressable
-            style={[
-              styles.primaryActionButton,
-              appleLinkBusy || (appleLinked ? !appleCanDisconnect : false) ? styles.buttonDisabled : undefined,
-            ]}
-            disabled={appleLinkBusy || (appleLinked ? !appleCanDisconnect : false)}
-            onPress={appleLinked ? onDisconnectApple : onLinkApple}
-          >
-            <Text style={styles.primaryActionButtonText}>
-              {appleLinked
-                ? appleCanDisconnect
-                  ? appleLinkBusy
-                    ? "Disconnecting..."
-                    : "Disconnect Apple"
-                  : "Apple linked"
-                : appleLinkBusy
-                  ? "Linking..."
-                  : "Link Apple"}
-            </Text>
-          </Pressable>
-        </View>
-      ) : null}
+      {section === "account" ? (
+        <>
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>{user?.name || "SFLUV User"}</Text>
+            <Text style={styles.meta}>User ID: {user?.id || "Not loaded"}</Text>
+            {user?.contactEmail ? <Text style={styles.meta}>Email: {user.contactEmail}</Text> : null}
+            {user?.contactPhone ? <Text style={styles.meta}>Phone: {user.contactPhone}</Text> : null}
+          </View>
 
-      {onDeleteAccount ? (
-        <View style={[styles.card, styles.deleteAccountCard]}>
-          <Text style={styles.sectionTitle}>Delete account</Text>
-          <Text style={styles.body}>
-            Delete your account and log out. Your account will be recoverable for the next 30 days,
-            but any SFLUV in your accessible wallets will be transferred out of your account before
-            the deletion request is submitted.
-          </Text>
-          {accountDeletionMessage ? (
-            <Text style={styles.inlineError}>{accountDeletionMessage}</Text>
+          {googleLinked ? (
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>Google Sign-In</Text>
+              <Text style={styles.body}>
+                Google is linked to this account for future sign-ins.
+              </Text>
+              {googleLinkedEmail ? <Text style={styles.meta}>Google email: {googleLinkedEmail}</Text> : null}
+              {googleDisconnectDisabledReason ? (
+                <Text style={styles.meta}>{googleDisconnectDisabledReason}</Text>
+              ) : null}
+              {googleMessage ? <Text style={styles.meta}>{googleMessage}</Text> : null}
+              <Pressable
+                style={[
+                  styles.secondaryButton,
+                  googleActionBusy || !googleCanDisconnect ? styles.buttonDisabled : undefined,
+                ]}
+                disabled={googleActionBusy || !googleCanDisconnect}
+                onPress={onDisconnectGoogle}
+              >
+                <Text style={styles.secondaryButtonText}>
+                  {googleCanDisconnect
+                    ? googleActionBusy
+                      ? "Disconnecting Google..."
+                      : "Disconnect Google"
+                    : "Google linked"}
+                </Text>
+              </Pressable>
+            </View>
           ) : null}
-          <Pressable
-            style={[styles.deleteAccountButton, accountDeletionBusy ? styles.buttonDisabled : undefined]}
-            disabled={accountDeletionBusy}
-            onPress={onDeleteAccount}
-          >
-            <Text style={styles.deleteAccountButtonText}>
-              {accountDeletionBusy ? "Preparing..." : "Delete account"}
-            </Text>
-          </Pressable>
-        </View>
+
+          {onLinkApple ? (
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>Apple Sign-In</Text>
+              <Text style={styles.body}>
+                {appleLinked
+                  ? "Apple is linked to this account for future Apple sign-ins."
+                  : "Link Apple so future Apple sign-ins land on this account."}
+              </Text>
+              {appleLinkedEmail ? <Text style={styles.meta}>Apple email: {appleLinkedEmail}</Text> : null}
+              {appleDisconnectDisabledReason ? (
+                <Text style={styles.meta}>{appleDisconnectDisabledReason}</Text>
+              ) : null}
+              {appleLinkMessage ? <Text style={styles.meta}>{appleLinkMessage}</Text> : null}
+              <Pressable
+                style={[
+                  appleLinked ? styles.secondaryButton : styles.primaryActionButton,
+                  appleLinkBusy || (appleLinked ? !appleCanDisconnect : false) ? styles.buttonDisabled : undefined,
+                ]}
+                disabled={appleLinkBusy || (appleLinked ? !appleCanDisconnect : false)}
+                onPress={appleLinked ? onDisconnectApple : onLinkApple}
+              >
+                <Text style={appleLinked ? styles.secondaryButtonText : styles.primaryActionButtonText}>
+                  {appleLinked
+                    ? appleCanDisconnect
+                      ? appleLinkBusy
+                        ? "Disconnecting Apple..."
+                        : "Disconnect Apple"
+                      : "Apple linked"
+                    : appleLinkBusy
+                      ? "Linking Apple..."
+                      : "Link Apple"}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {onDeleteAccount ? (
+            <View style={[styles.card, styles.deleteAccountCard]}>
+              <Text style={styles.sectionTitle}>Delete account</Text>
+              <Text style={styles.body}>
+                Delete your account and log out. Your account will be recoverable for the next 30 days,
+                but any SFLUV in your accessible wallets will be transferred out of your account before
+                the deletion request is submitted.
+              </Text>
+              {accountDeletionMessage ? (
+                <Text style={styles.inlineError}>{accountDeletionMessage}</Text>
+              ) : null}
+              <Pressable
+                style={[styles.deleteAccountButton, accountDeletionBusy ? styles.buttonDisabled : undefined]}
+                disabled={accountDeletionBusy}
+                onPress={onDeleteAccount}
+              >
+                <Text style={styles.deleteAccountButtonText}>
+                  {accountDeletionBusy ? "Preparing..." : "Delete account"}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {onLogout ? (
+            <Pressable style={styles.logoutButton} onPress={onLogout}>
+              <Text style={styles.logoutButtonText}>Log out</Text>
+            </Pressable>
+          ) : null}
+        </>
       ) : null}
     </ScrollView>
   );
@@ -580,6 +616,32 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     body: {
       color: palette.textMuted,
       lineHeight: 21,
+    },
+    segmentWrap: {
+      flexDirection: "row",
+      gap: spacing.sm,
+      backgroundColor: palette.surfaceStrong,
+      borderRadius: radii.lg,
+      padding: 6,
+      borderWidth: 1,
+      borderColor: palette.border,
+    },
+    segmentButton: {
+      flex: 1,
+      borderRadius: radii.md,
+      paddingVertical: 12,
+      alignItems: "center",
+    },
+    segmentButtonActive: {
+      backgroundColor: palette.primary,
+    },
+    segmentText: {
+      color: palette.textMuted,
+      fontWeight: "800",
+      fontSize: 13,
+    },
+    segmentTextActive: {
+      color: palette.white,
     },
     meta: {
       color: palette.textMuted,

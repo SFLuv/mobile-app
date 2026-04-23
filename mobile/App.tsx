@@ -45,7 +45,6 @@ import { mobileConfig } from "./src/config";
 import {
   clearCachedRouteDiscovery,
   createSmartWalletServiceFromSigner,
-  createSmartWalletServiceForIndex,
   RouteCandidate,
   RouteDiscovery,
   SmartWalletService,
@@ -83,6 +82,7 @@ type RuntimeState = {
   service: SmartWalletService | null;
   discovery: RouteDiscovery | null;
   error: string | null;
+  loadingMessage?: string | null;
 };
 
 type PendingLinkIntent = {
@@ -156,6 +156,30 @@ const TRANSACTION_POLL_INTERVAL_MS = 2_000;
 const WALLET_TRANSACTION_LIMIT = 5;
 const ACTIVITY_TRANSACTION_PAGE_SIZE = 10;
 const LINK_DEDUPE_WINDOW_MS = 4_000;
+const BACKEND_BOOTSTRAP_TIMEOUT_MS = 20_000;
+const WALLET_CREATE_TIMEOUT_MS = 30_000;
+const WALLET_DISCOVERY_TIMEOUT_MS = 45_000;
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timeoutID: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutID = setTimeout(() => {
+      reject(new Error(`Timed out while trying to ${label}. Please try again.`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutID) {
+      clearTimeout(timeoutID);
+    }
+  }
+}
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -167,7 +191,7 @@ Notifications.setNotificationHandler({
 });
 
 function blankRuntime(loading = false): RuntimeState {
-  return { loading, service: null, discovery: null, error: null };
+  return { loading, service: null, discovery: null, error: null, loadingMessage: null };
 }
 
 function buildPublicPolicyURL(path: string): string {
@@ -516,18 +540,14 @@ function smartWalletName(walletOrder: number, smartIndex: number, isNewAccount: 
 
 async function ensureManagedEmbeddedWallets({
   backendClient,
-  signer,
   ownerAddress,
   candidates,
   isNewAccount,
-  getAccessToken,
 }: {
   backendClient: AppBackendClient;
-  signer: ethers.Signer;
   ownerAddress: string;
   candidates: RouteCandidate[];
   isNewAccount: boolean;
-  getAccessToken: () => Promise<string | null>;
 }): Promise<{ latestWallets: AppWallet[]; deployedPrimarySmartWallet: boolean }> {
   let latestWallets = await backendClient.getWallets();
   const normalizedOwner = ethers.utils.getAddress(ownerAddress);
@@ -579,23 +599,10 @@ async function ensureManagedEmbeddedWallets({
     latestWallets = await backendClient.getWallets();
   }
 
-  const primaryCandidate = sortedCandidates.find((candidate) => candidate.smartIndex === 0);
-  if (!primaryCandidate || primaryCandidate.deployed) {
-    return { latestWallets, deployedPrimarySmartWallet: false };
-  }
-
-  const primaryService = await createSmartWalletServiceForIndex(
-    signer,
-    0,
-    getAccessToken,
-    primaryCandidate.accountAddress,
-  );
-  const deployedPrimarySmartWallet = await primaryService.ensureSmartWalletDeployed();
-  if (deployedPrimarySmartWallet) {
-    latestWallets = await backendClient.getWallets();
-  }
-
-  return { latestWallets, deployedPrimarySmartWallet };
+  // Do not block login on first-time smart-account deployment. The smart wallet
+  // address is deterministic and can receive funds before deployment; sends can
+  // deploy lazily via initCode when needed.
+  return { latestWallets, deployedPrimarySmartWallet: false };
 }
 
 async function ensureDefaultPrimaryWalletAssignment(
@@ -690,11 +697,28 @@ function describeAppBackendIssue(error: unknown): string {
   if (error instanceof AppBackendAuthError) {
     return error.message;
   }
+  if ((error as Error)?.name === "AbortError") {
+    return "That request timed out. Check your connection and try again.";
+  }
   const message = (error as Error)?.message?.trim();
   if (!message) {
     return "Some shared app features could not sync right now. Wallet transfers still work.";
   }
   return message;
+}
+
+function describeLoginIssue(error: unknown, fallback = "Unable to sign in right now."): string {
+  if (error instanceof AppBackendPolicyRequiredError && error.policyStatus) {
+    return "Privacy policy acceptance is required before this account can finish loading.";
+  }
+  if (error instanceof AppBackendAuthError) {
+    return error.message;
+  }
+  if ((error as Error)?.name === "AbortError") {
+    return "A login request timed out. Check your connection and try again.";
+  }
+  const message = (error as Error)?.message?.trim();
+  return message || fallback;
 }
 
 function formatDeletionDateLabel(value?: string | null): string | null {
@@ -1959,7 +1983,11 @@ function WalletAppShellContent({
   }, [runtime.service, selectedCandidateKey]);
 
   useEffect(() => {
-    if (!backendClient || !appUser || !walletSyncReady) {
+    if (!backendClient || !appUser) {
+      return;
+    }
+
+    if (preferences.notificationsEnabled && !walletSyncReady) {
       return;
     }
 
@@ -2117,6 +2145,25 @@ function WalletAppShellContent({
   ]);
 
   const handleSyncPushNotifications = () => {
+    if (!backendClient || !appUser) {
+      setPushSyncState((current) => ({
+        ...current,
+        syncState: "idle",
+        message: "Sign in fully before syncing push notifications.",
+      }));
+      return;
+    }
+
+    if (preferences.notificationsEnabled && !walletSyncReady) {
+      setPushSyncState((current) => ({
+        ...current,
+        syncState: "idle",
+        addressCount: notificationAddresses.length,
+        message: "Waiting for your wallets to finish loading before syncing push notifications.",
+      }));
+      return;
+    }
+
     setPushSyncRequestVersion((current) => current + 1);
   };
 
@@ -2343,7 +2390,9 @@ function WalletAppShellContent({
           {showBlockingWalletState ? (
             <View style={styles.centerState}>
               <ActivityIndicator size="large" color={palette.primary} />
-              <Text style={styles.stateText}>Preparing your wallet…</Text>
+              <Text style={styles.stateText}>
+                {runtime.loadingMessage || "Preparing your wallet..."}
+              </Text>
             </View>
           ) : runtime.error ? (
             <View style={styles.centerState}>
@@ -2785,6 +2834,7 @@ function PrivyWalletApp({
   const [appleRecoveryAction, setAppleRecoveryAction] =
     useState<AppleAccountPromptAction>("idle");
   const [appleRecoveryError, setAppleRecoveryError] = useState<string | null>(null);
+  const [showAppleLoginInfo, setShowAppleLoginInfo] = useState(false);
   const [appleLinkMessage, setAppleLinkMessage] = useState<string | null>(null);
   const [appleUnlinkBusy, setAppleUnlinkBusy] = useState(false);
   const [googleMessage, setGoogleMessage] = useState<string | null>(null);
@@ -2796,9 +2846,13 @@ function PrivyWalletApp({
   const recentIncomingLinkRef = useRef<{ signature: string; timestamp: number } | null>(null);
   const embeddedWallet = wallets[0];
 
+  const getAccessTokenRef = useRef(getAccessToken);
+  useEffect(() => {
+    getAccessTokenRef.current = getAccessToken;
+  }, [getAccessToken]);
   const backendClient = useMemo(
-    () => new AppBackendClient(async () => (await getAccessToken()) ?? null),
-    [getAccessToken],
+    () => new AppBackendClient(async () => (await getAccessTokenRef.current()) ?? null),
+    [],
   );
   const linkedAppleAccount = useMemo(() => getLinkedAppleAccount(user), [user]);
   const linkedGoogleAccount = useMemo(() => getLinkedGoogleAccount(user), [user]);
@@ -2842,12 +2896,13 @@ function PrivyWalletApp({
   });
 
   const presentLoginError = (error: unknown) => {
-    const message = (error as Error)?.message?.trim() || "Unable to sign in right now.";
+    const message = describeLoginIssue(error);
     setRuntime({
       loading: false,
       service: null,
       discovery: null,
       error: message,
+      loadingMessage: null,
     });
   };
 
@@ -2977,15 +3032,42 @@ function PrivyWalletApp({
       return;
     }
 
+    let cancelled = false;
     creatingWalletRef.current = true;
-    create({ createAdditional: false })
-      .catch((error) => {
+    const createEmbeddedWallet = async () => {
+      try {
+        await withTimeout(
+          backendClient.ensureUser(),
+          BACKEND_BOOTSTRAP_TIMEOUT_MS,
+          "prepare your SFLUV profile",
+        );
+        if (cancelled || wallets.length > 0) {
+          return;
+        }
+        await withTimeout(
+          create({ createAdditional: false }),
+          WALLET_CREATE_TIMEOUT_MS,
+          "create your Privy wallet",
+        );
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        if (error instanceof AppBackendPolicyRequiredError && error.policyStatus) {
+          showPolicyGate(error.policyStatus);
+          return;
+        }
         presentLoginError(error);
-      })
-      .finally(() => {
+      } finally {
         creatingWalletRef.current = false;
-      });
-  }, [appleRecovery, appleRecoveryState, create, deletedAccountStatus, isReady, policyStatus, user, wallets.length]);
+      }
+    };
+
+    void createEmbeddedWallet();
+    return () => {
+      cancelled = true;
+    };
+  }, [appleRecovery, appleRecoveryState, backendClient, create, deletedAccountStatus, isReady, policyStatus, user, wallets.length]);
 
   useEffect(() => {
     if (!isReady || !user?.id) {
@@ -3117,11 +3199,18 @@ function PrivyWalletApp({
     }
 
     let cancelled = false;
+    const hasAppleRecoveryIdentity = Boolean(
+      linkedAppleAccount?.subject || linkedAppleAccount?.email || appleUserInfoHint?.email,
+    );
     const resolveAppleRecovery = async () => {
       setAppleRecoveryState("checking");
       setAppleRecoveryError(null);
       try {
-        const status = await backendClient.getDeleteAccountStatus();
+        const status = await withTimeout(
+          backendClient.getDeleteAccountStatus(),
+          BACKEND_BOOTSTRAP_TIMEOUT_MS,
+          "check your account status",
+        );
         if (cancelled) {
           return;
         }
@@ -3131,7 +3220,14 @@ function PrivyWalletApp({
           return;
         }
 
-        const recovery = await backendClient.resolveAppleRecovery({
+        if (!hasAppleRecoveryIdentity) {
+          setAppleRecovery(null);
+          setAppleRecoveryState("ready");
+          return;
+        }
+
+        const recovery = await withTimeout(
+          backendClient.resolveAppleRecovery({
           providerSubject: linkedAppleAccount?.subject,
           providerEmail: linkedAppleAccount?.email || appleUserInfoHint?.email || undefined,
           isPrivateRelay: Boolean(
@@ -3139,7 +3235,10 @@ function PrivyWalletApp({
               .toLowerCase()
               .endsWith("@privaterelay.appleid.com"),
           ),
-        });
+          }),
+          BACKEND_BOOTSTRAP_TIMEOUT_MS,
+          "check Apple account recovery",
+        );
         if (cancelled) {
           return;
         }
@@ -3180,14 +3279,13 @@ function PrivyWalletApp({
       cancelled = true;
     };
   }, [
-    appleRecoveryState,
     appleUserInfoHint?.email,
     backendClient,
     deletedAccountStatus,
     isReady,
     linkedAppleAccount?.email,
     linkedAppleAccount?.subject,
-    user,
+    user?.id,
   ]);
 
   useEffect(() => {
@@ -3206,16 +3304,45 @@ function PrivyWalletApp({
 
     let cancelled = false;
     const bootstrap = async () => {
-      setRuntime((state) => ({ ...state, loading: true, error: null }));
+      setRuntime((state) => ({
+        ...state,
+        loading: true,
+        error: null,
+        loadingMessage: "Loading your SFLUV profile...",
+      }));
       try {
+        const profile = await withTimeout(
+          backendClient.ensureUser(),
+          BACKEND_BOOTSTRAP_TIMEOUT_MS,
+          "load your SFLUV profile",
+        );
+        if (cancelled) {
+          return;
+        }
+        setRuntime((state) => ({
+          ...state,
+          loading: true,
+          error: null,
+          loadingMessage: "Opening your Privy wallet...",
+        }));
         const embeddedProvider = await embeddedWallet.getProvider();
         const web3Provider = new ethers.providers.Web3Provider(embeddedProvider as any);
         const signer = web3Provider.getSigner(embeddedWallet.address);
         const accessTokenProvider = async () => (await getAccessToken()) ?? null;
-        let { service, discovery } = await createSmartWalletServiceFromSigner(
-          signer,
-          preferredCandidateKey,
-          accessTokenProvider,
+        setRuntime((state) => ({
+          ...state,
+          loading: true,
+          error: null,
+          loadingMessage: "Finding your smart wallet...",
+        }));
+        let { service, discovery } = await withTimeout(
+          createSmartWalletServiceFromSigner(
+            signer,
+            preferredCandidateKey,
+            accessTokenProvider,
+          ),
+          WALLET_DISCOVERY_TIMEOUT_MS,
+          "discover your smart wallet",
         );
         const initialPreferredCandidateKey = resolveCandidateKeyWithPreferences({
           candidates: discovery.candidates,
@@ -3225,10 +3352,14 @@ function PrivyWalletApp({
           hiddenWalletAddresses: walletPreferences.hiddenWalletAddresses,
         });
         if (initialPreferredCandidateKey && initialPreferredCandidateKey !== discovery.selectedCandidateKey) {
-          ({ service, discovery } = await createSmartWalletServiceFromSigner(
-            signer,
-            initialPreferredCandidateKey,
-            accessTokenProvider,
+          ({ service, discovery } = await withTimeout(
+            createSmartWalletServiceFromSigner(
+              signer,
+              initialPreferredCandidateKey,
+              accessTokenProvider,
+            ),
+            WALLET_DISCOVERY_TIMEOUT_MS,
+            "load your selected smart wallet",
           ));
         }
         const bootstrapKey = `${user.id}:${discovery.ownerAddress.toLowerCase()}`;
@@ -3236,16 +3367,23 @@ function PrivyWalletApp({
         if (bootstrappedIdentityRef.current !== bootstrapKey) {
           if (!cancelled) {
             setBackendBootstrapReady(false);
+            setRuntime((state) => ({
+              ...state,
+              loading: true,
+              error: null,
+              loadingMessage: "Syncing your wallet profile...",
+            }));
           }
-          const profile = await backendClient.ensureUser();
-          const { latestWallets, deployedPrimarySmartWallet } = await ensureManagedEmbeddedWallets({
-            backendClient,
-            signer,
-            ownerAddress: discovery.ownerAddress,
-            candidates: discovery.candidates,
-            isNewAccount: profile.wallets.length === 0,
-            getAccessToken: accessTokenProvider,
-          });
+          const { latestWallets, deployedPrimarySmartWallet } = await withTimeout(
+            ensureManagedEmbeddedWallets({
+              backendClient,
+              ownerAddress: discovery.ownerAddress,
+              candidates: discovery.candidates,
+              isNewAccount: profile.wallets.length === 0,
+            }),
+            BACKEND_BOOTSTRAP_TIMEOUT_MS,
+            "sync your wallet profile",
+          );
           const updatedPrimaryWalletAddress =
             (await ensureDefaultPrimaryWalletAssignment(
               backendClient,
@@ -3270,11 +3408,15 @@ function PrivyWalletApp({
             clearCachedRouteDiscovery(discovery.ownerAddress);
           }
           if (deployedPrimarySmartWallet || (syncedPreferredCandidateKey && syncedPreferredCandidateKey !== discovery.selectedCandidateKey)) {
-            ({ service, discovery } = await createSmartWalletServiceFromSigner(
-              signer,
-              syncedPreferredCandidateKey,
-              accessTokenProvider,
-              deployedPrimarySmartWallet ? { forceRefresh: true } : undefined,
+            ({ service, discovery } = await withTimeout(
+              createSmartWalletServiceFromSigner(
+                signer,
+                syncedPreferredCandidateKey,
+                accessTokenProvider,
+                deployedPrimarySmartWallet ? { forceRefresh: true } : undefined,
+              ),
+              WALLET_DISCOVERY_TIMEOUT_MS,
+              "refresh your smart wallet",
             ));
           }
           bootstrappedIdentityRef.current = bootstrapKey;
@@ -3287,6 +3429,7 @@ function PrivyWalletApp({
           service,
           discovery,
           error: null,
+          loadingMessage: null,
         });
         setBackendBootstrapReady(true);
       } catch (error) {
@@ -3361,6 +3504,16 @@ function PrivyWalletApp({
     oauthState.status === "loading" || linkOauthState.status === "loading";
   const authLoading = oauthLoading || emailLoading;
   const selectedCandidateKey = runtime.discovery?.selectedCandidateKey;
+  const walletInitializingMessage =
+    appleRecoveryState === "checking"
+      ? "Checking your account status..."
+      : appleRecoveryState !== "ready"
+        ? "Preparing account recovery checks..."
+        : !walletPreferencesReady
+          ? "Loading wallet preferences..."
+          : !embeddedWallet
+            ? "Creating your Privy wallet..."
+            : runtime.loadingMessage || (runtime.loading ? "Preparing your wallet..." : null);
   const walletInitializing =
     Boolean(user) &&
     !runtime.error &&
@@ -3378,7 +3531,7 @@ function PrivyWalletApp({
     }
   };
 
-  const handleAppleLogin = async () => {
+  const startAppleLogin = async () => {
     try {
       setLoginNotice(null);
       setAppleUserInfoHint(null);
@@ -3396,6 +3549,13 @@ function PrivyWalletApp({
     } catch (error) {
       presentLoginError(error);
     }
+  };
+
+  const handleAppleLogin = () => {
+    if (authLoading) {
+      return;
+    }
+    setShowAppleLoginInfo(true);
   };
 
   const handleSendEmailCode = async () => {
@@ -3761,33 +3921,6 @@ function PrivyWalletApp({
             </>
           ) : (
             <>
-              {Platform.OS === "ios" ? (
-                <AppleAuthentication.AppleAuthenticationButton
-                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-                  cornerRadius={999}
-                  style={[styles.appleLoginButton, authLoading ? styles.loginButtonDisabled : undefined]}
-                  onPress={() => {
-                    if (authLoading) {
-                      return;
-                    }
-                    void handleAppleLogin();
-                  }}
-                />
-              ) : (
-                <Pressable
-                  style={[styles.loginAppleFallbackButton, authLoading ? styles.loginButtonDisabled : undefined]}
-                  disabled={authLoading}
-                  onPress={() => {
-                    void handleAppleLogin();
-                  }}
-                >
-                  <Ionicons name="logo-apple" size={18} color={palette.white} />
-                  <Text style={styles.loginAppleFallbackButtonText}>
-                    {oauthLoading ? "Connecting..." : "Continue with Apple"}
-                  </Text>
-                </Pressable>
-              )}
               <Pressable
                 style={[styles.loginButton, authLoading ? styles.loginButtonDisabled : undefined]}
                 disabled={authLoading}
@@ -3808,6 +3941,30 @@ function PrivyWalletApp({
               >
                 <Text style={styles.loginSecondaryButtonText}>Continue with Email</Text>
               </Pressable>
+              {Platform.OS === "ios" ? (
+                <AppleAuthentication.AppleAuthenticationButton
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                  cornerRadius={999}
+                  style={[styles.appleLoginButton, authLoading ? styles.loginButtonDisabled : undefined]}
+                  onPress={() => {
+                    handleAppleLogin();
+                  }}
+                />
+              ) : (
+                <Pressable
+                  style={[styles.loginAppleFallbackButton, authLoading ? styles.loginButtonDisabled : undefined]}
+                  disabled={authLoading}
+                  onPress={() => {
+                    handleAppleLogin();
+                  }}
+                >
+                  <Ionicons name="logo-apple" size={18} color={palette.white} />
+                  <Text style={styles.loginAppleFallbackButtonText}>
+                    {oauthLoading ? "Connecting..." : "Continue with Apple"}
+                  </Text>
+                </Pressable>
+              )}
             </>
           )}
           <View style={styles.loginPolicyLinks}>
@@ -3831,6 +3988,57 @@ function PrivyWalletApp({
           </View>
           {runtime.error ? <Text style={styles.errorText}>{runtime.error}</Text> : null}
         </View>
+        <Modal
+          visible={showAppleLoginInfo}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowAppleLoginInfo(false)}
+        >
+          <View style={styles.loginInfoOverlay}>
+            <View style={styles.loginInfoCard}>
+              <Text style={styles.loginInfoTitle}>Before you continue with Apple</Text>
+              <Text style={styles.loginInfoBody}>
+                Apple can hide your real email behind a private relay address. If that happens during
+                a new sign-in, SFLuv may create a separate account that cannot be auto-linked to an
+                existing Google or email account.
+              </Text>
+              <View style={styles.loginInfoNote}>
+                <Text style={styles.loginInfoNoteText}>
+                  If you already have an SFLuv account, use Google or email first, then link Apple
+                  from Settings.
+                </Text>
+              </View>
+              <View style={styles.loginInfoNote}>
+                <Text style={styles.loginInfoNoteText}>
+                  If Apple no longer shows the email choice, reset it in iPhone Settings &gt; your
+                  name &gt; Sign-In &amp; Security &gt; Sign in with Apple &gt; SFLuv &gt; Stop Using Apple ID,
+                  then try again.
+                </Text>
+              </View>
+              <View style={styles.loginInfoActionStack}>
+                <Pressable
+                  style={[styles.loginInfoPrimaryButton, authLoading ? styles.loginButtonDisabled : undefined]}
+                  disabled={authLoading}
+                  onPress={() => {
+                    setShowAppleLoginInfo(false);
+                    void startAppleLogin();
+                  }}
+                >
+                  <Text style={styles.loginInfoPrimaryButtonText}>
+                    {oauthLoading ? "Connecting..." : "Continue with Apple"}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.loginInfoSecondaryButton, authLoading ? styles.loginButtonDisabled : undefined]}
+                  disabled={authLoading}
+                  onPress={() => setShowAppleLoginInfo(false)}
+                >
+                  <Text style={styles.loginInfoSecondaryButtonText}>Use email or Google instead</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     );
   }
@@ -3841,7 +4049,11 @@ function PrivyWalletApp({
 
   return (
     <WalletAppShell
-      runtime={{ ...runtime, loading: walletInitializing }}
+      runtime={{
+        ...runtime,
+        loading: walletInitializing,
+        loadingMessage: walletInitializingMessage,
+      }}
       selectedCandidateKey={selectedCandidateKey}
       onSelectCandidate={(key) => {
         manualWalletSelectionRef.current = true;
@@ -4396,6 +4608,78 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   loginPolicyLinkDivider: {
     color: palette.textMuted,
     fontSize: 12,
+  },
+  loginInfoOverlay: {
+    flex: 1,
+    backgroundColor: palette.overlay,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: spacing.lg,
+  },
+  loginInfoCard: {
+    width: "100%",
+    maxWidth: 360,
+    backgroundColor: palette.surface,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: palette.border,
+    padding: spacing.lg,
+    gap: spacing.md,
+    ...shadows.card,
+  },
+  loginInfoTitle: {
+    color: palette.primaryStrong,
+    fontSize: 24,
+    fontWeight: "900",
+    lineHeight: 28,
+  },
+  loginInfoBody: {
+    color: palette.textMuted,
+    lineHeight: 22,
+  },
+  loginInfoNote: {
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.surfaceStrong,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  loginInfoNoteText: {
+    color: palette.text,
+    lineHeight: 21,
+    fontWeight: "600",
+  },
+  loginInfoActionStack: {
+    gap: spacing.sm,
+  },
+  loginInfoPrimaryButton: {
+    minHeight: 52,
+    borderRadius: radii.pill,
+    backgroundColor: "#111111",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: spacing.lg,
+  },
+  loginInfoPrimaryButtonText: {
+    color: palette.white,
+    fontWeight: "900",
+    fontSize: 16,
+  },
+  loginInfoSecondaryButton: {
+    minHeight: 52,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: spacing.lg,
+  },
+  loginInfoSecondaryButtonText: {
+    color: palette.primaryStrong,
+    fontWeight: "800",
+    fontSize: 15,
   },
   deletedAccountNotice: {
     borderRadius: radii.md,

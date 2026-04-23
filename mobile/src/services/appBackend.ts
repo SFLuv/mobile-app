@@ -123,12 +123,14 @@ type VerifiedEmailResponse = Array<{
   updated_at: string;
 }>;
 
-type PonderResponse = Array<{
-  id: number;
-  address: string;
-  type: string;
-  data?: string;
-}>;
+type PonderResponse =
+  | Array<{
+      id: number;
+      address: string;
+      type: string;
+      data?: string;
+    }>
+  | null;
 
 type WalletsResponse = Array<{
   id?: number;
@@ -222,9 +224,27 @@ type UserPolicyStatusResponse = {
 
 const POLICY_REQUIRED_HEADER = "X-SFLUV-Auth-Reason";
 const POLICY_REQUIRED_REASON = "privacy-policy-required";
+const APP_BACKEND_REQUEST_TIMEOUT_MS = 25_000;
 
 function endpoint(path: string): string {
   return `${mobileConfig.appBackendURL.replace(/\/+$/, "")}${path}`;
+}
+
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutID = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: options.signal ?? controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutID);
+  }
 }
 
 async function readResponseDetail(response: Response): Promise<string> {
@@ -498,7 +518,11 @@ export class AppBackendClient {
     };
     let response: Response;
     try {
-      response = await fetch(endpoint(path), { ...options, headers });
+      response = await fetchWithTimeout(
+        endpoint(path),
+        { ...options, headers },
+        APP_BACKEND_REQUEST_TIMEOUT_MS,
+      );
     } catch (error) {
       throw new AppBackendRequestError(
         `Unable to reach the shared app backend at ${mobileConfig.appBackendURL}. ${(error as Error)?.message ?? ""}`.trim(),
@@ -966,15 +990,17 @@ export class AppBackendClient {
     }
     const merchantBody = (await merchantResponse.json()) as PonderResponse;
     const pushBody = (await pushResponse.json()) as PonderResponse;
+    const merchantEntries = Array.isArray(merchantBody) ? merchantBody : [];
+    const pushEntries = Array.isArray(pushBody) ? pushBody : [];
 
-    const merchantSubscriptions = merchantBody.map((entry) => ({
+    const merchantSubscriptions = merchantEntries.map((entry) => ({
       id: entry.id,
       address: entry.address,
       type: entry.type,
       email: entry.type === "merchant" ? entry.data : undefined,
       token: entry.type === "push" ? entry.data : undefined,
     }));
-    const pushSubscriptions = pushBody.map((entry) => ({
+    const pushSubscriptions = pushEntries.map((entry) => ({
       id: -Math.abs(entry.id),
       address: entry.address,
       type: entry.type,

@@ -1,5 +1,24 @@
 export type UserOp = Record<string, unknown>;
 
+const CW_ENGINE_REQUEST_TIMEOUT_MS = 30_000;
+
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutID = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: options.signal ?? controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutID);
+  }
+}
+
 export class BackendClient {
   constructor(
     private baseUrl: string,
@@ -24,11 +43,11 @@ export class BackendClient {
     if (accessToken) {
       headers["Access-Token"] = accessToken;
     }
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       method: "POST",
       headers,
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-    });
+    }, CW_ENGINE_REQUEST_TIMEOUT_MS);
 
     const body = await res.json();
     if (body.error) {
