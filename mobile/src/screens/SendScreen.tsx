@@ -44,6 +44,7 @@ type RecipientSuggestion = {
   label: string;
   address: string;
   subtitle?: string;
+  tipToAddress?: string;
 };
 
 type TipTarget = {
@@ -168,12 +169,12 @@ function formatTokenAmount(value: ethers.BigNumberish, maxDecimals = 4): string 
 function formatBalanceText(rawBalance: string): string {
   const normalized = rawBalance.trim();
   if (!normalized || normalized === "...") {
-    return "Balance ...";
+    return "Balance: ... SFLUV";
   }
   try {
-    return `Balance ${sanitizeTokenInput(formatTokenAmount(ethers.utils.parseUnits(normalized, mobileConfig.tokenDecimals), 2)) || "0"}`;
+    return `Balance: ${sanitizeTokenInput(formatTokenAmount(ethers.utils.parseUnits(normalized, mobileConfig.tokenDecimals), 2)) || "0"} SFLUV`;
   } catch {
-    return `Balance ${normalized}`;
+    return `Balance: ${normalized} SFLUV`;
   }
 }
 
@@ -422,6 +423,7 @@ export function SendScreen({
             kind: "merchant" as const,
             label: merchant.name,
             address: merchant.payToAddress!,
+            tipToAddress: merchant.tipToAddress,
             subtitle: distance !== null
               ? formatDistanceLabel(distance)
               : [merchant.type, merchant.city].filter(Boolean).join(" • "),
@@ -461,7 +463,10 @@ export function SendScreen({
 
   const filteredSuggestions = useMemo(() => {
     if (!searchQuery) {
-      return [];
+      if (userLocation && merchantSuggestions.length > 0) {
+        return merchantSuggestions.slice(0, 5);
+      }
+      return allSuggestions.slice(0, 5);
     }
     return allSuggestions
       .filter((suggestion) => {
@@ -469,7 +474,7 @@ export function SendScreen({
         return haystack.includes(searchQuery);
       })
       .slice(0, 5);
-  }, [allSuggestions, searchQuery]);
+  }, [allSuggestions, merchantSuggestions, searchQuery, userLocation]);
 
   useEffect(() => {
     if (!lookupAddress || !backendClient) {
@@ -517,7 +522,12 @@ export function SendScreen({
 
   const paymentLinkRecipient = useMemo<RecipientSuggestion | null>(() => {
     const target = activeTarget ?? parsedTarget;
-    if (!target || (target.source !== "sfluv-link" && target.source !== "citizenwallet-plugin-link")) {
+    if (
+      !target ||
+      (target.source !== "sfluv-link" &&
+        target.source !== "citizenwallet-link" &&
+        target.source !== "citizenwallet-plugin-link")
+    ) {
       return null;
     }
     return {
@@ -723,7 +733,11 @@ export function SendScreen({
 
   const continueToAmount = useCallback(
     (target: SendTarget, suggestion?: RecipientSuggestion | null) => {
-      setActiveTarget(target);
+      const nextTarget =
+        suggestion?.tipToAddress && suggestion.tipToAddress.toLowerCase() !== target.recipient.toLowerCase()
+          ? { ...target, tipToAddress: target.tipToAddress ?? suggestion.tipToAddress }
+          : target;
+      setActiveTarget(nextTarget);
       setRecipientInput(target.recipient);
       if (suggestion) {
         setDraftRecipient(suggestion);
@@ -748,6 +762,10 @@ export function SendScreen({
     (suggestion: RecipientSuggestion) => {
       const target: SendTarget = {
         recipient: suggestion.address,
+        tipToAddress:
+          suggestion.tipToAddress && suggestion.tipToAddress.toLowerCase() !== suggestion.address.toLowerCase()
+            ? suggestion.tipToAddress
+            : undefined,
         amountUnit: "token",
       };
       setDraftRecipient(suggestion);
@@ -758,6 +776,7 @@ export function SendScreen({
 
   const primaryRecipient = activeTarget?.recipient ?? parsedTarget?.recipient ?? "";
   const primaryRecipientLabel = resolvedRecipient?.label || (primaryRecipient ? shortAddress(primaryRecipient) : "");
+  const selectedRecipientForInput = activeTarget ? resolvedRecipient : null;
 
   const submitPayment = useCallback(async () => {
     const target = activeTarget ?? parsedTarget;
@@ -945,7 +964,7 @@ export function SendScreen({
                 suggestion.kind === "merchant" ? styles.kindBadgeTextMerchant : styles.kindBadgeTextContact,
               ]}
             >
-              {suggestion.kind === "merchant" ? "Merchant" : "Contact"}
+              {suggestion.kind === "merchant" ? "Merchant" : suggestion.kind === "payment-link" ? "Link" : "Contact"}
             </Text>
           </View>
         </View>
@@ -971,6 +990,7 @@ export function SendScreen({
           <Pressable style={styles.iconButton} onPress={handleBack}>
             <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
           </Pressable>
+          <Text style={styles.stepHeaderTitle}>Send</Text>
         </View>
 
         {feedback ? (
@@ -1017,7 +1037,9 @@ export function SendScreen({
               </View>
             </View>
 
-            {filteredSuggestions.length > 0 ? (
+            {selectedRecipientForInput ? (
+              <View style={styles.suggestionList}>{renderSuggestionCard(selectedRecipientForInput)}</View>
+            ) : filteredSuggestions.length > 0 ? (
               <View style={styles.suggestionList}>{filteredSuggestions.map((suggestion) => renderSuggestionCard(suggestion))}</View>
             ) : null}
           </>
@@ -1092,6 +1114,7 @@ export function SendScreen({
               <Pressable style={styles.iconButton} onPress={handleBack}>
                 <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
               </Pressable>
+              <Text style={styles.stepHeaderTitle}>Send</Text>
             </View>
 
             {feedback ? (
@@ -1113,6 +1136,8 @@ export function SendScreen({
               </Pressable>
             </View>
 
+            <View style={styles.flexGrow} />
+
             <View style={styles.amountMetaBlock}>
               <Text style={styles.balanceLabel}>{formatBalanceText(availableBalance)}</Text>
               <View style={styles.noteWrap}>
@@ -1129,8 +1154,6 @@ export function SendScreen({
                 />
               </View>
             </View>
-
-            <View style={styles.flexGrow} />
 
             {!noteFocused ? (
               <NumberPad
@@ -1369,7 +1392,14 @@ function createStyles(
       flexDirection: "row",
       justifyContent: "flex-start",
       alignItems: "center",
+      gap: spacing.sm,
       minHeight: 44,
+    },
+    stepHeaderTitle: {
+      color: palette.primaryStrong,
+      fontSize: 22,
+      fontWeight: "900",
+      letterSpacing: 0,
     },
     iconButton: {
       width: 42,
@@ -1579,7 +1609,7 @@ function createStyles(
     footerDock: {
       paddingHorizontal: spacing.lg,
       paddingTop: spacing.sm,
-      paddingBottom: spacing.lg,
+      paddingBottom: spacing.xl,
       backgroundColor: palette.background,
     },
     primaryButton: {
@@ -1651,7 +1681,7 @@ function createStyles(
       letterSpacing: 0.7,
     },
     amountMetaBlock: {
-      gap: compactLayout ? spacing.xs : spacing.sm,
+      gap: denseLayout ? 4 : compactLayout ? spacing.xs : spacing.sm,
     },
     balanceLabel: {
       color: palette.textMuted,
@@ -1703,7 +1733,7 @@ function createStyles(
     },
     sendDock: {
       paddingTop: denseLayout ? 4 : compactLayout ? spacing.xs : spacing.sm,
-      paddingBottom: denseLayout ? spacing.xs : compactLayout ? spacing.md : spacing.lg,
+      paddingBottom: denseLayout ? spacing.md : compactLayout ? spacing.lg : spacing.xl,
     },
     swipeTrack: {
       minHeight: swipeTrackHeight,

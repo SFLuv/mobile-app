@@ -21,6 +21,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { BlurView } from "expo-blur";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
 import * as Linking from "expo-linking";
@@ -1208,6 +1209,7 @@ function WalletAppShellContent({
   const handledPendingLinkIdRef = useRef<number | null>(null);
   const walletTransactionsRef = useRef<AppTransaction[]>(walletTransactions);
   const activityTransactionsRef = useRef<AppTransaction[]>(activityTransactions);
+  const walletPaneGestureMaxXRef = useRef(0);
   const walletOverlayPane: OverlayWalletPane | null = walletPane === "home" ? null : walletPane;
 
   const resetWalletPanePosition = React.useCallback(() => {
@@ -1222,8 +1224,7 @@ function WalletAppShellContent({
     }
 
     const returnTab = walletPane === "send" ? sendReturnTab : null;
-    walletPaneAnimatingRef.current = true;
-    walletPaneTranslateX.stopAnimation((currentValue) => {
+    const runCloseAnimation = (currentValue: number) => {
       walletPaneTranslateX.setValue(currentValue);
       Animated.timing(walletPaneTranslateX, {
         toValue: walletPaneSlideDistance,
@@ -1236,8 +1237,43 @@ function WalletAppShellContent({
         walletPaneTranslateX.setValue(0);
         walletPaneAnimatingRef.current = false;
       });
-    });
+    };
+
+    walletPaneAnimatingRef.current = true;
+    walletPaneTranslateX.stopAnimation(runCloseAnimation);
   }, [sendReturnTab, walletPane, walletPaneSlideDistance, walletPaneTranslateX]);
+
+  const resetWalletPaneSwipe = React.useCallback(
+    (fromValue?: number) => {
+      if (walletPane === "home") {
+        resetWalletPanePosition();
+        return;
+      }
+
+      const runResetAnimation = (currentValue: number) => {
+        walletPaneTranslateX.setValue(Math.max(0, Math.min(currentValue, walletPaneSlideDistance)));
+        walletPaneAnimatingRef.current = true;
+        Animated.spring(walletPaneTranslateX, {
+          toValue: 0,
+          useNativeDriver: true,
+          damping: 22,
+          stiffness: 220,
+          mass: 0.9,
+        }).start(() => {
+          walletPaneTranslateX.setValue(0);
+          walletPaneAnimatingRef.current = false;
+        });
+      };
+
+      if (typeof fromValue === "number") {
+        runResetAnimation(fromValue);
+        return;
+      }
+
+      walletPaneTranslateX.stopAnimation(runResetAnimation);
+    },
+    [resetWalletPanePosition, walletPane, walletPaneSlideDistance, walletPaneTranslateX],
+  );
 
   const walletPanePanResponder = useMemo(
     () =>
@@ -1248,17 +1284,38 @@ function WalletAppShellContent({
           gesture.x0 <= 28 &&
           gesture.dx > 10 &&
           Math.abs(gesture.dx) > Math.abs(gesture.dy),
-        onPanResponderMove: (_, gesture) => {
-          walletPaneTranslateX.setValue(Math.max(0, Math.min(gesture.dx, walletPaneSlideDistance)));
+        onPanResponderGrant: () => {
+          walletPaneGestureMaxXRef.current = 0;
         },
-        onPanResponderRelease: () => {
-          closeWalletPaneToWallet();
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderMove: (_, gesture) => {
+          const currentValue = Math.max(0, Math.min(gesture.dx, walletPaneSlideDistance));
+          walletPaneGestureMaxXRef.current = Math.max(walletPaneGestureMaxXRef.current, currentValue);
+          walletPaneTranslateX.setValue(currentValue);
+        },
+        onPanResponderRelease: (_, gesture) => {
+          const currentValue = Math.max(0, Math.min(gesture.dx, walletPaneSlideDistance));
+          const maxValue = Math.max(walletPaneGestureMaxXRef.current, currentValue);
+          walletPaneGestureMaxXRef.current = 0;
+          if (maxValue >= walletPaneSlideDistance * 0.25 || gesture.vx > 1.05) {
+            closeWalletPaneToWallet();
+            return;
+          }
+          resetWalletPaneSwipe(currentValue);
         },
         onPanResponderTerminate: () => {
-          closeWalletPaneToWallet();
+          walletPaneTranslateX.stopAnimation((currentValue) => {
+            const maxValue = Math.max(walletPaneGestureMaxXRef.current, currentValue);
+            walletPaneGestureMaxXRef.current = 0;
+            if (maxValue >= walletPaneSlideDistance * 0.25) {
+              closeWalletPaneToWallet();
+              return;
+            }
+            resetWalletPaneSwipe(currentValue);
+          });
         },
       }),
-    [closeWalletPaneToWallet, walletOverlayPane, walletPaneSlideDistance, walletPaneTranslateX],
+    [closeWalletPaneToWallet, resetWalletPaneSwipe, walletOverlayPane, walletPaneSlideDistance, walletPaneTranslateX],
   );
 
   useEffect(() => {
@@ -2776,8 +2833,14 @@ function WalletAppShellContent({
         </View>
 
         {showStandardChrome ? (
-          <View style={styles.bottomDockShell}>
-            <View pointerEvents="none" style={styles.bottomDockShellBackdrop}>
+          <View pointerEvents="box-none" style={styles.bottomDockShell}>
+            <BlurView
+              pointerEvents="none"
+              intensity={Platform.OS === "android" ? 24 : 42}
+              tint={isDark ? "dark" : "light"}
+              style={styles.bottomDockShellBackdrop}
+            />
+            <View pointerEvents="none" style={styles.bottomDockLiquidLayer}>
               <View style={styles.bottomDockShellGlowLarge} />
               <View style={styles.bottomDockShellGlowSmall} />
             </View>
@@ -2873,7 +2936,8 @@ function WalletAppShellContent({
       <Modal
         visible={showWalletChooser && canChooseWallet}
         transparent
-        animationType="fade"
+        presentationStyle="overFullScreen"
+        animationType="none"
         onRequestClose={() => setShowWalletChooser(false)}
       >
         <Pressable style={styles.modalOverlay} onPress={() => setShowWalletChooser(false)}>
@@ -2930,7 +2994,8 @@ function WalletAppShellContent({
       <Modal
         visible={showMoreMenu && hasImproverTab}
         transparent
-        animationType="fade"
+        presentationStyle="overFullScreen"
+        animationType="none"
         onRequestClose={() => setShowMoreMenu(false)}
       >
         <Pressable style={styles.modalOverlay} onPress={() => setShowMoreMenu(false)}>
@@ -4861,33 +4926,44 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     lineHeight: 20,
   },
   bottomDockShell: {
-    position: "relative",
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 20,
+    elevation: 20,
     paddingHorizontal: spacing.lg,
     paddingTop: Platform.OS === "android" ? spacing.md : spacing.sm,
     paddingBottom: Platform.OS === "android" ? spacing.sm : 6,
-    backgroundColor: isDark ? "rgba(16,22,27,0.28)" : "rgba(243,239,234,0.20)",
+    backgroundColor: "transparent",
     overflow: "hidden",
   },
   bottomDockShellBackdrop: {
     ...StyleSheet.absoluteFillObject,
   },
+  bottomDockLiquidLayer: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: isDark ? "rgba(16,22,27,0.22)" : "rgba(255,255,255,0.26)",
+    borderTopWidth: 1,
+    borderTopColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.64)",
+  },
   bottomDockShellGlowLarge: {
     position: "absolute",
-    top: -18,
-    left: spacing.xl,
-    width: 180,
-    height: 74,
-    borderRadius: 37,
-    backgroundColor: isDark ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.46)",
+    top: -16,
+    left: spacing.lg,
+    right: spacing.lg,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.52)",
   },
   bottomDockShellGlowSmall: {
     position: "absolute",
-    right: spacing.xl,
-    bottom: -24,
-    width: 120,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: isDark ? "rgba(239,109,102,0.09)" : "rgba(239,109,102,0.13)",
+    left: spacing.lg,
+    right: spacing.lg,
+    bottom: -20,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: isDark ? "rgba(239,109,102,0.10)" : "rgba(239,109,102,0.12)",
   },
   bottomDock: {
     position: "relative",

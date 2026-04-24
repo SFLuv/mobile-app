@@ -25,6 +25,7 @@ export type SfluvUniversalLink =
       address: string;
       amount?: string;
       memo?: string;
+      tipToAddress?: string;
       href: string;
     };
 
@@ -33,7 +34,7 @@ export type SendTarget = {
   amount?: string;
   memo?: string;
   tipToAddress?: string;
-  source?: "sfluv-link" | "citizenwallet-plugin-link" | "transfer-qr";
+  source?: "sfluv-link" | "citizenwallet-link" | "citizenwallet-plugin-link" | "transfer-qr";
   amountUnit: AmountUnit;
 };
 
@@ -76,6 +77,67 @@ function parseQueryLikeString(rawValue: string): URLSearchParams {
   const query = withoutLeadingSlash.startsWith("?") ? withoutLeadingSlash.slice(1) : withoutLeadingSlash;
   const questionMarkIndex = query.indexOf("?");
   return new URLSearchParams(questionMarkIndex >= 0 ? query.slice(questionMarkIndex + 1) : query);
+}
+
+function safeDecodeURIComponent(rawValue: string): string {
+  try {
+    return decodeURIComponent(rawValue);
+  } catch {
+    return rawValue;
+  }
+}
+
+function collectParamsFromURL(parsedURL: URL): URLSearchParams[] {
+  const candidates = [parsedURL.searchParams];
+  if (parsedURL.hash) {
+    candidates.push(parseQueryLikeString(parsedURL.hash));
+  }
+  return candidates.filter((params) => params.toString().length > 0);
+}
+
+function normalizeAddressParam(rawValue: string | null | undefined): string | undefined {
+  if (!rawValue) {
+    return undefined;
+  }
+  const decoded = safeDecodeURIComponent(rawValue).trim();
+  if (ethers.utils.isAddress(decoded)) {
+    return ethers.utils.getAddress(decoded);
+  }
+  return undefined;
+}
+
+function resolveAddressFromParams(
+  params: URLSearchParams,
+  primaryKey: string,
+  shortKey: string,
+  sendToKey?: string,
+): string | undefined {
+  if (sendToKey) {
+    const sendToValue = params.get(sendToKey);
+    if (sendToValue) {
+      const [rawAddress] = safeDecodeURIComponent(sendToValue).split("@");
+      const address = normalizeAddressParam(rawAddress);
+      if (address) {
+        return address;
+      }
+    }
+  }
+
+  const direct = normalizeAddressParam(params.get(primaryKey));
+  if (direct) {
+    return direct;
+  }
+
+  const shortValue = params.get(shortKey)?.trim();
+  if (!shortValue) {
+    return undefined;
+  }
+
+  const decoded = decodeBase64Address(shortValue);
+  if (decoded) {
+    return decoded;
+  }
+  return normalizeAddressParam(shortValue);
 }
 
 function normalizeRedeemCode(rawCode: string | null | undefined): string | undefined {
@@ -212,6 +274,63 @@ function parseCitizenWalletPluginLink(rawValue: string): SendTarget | null {
   };
 }
 
+function parseCitizenWalletMerchantSendLink(rawValue: string): SendTarget | null {
+  const trimmed = rawValue.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const candidates: URLSearchParams[] = [];
+  const collectFromRaw = (value: string) => {
+    try {
+      candidates.push(...collectParamsFromURL(new URL(value)));
+      return;
+    } catch {
+      // Fall through to query-string parsing.
+    }
+
+    const queryLike = value.trim().replace(/^[#?]+/, "");
+    if (queryLike.includes("=")) {
+      try {
+        candidates.push(new URLSearchParams(queryLike));
+      } catch {
+        // Ignore malformed query text.
+      }
+    }
+  };
+
+  collectFromRaw(trimmed);
+  const decoded = safeDecodeURIComponent(trimmed);
+  if (decoded !== trimmed) {
+    collectFromRaw(decoded);
+  }
+
+  for (const params of candidates) {
+    const sendToValue = params.get("sendto") || "";
+    const mode = (params.get("p") || params.get("m") || params.get("mode") || "").trim().toLowerCase();
+    const hasSendIntent = Boolean(sendToValue) || mode === "r" || mode === "s" || mode === "send";
+    const recipient = resolveAddressFromParams(params, "to", "t", "sendto");
+    if (!hasSendIntent || !recipient) {
+      continue;
+    }
+
+    const tipToAddress = resolveAddressFromParams(params, "tipTo", "tt");
+    const amount = normalizeRequestAmount(params.get("amount"));
+    const memo = params.get("memo")?.trim() || undefined;
+
+    return {
+      recipient,
+      amount,
+      memo,
+      tipToAddress,
+      amountUnit: "token",
+      source: "citizenwallet-link",
+    };
+  }
+
+  return null;
+}
+
 function parseCitizenWalletRequestLink(rawValue: string): SendTarget | null {
   const trimmed = rawValue.trim();
   if (!trimmed) {
@@ -249,7 +368,7 @@ function parseCitizenWalletRequestLink(rawValue: string): SendTarget | null {
   const recipient = ethers.utils.getAddress(rawRecipient);
   const rawTipTo = parsedURL.searchParams.get("tipTo")?.trim();
   const tipToAddress =
-    rawTipTo && ethers.utils.isAddress(rawTipTo) && rawTipTo.toLowerCase() !== recipient.toLowerCase()
+    rawTipTo && ethers.utils.isAddress(rawTipTo)
       ? ethers.utils.getAddress(rawTipTo)
       : undefined;
   const amount = normalizeRequestAmount(parsedURL.searchParams.get("amount"));
@@ -276,6 +395,7 @@ function parseHostedRequestLink(rawValue: string): Extract<SfluvUniversalLink, {
     address: parsed.recipient,
     amount: parsed.amount,
     memo: parsed.memo,
+    tipToAddress: parsed.tipToAddress,
     href: rawValue.trim(),
   };
 }
@@ -420,6 +540,7 @@ export function parseSfluvUniversalLink(rawValue: string): SfluvUniversalLink | 
       address: ethers.utils.getAddress(rawParam),
       amount: normalizeRequestAmount(parsedURL.searchParams.get("amount")),
       memo: parsedURL.searchParams.get("memo")?.trim() || undefined,
+      tipToAddress: resolveAddressFromParams(parsedURL.searchParams, "tipTo", "tt"),
       href: trimmed,
     };
   }
@@ -449,6 +570,7 @@ export function parseSendTarget(rawValue: string): SendTarget | null {
       recipient: universalLink.address,
       amount: universalLink.amount,
       memo: universalLink.memo,
+      tipToAddress: universalLink.tipToAddress,
       amountUnit: "token",
       source: "sfluv-link",
     };
@@ -463,6 +585,11 @@ export function parseSendTarget(rawValue: string): SendTarget | null {
   const citizenWalletRequestLink = parseCitizenWalletRequestLink(rawValue);
   if (citizenWalletRequestLink) {
     return citizenWalletRequestLink;
+  }
+
+  const citizenWalletMerchantSendLink = parseCitizenWalletMerchantSendLink(rawValue);
+  if (citizenWalletMerchantSendLink) {
+    return citizenWalletMerchantSendLink;
   }
 
   const citizenWalletPluginLink = parseCitizenWalletPluginLink(rawValue);

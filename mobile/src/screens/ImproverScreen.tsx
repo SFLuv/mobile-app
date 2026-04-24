@@ -3034,7 +3034,8 @@ export function ImproverScreen({
       <Modal
         visible={workflowSelectorVisible}
         transparent
-        animationType="fade"
+        presentationStyle="overFullScreen"
+        animationType="none"
         onRequestClose={() => setWorkflowSelectorVisible(false)}
       >
         <Pressable style={styles.modalOverlay} onPress={() => setWorkflowSelectorVisible(false)}>
@@ -3412,7 +3413,8 @@ export function ImproverScreen({
       <Modal
         visible={Boolean(badgePreview)}
         transparent
-        animationType="fade"
+        presentationStyle="overFullScreen"
+        animationType="none"
         onRequestClose={() => setBadgePreview(null)}
       >
         <Pressable style={styles.modalOverlay} onPress={() => setBadgePreview(null)}>
@@ -3485,10 +3487,12 @@ function createStyles(
       flexDirection: "row",
       alignItems: "flex-start",
       justifyContent: "space-between",
+      flexWrap: "wrap",
       gap: spacing.sm,
     },
     cardHeaderCopy: {
       flex: 1,
+      minWidth: 0,
       gap: 4,
     },
     cardBadgeStack: {
@@ -3499,6 +3503,7 @@ function createStyles(
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
+      flexWrap: "wrap",
       gap: spacing.sm,
     },
     sectionTitle: {
@@ -3733,6 +3738,7 @@ function createStyles(
       borderWidth: 1,
       alignItems: "center",
       justifyContent: "center",
+      maxWidth: "100%",
     },
     statusChipDefault: {
       backgroundColor: palette.surfaceStrong,
@@ -3768,7 +3774,7 @@ function createStyles(
     },
     choiceRow: {
       flexDirection: "row",
-      alignItems: "center",
+      alignItems: "flex-start",
       gap: spacing.sm,
       borderRadius: radii.md,
       borderWidth: 1,
@@ -3782,12 +3788,14 @@ function createStyles(
     },
     choiceCopy: {
       flex: 1,
+      minWidth: 0,
       gap: 4,
     },
     choiceTitle: {
       color: palette.text,
       fontWeight: "800",
       lineHeight: 18,
+      flexShrink: 1,
     },
     choiceBody: {
       color: palette.textMuted,
@@ -3835,7 +3843,9 @@ function createStyles(
       gap: spacing.md,
     },
     badgeCard: {
-      width: "47%",
+      flexBasis: "47%",
+      flexGrow: 1,
+      minWidth: 128,
       borderRadius: radii.md,
       borderWidth: 1,
       borderColor: palette.border,
@@ -3870,7 +3880,9 @@ function createStyles(
       gap: spacing.sm,
     },
     photoCard: {
-      width: "47%",
+      flexBasis: "47%",
+      flexGrow: 1,
+      minWidth: 128,
       gap: spacing.xs,
     },
     photoPlaceholder: {
@@ -3948,6 +3960,7 @@ function createStyles(
     responseValue: {
       color: palette.text,
       lineHeight: 20,
+      flexShrink: 1,
     },
     submissionRow: {
       gap: 4,
@@ -4119,9 +4132,12 @@ function createStyles(
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
+      flexWrap: "wrap",
       gap: spacing.sm,
     },
     stepPagerTitle: {
+      flex: 1,
+      minWidth: 140,
       color: palette.text,
       fontSize: 14,
       fontWeight: "800",
