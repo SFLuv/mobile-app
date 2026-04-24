@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Image,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,6 +13,7 @@ import {
   View,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import Constants from "expo-constants";
 import { Ionicons } from "@expo/vector-icons";
 import { AppBackendClient } from "../services/appBackend";
 import {
@@ -22,8 +24,10 @@ import {
   AppImproverAbsencePeriod,
   AppImproverAbsencePeriodCreateResult,
   AppUser,
+  AppWorkflowDropdownOption,
   AppWorkflow,
   AppWorkflowPhotoAspectRatio,
+  AppWorkflowWorkItem,
   AppWorkflowStep,
   AppWorkflowStepCompletionInput,
   VerifiedEmail,
@@ -37,13 +41,9 @@ type Props = {
   onRefreshProfile: () => Promise<void>;
 };
 
-type ImproverSection =
-  | "my-workflows"
-  | "workflow-board"
-  | "unpaid-workflows"
-  | "my-badges"
-  | "credentials"
-  | "absence";
+type ImproverSection = "workflows" | "credentials";
+type WorkflowView = "my-workflows" | "workflow-board" | "unpaid-workflows";
+type WorkflowEditAction = "absence" | "revoke";
 
 type CompletionPhoto = {
   id: string;
@@ -68,8 +68,12 @@ type StepNotPossibleForm = {
 type WorkflowSeriesGroup = {
   key: string;
   seriesId: string;
-  primaryStepOrder: number | null;
-  primaryStepTitle: string | null;
+  primaryStepOrder: number;
+  primaryStepTitle: string;
+  workflowTitle: string;
+  recurrence: AppWorkflow["recurrence"];
+  absence: AppImproverAbsencePeriod | null;
+  canRevokeAbsence: boolean;
   workflows: AppWorkflow[];
 };
 
@@ -91,7 +95,20 @@ type CameraTarget = {
   maxCount: number | null;
 };
 
+type WorkflowSelectorOption = {
+  value: WorkflowView;
+  label: string;
+};
+
 const MAX_MOBILE_WORKFLOW_PHOTO_BYTES = 2 * 1024 * 1024;
+const OPTIONAL_IMAGE_PICKER: any = (() => {
+  try {
+    // Loaded lazily at runtime so the panel still compiles even if the package has not been installed yet.
+    return require("expo-image-picker");
+  } catch {
+    return null;
+  }
+})();
 
 function shortAddress(address?: string | null): string {
   if (!address) {
@@ -177,6 +194,71 @@ function buildCredentialBadgeUri(credentialType?: AppGlobalCredentialType | null
   return `data:${contentType};base64,${base64}`;
 }
 
+function formatWorkItemRequirements(item: AppWorkflowWorkItem): string {
+  const requirements: string[] = [];
+  if (item.requiresPhoto) {
+    const countLabel = item.photoAllowAnyCount
+      ? "Any count"
+      : `${Math.max(1, item.photoRequiredCount || 1)} photo${Math.max(1, item.photoRequiredCount || 1) === 1 ? "" : "s"}`;
+    const aspectLabel =
+      item.photoAspectRatio === "vertical"
+        ? "vertical"
+        : item.photoAspectRatio === "horizontal"
+          ? "horizontal"
+          : "square";
+    const sourceLabel = item.cameraCaptureOnly ? "live camera only" : "camera or upload";
+    requirements.push(`Photo (${countLabel}, ${aspectLabel}, ${sourceLabel})`);
+  }
+  if (item.requiresWrittenResponse) {
+    requirements.push("Written response");
+  }
+  if (item.requiresDropdown) {
+    requirements.push("Choice");
+  }
+  return requirements.length > 0 ? requirements.join(" + ") : "No requirement";
+}
+
+function resolveWorkflowTone(
+  workflow: Pick<AppWorkflow, "status" | "startAt">,
+): "default" | "success" | "danger" | "warning" {
+  const displayStatus = formatWorkflowDisplayStatus(workflow);
+  if (workflow.status === "completed" || workflow.status === "paid_out") {
+    return "success";
+  }
+  if (workflow.status === "failed" || workflow.status === "rejected") {
+    return "danger";
+  }
+  if (workflow.status === "blocked" || displayStatus === "Upcoming") {
+    return "warning";
+  }
+  return "default";
+}
+
+function resolveAssignedStep(workflow: AppWorkflow, userId?: string | null): AppWorkflowStep | null {
+  if (!userId) {
+    return null;
+  }
+  return (
+    workflow.steps
+      .filter((step) => step.assignedImproverId === userId)
+      .sort((left, right) => left.stepOrder - right.stepOrder)[0] || null
+  );
+}
+
+function uniqueBy<T>(items: T[], getKey: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  const next: T[] = [];
+  for (const item of items) {
+    const key = getKey(item);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    next.push(item);
+  }
+  return next;
+}
+
 function isValidDateInput(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`));
 }
@@ -250,9 +332,26 @@ export function ImproverScreen({
 }: Props) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
-  const [section, setSection] = useState<ImproverSection>("my-workflows");
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [loading, setLoading] = useState(false);
+  const topInset = Math.max(Constants.statusBarHeight, Platform.OS === "ios" ? spacing.md : 0);
+  const [section, setSection] = useState<ImproverSection>("workflows");
+  const [workflowView, setWorkflowView] = useState<WorkflowView>("my-workflows");
+  const [workflowSelectorVisible, setWorkflowSelectorVisible] = useState(false);
+  const [workflowEditMode, setWorkflowEditMode] = useState(false);
+  const [workflowEditAction, setWorkflowEditAction] = useState<WorkflowEditAction>("absence");
+  const [selectedWorkflowKeys, setSelectedWorkflowKeys] = useState<string[]>([]);
+  const [badgesVisible, setBadgesVisible] = useState(false);
+  const [badgeSearch, setBadgeSearch] = useState("");
+  const [boardSearch, setBoardSearch] = useState("");
+  const [myWorkflowsSearch, setMyWorkflowsSearch] = useState("");
+  const [unpaidSearch, setUnpaidSearch] = useState("");
+  const [credentialSearch, setCredentialSearch] = useState("");
+  const [requestFirstName, setRequestFirstName] = useState("");
+  const [requestLastName, setRequestLastName] = useState("");
+  const [requestEmailInput, setRequestEmailInput] = useState("");
+  const [selectedVerifiedEmailId, setSelectedVerifiedEmailId] = useState<string | null>(null);
+  const [absenceFrom, setAbsenceFrom] = useState("");
+  const [absenceUntil, setAbsenceUntil] = useState("");
+  const [rewardsWalletDraft, setRewardsWalletDraft] = useState(improver?.primaryRewardsAccount || "");
   const [workflows, setWorkflows] = useState<AppWorkflow[]>([]);
   const [unpaidWorkflows, setUnpaidWorkflows] = useState<AppWorkflow[]>([]);
   const [activeCredentials, setActiveCredentials] = useState<AppCredentialType[]>([]);
@@ -260,40 +359,42 @@ export function ImproverScreen({
   const [credentialRequests, setCredentialRequests] = useState<AppCredentialRequest[]>([]);
   const [absencePeriods, setAbsencePeriods] = useState<AppImproverAbsencePeriod[]>([]);
   const [verifiedEmails, setVerifiedEmails] = useState<VerifiedEmail[]>([]);
+  const [requestDataLoaded, setRequestDataLoaded] = useState(false);
+  const [requestDataLoading, setRequestDataLoading] = useState(false);
+  const [workflowDataLoaded, setWorkflowDataLoaded] = useState(false);
+  const [workflowDataLoading, setWorkflowDataLoading] = useState(false);
+  const [unpaidDataLoaded, setUnpaidDataLoaded] = useState(false);
+  const [unpaidDataLoading, setUnpaidDataLoading] = useState(false);
+  const [credentialDataLoaded, setCredentialDataLoaded] = useState(false);
+  const [credentialDataLoading, setCredentialDataLoading] = useState(false);
+  const [absenceDataLoaded, setAbsenceDataLoaded] = useState(false);
+  const [absenceDataLoading, setAbsenceDataLoading] = useState(false);
   const [selectedWorkflow, setSelectedWorkflow] = useState<AppWorkflow | null>(null);
   const [detailVisible, setDetailVisible] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [actionKey, setActionKey] = useState("");
-  const [boardSearch, setBoardSearch] = useState("");
-  const [myWorkflowsSearch, setMyWorkflowsSearch] = useState("");
-  const [unpaidSearch, setUnpaidSearch] = useState("");
-  const [absenceSearch, setAbsenceSearch] = useState("");
-  const [credentialSearch, setCredentialSearch] = useState("");
-  const [showFinishedSeries, setShowFinishedSeries] = useState(false);
-  const [requestFirstName, setRequestFirstName] = useState("");
-  const [requestLastName, setRequestLastName] = useState("");
-  const [requestEmailInput, setRequestEmailInput] = useState("");
-  const [selectedVerifiedEmailId, setSelectedVerifiedEmailId] = useState<string | null>(null);
-  const [selectedCredentialType, setSelectedCredentialType] = useState<string | null>(null);
-  const [absenceTargetMode, setAbsenceTargetMode] = useState<"single" | "all">("single");
-  const [absenceSelection, setAbsenceSelection] = useState<string | null>(null);
-  const [absenceFrom, setAbsenceFrom] = useState("");
-  const [absenceUntil, setAbsenceUntil] = useState("");
-  const [editingAbsenceId, setEditingAbsenceId] = useState<string | null>(null);
-  const [editAbsenceFrom, setEditAbsenceFrom] = useState("");
-  const [editAbsenceUntil, setEditAbsenceUntil] = useState("");
+  const [detailStepIndex, setDetailStepIndex] = useState(0);
+  const [submissionDetailsOpen, setSubmissionDetailsOpen] = useState<Record<string, boolean>>({});
   const [completionForms, setCompletionForms] = useState<Record<string, Record<string, CompletionItemForm>>>({});
   const [stepErrors, setStepErrors] = useState<Record<string, string>>({});
   const [stepNotPossibleForms, setStepNotPossibleForms] = useState<Record<string, StepNotPossibleForm>>({});
   const [cameraTarget, setCameraTarget] = useState<CameraTarget | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [badgePreview, setBadgePreview] = useState<{ label: string; imageUri: string } | null>(null);
+  const [photoPreviewUris, setPhotoPreviewUris] = useState<Record<string, string>>({});
+  const [photoPreviewLoading, setPhotoPreviewLoading] = useState<Record<string, boolean>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [actionKey, setActionKey] = useState("");
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView | null>(null);
+  const requestDataRequestRef = useRef<Promise<void> | null>(null);
+  const workflowDataRequestRef = useRef<Promise<void> | null>(null);
+  const unpaidDataRequestRef = useRef<Promise<void> | null>(null);
+  const credentialDataRequestRef = useRef<Promise<void> | null>(null);
+  const absenceDataRequestRef = useRef<Promise<void> | null>(null);
 
   const canUsePanel = Boolean(user?.isImprover || user?.isAdmin);
+  const imagePickerAvailable = Boolean(OPTIONAL_IMAGE_PICKER?.launchImageLibraryAsync);
   const labelMap = useMemo(() => buildCredentialLabelMap(credentialTypes), [credentialTypes]);
   const credentialSet = useMemo(() => new Set(activeCredentials), [activeCredentials]);
   const pendingCredentialSet = useMemo(
@@ -316,35 +417,476 @@ export function ImproverScreen({
     }
   }, [requestFirstName, requestLastName, user?.name]);
 
+  useEffect(() => {
+    setRewardsWalletDraft(improver?.primaryRewardsAccount || "");
+  }, [improver?.primaryRewardsAccount]);
+
+  const loadRequestData = useCallback(
+    async (force = false) => {
+      if (!backendClient) {
+        return;
+      }
+      if (requestDataRequestRef.current && !force) {
+        return requestDataRequestRef.current;
+      }
+
+      const request = (async () => {
+        setRequestDataLoading(true);
+        try {
+          const [emails, loadedCredentialTypes] = await Promise.all([
+            backendClient.getVerifiedEmails(),
+            backendClient.getCredentialTypes(),
+          ]);
+          setVerifiedEmails(emails);
+          setCredentialTypes(loadedCredentialTypes);
+          setError(null);
+        } catch (nextError) {
+          setError((nextError as Error)?.message || "Unable to load improver request details.");
+        } finally {
+          setRequestDataLoaded(true);
+          setRequestDataLoading(false);
+          requestDataRequestRef.current = null;
+        }
+      })();
+
+      requestDataRequestRef.current = request;
+      return request;
+    },
+    [backendClient],
+  );
+
+  const loadWorkflowData = useCallback(
+    async (force = false) => {
+      if (!backendClient) {
+        return;
+      }
+      if (workflowDataRequestRef.current && !force) {
+        return workflowDataRequestRef.current;
+      }
+
+      const request = (async () => {
+        setWorkflowDataLoading(true);
+        try {
+          const feed = await backendClient.getImproverWorkflows();
+          setWorkflows(feed.workflows);
+          setActiveCredentials(feed.activeCredentials);
+          setError((current) => (current === "Unable to load workflows." ? null : current));
+        } catch (nextError) {
+          setError((nextError as Error)?.message || "Unable to load workflows.");
+        } finally {
+          setWorkflowDataLoaded(true);
+          setWorkflowDataLoading(false);
+          workflowDataRequestRef.current = null;
+        }
+      })();
+
+      workflowDataRequestRef.current = request;
+      return request;
+    },
+    [backendClient],
+  );
+
+  const loadAbsenceData = useCallback(
+    async (force = false) => {
+      if (!backendClient) {
+        return;
+      }
+      if (absenceDataRequestRef.current && !force) {
+        return absenceDataRequestRef.current;
+      }
+
+      const request = (async () => {
+        setAbsenceDataLoading(true);
+        try {
+          const nextAbsencePeriods = await backendClient.getImproverAbsencePeriods();
+          setAbsencePeriods(nextAbsencePeriods);
+          setError((current) => (current === "Unable to load workflow absence." ? null : current));
+        } catch (nextError) {
+          setError((nextError as Error)?.message || "Unable to load workflow absence.");
+        } finally {
+          setAbsenceDataLoaded(true);
+          setAbsenceDataLoading(false);
+          absenceDataRequestRef.current = null;
+        }
+      })();
+
+      absenceDataRequestRef.current = request;
+      return request;
+    },
+    [backendClient],
+  );
+
+  const loadUnpaidData = useCallback(
+    async (force = false) => {
+      if (!backendClient) {
+        return;
+      }
+      if (unpaidDataRequestRef.current && !force) {
+        return unpaidDataRequestRef.current;
+      }
+
+      const request = (async () => {
+        setUnpaidDataLoading(true);
+        try {
+          const nextUnpaid = await backendClient.getImproverUnpaidWorkflows();
+          setUnpaidWorkflows(nextUnpaid);
+          setError((current) => (current === "Unable to load unpaid workflows." ? null : current));
+        } catch (nextError) {
+          setError((nextError as Error)?.message || "Unable to load unpaid workflows.");
+        } finally {
+          setUnpaidDataLoaded(true);
+          setUnpaidDataLoading(false);
+          unpaidDataRequestRef.current = null;
+        }
+      })();
+
+      unpaidDataRequestRef.current = request;
+      return request;
+    },
+    [backendClient],
+  );
+
+  const loadCredentialData = useCallback(
+    async (force = false) => {
+      if (!backendClient) {
+        return;
+      }
+      if (credentialDataRequestRef.current && !force) {
+        return credentialDataRequestRef.current;
+      }
+
+      const request = (async () => {
+        setCredentialDataLoading(true);
+        try {
+          const shouldLoadFeed = !workflowDataLoaded && activeCredentials.length === 0;
+          const [loadedCredentialTypes, loadedCredentialRequests, workflowFeed] = await Promise.all([
+            backendClient.getCredentialTypes(),
+            backendClient.getImproverCredentialRequests(),
+            shouldLoadFeed ? backendClient.getImproverWorkflows() : Promise.resolve(null),
+          ]);
+          setCredentialTypes(loadedCredentialTypes);
+          setCredentialRequests(loadedCredentialRequests);
+          if (workflowFeed) {
+            setWorkflows(workflowFeed.workflows);
+            setActiveCredentials(workflowFeed.activeCredentials);
+            setWorkflowDataLoaded(true);
+          }
+          setError((current) => (current === "Unable to load credentials." ? null : current));
+        } catch (nextError) {
+          setError((nextError as Error)?.message || "Unable to load credentials.");
+        } finally {
+          setCredentialDataLoaded(true);
+          setCredentialDataLoading(false);
+          credentialDataRequestRef.current = null;
+        }
+      })();
+
+      credentialDataRequestRef.current = request;
+      return request;
+    },
+    [activeCredentials.length, backendClient, workflowDataLoaded],
+  );
+
+  useEffect(() => {
+    if (!backendClient) {
+      return;
+    }
+    if (!canUsePanel) {
+      void loadRequestData();
+      return;
+    }
+    void loadWorkflowData();
+  }, [backendClient, canUsePanel, loadRequestData, loadWorkflowData]);
+
+  useEffect(() => {
+    if (!canUsePanel) {
+      return;
+    }
+    if (
+      section === "workflows" &&
+      (workflowView === "my-workflows" || workflowView === "workflow-board" || workflowEditMode || detailVisible)
+    ) {
+      void loadAbsenceData();
+    }
+    if (section === "credentials" || badgesVisible) {
+      void loadCredentialData();
+    }
+    if (workflowSelectorVisible || (section === "workflows" && workflowView === "unpaid-workflows")) {
+      void loadUnpaidData();
+    }
+  }, [
+    badgesVisible,
+    canUsePanel,
+    detailVisible,
+    loadAbsenceData,
+    loadCredentialData,
+    loadUnpaidData,
+    section,
+    workflowEditMode,
+    workflowSelectorVisible,
+    workflowView,
+  ]);
+
+  useEffect(() => {
+    if (workflowView !== "my-workflows" && workflowEditMode) {
+      setWorkflowEditMode(false);
+      setSelectedWorkflowKeys([]);
+    }
+  }, [workflowEditMode, workflowView]);
+
+  const hasClaimedRoleInWorkflow = useCallback(
+    (workflow: AppWorkflow) => workflow.steps.some((step) => step.assignedImproverId === user?.id),
+    [user?.id],
+  );
+
+  const isWorkflowActiveForUser = useCallback(
+    (workflow: AppWorkflow) =>
+      workflow.steps.some(
+        (step) =>
+          step.assignedImproverId === user?.id &&
+          (step.status === "available" || step.status === "in_progress"),
+      ),
+    [user?.id],
+  );
+
+  const isStepCoveredByAbsence = useCallback(
+    (workflow: AppWorkflow, step: AppWorkflowStep) =>
+      workflow.recurrence !== "one_time" &&
+      absencePeriods.some(
+        (period) =>
+          period.seriesId === workflow.seriesId &&
+          period.stepOrder === step.stepOrder &&
+          workflow.startAt >= period.absentFrom &&
+          workflow.startAt < period.absentUntil,
+      ),
+    [absencePeriods],
+  );
+
+  const canClaimStep = useCallback(
+    (workflow: AppWorkflow, step: AppWorkflowStep) => {
+      if (!user?.id) {
+        return false;
+      }
+      if (step.assignedImproverId) {
+        return false;
+      }
+      if (step.status !== "available" && step.status !== "locked") {
+        return false;
+      }
+      if (hasClaimedRoleInWorkflow(workflow)) {
+        return false;
+      }
+      if (isStepCoveredByAbsence(workflow, step)) {
+        return false;
+      }
+      if (!step.roleId) {
+        return false;
+      }
+      const role = workflow.roles.find((candidate) => candidate.id === step.roleId);
+      if (!role) {
+        return false;
+      }
+      return role.requiredCredentials.every((credential) => credentialSet.has(credential));
+    },
+    [credentialSet, hasClaimedRoleInWorkflow, isStepCoveredByAbsence, user?.id],
+  );
+
+  const myClaimedWorkflows = useMemo(
+    () => workflows.filter((workflow) => hasClaimedRoleInWorkflow(workflow)),
+    [hasClaimedRoleInWorkflow, workflows],
+  );
+
+  const myWorkflowGroups = useMemo<WorkflowSeriesGroup[]>(() => {
+    if (!user?.id) {
+      return [];
+    }
+    const groups = new Map<string, WorkflowSeriesGroup>();
+
+    for (const workflow of myClaimedWorkflows) {
+      const assignedStep = resolveAssignedStep(workflow, user.id);
+      if (!assignedStep) {
+        continue;
+      }
+      const selectionKey = `${workflow.seriesId}:${assignedStep.stepOrder}`;
+      const existing = groups.get(selectionKey);
+      if (!existing) {
+        groups.set(selectionKey, {
+          key: selectionKey,
+          seriesId: workflow.seriesId,
+          primaryStepOrder: assignedStep.stepOrder,
+          primaryStepTitle: assignedStep.title,
+          workflowTitle: workflow.title,
+          recurrence: workflow.recurrence,
+          absence: null,
+          canRevokeAbsence: false,
+          workflows: [workflow],
+        });
+        continue;
+      }
+
+      groups.set(selectionKey, {
+        ...existing,
+        workflows: [...existing.workflows, workflow].sort((left, right) => right.startAt - left.startAt),
+      });
+    }
+
+    return Array.from(groups.values())
+      .map((group) => {
+        const matchingAbsence = absencePeriods
+          .filter(
+            (period) =>
+              period.seriesId === group.seriesId &&
+              period.stepOrder === group.primaryStepOrder &&
+              period.absentUntil * 1000 >= Date.now(),
+          )
+          .sort((left, right) => left.absentFrom - right.absentFrom)[0] || null;
+
+        const canRevokeAbsence =
+          Boolean(matchingAbsence) &&
+          !workflows.some((candidateWorkflow) => {
+            if (!matchingAbsence) {
+              return false;
+            }
+            if (candidateWorkflow.seriesId !== matchingAbsence.seriesId) {
+              return false;
+            }
+            if (
+              candidateWorkflow.startAt < matchingAbsence.absentFrom ||
+              candidateWorkflow.startAt >= matchingAbsence.absentUntil
+            ) {
+              return false;
+            }
+            return candidateWorkflow.steps.some(
+              (step) =>
+                step.stepOrder === matchingAbsence.stepOrder &&
+                Boolean(step.assignedImproverId) &&
+                step.assignedImproverId !== user.id,
+            );
+          });
+
+        return {
+          ...group,
+          absence: matchingAbsence,
+          canRevokeAbsence,
+          workflows: [...group.workflows].sort((left, right) => right.startAt - left.startAt),
+        };
+      })
+      .sort((left, right) => {
+        const leftActive = left.workflows.some((workflow) => isWorkflowActiveForUser(workflow));
+        const rightActive = right.workflows.some((workflow) => isWorkflowActiveForUser(workflow));
+        if (leftActive !== rightActive) {
+          return leftActive ? -1 : 1;
+        }
+        return (right.workflows[0]?.startAt || 0) - (left.workflows[0]?.startAt || 0);
+      });
+  }, [absencePeriods, isWorkflowActiveForUser, myClaimedWorkflows, user?.id, workflows]);
+
+  const filteredMyWorkflowGroups = useMemo(() => {
+    const search = myWorkflowsSearch.trim().toLowerCase();
+    return myWorkflowGroups
+      .filter((group) =>
+        group.recurrence !== "one_time" ||
+        group.workflows.some((workflow) => workflow.status !== "completed" && workflow.status !== "paid_out"),
+      )
+      .filter((group) => {
+        if (!search) {
+          return true;
+        }
+        return (
+          group.workflowTitle.toLowerCase().includes(search) ||
+          group.primaryStepTitle.toLowerCase().includes(search)
+        );
+      });
+  }, [myWorkflowGroups, myWorkflowsSearch]);
+
+  const workflowBoardWorkflows = useMemo(
+    () =>
+      workflows.filter((workflow) => {
+        if (hasClaimedRoleInWorkflow(workflow)) {
+          return false;
+        }
+        return workflow.steps.some((step) => canClaimStep(workflow, step));
+      }),
+    [canClaimStep, hasClaimedRoleInWorkflow, workflows],
+  );
+
+  const filteredWorkflowBoard = useMemo(() => {
+    const search = boardSearch.trim().toLowerCase();
+    if (!search) {
+      return workflowBoardWorkflows;
+    }
+    return workflowBoardWorkflows.filter((workflow) => workflow.title.toLowerCase().includes(search));
+  }, [boardSearch, workflowBoardWorkflows]);
+
+  const unpaidWorkflowCards = useMemo(
+    () =>
+      unpaidWorkflows.filter((workflow) =>
+        workflow.steps.some(
+          (step) => step.assignedImproverId === user?.id && step.status === "completed" && step.bounty > 0,
+        ),
+      ),
+    [unpaidWorkflows, user?.id],
+  );
+
+  const filteredUnpaidWorkflowCards = useMemo(() => {
+    const search = unpaidSearch.trim().toLowerCase();
+    if (!search) {
+      return unpaidWorkflowCards;
+    }
+    return unpaidWorkflowCards.filter((workflow) => workflow.title.toLowerCase().includes(search));
+  }, [unpaidSearch, unpaidWorkflowCards]);
+
+  const hasUnpaidWorkflowOption = unpaidDataLoaded && unpaidWorkflowCards.length > 0;
+  const workflowSelectorOptions = useMemo<WorkflowSelectorOption[]>(
+    () =>
+      [
+        { value: "my-workflows", label: "My workflows" },
+        { value: "workflow-board", label: "Workflow board" },
+        ...(hasUnpaidWorkflowOption ? [{ value: "unpaid-workflows" as const, label: "Unpaid workflows" }] : []),
+      ],
+    [hasUnpaidWorkflowOption],
+  );
+
+  useEffect(() => {
+    if (workflowView === "unpaid-workflows" && !hasUnpaidWorkflowOption) {
+      setWorkflowView("my-workflows");
+    }
+  }, [hasUnpaidWorkflowOption, workflowView]);
+
+  useEffect(() => {
+    setSelectedWorkflowKeys((current) =>
+      current.filter((key) => myWorkflowGroups.some((group) => group.key === key && group.recurrence !== "one_time")),
+    );
+  }, [myWorkflowGroups]);
+
+  const selectedWorkflowGroups = useMemo(
+    () => myWorkflowGroups.filter((group) => selectedWorkflowKeys.includes(group.key)),
+    [myWorkflowGroups, selectedWorkflowKeys],
+  );
+
   const requestableCredentialTypes = useMemo(
     () =>
       credentialTypes.filter((credentialType) => {
-        if (credentialSet.has(credentialType.value)) {
+        if (credentialType.visibility !== "public") {
           return false;
         }
-        return credentialType.visibility === "public";
+        return !credentialSet.has(credentialType.value);
       }),
     [credentialSet, credentialTypes],
   );
 
-  useEffect(() => {
-    if (!selectedCredentialType) {
-      setSelectedCredentialType(requestableCredentialTypes[0]?.value ?? null);
-      return;
+  const credentialSuggestions = useMemo(() => {
+    const search = credentialSearch.trim().toLowerCase();
+    if (!search) {
+      return [];
     }
-    if (!requestableCredentialTypes.some((credentialType) => credentialType.value === selectedCredentialType)) {
-      setSelectedCredentialType(requestableCredentialTypes[0]?.value ?? null);
-    }
-  }, [requestableCredentialTypes, selectedCredentialType]);
-
-  const filteredCredentialTypes = useMemo(() => {
-    const normalizedSearch = credentialSearch.trim().toLowerCase();
-    if (!normalizedSearch) {
-      return requestableCredentialTypes;
-    }
-    return requestableCredentialTypes.filter((credentialType) =>
-      credentialType.label.toLowerCase().includes(normalizedSearch),
-    );
+    return requestableCredentialTypes
+      .filter(
+        (credentialType) =>
+          credentialType.label.toLowerCase().includes(search) ||
+          credentialType.value.toLowerCase().includes(search),
+      )
+      .slice(0, 4);
   }, [credentialSearch, requestableCredentialTypes]);
 
   const myBadgeItems = useMemo(() => {
@@ -354,220 +896,31 @@ export function ImproverScreen({
     }
     return activeCredentials
       .map((credential) => {
-        const credentialType = typeByValue.get(credential);
+        const type = typeByValue.get(credential);
         return {
           credential,
           label: formatCredentialLabel(credential, labelMap),
-          badgeUri: buildCredentialBadgeUri(credentialType),
+          badgeUri: buildCredentialBadgeUri(type),
         };
       })
       .sort((left, right) => left.label.localeCompare(right.label));
   }, [activeCredentials, credentialTypes, labelMap]);
 
-  const recurringClaimOptions = useMemo<RecurringClaimOption[]>(() => {
-    if (!user?.id) {
-      return [];
+  const filteredBadgeItems = useMemo(() => {
+    const search = badgeSearch.trim().toLowerCase();
+    if (!search) {
+      return myBadgeItems;
     }
-    const optionMap = new Map<string, RecurringClaimOption>();
-    for (const workflow of workflows) {
-      if (workflow.recurrence === "one_time") {
-        continue;
-      }
-      for (const step of workflow.steps) {
-        if (step.assignedImproverId !== user.id || step.status === "paid_out") {
-          continue;
-        }
-        const key = `${workflow.seriesId}:${step.stepOrder}`;
-        const current = optionMap.get(key);
-        if (!current) {
-          optionMap.set(key, {
-            key,
-            seriesId: workflow.seriesId,
-            stepOrder: step.stepOrder,
-            workflowTitle: workflow.title,
-            stepTitle: step.title,
-            recurrence: workflow.recurrence,
-            claimedCount: 1,
-          });
-          continue;
-        }
-        optionMap.set(key, {
-          ...current,
-          claimedCount: current.claimedCount + 1,
-        });
-      }
-    }
-    return Array.from(optionMap.values()).sort((left, right) => {
-      if (left.seriesId === right.seriesId) {
-        return left.stepOrder - right.stepOrder;
-      }
-      return left.seriesId.localeCompare(right.seriesId);
-    });
-  }, [user?.id, workflows]);
+    return myBadgeItems.filter((badge) => badge.label.toLowerCase().includes(search));
+  }, [badgeSearch, myBadgeItems]);
 
-  useEffect(() => {
-    if (!absenceSelection) {
-      setAbsenceSelection(recurringClaimOptions[0]?.key ?? null);
-      return;
-    }
-    if (!recurringClaimOptions.some((option) => option.key === absenceSelection)) {
-      setAbsenceSelection(recurringClaimOptions[0]?.key ?? null);
-    }
-  }, [absenceSelection, recurringClaimOptions]);
-
-  const hasClaimedRoleInWorkflow = (workflow: AppWorkflow) =>
-    workflow.steps.some((step) => step.assignedImproverId === user?.id);
-
-  const isWorkflowActiveForUser = (workflow: AppWorkflow) =>
-    workflow.steps.some(
-      (step) =>
-        step.assignedImproverId === user?.id &&
-        (step.status === "available" || step.status === "in_progress"),
-    );
-
-  const isStepCoveredByAbsence = (workflow: AppWorkflow, step: AppWorkflowStep) =>
-    workflow.recurrence !== "one_time" &&
-    absencePeriods.some(
-      (period) =>
-        period.seriesId === workflow.seriesId &&
-        period.stepOrder === step.stepOrder &&
-        workflow.startAt >= period.absentFrom &&
-        workflow.startAt < period.absentUntil,
-    );
-
-  const canClaimStep = (workflow: AppWorkflow, step: AppWorkflowStep) => {
-    if (!user?.id) {
-      return false;
-    }
-    if (step.assignedImproverId) {
-      return false;
-    }
-    if (step.status !== "available" && step.status !== "locked") {
-      return false;
-    }
-    if (hasClaimedRoleInWorkflow(workflow)) {
-      return false;
-    }
-    if (isStepCoveredByAbsence(workflow, step)) {
-      return false;
-    }
-    if (!step.roleId) {
-      return false;
-    }
-    const role = workflow.roles.find((candidate) => candidate.id === step.roleId);
-    if (!role) {
-      return false;
-    }
-    return role.requiredCredentials.every((credential) => credentialSet.has(credential));
-  };
-
-  const workflowBoardWorkflows = useMemo(() => {
-    return workflows.filter((workflow) => {
-      if (hasClaimedRoleInWorkflow(workflow)) {
-        return false;
-      }
-      return workflow.steps.some((step) => canClaimStep(workflow, step));
-    });
-  }, [workflows, absencePeriods, user?.id, credentialSet]);
-
-  const myClaimedWorkflows = useMemo(
-    () => workflows.filter((workflow) => hasClaimedRoleInWorkflow(workflow)),
-    [workflows, user?.id],
-  );
-
-  const myWorkflowSeriesGroups = useMemo<WorkflowSeriesGroup[]>(() => {
-    if (!user?.id) {
-      return [];
-    }
-    const groupMap = new Map<string, WorkflowSeriesGroup>();
-    for (const workflow of myClaimedWorkflows) {
-      const assignedStep = workflow.steps
-        .filter((step) => step.assignedImproverId === user.id)
-        .sort((left, right) => left.stepOrder - right.stepOrder)[0];
-      const existing = groupMap.get(workflow.seriesId);
-      if (!existing) {
-        groupMap.set(workflow.seriesId, {
-          key: workflow.seriesId,
-          seriesId: workflow.seriesId,
-          primaryStepOrder: assignedStep?.stepOrder ?? null,
-          primaryStepTitle: assignedStep?.title ?? null,
-          workflows: [workflow],
-        });
-        continue;
-      }
-      groupMap.set(workflow.seriesId, {
-        ...existing,
-        workflows: [...existing.workflows, workflow].sort(
-          (left, right) => right.startAt - left.startAt,
-        ),
-      });
-    }
-    return Array.from(groupMap.values()).sort((left, right) => {
-      const leftActive = left.workflows.some((workflow) => isWorkflowActiveForUser(workflow));
-      const rightActive = right.workflows.some((workflow) => isWorkflowActiveForUser(workflow));
-      if (leftActive !== rightActive) {
-        return leftActive ? -1 : 1;
-      }
-      return (right.workflows[0]?.startAt || 0) - (left.workflows[0]?.startAt || 0);
-    });
-  }, [isWorkflowActiveForUser, myClaimedWorkflows, user?.id]);
-
-  const filteredBoardWorkflows = useMemo(() => {
-    const normalizedSearch = boardSearch.trim().toLowerCase();
-    if (!normalizedSearch) {
-      return workflowBoardWorkflows;
-    }
-    return workflowBoardWorkflows.filter((workflow) =>
-      workflow.title.toLowerCase().includes(normalizedSearch),
-    );
-  }, [boardSearch, workflowBoardWorkflows]);
-
-  const filteredSeriesGroups = useMemo(() => {
-    const normalizedSearch = myWorkflowsSearch.trim().toLowerCase();
-    const filtered = myWorkflowSeriesGroups.filter((group) => {
-      if (showFinishedSeries) {
-        return true;
-      }
-      return group.workflows.some(
-        (workflow) =>
-          workflow.recurrence !== "one_time" ||
-          (workflow.status !== "completed" && workflow.status !== "paid_out"),
-      );
-    });
-    if (!normalizedSearch) {
-      return filtered;
-    }
-    return filtered.filter((group) =>
-      group.workflows.some((workflow) => workflow.title.toLowerCase().includes(normalizedSearch)),
-    );
-  }, [myWorkflowSeriesGroups, myWorkflowsSearch, showFinishedSeries]);
-
-  const filteredUnpaidWorkflows = useMemo(() => {
-    const normalizedSearch = unpaidSearch.trim().toLowerCase();
-    if (!normalizedSearch) {
-      return unpaidWorkflows;
-    }
-    return unpaidWorkflows.filter((workflow) =>
-      workflow.title.toLowerCase().includes(normalizedSearch),
-    );
-  }, [unpaidSearch, unpaidWorkflows]);
-
-  const filteredAbsencePeriods = useMemo(() => {
-    const normalizedSearch = absenceSearch.trim().toLowerCase();
-    if (!normalizedSearch) {
-      return absencePeriods;
-    }
-    return absencePeriods.filter((period) =>
-      period.seriesId.toLowerCase().includes(normalizedSearch),
-    );
-  }, [absencePeriods, absenceSearch]);
-
-  const verifiedEmailsByStatus = useMemo(() => {
-    return {
+  const verifiedEmailsByStatus = useMemo(
+    () => ({
       verified: verifiedEmails.filter((email) => email.status === "verified"),
       pending: verifiedEmails.filter((email) => email.status !== "verified"),
-    };
-  }, [verifiedEmails]);
+    }),
+    [verifiedEmails],
+  );
 
   useEffect(() => {
     if (!selectedVerifiedEmailId && verifiedEmailsByStatus.verified[0]) {
@@ -575,77 +928,92 @@ export function ImproverScreen({
     }
   }, [selectedVerifiedEmailId, verifiedEmailsByStatus.verified]);
 
-  const loadImproverPanelData = async () => {
-    if (!backendClient) {
-      return;
-    }
-    setLoading(true);
-    try {
-      const [workflowFeed, unpaid, loadedCredentialTypes, loadedCredentialRequests, loadedAbsencePeriods] =
-        await Promise.all([
-          backendClient.getImproverWorkflows(),
-          backendClient.getImproverUnpaidWorkflows(),
-          backendClient.getCredentialTypes(),
-          backendClient.getImproverCredentialRequests(),
-          backendClient.getImproverAbsencePeriods(),
-        ]);
-      setWorkflows(workflowFeed.workflows);
-      setActiveCredentials(workflowFeed.activeCredentials);
-      setUnpaidWorkflows(unpaid);
-      setCredentialTypes(loadedCredentialTypes);
-      setCredentialRequests(loadedCredentialRequests);
-      setAbsencePeriods(loadedAbsencePeriods);
-      setError(null);
-    } catch (nextError) {
-      setError((nextError as Error)?.message || "Unable to load the improver panel.");
-    } finally {
-      setLoading(false);
-      setInitialLoading(false);
-    }
-  };
+  const mergeWorkflow = useCallback((updatedWorkflow: AppWorkflow) => {
+    setWorkflows((current) => {
+      const existing = current.some((workflow) => workflow.id === updatedWorkflow.id);
+      return existing
+        ? current.map((workflow) => (workflow.id === updatedWorkflow.id ? updatedWorkflow : workflow))
+        : [updatedWorkflow, ...current];
+    });
+    setUnpaidWorkflows((current) => {
+      const existing = current.some((workflow) => workflow.id === updatedWorkflow.id);
+      return existing
+        ? current.map((workflow) => (workflow.id === updatedWorkflow.id ? updatedWorkflow : workflow))
+        : [updatedWorkflow, ...current];
+    });
+    setSelectedWorkflow((current) => (current?.id === updatedWorkflow.id ? updatedWorkflow : current));
+  }, []);
 
-  const loadImproverRequestData = async () => {
-    if (!backendClient) {
-      return;
-    }
-    setLoading(true);
-    try {
-      const [emails, loadedCredentialTypes] = await Promise.all([
-        backendClient.getVerifiedEmails(),
-        backendClient.getCredentialTypes(),
+  const getInitialStepIndexForWorkflow = useCallback(
+    (workflow: AppWorkflow): number => {
+      const sortedSteps = [...workflow.steps].sort((left, right) => left.stepOrder - right.stepOrder);
+      const mineIndex = sortedSteps.findIndex(
+        (step) =>
+          step.assignedImproverId === user?.id &&
+          (step.status === "available" || step.status === "in_progress" || step.status === "locked"),
+      );
+      if (mineIndex >= 0) {
+        return mineIndex;
+      }
+      const claimableIndex = sortedSteps.findIndex((step) => canClaimStep(workflow, step));
+      return claimableIndex >= 0 ? claimableIndex : 0;
+    },
+    [canClaimStep, user?.id],
+  );
+
+  const openWorkflowDetail = useCallback(
+    async (workflow: AppWorkflow) => {
+      setSelectedWorkflow(workflow);
+      setDetailStepIndex(getInitialStepIndexForWorkflow(workflow));
+      setDetailVisible(true);
+      setSubmissionDetailsOpen({});
+      if (workflow.recurrence !== "one_time") {
+        void loadAbsenceData();
+      }
+      if (!backendClient) {
+        return;
+      }
+      setDetailLoading(true);
+      try {
+        const refreshedWorkflow = await backendClient.getWorkflow(workflow.id);
+        setSelectedWorkflow(refreshedWorkflow);
+        setDetailStepIndex(getInitialStepIndexForWorkflow(refreshedWorkflow));
+      } catch (nextError) {
+        setError((nextError as Error)?.message || "Unable to load workflow details.");
+      } finally {
+        setDetailLoading(false);
+      }
+    },
+    [backendClient, getInitialStepIndexForWorkflow, loadAbsenceData],
+  );
+
+  const refreshSelectedWorkflow = useCallback(
+    async (workflowId: string) => {
+      if (!backendClient) {
+        return;
+      }
+      try {
+        const refreshedWorkflow = await backendClient.getWorkflow(workflowId);
+        mergeWorkflow(refreshedWorkflow);
+      } catch {
+        // Keep current in-memory state if detail refresh fails.
+      }
+    },
+    [backendClient, mergeWorkflow],
+  );
+
+  const refreshWorkflowSurfaces = useCallback(
+    async (includeUnpaid = unpaidDataLoaded || workflowView === "unpaid-workflows") => {
+      await Promise.all([
+        loadWorkflowData(true),
+        loadAbsenceData(true),
+        includeUnpaid ? loadUnpaidData(true) : Promise.resolve(),
       ]);
-      setVerifiedEmails(emails);
-      setCredentialTypes(loadedCredentialTypes);
-      setError(null);
-    } catch (nextError) {
-      setError((nextError as Error)?.message || "Unable to load improver request details.");
-    } finally {
-      setLoading(false);
-      setInitialLoading(false);
-    }
-  };
+    },
+    [loadAbsenceData, loadUnpaidData, loadWorkflowData, unpaidDataLoaded, workflowView],
+  );
 
-  useEffect(() => {
-    if (!backendClient) {
-      setInitialLoading(false);
-      return;
-    }
-    if (canUsePanel) {
-      void loadImproverPanelData();
-      return;
-    }
-    void loadImproverRequestData();
-  }, [backendClient, canUsePanel]);
-
-  const refreshAllData = async () => {
-    if (canUsePanel) {
-      await loadImproverPanelData();
-      return;
-    }
-    await loadImproverRequestData();
-  };
-
-  const setItemForm = (stepId: string, itemId: string, patch: Partial<CompletionItemForm>) => {
+  const setItemForm = useCallback((stepId: string, itemId: string, patch: Partial<CompletionItemForm>) => {
     setStepErrors((current) => {
       if (!current[stepId]) {
         return current;
@@ -656,21 +1024,21 @@ export function ImproverScreen({
     });
     setCompletionForms((current) => {
       const stepForms = current[stepId] || {};
-      const itemForm = stepForms[itemId] || emptyItemForm();
+      const existing = stepForms[itemId] || emptyItemForm();
       return {
         ...current,
         [stepId]: {
           ...stepForms,
           [itemId]: {
-            ...itemForm,
+            ...existing,
             ...patch,
           },
         },
       };
     });
-  };
+  }, []);
 
-  const setStepNotPossibleForm = (stepId: string, patch: Partial<StepNotPossibleForm>) => {
+  const setStepNotPossibleForm = useCallback((stepId: string, patch: Partial<StepNotPossibleForm>) => {
     setStepErrors((current) => {
       if (!current[stepId]) {
         return current;
@@ -686,115 +1054,101 @@ export function ImproverScreen({
         ...patch,
       },
     }));
-  };
+  }, []);
 
-  const mergeWorkflow = (updatedWorkflow: AppWorkflow) => {
-    setWorkflows((current) =>
-      current.map((workflow) => (workflow.id === updatedWorkflow.id ? updatedWorkflow : workflow)),
-    );
-    setUnpaidWorkflows((current) =>
-      current.map((workflow) => (workflow.id === updatedWorkflow.id ? updatedWorkflow : workflow)),
-    );
-    setSelectedWorkflow((current) => (current?.id === updatedWorkflow.id ? updatedWorkflow : current));
-  };
+  const ensurePhotoPreviewUri = useCallback(
+    async (photoId: string) => {
+      if (!backendClient) {
+        return;
+      }
+      const trimmed = photoId.trim();
+      if (!trimmed || photoPreviewUris[trimmed] || photoPreviewLoading[trimmed]) {
+        return;
+      }
 
-  const openWorkflowDetail = async (workflow: AppWorkflow) => {
-    setSelectedWorkflow(workflow);
-    setDetailVisible(true);
-    if (!backendClient) {
-      return;
-    }
-    setDetailLoading(true);
-    try {
-      const refreshed = await backendClient.getWorkflow(workflow.id);
-      setSelectedWorkflow(refreshed);
-    } catch (nextError) {
-      setError((nextError as Error)?.message || "Unable to load workflow details.");
-    } finally {
-      setDetailLoading(false);
-    }
-  };
+      setPhotoPreviewLoading((current) => ({
+        ...current,
+        [trimmed]: true,
+      }));
 
-  const refreshSelectedWorkflow = async (workflowId: string) => {
-    if (!backendClient) {
-      return;
-    }
-    try {
-      const refreshed = await backendClient.getWorkflow(workflowId);
-      mergeWorkflow(refreshed);
-    } catch {
-      // Keep current in-memory workflow state if detail refresh fails.
-    }
-  };
+      try {
+        const dataUri = await backendClient.getWorkflowPhotoDataUri(trimmed);
+        if (dataUri) {
+          setPhotoPreviewUris((current) => ({
+            ...current,
+            [trimmed]: dataUri,
+          }));
+        }
+      } catch {
+        // Keep the rest of the detail view functional even if preview loading fails.
+      } finally {
+        setPhotoPreviewLoading((current) => {
+          if (!current[trimmed]) {
+            return current;
+          }
+          const next = { ...current };
+          delete next[trimmed];
+          return next;
+        });
+      }
+    },
+    [backendClient, photoPreviewLoading, photoPreviewUris],
+  );
 
-  const claimWorkflowStep = async (workflowId: string, stepId: string) => {
-    if (!backendClient) {
-      return;
-    }
-    setActionKey(`claim:${stepId}`);
-    try {
-      const updatedWorkflow = await backendClient.claimWorkflowStep(workflowId, stepId);
-      mergeWorkflow(updatedWorkflow);
-      setNotice("Workflow step claimed.");
-      setError(null);
-      await refreshAllData();
-    } catch (nextError) {
-      setError((nextError as Error)?.message || "Unable to claim this workflow step.");
-      setNotice(null);
-    } finally {
-      setActionKey("");
-    }
-  };
+  const removeCompletionPhoto = useCallback(
+    (stepId: string, itemId: string, photoId: string) => {
+      const currentPhotos = completionForms[stepId]?.[itemId]?.photos || [];
+      setItemForm(stepId, itemId, {
+        photos: currentPhotos.filter((photo) => photo.id !== photoId),
+      });
+    },
+    [completionForms, setItemForm],
+  );
 
-  const startWorkflowStep = async (workflowId: string, stepId: string) => {
-    if (!backendClient) {
-      return;
-    }
-    setActionKey(`start:${stepId}`);
-    try {
-      const updatedWorkflow = await backendClient.startWorkflowStep(workflowId, stepId);
-      mergeWorkflow(updatedWorkflow);
-      setNotice("Workflow step started.");
-      setError(null);
-      await refreshAllData();
-    } catch (nextError) {
-      setError((nextError as Error)?.message || "Unable to start this workflow step.");
-      setNotice(null);
-    } finally {
-      setActionKey("");
-    }
-  };
+  const createCompletionPhoto = useCallback((base64: string, title: string, contentType = "image/jpeg"): CompletionPhoto => {
+    const normalizedBase64 = base64.trim();
+    return {
+      id: `photo-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      fileName: `${slugifyFileName(title)}_${Date.now()}.${contentType.includes("png") ? "png" : "jpg"}`,
+      contentType,
+      dataBase64: normalizedBase64,
+      previewUri: `data:${contentType};base64,${normalizedBase64}`,
+      sizeBytes: estimateBase64Bytes(normalizedBase64),
+    };
+  }, []);
 
-  const removeCompletionPhoto = (stepId: string, itemId: string, photoId: string) => {
-    const currentPhotos = completionForms[stepId]?.[itemId]?.photos || [];
-    setItemForm(stepId, itemId, {
-      photos: currentPhotos.filter((photo) => photo.id !== photoId),
-    });
-  };
+  const addPhotosToItem = useCallback(
+    (stepId: string, itemId: string, photos: CompletionPhoto[], maxCount: number | null) => {
+      const currentPhotos = completionForms[stepId]?.[itemId]?.photos || [];
+      let nextPhotos = [...currentPhotos, ...photos];
+      if (typeof maxCount === "number" && maxCount > 0) {
+        nextPhotos = nextPhotos.slice(-maxCount);
+      }
+      setItemForm(stepId, itemId, { photos: uniqueBy(nextPhotos, (photo) => photo.id) });
+    },
+    [completionForms, setItemForm],
+  );
 
-  const openCameraCapture = async (
-    stepId: string,
-    itemId: string,
-    title: string,
-    aspectRatio: AppWorkflowPhotoAspectRatio,
-    maxCount: number | null,
-  ) => {
-    const currentPermission = permission?.granted ? permission : await requestPermission();
-    if (!currentPermission?.granted) {
-      setCameraError("Camera permission is required to add workflow photos.");
-      return;
-    }
-    setCameraError(null);
-    setCameraTarget({
-      stepId,
-      itemId,
-      title,
-      aspectRatio,
-      maxCount,
-    });
-  };
+  const openCameraCapture = useCallback(
+    async (stepId: string, itemId: string, title: string, aspectRatio: AppWorkflowPhotoAspectRatio, maxCount: number | null) => {
+      const currentPermission = permission?.granted ? permission : await requestPermission();
+      if (!currentPermission?.granted) {
+        setCameraError("Camera permission is required to add workflow photos.");
+        return;
+      }
+      setCameraError(null);
+      setCameraTarget({
+        stepId,
+        itemId,
+        title,
+        aspectRatio,
+        maxCount,
+      });
+    },
+    [permission, requestPermission],
+  );
 
-  const captureWorkflowPhoto = async () => {
+  const captureWorkflowPhoto = useCallback(async () => {
     if (!cameraTarget) {
       return;
     }
@@ -809,138 +1163,158 @@ export function ImproverScreen({
       if (!base64) {
         throw new Error("Unable to capture a photo right now.");
       }
-      const sizeBytes = estimateBase64Bytes(base64);
-      if (sizeBytes > MAX_MOBILE_WORKFLOW_PHOTO_BYTES) {
+      const photo = createCompletionPhoto(base64, cameraTarget.title, "image/jpeg");
+      if (photo.sizeBytes > MAX_MOBILE_WORKFLOW_PHOTO_BYTES) {
         throw new Error("That photo is too large. Try again with a simpler shot.");
       }
-      const contentType = "image/jpeg";
-      const previewUri = `data:${contentType};base64,${base64}`;
-      const photo: CompletionPhoto = {
-        id: `photo-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        fileName: `${slugifyFileName(cameraTarget.title)}_${Date.now()}.jpg`,
-        contentType,
-        dataBase64: base64,
-        previewUri,
-        sizeBytes,
-      };
-      const currentPhotos = completionForms[cameraTarget.stepId]?.[cameraTarget.itemId]?.photos || [];
-      let nextPhotos = [...currentPhotos, photo];
-      if (typeof cameraTarget.maxCount === "number" && cameraTarget.maxCount > 0) {
-        nextPhotos = nextPhotos.slice(-cameraTarget.maxCount);
-      }
-      setItemForm(cameraTarget.stepId, cameraTarget.itemId, {
-        photos: nextPhotos,
-      });
+      addPhotosToItem(cameraTarget.stepId, cameraTarget.itemId, [photo], cameraTarget.maxCount);
       setCameraTarget(null);
     } catch (nextError) {
       setCameraError((nextError as Error)?.message || "Unable to capture a workflow photo.");
     }
-  };
+  }, [addPhotosToItem, cameraTarget, createCompletionPhoto]);
 
-  const buildCompletionPayload = (workflow: AppWorkflow, step: AppWorkflowStep): AppWorkflowStepCompletionInput => {
-    const notPossibleForm = stepNotPossibleForms[step.id] || emptyStepNotPossibleForm();
-    if (step.allowStepNotPossible && notPossibleForm.selected) {
-      const details = notPossibleForm.details.trim();
-      if (!details) {
-        throw new Error("Explain why this step is not possible.");
+  const pickLibraryPhotos = useCallback(
+    async (stepId: string, itemId: string, title: string, maxCount: number | null) => {
+      if (!OPTIONAL_IMAGE_PICKER?.launchImageLibraryAsync) {
+        setError("Photo library uploads are not available on this build yet.");
+        setNotice(null);
+        return;
       }
+      try {
+        const permissionResult = await OPTIONAL_IMAGE_PICKER.requestMediaLibraryPermissionsAsync();
+        if (!permissionResult?.granted) {
+          throw new Error("Photo library permission is required to attach workflow photos.");
+        }
+
+        const result = await OPTIONAL_IMAGE_PICKER.launchImageLibraryAsync({
+          mediaTypes:
+            OPTIONAL_IMAGE_PICKER.MediaTypeOptions?.Images ?? OPTIONAL_IMAGE_PICKER.MediaType?.images ?? ["images"],
+          allowsMultipleSelection: maxCount === null || maxCount > 1,
+          selectionLimit: maxCount === null ? 10 : Math.max(1, maxCount),
+          quality: 0.45,
+          base64: true,
+        });
+
+        if (result?.canceled) {
+          return;
+        }
+
+        const assets = Array.isArray(result?.assets) ? result.assets : [];
+        const nextPhotos = assets.map((asset: any, index: number) => {
+          const base64 = typeof asset?.base64 === "string" ? asset.base64.trim() : "";
+          if (!base64) {
+            throw new Error("One of the selected photos could not be read.");
+          }
+          const contentType = typeof asset?.mimeType === "string" && asset.mimeType.startsWith("image/")
+            ? asset.mimeType
+            : "image/jpeg";
+          const photo = createCompletionPhoto(base64, `${title}_${index + 1}`, contentType);
+          if (photo.sizeBytes > MAX_MOBILE_WORKFLOW_PHOTO_BYTES) {
+            throw new Error("One of the selected photos is too large after compression.");
+          }
+          return photo;
+        });
+
+        if (nextPhotos.length > 0) {
+          addPhotosToItem(stepId, itemId, nextPhotos, maxCount);
+          setError(null);
+        }
+      } catch (nextError) {
+        setError((nextError as Error)?.message || "Unable to attach library photos.");
+        setNotice(null);
+      }
+    },
+    [addPhotosToItem, createCompletionPhoto],
+  );
+
+  const buildCompletionPayload = useCallback(
+    (workflow: AppWorkflow, step: AppWorkflowStep): AppWorkflowStepCompletionInput => {
+      const notPossibleForm = stepNotPossibleForms[step.id] || emptyStepNotPossibleForm();
+      if (step.allowStepNotPossible && notPossibleForm.selected) {
+        const details = notPossibleForm.details.trim();
+        if (!details) {
+          throw new Error("Explain why this step cannot be completed.");
+        }
+        return {
+          stepNotPossible: true,
+          stepNotPossibleDetails: details,
+          items: [],
+        };
+      }
+
+      const items: AppWorkflowStepCompletionInput["items"] = [];
+      const stepForms = completionForms[step.id] || {};
+      for (const item of step.workItems) {
+        const form = stepForms[item.id] || emptyItemForm();
+        const dropdownValue = form.dropdown.trim();
+        const writtenResponse = form.written.trim();
+        const selectedOption = dropdownValue
+          ? item.dropdownOptions.find((option) => option.value === dropdownValue)
+          : undefined;
+        const dropdownRequiresPhoto = Boolean(selectedOption?.requiresPhotoAttachment);
+        const requiresWritten =
+          item.requiresWrittenResponse ||
+          (dropdownValue ? Boolean(item.dropdownRequiresWrittenResponse[dropdownValue]) : false);
+        const requiresPhoto = item.requiresPhoto || dropdownRequiresPhoto;
+        const anyInput = form.photos.length > 0 || dropdownValue.length > 0 || writtenResponse.length > 0;
+
+        if (!item.optional && !anyInput) {
+          throw new Error(`Missing response for ${item.title}.`);
+        }
+        if (item.requiresDropdown && !dropdownValue) {
+          throw new Error(`Choose an option for ${item.title}.`);
+        }
+        if (requiresWritten && !writtenResponse) {
+          throw new Error(`Enter a written response for ${item.title}.`);
+        }
+        if (requiresPhoto) {
+          if (item.requiresPhoto && item.photoAllowAnyCount) {
+            if (form.photos.length === 0) {
+              throw new Error(`Add at least one photo for ${item.title}.`);
+            }
+          } else if (item.requiresPhoto) {
+            const requiredCount = Math.max(1, item.photoRequiredCount || 1);
+            if (form.photos.length !== requiredCount) {
+              throw new Error(`Add exactly ${requiredCount} photo${requiredCount === 1 ? "" : "s"} for ${item.title}.`);
+            }
+          } else if (form.photos.length === 0) {
+            throw new Error(`Add a photo for ${item.title}.`);
+          }
+        }
+        if (!anyInput && item.optional) {
+          continue;
+        }
+
+        items.push({
+          itemId: item.id,
+          photoUploads:
+            form.photos.length > 0
+              ? form.photos.map((photo) => ({
+                  fileName: photo.fileName,
+                  contentType: photo.contentType,
+                  dataBase64: photo.dataBase64,
+                }))
+              : undefined,
+          writtenResponse: writtenResponse || undefined,
+          dropdownValue: dropdownValue || undefined,
+        });
+      }
+
       return {
-        stepNotPossible: true,
-        stepNotPossibleDetails: details,
-        items: [],
+        stepNotPossible: false,
+        items,
       };
-    }
+    },
+    [completionForms, stepNotPossibleForms],
+  );
 
-    const items: AppWorkflowStepCompletionInput["items"] = [];
-    const stepForms = completionForms[step.id] || {};
-    for (const item of step.workItems) {
-      const form = stepForms[item.id] || emptyItemForm();
-      const dropdownValue = form.dropdown.trim();
-      const writtenResponse = form.written.trim();
-      const selectedOption = dropdownValue
-        ? item.dropdownOptions.find((option) => option.value === dropdownValue)
-        : undefined;
-      const requiresWritten =
-        item.requiresWrittenResponse ||
-        (dropdownValue ? Boolean(item.dropdownRequiresWrittenResponse[dropdownValue]) : false);
-      const requiresPhoto = item.requiresPhoto || Boolean(selectedOption?.requiresPhotoAttachment);
-      const anyInput = form.photos.length > 0 || dropdownValue.length > 0 || writtenResponse.length > 0;
-
-      if (!item.optional && !anyInput) {
-        throw new Error(`Missing response for ${item.title}.`);
+  const completeWorkflowStep = useCallback(
+    async (workflow: AppWorkflow, step: AppWorkflowStep) => {
+      if (!backendClient) {
+        return;
       }
-      if (item.requiresDropdown && !dropdownValue) {
-        throw new Error(`Choose an option for ${item.title}.`);
-      }
-      if (requiresWritten && !writtenResponse) {
-        throw new Error(`Enter a written response for ${item.title}.`);
-      }
-      if (requiresPhoto) {
-        if (item.requiresPhoto && item.photoAllowAnyCount) {
-          if (form.photos.length === 0) {
-            throw new Error(`Add at least one photo for ${item.title}.`);
-          }
-        } else if (item.requiresPhoto) {
-          const requiredCount = Math.max(1, item.photoRequiredCount || 1);
-          if (form.photos.length !== requiredCount) {
-            throw new Error(
-              `Add exactly ${requiredCount} photo${requiredCount === 1 ? "" : "s"} for ${item.title}.`,
-            );
-          }
-        } else if (form.photos.length === 0) {
-          throw new Error(`Add a photo for ${item.title}.`);
-        }
-      }
-      if (!anyInput && item.optional) {
-        continue;
-      }
-
-      items.push({
-        itemId: item.id,
-        photoUploads:
-          form.photos.length > 0
-            ? form.photos.map((photo) => ({
-                fileName: photo.fileName,
-                contentType: photo.contentType,
-                dataBase64: photo.dataBase64,
-              }))
-            : undefined,
-        writtenResponse: writtenResponse || undefined,
-        dropdownValue: dropdownValue || undefined,
-      });
-    }
-
-    return {
-      stepNotPossible: false,
-      items,
-    };
-  };
-
-  const completeWorkflowStep = async (workflow: AppWorkflow, step: AppWorkflowStep) => {
-    if (!backendClient) {
-      return;
-    }
-    setStepErrors((current) => {
-      if (!current[step.id]) {
-        return current;
-      }
-      const next = { ...current };
-      delete next[step.id];
-      return next;
-    });
-    setActionKey(`complete:${step.id}`);
-    try {
-      const payload = buildCompletionPayload(workflow, step);
-      const updatedWorkflow = await backendClient.completeWorkflowStep(workflow.id, step.id, payload);
-      mergeWorkflow(updatedWorkflow);
-      setNotice(
-        (stepNotPossibleForms[step.id] || emptyStepNotPossibleForm()).selected
-          ? "Step marked not possible."
-          : "Workflow step completed.",
-      );
-      setError(null);
-      setCameraTarget(null);
-      setCompletionForms((current) => {
+      setStepErrors((current) => {
         if (!current[step.id]) {
           return current;
         }
@@ -948,98 +1322,175 @@ export function ImproverScreen({
         delete next[step.id];
         return next;
       });
-      setStepNotPossibleForms((current) => {
-        if (!current[step.id]) {
-          return current;
-        }
-        const next = { ...current };
-        delete next[step.id];
-        return next;
-      });
-      await refreshAllData();
-      await refreshSelectedWorkflow(workflow.id);
-    } catch (nextError) {
-      const message = (nextError as Error)?.message || "Unable to complete this workflow step.";
-      setStepErrors((current) => ({
-        ...current,
-        [step.id]: message,
-      }));
-    } finally {
-      setActionKey("");
-    }
-  };
-
-  const requestPayoutRetry = async (workflowId: string, stepId: string) => {
-    if (!backendClient) {
-      return;
-    }
-    setActionKey(`retry:${stepId}`);
-    try {
-      const updatedWorkflow = await backendClient.requestWorkflowStepPayoutRetry(workflowId, stepId);
-      mergeWorkflow(updatedWorkflow);
-      setNotice("Payout retry requested.");
-      setError(null);
-      await refreshAllData();
-    } catch (nextError) {
-      setError((nextError as Error)?.message || "Unable to request payout retry.");
-      setNotice(null);
-    } finally {
-      setActionKey("");
-    }
-  };
-
-  const requestWorkflowPayoutRetries = async (workflow: AppWorkflow) => {
-    const failedSteps = workflow.steps.filter(
-      (step) =>
-        step.assignedImproverId === user?.id &&
-        step.status === "completed" &&
-        step.bounty > 0 &&
-        Boolean(step.payoutError?.trim()),
-    );
-    if (failedSteps.length === 0 || !backendClient) {
-      return;
-    }
-    setActionKey(`retry-workflow:${workflow.id}`);
-    try {
-      for (const step of failedSteps) {
-        await backendClient.requestWorkflowStepPayoutRetry(workflow.id, step.id);
+      setActionKey(`complete:${step.id}`);
+      try {
+        const payload = buildCompletionPayload(workflow, step);
+        const updatedWorkflow = await backendClient.completeWorkflowStep(workflow.id, step.id, payload);
+        mergeWorkflow(updatedWorkflow);
+        setNotice(payload.stepNotPossible ? "Step marked not possible." : "Workflow step completed.");
+        setError(null);
+        setCompletionForms((current) => {
+          if (!current[step.id]) {
+            return current;
+          }
+          const next = { ...current };
+          delete next[step.id];
+          return next;
+        });
+        setStepNotPossibleForms((current) => {
+          if (!current[step.id]) {
+            return current;
+          }
+          const next = { ...current };
+          delete next[step.id];
+          return next;
+        });
+        await refreshWorkflowSurfaces();
+        await refreshSelectedWorkflow(workflow.id);
+      } catch (nextError) {
+        const message = (nextError as Error)?.message || "Unable to complete this workflow step.";
+        setStepErrors((current) => ({
+          ...current,
+          [step.id]: message,
+        }));
+      } finally {
+        setActionKey("");
       }
-      setNotice(
-        failedSteps.length === 1 ? "Payout retry requested." : `${failedSteps.length} payout retries requested.`,
+    },
+    [backendClient, buildCompletionPayload, mergeWorkflow, refreshSelectedWorkflow, refreshWorkflowSurfaces],
+  );
+
+  const requestPayoutRetry = useCallback(
+    async (workflowId: string, stepId: string) => {
+      if (!backendClient) {
+        return;
+      }
+      setActionKey(`retry:${stepId}`);
+      try {
+        const updatedWorkflow = await backendClient.requestWorkflowStepPayoutRetry(workflowId, stepId);
+        mergeWorkflow(updatedWorkflow);
+        setNotice("Payout retry requested.");
+        setError(null);
+        await loadUnpaidData(true);
+        await refreshSelectedWorkflow(workflowId);
+      } catch (nextError) {
+        setError((nextError as Error)?.message || "Unable to request payout retry.");
+        setNotice(null);
+      } finally {
+        setActionKey("");
+      }
+    },
+    [backendClient, loadUnpaidData, mergeWorkflow, refreshSelectedWorkflow],
+  );
+
+  const requestWorkflowPayoutRetries = useCallback(
+    async (workflow: AppWorkflow) => {
+      if (!backendClient) {
+        return;
+      }
+      const failedSteps = workflow.steps.filter(
+        (step) =>
+          step.assignedImproverId === user?.id &&
+          step.status === "completed" &&
+          step.bounty > 0 &&
+          Boolean(step.payoutError?.trim()),
       );
-      setError(null);
-      await refreshAllData();
-    } catch (nextError) {
-      setError((nextError as Error)?.message || "Unable to request payout retries.");
-      setNotice(null);
-    } finally {
-      setActionKey("");
-    }
-  };
+      if (failedSteps.length === 0) {
+        return;
+      }
 
-  const requestCredential = async (credentialType: string) => {
+      setActionKey(`retry-workflow:${workflow.id}`);
+      try {
+        for (const step of failedSteps) {
+          await backendClient.requestWorkflowStepPayoutRetry(workflow.id, step.id);
+        }
+        setNotice(failedSteps.length === 1 ? "Payout retry requested." : `${failedSteps.length} payout retries requested.`);
+        setError(null);
+        await loadUnpaidData(true);
+        await refreshSelectedWorkflow(workflow.id);
+      } catch (nextError) {
+        setError((nextError as Error)?.message || "Unable to request payout retries.");
+        setNotice(null);
+      } finally {
+        setActionKey("");
+      }
+    },
+    [backendClient, loadUnpaidData, refreshSelectedWorkflow, user?.id],
+  );
+
+  const claimWorkflowStep = useCallback(
+    async (workflowId: string, stepId: string) => {
+      if (!backendClient) {
+        return;
+      }
+      setActionKey(`claim:${stepId}`);
+      try {
+        const updatedWorkflow = await backendClient.claimWorkflowStep(workflowId, stepId);
+        mergeWorkflow(updatedWorkflow);
+        setNotice("Workflow step claimed.");
+        setError(null);
+        await refreshWorkflowSurfaces();
+        await refreshSelectedWorkflow(workflowId);
+      } catch (nextError) {
+        setError((nextError as Error)?.message || "Unable to claim this workflow step.");
+        setNotice(null);
+      } finally {
+        setActionKey("");
+      }
+    },
+    [backendClient, mergeWorkflow, refreshSelectedWorkflow, refreshWorkflowSurfaces],
+  );
+
+  const startWorkflowStep = useCallback(
+    async (workflowId: string, stepId: string) => {
+      if (!backendClient) {
+        return;
+      }
+      setActionKey(`start:${stepId}`);
+      try {
+        const updatedWorkflow = await backendClient.startWorkflowStep(workflowId, stepId);
+        mergeWorkflow(updatedWorkflow);
+        setNotice("Workflow step started.");
+        setError(null);
+        await refreshWorkflowSurfaces();
+        await refreshSelectedWorkflow(workflowId);
+      } catch (nextError) {
+        setError((nextError as Error)?.message || "Unable to start this workflow step.");
+        setNotice(null);
+      } finally {
+        setActionKey("");
+      }
+    },
+    [backendClient, mergeWorkflow, refreshSelectedWorkflow, refreshWorkflowSurfaces],
+  );
+
+  const requestCredential = useCallback(
+    async (credentialType: string) => {
+      if (!backendClient) {
+        return;
+      }
+      setActionKey(`credential:${credentialType}`);
+      try {
+        await backendClient.createImproverCredentialRequest(credentialType);
+        setNotice(`Requested ${formatCredentialLabel(credentialType, labelMap)}.`);
+        setError(null);
+        await loadCredentialData(true);
+      } catch (nextError) {
+        setError((nextError as Error)?.message || "Unable to request that credential.");
+        setNotice(null);
+      } finally {
+        setActionKey("");
+      }
+    },
+    [backendClient, labelMap, loadCredentialData],
+  );
+
+  const requestImproverAccess = useCallback(async () => {
     if (!backendClient) {
       return;
     }
-    setActionKey(`credential:${credentialType}`);
-    try {
-      await backendClient.createImproverCredentialRequest(credentialType);
-      setNotice(`Requested ${formatCredentialLabel(credentialType, labelMap)}.`);
-      setError(null);
-      await refreshAllData();
-    } catch (nextError) {
-      setError((nextError as Error)?.message || "Unable to request that credential.");
-      setNotice(null);
-    } finally {
-      setActionKey("");
-    }
-  };
-
-  const requestImproverAccess = async () => {
-    if (!backendClient) {
-      return;
-    }
-    const selectedEmail = verifiedEmailsByStatus.verified.find((email) => email.id === selectedVerifiedEmailId)?.email;
+    const selectedEmail =
+      verifiedEmailsByStatus.verified.find((email) => email.id === selectedVerifiedEmailId)?.email || "";
     if (!requestFirstName.trim() || !requestLastName.trim()) {
       setError("First and last name are required.");
       setNotice(null);
@@ -1062,7 +1513,7 @@ export function ImproverScreen({
         email: selectedEmail,
       });
       await onRefreshProfile();
-      await refreshAllData();
+      await loadRequestData(true);
       setNotice("Improver status requested.");
       setError(null);
     } catch (nextError) {
@@ -1071,9 +1522,17 @@ export function ImproverScreen({
     } finally {
       setActionKey("");
     }
-  };
+  }, [
+    backendClient,
+    loadRequestData,
+    onRefreshProfile,
+    requestFirstName,
+    requestLastName,
+    selectedVerifiedEmailId,
+    verifiedEmailsByStatus.verified,
+  ]);
 
-  const requestEmailVerification = async () => {
+  const requestEmailVerification = useCallback(async () => {
     if (!backendClient) {
       return;
     }
@@ -1085,8 +1544,7 @@ export function ImproverScreen({
     setActionKey("request-email");
     try {
       await backendClient.requestVerifiedEmail(requestEmailInput.trim());
-      const emails = await backendClient.getVerifiedEmails();
-      setVerifiedEmails(emails);
+      await loadRequestData(true);
       setRequestEmailInput("");
       setNotice("Verification email sent.");
       setError(null);
@@ -1096,47 +1554,144 @@ export function ImproverScreen({
     } finally {
       setActionKey("");
     }
-  };
+  }, [backendClient, loadRequestData, requestEmailInput]);
 
-  const resendEmailVerification = async (emailId: string) => {
+  const resendEmailVerification = useCallback(
+    async (emailId: string) => {
+      if (!backendClient) {
+        return;
+      }
+      setActionKey(`resend-email:${emailId}`);
+      try {
+        await backendClient.resendVerifiedEmail(emailId);
+        await loadRequestData(true);
+        setNotice("Verification email resent.");
+        setError(null);
+      } catch (nextError) {
+        setError((nextError as Error)?.message || "Unable to resend verification.");
+        setNotice(null);
+      } finally {
+        setActionKey("");
+      }
+    },
+    [backendClient, loadRequestData],
+  );
+
+  const updateRewardsWallet = useCallback(async () => {
     if (!backendClient) {
       return;
     }
-    setActionKey(`resend-email:${emailId}`);
+    if (!rewardsWalletDraft.trim()) {
+      setError("Enter a rewards wallet address.");
+      setNotice(null);
+      return;
+    }
+    setActionKey("update-rewards-wallet");
     try {
-      await backendClient.resendVerifiedEmail(emailId);
-      const emails = await backendClient.getVerifiedEmails();
-      setVerifiedEmails(emails);
-      setNotice("Verification email resent.");
+      await backendClient.updateImproverPrimaryRewardsAccount(rewardsWalletDraft.trim());
+      await onRefreshProfile();
+      await loadWorkflowData(true);
+      setNotice("Improver rewards wallet updated.");
       setError(null);
     } catch (nextError) {
-      setError((nextError as Error)?.message || "Unable to resend verification.");
+      setError((nextError as Error)?.message || "Unable to update the rewards wallet.");
       setNotice(null);
     } finally {
       setActionKey("");
     }
-  };
+  }, [backendClient, loadWorkflowData, onRefreshProfile, rewardsWalletDraft]);
 
-  const parseAbsenceSelection = (value: string | null) => {
-    if (!value) {
-      return null;
-    }
-    const separator = value.lastIndexOf(":");
-    if (separator <= 0) {
-      return null;
-    }
-    const seriesId = value.slice(0, separator);
-    const stepOrder = Number.parseInt(value.slice(separator + 1), 10);
-    if (!seriesId || Number.isNaN(stepOrder) || stepOrder <= 0) {
-      return null;
-    }
-    return { seriesId, stepOrder };
-  };
+  const revokeAbsence = useCallback(
+    async (absenceId: string) => {
+      if (!backendClient) {
+        return;
+      }
+      setActionKey(`absence-delete:${absenceId}`);
+      try {
+        await backendClient.deleteImproverAbsencePeriod(absenceId);
+        setNotice("Absence revoked.");
+        setError(null);
+        await refreshWorkflowSurfaces();
+      } catch (nextError) {
+        setError((nextError as Error)?.message || "Unable to revoke absence.");
+        setNotice(null);
+      } finally {
+        setActionKey("");
+      }
+    },
+    [backendClient, refreshWorkflowSurfaces],
+  );
 
-  const saveAbsencePeriod = async () => {
-    if (!backendClient) {
+  const revokeWorkflowSeries = useCallback(
+    async (seriesId: string, stepOrder: number) => {
+      if (!backendClient) {
+        return;
+      }
+      setActionKey(`unclaim:${seriesId}:${stepOrder}`);
+      try {
+        const result = await backendClient.unclaimImproverWorkflowSeries(seriesId, stepOrder);
+        setNotice(
+          result.skippedCount > 0
+            ? `Released ${result.releasedCount} claims and skipped ${result.skippedCount} active assignments.`
+            : `Released ${result.releasedCount} claims.`,
+        );
+        setError(null);
+        await refreshWorkflowSurfaces();
+        setDetailVisible(false);
+      } catch (nextError) {
+        setError((nextError as Error)?.message || "Unable to revoke these workflow claims.");
+        setNotice(null);
+      } finally {
+        setActionKey("");
+      }
+    },
+    [backendClient, refreshWorkflowSurfaces],
+  );
+
+  const applyWorkflowEditAction = useCallback(() => {
+    if (selectedWorkflowGroups.length === 0 || !backendClient) {
       return;
     }
+
+    if (workflowEditAction === "revoke") {
+      Alert.alert(
+        "Revoke selected workflows?",
+        "This will release the selected recurring workflow claims to other improvers.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Revoke",
+            style: "destructive",
+            onPress: () => {
+              void (async () => {
+                setActionKey("bulk-revoke");
+                try {
+                  for (const group of selectedWorkflowGroups) {
+                    await backendClient.unclaimImproverWorkflowSeries(group.seriesId, group.primaryStepOrder);
+                  }
+                  setNotice(
+                    selectedWorkflowGroups.length === 1
+                      ? "Selected workflow revoked."
+                      : `${selectedWorkflowGroups.length} workflows revoked.`,
+                  );
+                  setError(null);
+                  setWorkflowEditMode(false);
+                  setSelectedWorkflowKeys([]);
+                  await refreshWorkflowSurfaces();
+                } catch (nextError) {
+                  setError((nextError as Error)?.message || "Unable to revoke selected workflows.");
+                  setNotice(null);
+                } finally {
+                  setActionKey("");
+                }
+              })();
+            },
+          },
+        ],
+      );
+      return;
+    }
+
     if (!isValidDateInput(absenceFrom) || !isValidDateInput(absenceUntil)) {
       setError("Enter absence dates in YYYY-MM-DD format.");
       setNotice(null);
@@ -1147,174 +1702,123 @@ export function ImproverScreen({
       setNotice(null);
       return;
     }
-    setActionKey("absence-create");
-    try {
-      let summaries: AppImproverAbsencePeriodCreateResult[] = [];
-      if (absenceTargetMode === "all") {
-        for (const option of recurringClaimOptions) {
+
+    void (async () => {
+      setActionKey("bulk-absence");
+      try {
+        const summaries: AppImproverAbsencePeriodCreateResult[] = [];
+        for (const group of selectedWorkflowGroups) {
           summaries.push(
             await backendClient.createImproverAbsencePeriod({
-              seriesId: option.seriesId,
-              stepOrder: option.stepOrder,
+              seriesId: group.seriesId,
+              stepOrder: group.primaryStepOrder,
               absentFrom: absenceFrom,
               absentUntil: absenceUntil,
             }),
           );
         }
-      } else {
-        const target = parseAbsenceSelection(absenceSelection);
-        if (!target) {
-          throw new Error("Choose a recurring workflow series step.");
-        }
-        summaries = [
-          await backendClient.createImproverAbsencePeriod({
-            seriesId: target.seriesId,
-            stepOrder: target.stepOrder,
-            absentFrom: absenceFrom,
-            absentUntil: absenceUntil,
-          }),
-        ];
+        const released = summaries.reduce((sum, entry) => sum + entry.releasedCount, 0);
+        const skipped = summaries.reduce((sum, entry) => sum + entry.skippedCount, 0);
+        setNotice(
+          skipped > 0
+            ? `Absence saved. Released ${released} assignments and skipped ${skipped} active ones.`
+            : `Absence saved. Released ${released} assignments.`,
+        );
+        setError(null);
+        setWorkflowEditMode(false);
+        setSelectedWorkflowKeys([]);
+        setAbsenceFrom("");
+        setAbsenceUntil("");
+        await refreshWorkflowSurfaces();
+      } catch (nextError) {
+        setError((nextError as Error)?.message || "Unable to save absence coverage.");
+        setNotice(null);
+      } finally {
+        setActionKey("");
       }
-      const released = summaries.reduce((sum, entry) => sum + entry.releasedCount, 0);
-      const skipped = summaries.reduce((sum, entry) => sum + entry.skippedCount, 0);
-      setNotice(
-        skipped > 0
-          ? `Absence saved. Released ${released} assignments and skipped ${skipped} active ones.`
-          : `Absence saved. Released ${released} assignments.`,
-      );
-      setError(null);
-      setAbsenceFrom("");
-      setAbsenceUntil("");
-      await refreshAllData();
-    } catch (nextError) {
-      setError((nextError as Error)?.message || "Unable to save absence coverage.");
-      setNotice(null);
-    } finally {
-      setActionKey("");
-    }
-  };
+    })();
+  }, [
+    absenceFrom,
+    absenceUntil,
+    backendClient,
+    refreshWorkflowSurfaces,
+    selectedWorkflowGroups,
+    workflowEditAction,
+  ]);
 
-  const saveEditedAbsence = async () => {
-    if (!backendClient || !editingAbsenceId) {
-      return;
-    }
-    if (!isValidDateInput(editAbsenceFrom) || !isValidDateInput(editAbsenceUntil)) {
-      setError("Enter absence dates in YYYY-MM-DD format.");
-      setNotice(null);
-      return;
-    }
-    if (editAbsenceFrom > editAbsenceUntil) {
-      setError("Absent end date must be on or after the start date.");
-      setNotice(null);
-      return;
-    }
-    setActionKey(`absence-update:${editingAbsenceId}`);
-    try {
-      const result = await backendClient.updateImproverAbsencePeriod(editingAbsenceId, {
-        absentFrom: editAbsenceFrom,
-        absentUntil: editAbsenceUntil,
-      });
-      setNotice(
-        result.skippedCount > 0
-          ? `Absence updated. Released ${result.releasedCount} assignments and skipped ${result.skippedCount} active ones.`
-          : `Absence updated. Released ${result.releasedCount} assignments.`,
-      );
-      setError(null);
-      setEditingAbsenceId(null);
-      await refreshAllData();
-    } catch (nextError) {
-      setError((nextError as Error)?.message || "Unable to update absence coverage.");
-      setNotice(null);
-    } finally {
-      setActionKey("");
-    }
-  };
+  const currentWorkflowOptionsLabel =
+    workflowSelectorOptions.find((option) => option.value === workflowView)?.label || "My workflows";
 
-  const deleteAbsence = (absenceId: string) => {
-    if (!backendClient) {
-      return;
-    }
-    Alert.alert("Delete absence coverage?", "This will reopen those recurring claims to other improvers.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: () => {
-          void (async () => {
-            setActionKey(`absence-delete:${absenceId}`);
-            try {
-              await backendClient.deleteImproverAbsencePeriod(absenceId);
-              setNotice("Absence coverage deleted.");
-              setError(null);
-              setEditingAbsenceId(null);
-              await refreshAllData();
-            } catch (nextError) {
-              setError((nextError as Error)?.message || "Unable to delete absence coverage.");
-              setNotice(null);
-            } finally {
-              setActionKey("");
-            }
-          })();
-        },
-      },
-    ]);
-  };
+  const selectedWorkflowAssignedStep = useMemo(
+    () => (selectedWorkflow ? resolveAssignedStep(selectedWorkflow, user?.id) : null),
+    [selectedWorkflow, user?.id],
+  );
 
-  const unclaimSeries = (seriesId: string, stepOrder: number) => {
-    if (!backendClient) {
-      return;
+  const selectedWorkflowAbsence = useMemo(() => {
+    if (!selectedWorkflowAssignedStep || !selectedWorkflow) {
+      return null;
     }
-    Alert.alert(
-      "Unclaim this series?",
-      "Future claimable assignments for this recurring series step will be released to other improvers.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Unclaim",
-          style: "destructive",
-          onPress: () => {
-            void (async () => {
-              setActionKey(`unclaim:${seriesId}:${stepOrder}`);
-              try {
-                const result = await backendClient.unclaimImproverWorkflowSeries(seriesId, stepOrder);
-                setNotice(
-                  result.skippedCount > 0
-                    ? `Series unclaimed. Released ${result.releasedCount} claims and skipped ${result.skippedCount} active assignments.`
-                    : `Series unclaimed. Released ${result.releasedCount} claims.`,
-                );
-                setError(null);
-                setDetailVisible(false);
-                setSelectedWorkflow(null);
-                await refreshAllData();
-              } catch (nextError) {
-                setError((nextError as Error)?.message || "Unable to unclaim this workflow series.");
-                setNotice(null);
-              } finally {
-                setActionKey("");
-              }
-            })();
-          },
-        },
-      ],
+    return (
+      absencePeriods
+        .filter(
+          (period) =>
+            period.seriesId === selectedWorkflow.seriesId &&
+            period.stepOrder === selectedWorkflowAssignedStep.stepOrder &&
+            period.absentUntil * 1000 >= Date.now(),
+        )
+        .sort((left, right) => left.absentFrom - right.absentFrom)[0] || null
     );
-  };
+  }, [absencePeriods, selectedWorkflow, selectedWorkflowAssignedStep]);
 
-  const selectedWorkflowSeriesStep = useMemo(() => {
-    if (!selectedWorkflow || !user?.id) {
-      return null;
+  const canRevokeSelectedWorkflowAbsence = useMemo(() => {
+    if (!selectedWorkflowAbsence || !selectedWorkflowAssignedStep || !selectedWorkflow || !user?.id) {
+      return false;
     }
-    const assignedStep = selectedWorkflow.steps
-      .filter((step) => step.assignedImproverId === user.id)
-      .sort((left, right) => left.stepOrder - right.stepOrder)[0];
-    if (!assignedStep) {
-      return null;
+    return !workflows.some((workflow) => {
+      if (workflow.seriesId !== selectedWorkflowAbsence.seriesId) {
+        return false;
+      }
+      if (
+        workflow.startAt < selectedWorkflowAbsence.absentFrom ||
+        workflow.startAt >= selectedWorkflowAbsence.absentUntil
+      ) {
+        return false;
+      }
+      return workflow.steps.some(
+        (step) =>
+          step.stepOrder === selectedWorkflowAssignedStep.stepOrder &&
+          Boolean(step.assignedImproverId) &&
+          step.assignedImproverId !== user.id,
+      );
+    });
+  }, [selectedWorkflowAbsence, selectedWorkflowAssignedStep, selectedWorkflow, user?.id, workflows]);
+
+  const sortedDetailSteps = useMemo(
+    () => (selectedWorkflow ? [...selectedWorkflow.steps].sort((left, right) => left.stepOrder - right.stepOrder) : []),
+    [selectedWorkflow],
+  );
+  const currentDetailStepIndex = Math.min(detailStepIndex, Math.max(sortedDetailSteps.length - 1, 0));
+  const currentDetailStep = sortedDetailSteps[currentDetailStepIndex] || null;
+  const detailSubmissionExpanded = currentDetailStep ? Boolean(submissionDetailsOpen[currentDetailStep.id]) : false;
+
+  useEffect(() => {
+    if (!detailVisible) {
+      setSubmissionDetailsOpen({});
     }
-    return {
-      seriesId: selectedWorkflow.seriesId,
-      stepOrder: assignedStep.stepOrder,
-      title: assignedStep.title,
-    };
-  }, [selectedWorkflow, user?.id]);
+  }, [detailVisible]);
+
+  useEffect(() => {
+    if (!currentDetailStep?.submission || currentDetailStep.submission.stepNotPossible) {
+      return;
+    }
+    const photoIds = uniqueBy(
+      currentDetailStep.submission.itemResponses.flatMap((response) => response.photoIds || []),
+      (photoId) => photoId,
+    );
+    for (const photoId of photoIds) {
+      void ensurePhotoPreviewUri(photoId);
+    }
+  }, [currentDetailStep, ensurePhotoPreviewUri]);
 
   const renderStatusChip = (label: string, tone: "default" | "success" | "danger" | "warning" = "default") => {
     const toneStyle =
@@ -1340,6 +1844,38 @@ export function ImproverScreen({
     );
   };
 
+  const renderBannerStack = () => (
+    <>
+      {error ? (
+        <View style={styles.errorCard}>
+          <Ionicons name="alert-circle-outline" size={18} color={palette.danger} />
+          <Text style={styles.errorCardText}>{error}</Text>
+        </View>
+      ) : null}
+
+      {notice ? (
+        <View style={styles.noticeCard}>
+          <Ionicons name="checkmark-circle-outline" size={18} color={palette.success} />
+          <Text style={styles.noticeCardText}>{notice}</Text>
+        </View>
+      ) : null}
+    </>
+  );
+
+  const renderLoadingCard = (label: string) => (
+    <View style={styles.loadingInlineCard}>
+      <ActivityIndicator size="small" color={palette.primary} />
+      <Text style={styles.loadingInlineText}>{label}</Text>
+    </View>
+  );
+
+  const renderEmptyCard = (title: string, body: string) => (
+    <View style={styles.card}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      <Text style={styles.body}>{body}</Text>
+    </View>
+  );
+
   const renderRequestAccess = () => {
     const statusTone =
       improver?.status === "approved"
@@ -1350,53 +1886,43 @@ export function ImproverScreen({
 
     return (
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        {renderBannerStack()}
+
         {improver ? (
           <View style={styles.card}>
-            <View style={styles.cardHeaderRow}>
-              <Text style={styles.sectionTitle}>Current Request</Text>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Current request</Text>
               {renderStatusChip(formatStatusLabel(improver.status), statusTone)}
             </View>
-            <Text style={styles.body}>
-              {improver.status === "approved"
-                ? "This account is already enabled for improver access."
-                : improver.status === "rejected"
-                  ? "This improver request was rejected. You can update your information and try again."
-                  : "Your improver request is pending review."}
-            </Text>
-            <Text style={styles.meta}>Name: {`${improver.firstName} ${improver.lastName}`.trim()}</Text>
-            <Text style={styles.meta}>Email: {improver.email}</Text>
-            <Text style={styles.meta}>Requested: {new Date(improver.createdAt).toLocaleString()}</Text>
+            <Text style={styles.meta}>{`${improver.firstName} ${improver.lastName}`.trim()}</Text>
+            <Text style={styles.meta}>{improver.email}</Text>
           </View>
         ) : null}
 
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Verified Email</Text>
-          <Text style={styles.body}>
-            Improver requests require a verified email address.
-          </Text>
-          {verifiedEmailsByStatus.verified.length > 0 ? (
-            verifiedEmailsByStatus.verified.map((email) => {
-              const selected = selectedVerifiedEmailId === email.id;
-              return (
-                <Pressable
-                  key={email.id}
-                  style={[
-                    styles.choiceRow,
-                    selected ? styles.choiceRowActive : undefined,
-                  ]}
-                  onPress={() => setSelectedVerifiedEmailId(email.id)}
-                >
-                  <View style={styles.choiceCopy}>
-                    <Text style={styles.choiceTitle}>{email.email}</Text>
-                    <Text style={styles.choiceBody}>Verified {email.verifiedAt ? new Date(email.verifiedAt).toLocaleString() : "recently"}</Text>
-                  </View>
-                  {selected ? <Ionicons name="checkmark-circle" size={20} color={palette.primaryStrong} /> : null}
-                </Pressable>
-              );
-            })
-          ) : (
+          <Text style={styles.sectionTitle}>Verified email</Text>
+          {requestDataLoading && !requestDataLoaded ? renderLoadingCard("Loading verified emails...") : null}
+          {verifiedEmailsByStatus.verified.map((email) => {
+            const selected = selectedVerifiedEmailId === email.id;
+            return (
+              <Pressable
+                key={email.id}
+                style={[styles.choiceRow, selected ? styles.choiceRowActive : undefined]}
+                onPress={() => setSelectedVerifiedEmailId(email.id)}
+              >
+                <View style={styles.choiceCopy}>
+                  <Text style={styles.choiceTitle}>{email.email}</Text>
+                  <Text style={styles.choiceBody}>
+                    Verified {email.verifiedAt ? new Date(email.verifiedAt).toLocaleDateString() : "recently"}
+                  </Text>
+                </View>
+                {selected ? <Ionicons name="checkmark-circle" size={20} color={palette.primaryStrong} /> : null}
+              </Pressable>
+            );
+          })}
+          {verifiedEmailsByStatus.verified.length === 0 && requestDataLoaded ? (
             <Text style={styles.meta}>No verified emails yet.</Text>
-          )}
+          ) : null}
 
           <View style={styles.inlineForm}>
             <TextInput
@@ -1424,7 +1950,6 @@ export function ImproverScreen({
 
           {verifiedEmailsByStatus.pending.length > 0 ? (
             <View style={styles.stack}>
-              <Text style={styles.stackLabel}>Pending emails</Text>
               {verifiedEmailsByStatus.pending.map((email) => (
                 <View key={email.id} style={styles.pendingEmailRow}>
                   <View style={styles.choiceCopy}>
@@ -1454,10 +1979,7 @@ export function ImproverScreen({
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Request Improver Status</Text>
-          <Text style={styles.body}>
-            Tell us who you are so the improver admin team can review this account.
-          </Text>
+          <Text style={styles.sectionTitle}>Request improver status</Text>
           <TextInput
             style={styles.input}
             placeholder="First name"
@@ -1493,308 +2015,248 @@ export function ImproverScreen({
     );
   };
 
-  const renderWorkflowCard = (
-    workflow: AppWorkflow,
-    extra?: React.ReactNode,
-  ) => {
-    const displayStatus = formatWorkflowDisplayStatus(workflow);
-    const tone =
-      workflow.status === "completed" || workflow.status === "paid_out"
-        ? "success"
-        : workflow.status === "failed" || workflow.status === "rejected"
-          ? "danger"
-          : workflow.status === "blocked" || displayStatus === "Upcoming"
-            ? "warning"
-            : "default";
+  if (!canUsePanel) {
+    return renderRequestAccess();
+  }
+
+  const renderMyWorkflowCard = (group: WorkflowSeriesGroup) => {
+    const focusWorkflow =
+      group.workflows.find((workflow) => isWorkflowActiveForUser(workflow)) || group.workflows[0];
+    const selected = selectedWorkflowKeys.includes(group.key);
+    const isEditable = group.recurrence !== "one_time";
+
     return (
-      <Pressable style={styles.card} onPress={() => void openWorkflowDetail(workflow)}>
+      <Pressable
+        key={group.key}
+        style={[
+          styles.card,
+          workflowEditMode && selected ? styles.cardSelected : undefined,
+        ]}
+        onPress={() => {
+          if (workflowEditMode && isEditable) {
+            setSelectedWorkflowKeys((current) =>
+              current.includes(group.key)
+                ? current.filter((value) => value !== group.key)
+                : [...current, group.key],
+            );
+            return;
+          }
+          void openWorkflowDetail(focusWorkflow);
+        }}
+      >
         <View style={styles.cardHeaderRow}>
           <View style={styles.cardHeaderCopy}>
-            <Text style={styles.sectionTitle}>{workflow.title}</Text>
-            <Text style={styles.body}>{workflow.description}</Text>
+            <Text style={styles.workflowTitle} numberOfLines={2}>
+              {group.workflowTitle}
+            </Text>
+            <Text style={styles.meta}>
+              Step {group.primaryStepOrder}: {group.primaryStepTitle}
+            </Text>
+            <Text style={styles.meta}>Next: {formatWorkflowDate(focusWorkflow.startAt)}</Text>
           </View>
-          {renderStatusChip(displayStatus || "Workflow", tone)}
+          <View style={styles.cardBadgeStack}>
+            {renderStatusChip(formatWorkflowDisplayStatus(focusWorkflow), resolveWorkflowTone(focusWorkflow))}
+            {group.absence ? (
+              renderStatusChip(
+                `Absent until ${formatDateFromUnix(group.absence.absentUntil, true)}`,
+                "warning",
+              )
+            ) : null}
+            {workflowEditMode && isEditable ? (
+              <Ionicons
+                name={selected ? "checkmark-circle" : "ellipse-outline"}
+                size={20}
+                color={selected ? palette.primaryStrong : palette.textMuted}
+              />
+            ) : null}
+          </View>
         </View>
-        <View style={styles.metadataWrap}>
-          <Text style={styles.meta}>Start: {formatWorkflowDate(workflow.startAt)}</Text>
-          <Text style={styles.meta}>Series: {workflow.seriesId}</Text>
-        </View>
-        {extra}
-        <View style={styles.inlineActions}>
-          <Pressable style={styles.secondaryButton} onPress={() => void openWorkflowDetail(workflow)}>
-            <Text style={styles.secondaryButtonText}>View details</Text>
-          </Pressable>
-        </View>
+        {group.workflows.length > 1 ? (
+          <Text style={styles.meta}>
+            {group.workflows.length} upcoming assignments
+          </Text>
+        ) : null}
       </Pressable>
     );
   };
 
-  const renderWorkflowBoard = () => (
-    <View style={styles.sectionStack}>
-      <View style={styles.searchWrap}>
-        <Ionicons name="search-outline" size={16} color={palette.textMuted} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search workflows"
-          placeholderTextColor={palette.textMuted}
-          value={boardSearch}
-          onChangeText={setBoardSearch}
-        />
-      </View>
-      {filteredBoardWorkflows.length === 0 ? (
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>No Eligible Workflows</Text>
-          <Text style={styles.body}>Nothing is claimable for your credentials right now.</Text>
-        </View>
-      ) : (
-        filteredBoardWorkflows.map((workflow) => {
-          const claimableStep = workflow.steps.find((step) => canClaimStep(workflow, step));
-          return renderWorkflowCard(
-            workflow,
-            claimableStep ? (
-              <View style={styles.inlineActions}>
-                <Pressable
-                  style={[
-                    styles.primaryButton,
-                    actionKey === `claim:${claimableStep.id}` ? styles.buttonDisabled : undefined,
-                  ]}
-                  disabled={Boolean(actionKey)}
-                  onPress={() => {
-                    void claimWorkflowStep(workflow.id, claimableStep.id);
-                  }}
-                >
-                  <Text style={styles.primaryButtonText}>
-                    {actionKey === `claim:${claimableStep.id}` ? "Claiming..." : `Claim Step ${claimableStep.stepOrder}`}
-                  </Text>
-                </Pressable>
-              </View>
-            ) : null,
-          );
-        })
-      )}
-    </View>
-  );
-
-  const renderMyWorkflows = () => (
-    <View style={styles.sectionStack}>
-      <View style={styles.searchWrap}>
-        <Ionicons name="search-outline" size={16} color={palette.textMuted} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search your workflows"
-          placeholderTextColor={palette.textMuted}
-          value={myWorkflowsSearch}
-          onChangeText={setMyWorkflowsSearch}
-        />
-      </View>
-      <Pressable
-        style={styles.choiceRow}
-        onPress={() => setShowFinishedSeries((current) => !current)}
-      >
-        <View style={styles.choiceCopy}>
-          <Text style={styles.choiceTitle}>Show finished series</Text>
-          <Text style={styles.choiceBody}>Toggle whether completed one-time work stays visible here.</Text>
-        </View>
-        <Ionicons
-          name={showFinishedSeries ? "checkmark-circle" : "ellipse-outline"}
-          size={20}
-          color={showFinishedSeries ? palette.primaryStrong : palette.textMuted}
-        />
-      </Pressable>
-      {filteredSeriesGroups.length === 0 ? (
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>No Claimed Workflows</Text>
-          <Text style={styles.body}>Claimed workflows will show up here.</Text>
-        </View>
-      ) : (
-        filteredSeriesGroups.map((group) => {
-          const focusWorkflow =
-            group.workflows.find((workflow) => isWorkflowActiveForUser(workflow)) || group.workflows[0];
-          return renderWorkflowCard(
-            focusWorkflow,
-            <View style={styles.stack}>
-              {group.primaryStepOrder != null && group.primaryStepTitle ? (
-                <Text style={styles.meta}>
-                  Assigned step {group.primaryStepOrder}: {group.primaryStepTitle}
-                </Text>
-              ) : null}
+  const renderWorkflowBoardCard = (workflow: AppWorkflow) => {
+    const claimableStep = workflow.steps.find((step) => canClaimStep(workflow, step));
+    return (
+      <Pressable key={workflow.id} style={styles.card} onPress={() => void openWorkflowDetail(workflow)}>
+        <View style={styles.cardHeaderRow}>
+          <View style={styles.cardHeaderCopy}>
+            <Text style={styles.workflowTitle} numberOfLines={2}>
+              {workflow.title}
+            </Text>
+            {claimableStep ? (
               <Text style={styles.meta}>
-                {group.workflows.length} workflow{group.workflows.length === 1 ? "" : "s"} in this series
+                Claimable: Step {claimableStep.stepOrder}
+                {claimableStep.title ? ` - ${claimableStep.title}` : ""}
               </Text>
-              {focusWorkflow.recurrence !== "one_time" && group.primaryStepOrder != null ? (
-                <View style={styles.inlineActions}>
-                  <Pressable
-                    style={[
-                      styles.secondaryButton,
-                      actionKey === `unclaim:${group.seriesId}:${group.primaryStepOrder}` ? styles.buttonDisabled : undefined,
-                    ]}
-                    disabled={Boolean(actionKey)}
-                    onPress={() => unclaimSeries(group.seriesId, group.primaryStepOrder as number)}
-                  >
-                    <Text style={styles.secondaryButtonText}>
-                      {actionKey === `unclaim:${group.seriesId}:${group.primaryStepOrder}`
-                        ? "Unclaiming..."
-                        : "Unclaim series"}
-                    </Text>
-                  </Pressable>
-                </View>
-              ) : null}
-            </View>,
-          );
-        })
-      )}
-    </View>
-  );
-
-  const renderUnpaidWorkflows = () => (
-    <View style={styles.sectionStack}>
-      <View style={styles.searchWrap}>
-        <Ionicons name="search-outline" size={16} color={palette.textMuted} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search unpaid workflows"
-          placeholderTextColor={palette.textMuted}
-          value={unpaidSearch}
-          onChangeText={setUnpaidSearch}
-        />
-      </View>
-      {filteredUnpaidWorkflows.length === 0 ? (
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>No Unpaid Workflows</Text>
-          <Text style={styles.body}>Completed payouts waiting on settlement will show up here.</Text>
+            ) : null}
+            <Text style={styles.meta}>Starts: {formatWorkflowDate(workflow.startAt)}</Text>
+          </View>
+          {renderStatusChip(formatWorkflowDisplayStatus(workflow), resolveWorkflowTone(workflow))}
         </View>
-      ) : (
-        filteredUnpaidWorkflows.map((workflow) => {
-          const unpaidSteps = workflow.steps.filter(
-            (step) => step.assignedImproverId === user?.id && step.status === "completed" && step.bounty > 0,
-          );
-          const failedSteps = unpaidSteps.filter((step) => Boolean(step.payoutError?.trim()));
-          if (unpaidSteps.length === 0) {
-            return null;
-          }
-          return renderWorkflowCard(
-            workflow,
-            <View style={styles.stack}>
-              <Text style={styles.meta}>Pending payouts: {unpaidSteps.length}</Text>
-              <Text style={styles.meta}>Needs attention: {failedSteps.length}</Text>
-              {failedSteps.length > 0 ? (
-                <Pressable
-                  style={[
-                    styles.primaryButton,
-                    actionKey === `retry-workflow:${workflow.id}` ? styles.buttonDisabled : undefined,
-                  ]}
-                  disabled={Boolean(actionKey)}
-                  onPress={() => {
-                    void requestWorkflowPayoutRetries(workflow);
-                  }}
-                >
-                  <Text style={styles.primaryButtonText}>
-                    {actionKey === `retry-workflow:${workflow.id}`
-                      ? "Requesting..."
-                      : failedSteps.length === 1
-                        ? "Retry failed payout"
-                        : "Retry failed payouts"}
-                  </Text>
-                </Pressable>
-              ) : null}
-              {unpaidSteps.map((step) => (
-                <View key={step.id} style={[styles.subCard, step.payoutError ? styles.subCardDanger : undefined]}>
-                  <View style={styles.cardHeaderRow}>
-                    <View style={styles.cardHeaderCopy}>
-                      <Text style={styles.choiceTitle}>
-                        Step {step.stepOrder}: {step.title}
-                      </Text>
-                      <Text style={styles.choiceBody}>Bounty: {step.bounty} SFLUV</Text>
-                    </View>
-                    {renderStatusChip(step.payoutError ? "Payout Error" : "Pending", step.payoutError ? "danger" : "warning")}
-                  </View>
-                  <Text style={styles.choiceBody}>
-                    {step.payoutError
-                      ? step.payoutError
-                      : "Payout is waiting for earlier series work to finish and settle."}
-                  </Text>
-                  {step.payoutError ? (
-                    <Pressable
-                      style={[
-                        styles.secondaryButton,
-                        actionKey === `retry:${step.id}` ? styles.buttonDisabled : undefined,
-                      ]}
-                      disabled={Boolean(actionKey)}
-                      onPress={() => {
-                        void requestPayoutRetry(workflow.id, step.id);
-                      }}
-                    >
-                      <Text style={styles.secondaryButtonText}>
-                        {actionKey === `retry:${step.id}` ? "Requesting..." : "Retry payout"}
-                      </Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-              ))}
-            </View>,
-          );
-        })
-      )}
-    </View>
-  );
+        {claimableStep ? (
+          <Pressable
+            style={[styles.primaryButton, actionKey === `claim:${claimableStep.id}` ? styles.buttonDisabled : undefined]}
+            disabled={Boolean(actionKey)}
+            onPress={() => {
+              void claimWorkflowStep(workflow.id, claimableStep.id);
+            }}
+          >
+            <Text style={styles.primaryButtonText}>
+              {actionKey === `claim:${claimableStep.id}` ? "Claiming..." : `Claim Step ${claimableStep.stepOrder}`}
+            </Text>
+          </Pressable>
+        ) : null}
+      </Pressable>
+    );
+  };
 
-  const renderBadges = () => (
-    <View style={styles.sectionStack}>
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>My Badges</Text>
-        <Text style={styles.body}>
-          Credential badges tied to your active improver credentials.
-        </Text>
-        {myBadgeItems.length === 0 ? (
-          <Text style={styles.meta}>No active credential badges yet.</Text>
-        ) : (
-          <View style={styles.badgeGrid}>
-            {myBadgeItems.map((badge) => (
+  const renderUnpaidWorkflowCard = (workflow: AppWorkflow) => {
+    const unpaidSteps = workflow.steps.filter(
+      (step) => step.assignedImproverId === user?.id && step.status === "completed" && step.bounty > 0,
+    );
+    const failedSteps = unpaidSteps.filter((step) => Boolean(step.payoutError?.trim()));
+    return (
+      <Pressable key={workflow.id} style={styles.card} onPress={() => void openWorkflowDetail(workflow)}>
+        <View style={styles.cardHeaderRow}>
+          <View style={styles.cardHeaderCopy}>
+            <Text style={styles.workflowTitle} numberOfLines={2}>
+              {workflow.title}
+            </Text>
+            <Text style={styles.meta}>Pending payouts: {unpaidSteps.length}</Text>
+            {failedSteps.length > 0 ? (
+              <Text style={styles.inlineError}>
+                {failedSteps.length === 1 ? "1 payout needs attention" : `${failedSteps.length} payouts need attention`}
+              </Text>
+            ) : null}
+          </View>
+          {renderStatusChip(
+            failedSteps.length > 0 ? "Action needed" : "Pending",
+            failedSteps.length > 0 ? "danger" : "warning",
+          )}
+        </View>
+        {failedSteps.length > 0 ? (
+          <Pressable
+            style={[styles.primaryButton, actionKey === `retry-workflow:${workflow.id}` ? styles.buttonDisabled : undefined]}
+            disabled={Boolean(actionKey)}
+            onPress={() => {
+              void requestWorkflowPayoutRetries(workflow);
+            }}
+          >
+            <Text style={styles.primaryButtonText}>
+              {actionKey === `retry-workflow:${workflow.id}`
+                ? "Requesting..."
+                : failedSteps.length === 1
+                  ? "Retry failed payout"
+                  : "Retry failed payouts"}
+            </Text>
+          </Pressable>
+        ) : null}
+      </Pressable>
+    );
+  };
+
+  const renderWorkflowsContent = () => {
+    const searchValue =
+      workflowView === "my-workflows"
+        ? myWorkflowsSearch
+        : workflowView === "workflow-board"
+          ? boardSearch
+          : unpaidSearch;
+    const setSearchValue =
+      workflowView === "my-workflows"
+        ? setMyWorkflowsSearch
+        : workflowView === "workflow-board"
+          ? setBoardSearch
+          : setUnpaidSearch;
+    const searchPlaceholder =
+      workflowView === "my-workflows"
+        ? "Search your workflows"
+        : workflowView === "workflow-board"
+          ? "Search the workflow board"
+          : "Search unpaid workflows";
+
+    return (
+      <View style={styles.sectionStack}>
+        <View style={styles.card}>
+          <View style={styles.sectionHeaderRow}>
+            <Pressable style={styles.selectorButton} onPress={() => setWorkflowSelectorVisible(true)}>
+              <Text style={styles.selectorButtonText}>{currentWorkflowOptionsLabel}</Text>
+              <Ionicons name="chevron-down" size={16} color={palette.primaryStrong} />
+            </Pressable>
+            {workflowView === "my-workflows" && myWorkflowGroups.some((group) => group.recurrence !== "one_time") ? (
               <Pressable
-                key={badge.credential}
-                style={styles.badgeCard}
-                disabled={!badge.badgeUri}
+                style={styles.compactActionButton}
                 onPress={() => {
-                  if (badge.badgeUri) {
-                    setBadgePreview({ label: badge.label, imageUri: badge.badgeUri });
-                  }
+                  setWorkflowEditMode((current) => !current);
+                  setSelectedWorkflowKeys([]);
                 }}
               >
-                {badge.badgeUri ? (
-                  <Image source={{ uri: badge.badgeUri }} style={styles.badgeImage} resizeMode="cover" />
-                ) : (
-                  <View style={styles.badgePlaceholder}>
-                    <Ionicons name="ribbon-outline" size={28} color={palette.textMuted} />
-                  </View>
-                )}
-                <Text style={styles.badgeLabel}>{badge.label}</Text>
+                <Text style={styles.compactActionButtonText}>{workflowEditMode ? "Done" : "Edit"}</Text>
               </Pressable>
-            ))}
+            ) : null}
           </View>
-        )}
-      </View>
-    </View>
-  );
 
-  const renderCredentials = () => (
+          <View style={styles.searchWrap}>
+            <Ionicons name="search-outline" size={16} color={palette.textMuted} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder={searchPlaceholder}
+              placeholderTextColor={palette.textMuted}
+              value={searchValue}
+              onChangeText={setSearchValue}
+            />
+          </View>
+        </View>
+
+        {workflowView === "my-workflows" && !workflowDataLoaded ? renderLoadingCard("Loading workflows...") : null}
+        {workflowView === "workflow-board" && (!workflowDataLoaded || !absenceDataLoaded)
+          ? renderLoadingCard("Loading workflow board...")
+          : null}
+        {workflowView === "unpaid-workflows" && !unpaidDataLoaded ? renderLoadingCard("Loading unpaid workflows...") : null}
+
+        {workflowView === "my-workflows" && workflowDataLoaded
+          ? filteredMyWorkflowGroups.length === 0
+            ? renderEmptyCard("No claimed workflows", "Claimed workflows will appear here.")
+            : filteredMyWorkflowGroups.map(renderMyWorkflowCard)
+          : null}
+
+        {workflowView === "workflow-board" && workflowDataLoaded && absenceDataLoaded
+          ? filteredWorkflowBoard.length === 0
+            ? renderEmptyCard("No eligible workflows", "Nothing is claimable for your credentials right now.")
+            : filteredWorkflowBoard.map(renderWorkflowBoardCard)
+          : null}
+
+        {workflowView === "unpaid-workflows" && unpaidDataLoaded
+          ? filteredUnpaidWorkflowCards.length === 0
+            ? renderEmptyCard("No unpaid workflows", "Completed payouts waiting on settlement will appear here.")
+            : filteredUnpaidWorkflowCards.map(renderUnpaidWorkflowCard)
+          : null}
+      </View>
+    );
+  };
+
+  const renderCredentialsContent = () => (
     <View style={styles.sectionStack}>
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Active Credentials</Text>
-        <Text style={styles.body}>These credential types currently unlock workflow claims for you.</Text>
-        {activeCredentials.length === 0 ? (
-          <Text style={styles.meta}>No active credentials yet.</Text>
-        ) : (
+        <Pressable style={styles.primaryButton} onPress={() => setBadgesVisible(true)}>
+          <Text style={styles.primaryButtonText}>My badges</Text>
+        </Pressable>
+        {activeCredentials.length > 0 ? (
           <View style={styles.chipWrap}>
             {activeCredentials.map((credential) =>
               renderStatusChip(formatCredentialLabel(credential, labelMap), "default"),
             )}
           </View>
-        )}
+        ) : null}
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Request Credentials</Text>
-        <Text style={styles.body}>Ask for additional credentials for future workflow claims.</Text>
         <View style={styles.searchWrap}>
           <Ionicons name="search-outline" size={16} color={palette.textMuted} />
           <TextInput
@@ -1805,38 +2267,37 @@ export function ImproverScreen({
             onChangeText={setCredentialSearch}
           />
         </View>
-        {filteredCredentialTypes.length === 0 ? (
-          <Text style={styles.meta}>No additional public credentials are available to request.</Text>
-        ) : (
-          filteredCredentialTypes.map((credentialType) => (
-            <View key={credentialType.value} style={styles.choiceRow}>
-              <View style={styles.choiceCopy}>
-                <Text style={styles.choiceTitle}>{credentialType.label}</Text>
-                <Text style={styles.choiceBody}>
-                  {pendingCredentialSet.has(credentialType.value)
-                    ? "Request already pending."
-                    : "Available to request."}
-                </Text>
+
+        {credentialDataLoading && !credentialDataLoaded ? renderLoadingCard("Loading credentials...") : null}
+
+        {credentialSuggestions.length > 0 ? (
+          <View style={styles.stack}>
+            {credentialSuggestions.map((credentialType) => (
+              <View key={credentialType.value} style={styles.choiceRow}>
+                <View style={styles.choiceCopy}>
+                  <Text style={styles.choiceTitle}>{credentialType.label}</Text>
+                  <Text style={styles.choiceBody}>
+                    {pendingCredentialSet.has(credentialType.value) ? "Request already pending." : "Available to request."}
+                  </Text>
+                </View>
+                <Pressable
+                  style={[
+                    styles.secondaryButton,
+                    pendingCredentialSet.has(credentialType.value) || Boolean(actionKey) ? styles.buttonDisabled : undefined,
+                  ]}
+                  disabled={pendingCredentialSet.has(credentialType.value) || Boolean(actionKey)}
+                  onPress={() => {
+                    void requestCredential(credentialType.value);
+                  }}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    {actionKey === `credential:${credentialType.value}` ? "Sending..." : "Request"}
+                  </Text>
+                </Pressable>
               </View>
-              <Pressable
-                style={[
-                  styles.secondaryButton,
-                  pendingCredentialSet.has(credentialType.value) || Boolean(actionKey)
-                    ? styles.buttonDisabled
-                    : undefined,
-                ]}
-                disabled={pendingCredentialSet.has(credentialType.value) || Boolean(actionKey)}
-                onPress={() => {
-                  void requestCredential(credentialType.value);
-                }}
-              >
-                <Text style={styles.secondaryButtonText}>
-                  {actionKey === `credential:${credentialType.value}` ? "Sending..." : "Request"}
-                </Text>
-              </Pressable>
-            </View>
-          ))
-        )}
+            ))}
+          </View>
+        ) : null}
 
         {credentialRequests.length > 0 ? (
           <View style={styles.stack}>
@@ -1869,236 +2330,122 @@ export function ImproverScreen({
               </View>
             ))}
           </View>
+        ) : credentialDataLoaded ? (
+          <Text style={styles.meta}>No credential requests yet.</Text>
         ) : null}
       </View>
     </View>
   );
 
-  const renderAbsenceCoverage = () => (
-    <View style={styles.sectionStack}>
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Recurring Absence Coverage</Text>
-        <Text style={styles.body}>
-          Release recurring claims while you are away so other qualified improvers can cover them.
-        </Text>
-        {recurringClaimOptions.length === 0 ? (
-          <Text style={styles.meta}>Claim a recurring workflow step first to configure absence coverage.</Text>
-        ) : (
-          <>
-            <View style={styles.segmentWrap}>
-              <Pressable
-                style={[styles.segmentButton, absenceTargetMode === "single" ? styles.segmentButtonActive : undefined]}
-                onPress={() => setAbsenceTargetMode("single")}
-              >
-                <Text style={[styles.segmentText, absenceTargetMode === "single" ? styles.segmentTextActive : undefined]}>
-                  One Step
-                </Text>
-              </Pressable>
-              <Pressable
-                style={[styles.segmentButton, absenceTargetMode === "all" ? styles.segmentButtonActive : undefined]}
-                onPress={() => setAbsenceTargetMode("all")}
-              >
-                <Text style={[styles.segmentText, absenceTargetMode === "all" ? styles.segmentTextActive : undefined]}>
-                  All Series
-                </Text>
-              </Pressable>
-            </View>
-            {absenceTargetMode === "single" ? (
-              <View style={styles.stack}>
-                {recurringClaimOptions.map((option) => {
-                  const selected = option.key === absenceSelection;
-                  return (
-                    <Pressable
-                      key={option.key}
-                      style={[styles.choiceRow, selected ? styles.choiceRowActive : undefined]}
-                      onPress={() => setAbsenceSelection(option.key)}
-                    >
-                      <View style={styles.choiceCopy}>
-                        <Text style={styles.choiceTitle}>
-                          {option.workflowTitle} • Step {option.stepOrder}
-                        </Text>
-                        <Text style={styles.choiceBody}>
-                          {option.stepTitle} • {formatStatusLabel(option.recurrence)}
-                        </Text>
-                      </View>
-                      {selected ? <Ionicons name="checkmark-circle" size={20} color={palette.primaryStrong} /> : null}
-                    </Pressable>
-                  );
-                })}
-              </View>
-            ) : null}
-            <TextInput
-              style={styles.input}
-              placeholder="Absent from (YYYY-MM-DD)"
-              placeholderTextColor={palette.textMuted}
-              value={absenceFrom}
-              onChangeText={setAbsenceFrom}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Absent until (YYYY-MM-DD)"
-              placeholderTextColor={palette.textMuted}
-              value={absenceUntil}
-              onChangeText={setAbsenceUntil}
-            />
-            <Pressable
-              style={[styles.primaryButton, actionKey === "absence-create" ? styles.buttonDisabled : undefined]}
-              disabled={actionKey === "absence-create"}
-              onPress={() => {
-                void saveAbsencePeriod();
-              }}
-            >
-              <Text style={styles.primaryButtonText}>
-                {actionKey === "absence-create" ? "Saving..." : "Save absence coverage"}
-              </Text>
-            </Pressable>
-          </>
-        )}
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Current Absence Periods</Text>
-        <View style={styles.searchWrap}>
-          <Ionicons name="search-outline" size={16} color={palette.textMuted} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Filter by series id"
-            placeholderTextColor={palette.textMuted}
-            value={absenceSearch}
-            onChangeText={setAbsenceSearch}
-          />
-        </View>
-        {filteredAbsencePeriods.length === 0 ? (
-          <Text style={styles.meta}>No absence coverage saved yet.</Text>
-        ) : (
-          filteredAbsencePeriods.map((period) => (
-            <View key={period.id} style={styles.subCard}>
-              <View style={styles.cardHeaderRow}>
-                <View style={styles.cardHeaderCopy}>
-                  <Text style={styles.choiceTitle}>Step {period.stepOrder}</Text>
-                  <Text style={styles.choiceBody}>Series: {period.seriesId}</Text>
-                </View>
-                {renderStatusChip(
-                  period.absentUntil * 1000 < Date.now() ? "Ended" : "Scheduled",
-                  period.absentUntil * 1000 < Date.now() ? "default" : "warning",
-                )}
-              </View>
-              {editingAbsenceId === period.id ? (
-                <View style={styles.stack}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Absent from (YYYY-MM-DD)"
-                    placeholderTextColor={palette.textMuted}
-                    value={editAbsenceFrom}
-                    onChangeText={setEditAbsenceFrom}
-                  />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Absent until (YYYY-MM-DD)"
-                    placeholderTextColor={palette.textMuted}
-                    value={editAbsenceUntil}
-                    onChangeText={setEditAbsenceUntil}
-                  />
-                  <View style={styles.inlineActions}>
-                    <Pressable
-                      style={[styles.primaryButton, actionKey === `absence-update:${period.id}` ? styles.buttonDisabled : undefined]}
-                      disabled={actionKey === `absence-update:${period.id}`}
-                      onPress={() => {
-                        void saveEditedAbsence();
-                      }}
-                    >
-                      <Text style={styles.primaryButtonText}>
-                        {actionKey === `absence-update:${period.id}` ? "Saving..." : "Save"}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.secondaryButton}
-                      onPress={() => setEditingAbsenceId(null)}
-                    >
-                      <Text style={styles.secondaryButtonText}>Cancel</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              ) : (
-                <View style={styles.stack}>
-                  <Text style={styles.choiceBody}>From: {formatDateFromUnix(period.absentFrom)}</Text>
-                  <Text style={styles.choiceBody}>Until: {formatDateFromUnix(period.absentUntil, true)}</Text>
-                  <View style={styles.inlineActions}>
-                    <Pressable
-                      style={styles.secondaryButton}
-                      onPress={() => {
-                        setEditingAbsenceId(period.id);
-                        setEditAbsenceFrom(toDateInputValueFromUnix(period.absentFrom));
-                        setEditAbsenceUntil(toDateInputValueFromUnix(period.absentUntil, true));
-                      }}
-                    >
-                      <Text style={styles.secondaryButtonText}>Edit</Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.deleteButton}
-                      onPress={() => deleteAbsence(period.id)}
-                    >
-                      <Text style={styles.deleteButtonText}>
-                        {actionKey === `absence-delete:${period.id}` ? "Deleting..." : "Delete"}
-                      </Text>
-                    </Pressable>
-                  </View>
-                </View>
-              )}
-            </View>
-          ))
-        )}
-      </View>
-    </View>
-  );
-
-  const renderPanelContent = () => {
-    switch (section) {
-      case "workflow-board":
-        return renderWorkflowBoard();
-      case "unpaid-workflows":
-        return renderUnpaidWorkflows();
-      case "my-badges":
-        return renderBadges();
-      case "credentials":
-        return renderCredentials();
-      case "absence":
-        return renderAbsenceCoverage();
-      case "my-workflows":
-      default:
-        return renderMyWorkflows();
-    }
-  };
-
-  const renderSubmittedResponses = (step: AppWorkflowStep) => {
-    if (!step.submission) {
+  const renderStepResponsePhotos = (response: { photoIds?: string[]; photoUrls?: string[]; photos?: Array<{ id: string; fileName: string }> }) => {
+    const responsePhotoIds = response.photoIds || [];
+    const responsePhotoUrls = response.photoUrls || [];
+    if (responsePhotoIds.length === 0 && responsePhotoUrls.length === 0) {
       return null;
     }
+
     return (
-      <View style={styles.submissionCard}>
-        <Text style={styles.stackLabel}>Submitted</Text>
-        {step.submission.stepNotPossible ? (
-          <Text style={styles.choiceBody}>
-            Step marked not possible: {step.submission.stepNotPossibleDetails || "No details provided."}
-          </Text>
-        ) : (
-          step.submission.itemResponses.map((response) => (
-            <View key={response.itemId} style={styles.submissionRow}>
-              <Text style={styles.choiceTitle}>Item {response.itemId}</Text>
-              {response.dropdownValue ? (
-                <Text style={styles.choiceBody}>Choice: {response.dropdownValue}</Text>
-              ) : null}
-              {response.writtenResponse ? (
-                <Text style={styles.choiceBody}>{response.writtenResponse}</Text>
-              ) : null}
-              {(response.photos?.length || response.photoIds?.length) ? (
-                <Text style={styles.choiceBody}>
-                  Photos: {response.photos?.length || response.photoIds?.length}
-                </Text>
-              ) : null}
-            </View>
-          ))
-        )}
+      <View style={styles.photoGrid}>
+        {responsePhotoIds.map((photoId, photoIndex) => {
+          const previewUri = photoPreviewUris[photoId];
+          const previewLoading = Boolean(photoPreviewLoading[photoId]);
+          const fileName =
+            response.photos?.find((photo) => photo.id === photoId)?.fileName || `Photo ${photoIndex + 1}`;
+          return (
+            <Pressable
+              key={photoId}
+              style={styles.photoCard}
+              disabled={!previewUri}
+              onPress={() => {
+                if (previewUri) {
+                  setBadgePreview({ label: fileName, imageUri: previewUri });
+                }
+              }}
+            >
+              {previewUri ? (
+                <Image source={{ uri: previewUri }} style={styles.photoPreview} resizeMode="cover" />
+              ) : (
+                <View style={styles.photoPlaceholder}>
+                  <Text style={styles.photoPlaceholderText}>
+                    {previewLoading ? "Loading..." : "Preview unavailable"}
+                  </Text>
+                </View>
+              )}
+              <Text style={styles.photoLabel} numberOfLines={1}>
+                {fileName}
+              </Text>
+            </Pressable>
+          );
+        })}
+
+        {responsePhotoUrls.map((photoUrl, photoIndex) => (
+          <Pressable
+            key={`${photoUrl}-${photoIndex}`}
+            style={styles.photoCard}
+            onPress={() => setBadgePreview({ label: `Photo ${photoIndex + 1}`, imageUri: photoUrl })}
+          >
+            <Image source={{ uri: photoUrl }} style={styles.photoPreview} resizeMode="cover" />
+            <Text style={styles.photoLabel} numberOfLines={1}>
+              Photo {photoIndex + 1}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+    );
+  };
+
+  const renderDetailWorkItem = (step: AppWorkflowStep, item: AppWorkflowWorkItem) => {
+    const itemResponses =
+      step.submission && !step.submission.stepNotPossible
+        ? step.submission.itemResponses.filter((response) => response.itemId === item.id)
+        : [];
+
+    return (
+      <View key={item.id} style={styles.subCard}>
+        <View style={styles.cardHeaderRow}>
+          <View style={styles.cardHeaderCopy}>
+            <Text style={styles.choiceTitle}>
+              Item {item.itemOrder}: {item.title}
+            </Text>
+            {item.description ? <Text style={styles.choiceBody}>{item.description}</Text> : null}
+          </View>
+          {item.optional ? renderStatusChip("Optional", "default") : null}
+        </View>
+        <Text style={styles.meta}>Requirements: {formatWorkItemRequirements(item)}</Text>
+
+                {itemResponses.length > 0 ? (
+          itemResponses.map((response, index) => {
+            const dropdownLabel = response.dropdownValue
+              ? item.dropdownOptions.find((option) => option.value === response.dropdownValue)?.label || response.dropdownValue
+              : "";
+            return (
+              <View key={`${item.id}-response-${index}`} style={styles.responseCard}>
+                {itemResponses.length > 1 ? (
+                  <Text style={styles.responseLabel}>Submitted response {index + 1}</Text>
+                ) : null}
+                {dropdownLabel ? (
+                  <View style={styles.responseRow}>
+                    <Text style={styles.responseKey}>Selected option</Text>
+                    <Text style={styles.responseValue}>{dropdownLabel}</Text>
+                  </View>
+                ) : null}
+                {response.writtenResponse ? (
+                  <View style={styles.stack}>
+                    <Text style={styles.responseKey}>Notes</Text>
+                    <Text style={styles.responseValue}>{response.writtenResponse}</Text>
+                  </View>
+                ) : null}
+                {renderStepResponsePhotos({
+                  photoIds: response.photoIds,
+                  photoUrls: response.photoUrls,
+                  photos: response.photos?.map((photo) => ({ id: photo.id, fileName: photo.fileName })),
+                })}
+              </View>
+            );
+          })
+        ) : step.submission && !step.submission.stepNotPossible ? (
+          <Text style={styles.meta}>No response submitted for this item.</Text>
+        ) : null}
       </View>
     );
   };
@@ -2121,6 +2468,7 @@ export function ImproverScreen({
 
     const stepError = stepErrors[step.id];
     const notPossibleForm = stepNotPossibleForms[step.id] || emptyStepNotPossibleForm();
+
     return (
       <View style={styles.stack}>
         {claimable ? (
@@ -2132,7 +2480,7 @@ export function ImproverScreen({
             }}
           >
             <Text style={styles.primaryButtonText}>
-              {actionKey === `claim:${step.id}` ? "Claiming..." : `Claim Step ${step.stepOrder}`}
+              {actionKey === `claim:${step.id}` ? "Claiming..." : `Claim step ${step.stepOrder}`}
             </Text>
           </Pressable>
         ) : null}
@@ -2156,11 +2504,7 @@ export function ImproverScreen({
             {step.allowStepNotPossible ? (
               <Pressable
                 style={[styles.choiceRow, notPossibleForm.selected ? styles.choiceRowActive : undefined]}
-                onPress={() =>
-                  setStepNotPossibleForm(step.id, {
-                    selected: !notPossibleForm.selected,
-                  })
-                }
+                onPress={() => setStepNotPossibleForm(step.id, { selected: !notPossibleForm.selected })}
               >
                 <View style={styles.choiceCopy}>
                   <Text style={styles.choiceTitle}>Step not possible</Text>
@@ -2184,109 +2528,130 @@ export function ImproverScreen({
                 onChangeText={(value) => setStepNotPossibleForm(step.id, { details: value })}
               />
             ) : (
-              step.workItems.map((item) => {
-                const form = completionForms[step.id]?.[item.id] || emptyItemForm();
-                const selectedOption = form.dropdown
-                  ? item.dropdownOptions.find((option) => option.value === form.dropdown)
-                  : undefined;
-                const requiresPhoto = item.requiresPhoto || Boolean(selectedOption?.requiresPhotoAttachment);
-                const requiresWritten =
-                  item.requiresWrittenResponse ||
-                  (form.dropdown ? Boolean(item.dropdownRequiresWrittenResponse[form.dropdown]) : false);
-                const photoLimit = item.requiresPhoto
-                  ? item.photoAllowAnyCount
-                    ? null
-                    : Math.max(1, item.photoRequiredCount || 1)
-                  : 1;
-                return (
-                  <View key={item.id} style={styles.subCard}>
-                    <Text style={styles.choiceTitle}>{item.title}</Text>
-                    <Text style={styles.choiceBody}>{item.description}</Text>
-                    {item.requiresDropdown ? (
-                      <View style={styles.choiceList}>
-                        {item.dropdownOptions.map((option) => {
-                          const selected = option.value === form.dropdown;
-                          return (
+              step.workItems
+                .slice()
+                .sort((left, right) => left.itemOrder - right.itemOrder)
+                .map((item) => {
+                  const form = completionForms[step.id]?.[item.id] || emptyItemForm();
+                  const selectedOption = form.dropdown
+                    ? item.dropdownOptions.find((option) => option.value === form.dropdown)
+                    : undefined;
+                  const dropdownRequiresPhoto = Boolean(selectedOption?.requiresPhotoAttachment);
+                  const dropdownCameraOnly = dropdownRequiresPhoto && Boolean(selectedOption?.cameraCaptureOnly);
+                  const requiresPhoto = item.requiresPhoto || dropdownRequiresPhoto;
+                  const requiresWritten =
+                    item.requiresWrittenResponse ||
+                    (form.dropdown ? Boolean(item.dropdownRequiresWrittenResponse[form.dropdown]) : false);
+                  const photoLimit = item.requiresPhoto
+                    ? item.photoAllowAnyCount
+                      ? null
+                      : Math.max(1, item.photoRequiredCount || 1)
+                    : 1;
+                  const effectiveCameraOnly = (item.requiresPhoto && item.cameraCaptureOnly) || dropdownCameraOnly;
+
+                  return (
+                    <View key={item.id} style={styles.subCard}>
+                      <Text style={styles.choiceTitle}>
+                        Item {item.itemOrder}: {item.title}
+                      </Text>
+                      {item.description ? <Text style={styles.choiceBody}>{item.description}</Text> : null}
+                      <Text style={styles.meta}>Requirements: {formatWorkItemRequirements(item)}</Text>
+
+                      {item.requiresDropdown ? (
+                        <View style={styles.choiceList}>
+                          {item.dropdownOptions.map((option) => {
+                            const selected = option.value === form.dropdown;
+                            return (
+                              <Pressable
+                                key={option.value}
+                                style={[styles.choiceRow, selected ? styles.choiceRowActive : undefined]}
+                                onPress={() => setItemForm(step.id, item.id, { dropdown: option.value })}
+                              >
+                                <View style={styles.choiceCopy}>
+                                  <Text style={styles.choiceTitle}>{option.label}</Text>
+                                  {option.photoInstructions ? (
+                                    <Text style={styles.choiceBody}>{option.photoInstructions}</Text>
+                                  ) : null}
+                                </View>
+                                {selected ? <Ionicons name="checkmark-circle" size={20} color={palette.primaryStrong} /> : null}
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      ) : null}
+
+                      {requiresWritten ? (
+                        <TextInput
+                          style={[styles.input, styles.multilineInput]}
+                          multiline
+                          placeholder="Enter your response"
+                          placeholderTextColor={palette.textMuted}
+                          value={form.written}
+                          onChangeText={(value) => setItemForm(step.id, item.id, { written: value })}
+                        />
+                      ) : null}
+
+                      {requiresPhoto ? (
+                        <View style={styles.stack}>
+                          {selectedOption?.photoInstructions ? (
+                            <Text style={styles.choiceBody}>{selectedOption.photoInstructions}</Text>
+                          ) : null}
+                          <View style={styles.photoGrid}>
+                            {form.photos.map((photo) => (
+                              <View key={photo.id} style={styles.photoCard}>
+                                <Image source={{ uri: photo.previewUri }} style={styles.photoPreview} resizeMode="cover" />
+                                <Text style={styles.photoLabel} numberOfLines={1}>
+                                  {photo.fileName}
+                                </Text>
+                                <Pressable
+                                  style={styles.photoRemoveButton}
+                                  onPress={() => removeCompletionPhoto(step.id, item.id, photo.id)}
+                                >
+                                  <Text style={styles.photoRemoveText}>Remove</Text>
+                                </Pressable>
+                              </View>
+                            ))}
+                          </View>
+
+                          <View style={styles.inlineActions}>
                             <Pressable
-                              key={option.value}
-                              style={[styles.choiceRow, selected ? styles.choiceRowActive : undefined]}
+                              style={styles.secondaryButton}
                               onPress={() =>
-                                setItemForm(step.id, item.id, {
-                                  dropdown: option.value,
-                                })
+                                void openCameraCapture(
+                                  step.id,
+                                  item.id,
+                                  item.title,
+                                  item.photoAspectRatio,
+                                  photoLimit,
+                                )
                               }
                             >
-                              <View style={styles.choiceCopy}>
-                                <Text style={styles.choiceTitle}>{option.label}</Text>
-                              </View>
-                              {selected ? (
-                                <Ionicons name="checkmark-circle" size={20} color={palette.primaryStrong} />
-                              ) : null}
+                              <Text style={styles.secondaryButtonText}>
+                                {form.photos.length > 0 ? "Capture another live photo" : "Capture live photo"}
+                              </Text>
                             </Pressable>
-                          );
-                        })}
-                      </View>
-                    ) : null}
-                    {requiresWritten ? (
-                      <TextInput
-                        style={[styles.input, styles.multilineInput]}
-                        multiline
-                        placeholder="Enter your response"
-                        placeholderTextColor={palette.textMuted}
-                        value={form.written}
-                        onChangeText={(value) =>
-                          setItemForm(step.id, item.id, {
-                            written: value,
-                          })
-                        }
-                      />
-                    ) : null}
-                    {requiresPhoto ? (
-                      <View style={styles.stack}>
-                        <Text style={styles.choiceBody}>
-                          {photoLimit
-                            ? `Capture ${photoLimit} photo${photoLimit === 1 ? "" : "s"} for this item.`
-                            : "Capture one or more photos for this item."}
-                        </Text>
-                        {selectedOption?.photoInstructions ? (
-                          <Text style={styles.choiceBody}>{selectedOption.photoInstructions}</Text>
-                        ) : null}
-                        <View style={styles.photoGrid}>
-                          {form.photos.map((photo) => (
-                            <View key={photo.id} style={styles.photoCard}>
-                              <Image source={{ uri: photo.previewUri }} style={styles.photoPreview} resizeMode="cover" />
-                              <Text style={styles.photoLabel}>{photo.fileName}</Text>
+                            {!effectiveCameraOnly ? (
                               <Pressable
-                                style={styles.photoRemoveButton}
-                                onPress={() => removeCompletionPhoto(step.id, item.id, photo.id)}
+                                style={[styles.secondaryButton, !imagePickerAvailable ? styles.buttonDisabled : undefined]}
+                                disabled={!imagePickerAvailable}
+                                onPress={() => {
+                                  void pickLibraryPhotos(step.id, item.id, item.title, photoLimit);
+                                }}
                               >
-                                <Text style={styles.photoRemoveText}>Remove</Text>
+                                <Text style={styles.secondaryButtonText}>Upload from library</Text>
                               </Pressable>
-                            </View>
-                          ))}
+                            ) : null}
+                          </View>
+                          {!imagePickerAvailable && !effectiveCameraOnly ? (
+                            <Text style={styles.meta}>Photo library uploads will work once the image picker dependency is installed.</Text>
+                          ) : null}
                         </View>
-                        <Pressable
-                          style={styles.secondaryButton}
-                          onPress={() =>
-                            void openCameraCapture(
-                              step.id,
-                              item.id,
-                              item.title,
-                              item.photoAspectRatio,
-                              photoLimit,
-                            )
-                          }
-                        >
-                          <Text style={styles.secondaryButtonText}>
-                            {form.photos.length > 0 ? "Capture another photo" : "Open camera"}
-                          </Text>
-                        </Pressable>
-                      </View>
-                    ) : null}
-                  </View>
-                );
-              })
+                      ) : null}
+                    </View>
+                  );
+                })
             )}
+
             {stepError ? <Text style={styles.inlineError}>{stepError}</Text> : null}
             <Pressable
               style={[styles.primaryButton, actionKey === `complete:${step.id}` ? styles.buttonDisabled : undefined]}
@@ -2309,47 +2674,50 @@ export function ImproverScreen({
     );
   };
 
-  if (initialLoading) {
-    return (
-      <View style={styles.loadingWrap}>
-        <ActivityIndicator size="large" color={palette.primary} />
-        <Text style={styles.loadingText}>Loading improver tools...</Text>
-      </View>
-    );
-  }
-
-  if (!canUsePanel) {
-    return renderRequestAccess();
-  }
-
   return (
     <>
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-        {error ? (
-          <View style={styles.errorCard}>
-            <Ionicons name="alert-circle-outline" size={18} color={palette.danger} />
-            <Text style={styles.errorCardText}>{error}</Text>
-          </View>
-        ) : null}
+      <ScrollView
+        contentContainerStyle={[
+          styles.container,
+          workflowEditMode && workflowView === "my-workflows" ? styles.containerWithActionBar : undefined,
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        {renderBannerStack()}
 
-        {notice ? (
-          <View style={styles.noticeCard}>
-            <Ionicons name="checkmark-circle-outline" size={18} color={palette.success} />
-            <Text style={styles.noticeCardText}>{notice}</Text>
-          </View>
-        ) : null}
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Improver profile</Text>
+          <Text style={styles.meta}>Status: {formatStatusLabel(improver?.status || "approved")}</Text>
+          {improver?.primaryRewardsAccount ? (
+            <Text style={styles.meta}>Rewards wallet: {shortAddress(improver.primaryRewardsAccount)}</Text>
+          ) : null}
+          <TextInput
+            style={styles.input}
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="Improver rewards wallet"
+            placeholderTextColor={palette.textMuted}
+            value={rewardsWalletDraft}
+            onChangeText={setRewardsWalletDraft}
+          />
+          <Pressable
+            style={[styles.primaryButton, actionKey === "update-rewards-wallet" ? styles.buttonDisabled : undefined]}
+            disabled={actionKey === "update-rewards-wallet"}
+            onPress={() => {
+              void updateRewardsWallet();
+            }}
+          >
+            <Text style={styles.primaryButtonText}>
+              {actionKey === "update-rewards-wallet" ? "Saving..." : "Save rewards wallet"}
+            </Text>
+          </Pressable>
+        </View>
 
         <View style={styles.segmentWrap}>
-          {(
-            [
-              ["my-workflows", "Mine"],
-              ["workflow-board", "Board"],
-              ["unpaid-workflows", "Unpaid"],
-              ["my-badges", "Badges"],
-              ["credentials", "Credentials"],
-              ["absence", "Absence"],
-            ] as Array<[ImproverSection, string]>
-          ).map(([value, label]) => (
+          {([
+            ["workflows", "Workflows"],
+            ["credentials", "Credentials"],
+          ] as Array<[ImproverSection, string]>).map(([value, label]) => (
             <Pressable
               key={value}
               style={[styles.segmentButton, section === value ? styles.segmentButtonActive : undefined]}
@@ -2362,19 +2730,110 @@ export function ImproverScreen({
           ))}
         </View>
 
-        {loading ? (
-          <View style={styles.loadingInlineCard}>
-            <ActivityIndicator size="small" color={palette.primary} />
-            <Text style={styles.loadingInlineText}>Refreshing improver data...</Text>
-          </View>
-        ) : null}
-
-        {renderPanelContent()}
+        {section === "workflows" ? renderWorkflowsContent() : renderCredentialsContent()}
       </ScrollView>
+
+      {workflowEditMode && workflowView === "my-workflows" ? (
+        <View style={[styles.bulkActionBar, { paddingBottom: spacing.lg }]}>
+          <Text style={styles.bulkActionTitle}>
+            {selectedWorkflowGroups.length === 0
+              ? "Select workflows"
+              : `${selectedWorkflowGroups.length} selected`}
+          </Text>
+          <View style={styles.segmentWrap}>
+            <Pressable
+              style={[styles.segmentButton, workflowEditAction === "revoke" ? styles.segmentButtonActive : undefined]}
+              onPress={() => setWorkflowEditAction("revoke")}
+            >
+              <Text style={[styles.segmentText, workflowEditAction === "revoke" ? styles.segmentTextActive : undefined]}>
+                Revoke
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.segmentButton, workflowEditAction === "absence" ? styles.segmentButtonActive : undefined]}
+              onPress={() => setWorkflowEditAction("absence")}
+            >
+              <Text style={[styles.segmentText, workflowEditAction === "absence" ? styles.segmentTextActive : undefined]}>
+                Absence
+              </Text>
+            </Pressable>
+          </View>
+
+          {workflowEditAction === "absence" ? (
+            <View style={styles.stack}>
+              <TextInput
+                style={styles.input}
+                placeholder="Absent from (YYYY-MM-DD)"
+                placeholderTextColor={palette.textMuted}
+                value={absenceFrom}
+                onChangeText={setAbsenceFrom}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Absent until (YYYY-MM-DD)"
+                placeholderTextColor={palette.textMuted}
+                value={absenceUntil}
+                onChangeText={setAbsenceUntil}
+              />
+            </View>
+          ) : null}
+
+          <Pressable
+            style={[
+              styles.primaryButton,
+              selectedWorkflowGroups.length === 0 || Boolean(actionKey) ? styles.buttonDisabled : undefined,
+            ]}
+            disabled={selectedWorkflowGroups.length === 0 || Boolean(actionKey)}
+            onPress={applyWorkflowEditAction}
+          >
+            <Text style={styles.primaryButtonText}>
+              {actionKey === "bulk-revoke"
+                ? "Revoking..."
+                : actionKey === "bulk-absence"
+                  ? "Saving..."
+                  : workflowEditAction === "revoke"
+                    ? "Revoke selected workflows"
+                    : "Save absence"}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <Modal
+        visible={workflowSelectorVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setWorkflowSelectorVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setWorkflowSelectorVisible(false)}>
+          <Pressable style={styles.selectorSheetCard} onPress={() => {}}>
+            <Text style={styles.sectionTitle}>Workflow view</Text>
+            <View style={styles.stack}>
+              {workflowSelectorOptions.map((option) => {
+                const selected = option.value === workflowView;
+                return (
+                  <Pressable
+                    key={option.value}
+                    style={[styles.choiceRow, selected ? styles.choiceRowActive : undefined]}
+                    onPress={() => {
+                      setWorkflowView(option.value);
+                      setWorkflowSelectorVisible(false);
+                    }}
+                  >
+                    <Text style={styles.choiceTitle}>{option.label}</Text>
+                    {selected ? <Ionicons name="checkmark-circle" size={20} color={palette.primaryStrong} /> : null}
+                  </Pressable>
+                );
+              })}
+              {unpaidDataLoading && !unpaidDataLoaded ? renderLoadingCard("Checking unpaid workflows...") : null}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal visible={detailVisible} animationType="slide" onRequestClose={() => setDetailVisible(false)}>
         <View style={styles.modalScreen}>
-          <View style={styles.modalHeader}>
+          <View style={[styles.modalHeader, { paddingTop: topInset + spacing.sm }]}>
             <View style={styles.modalHeaderCopy}>
               <Text style={styles.modalTitle}>{selectedWorkflow?.title || "Workflow"}</Text>
               <Text style={styles.modalSubtitle}>
@@ -2386,126 +2845,261 @@ export function ImproverScreen({
             </Pressable>
           </View>
 
-          {detailLoading ? (
+          {!selectedWorkflow && detailLoading ? (
             <View style={styles.loadingWrap}>
               <ActivityIndicator size="large" color={palette.primary} />
               <Text style={styles.loadingText}>Loading workflow details...</Text>
             </View>
           ) : selectedWorkflow ? (
             <ScrollView contentContainerStyle={styles.modalContent} showsVerticalScrollIndicator={false}>
+              {detailLoading ? renderLoadingCard("Refreshing workflow details...") : null}
+
               <View style={styles.card}>
-                <Text style={styles.sectionTitle}>{selectedWorkflow.title}</Text>
-                <Text style={styles.body}>{selectedWorkflow.description}</Text>
-                <Text style={styles.meta}>Start: {formatWorkflowDate(selectedWorkflow.startAt)}</Text>
-                <Text style={styles.meta}>Series: {selectedWorkflow.seriesId}</Text>
-                {selectedWorkflowSeriesStep && selectedWorkflow.recurrence !== "one_time" ? (
-                  <Pressable
-                    style={[
-                      styles.secondaryButton,
-                      actionKey === `unclaim:${selectedWorkflowSeriesStep.seriesId}:${selectedWorkflowSeriesStep.stepOrder}`
-                        ? styles.buttonDisabled
-                        : undefined,
-                    ]}
-                    disabled={Boolean(actionKey)}
-                    onPress={() =>
-                      unclaimSeries(
-                        selectedWorkflowSeriesStep.seriesId,
-                        selectedWorkflowSeriesStep.stepOrder,
-                      )
-                    }
-                  >
-                    <Text style={styles.secondaryButtonText}>
-                      {actionKey === `unclaim:${selectedWorkflowSeriesStep.seriesId}:${selectedWorkflowSeriesStep.stepOrder}`
-                        ? "Unclaiming..."
-                        : "Unclaim series"}
-                    </Text>
-                  </Pressable>
+                <View style={styles.cardHeaderRow}>
+                  <View style={styles.cardHeaderCopy}>
+                    <Text style={styles.sectionTitle}>{selectedWorkflow.title}</Text>
+                    <Text style={styles.meta}>Status: {formatWorkflowDisplayStatus(selectedWorkflow)}</Text>
+                    <Text style={styles.meta}>Start: {formatWorkflowDate(selectedWorkflow.startAt)}</Text>
+                    {selectedWorkflow.supervisorRequired ? (
+                      <Text style={styles.meta}>
+                        Supervisor: {selectedWorkflow.supervisorTitle || selectedWorkflow.supervisorOrganization || "Assigned"}
+                      </Text>
+                    ) : null}
+                  </View>
+                  {renderStatusChip(formatWorkflowDisplayStatus(selectedWorkflow), resolveWorkflowTone(selectedWorkflow))}
+                </View>
+
+                {selectedWorkflow.description ? <Text style={styles.body}>{selectedWorkflow.description}</Text> : null}
+
+                {selectedWorkflow.roles.length > 0 ? (
+                  <View style={styles.stack}>
+                    <Text style={styles.stackLabel}>Roles</Text>
+                    {selectedWorkflow.roles.map((role) => (
+                      <View key={role.id} style={styles.subCard}>
+                        <Text style={styles.choiceTitle}>{role.title}</Text>
+                        <View style={styles.chipWrap}>
+                          {role.requiredCredentials.length === 0 ? (
+                            renderStatusChip("No required credentials", "default")
+                          ) : (
+                            role.requiredCredentials.map((credential) =>
+                              renderStatusChip(formatCredentialLabel(credential, labelMap), "default"),
+                            )
+                          )}
+                        </View>
+                      </View>
+                    ))}
+                  </View>
                 ) : null}
+
+                <View style={styles.inlineActions}>
+                  {selectedWorkflowAssignedStep && selectedWorkflow.recurrence !== "one_time" ? (
+                    <Pressable
+                      style={[
+                        styles.secondaryButton,
+                        actionKey === `unclaim:${selectedWorkflow.seriesId}:${selectedWorkflowAssignedStep.stepOrder}`
+                          ? styles.buttonDisabled
+                          : undefined,
+                      ]}
+                      disabled={Boolean(actionKey)}
+                      onPress={() =>
+                        Alert.alert(
+                          "Revoke workflow?",
+                          "This will release future recurring claims for this workflow to other improvers.",
+                          [
+                            { text: "Cancel", style: "cancel" },
+                            {
+                              text: "Revoke",
+                              style: "destructive",
+                              onPress: () => {
+                                void revokeWorkflowSeries(selectedWorkflow.seriesId, selectedWorkflowAssignedStep.stepOrder);
+                              },
+                            },
+                          ],
+                        )
+                      }
+                    >
+                      <Text style={styles.secondaryButtonText}>
+                        {actionKey === `unclaim:${selectedWorkflow.seriesId}:${selectedWorkflowAssignedStep.stepOrder}`
+                          ? "Revoking..."
+                          : "Revoke workflow"}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+
+                  {selectedWorkflowAbsence && canRevokeSelectedWorkflowAbsence ? (
+                    <Pressable
+                      style={[
+                        styles.secondaryButton,
+                        actionKey === `absence-delete:${selectedWorkflowAbsence.id}` ? styles.buttonDisabled : undefined,
+                      ]}
+                      disabled={Boolean(actionKey)}
+                      onPress={() =>
+                        Alert.alert(
+                          "Revoke absence?",
+                          "This will remove the saved absence period for this workflow.",
+                          [
+                            { text: "Cancel", style: "cancel" },
+                            {
+                              text: "Revoke",
+                              style: "destructive",
+                              onPress: () => {
+                                void revokeAbsence(selectedWorkflowAbsence.id);
+                              },
+                            },
+                          ],
+                        )
+                      }
+                    >
+                      <Text style={styles.secondaryButtonText}>
+                        {actionKey === `absence-delete:${selectedWorkflowAbsence.id}` ? "Revoking..." : "Revoke absence"}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
               </View>
 
-              {selectedWorkflow.steps
-                .slice()
-                .sort((left, right) => left.stepOrder - right.stepOrder)
-                .map((step) => (
-                  <View key={step.id} style={styles.card}>
-                    <View style={styles.cardHeaderRow}>
-                      <View style={styles.cardHeaderCopy}>
-                        <Text style={styles.sectionTitle}>
-                          Step {step.stepOrder}: {step.title}
-                        </Text>
-                        <Text style={styles.body}>{step.description}</Text>
-                      </View>
-                      {renderStatusChip(
-                        formatStatusLabel(step.status),
-                        step.status === "paid_out"
-                          ? "success"
-                          : step.status === "completed"
-                            ? "warning"
-                            : "default",
-                      )}
-                    </View>
-                    <Text style={styles.meta}>Bounty: {step.bounty} SFLUV</Text>
-                    {step.assignedImproverName ? (
-                      <Text style={styles.meta}>Assigned: {step.assignedImproverName}</Text>
-                    ) : null}
-                    {step.payoutError ? <Text style={styles.inlineError}>{step.payoutError}</Text> : null}
-                    {step.workItems.length > 0 ? (
-                      <View style={styles.stack}>
-                        <Text style={styles.stackLabel}>Work items</Text>
-                        {step.workItems.map((item) => (
-                          <View key={item.id} style={styles.submissionRow}>
-                            <Text style={styles.choiceTitle}>{item.title}</Text>
-                            <Text style={styles.choiceBody}>{item.description}</Text>
-                            <Text style={styles.choiceBody}>
-                              {[
-                                item.requiresDropdown ? "Dropdown" : null,
-                                item.requiresWrittenResponse ? "Written response" : null,
-                                item.requiresPhoto ? "Photo" : null,
-                                item.optional ? "Optional" : "Required",
-                              ]
-                                .filter(Boolean)
-                                .join(" • ")}
-                            </Text>
-                          </View>
-                        ))}
-                      </View>
-                    ) : null}
-                    {renderSubmittedResponses(step)}
-                    {step.status === "completed" &&
-                    step.assignedImproverId === user?.id &&
-                    step.bounty > 0 &&
-                    step.payoutError ? (
+              {sortedDetailSteps.length > 0 ? (
+                <>
+                  <View style={styles.stepPagerRow}>
+                    <Text style={styles.stepPagerTitle}>
+                      Step {currentDetailStepIndex + 1} of {sortedDetailSteps.length}
+                    </Text>
+                    <View style={styles.inlineActions}>
+                      <Pressable
+                        style={[styles.compactActionButton, currentDetailStepIndex === 0 ? styles.buttonDisabled : undefined]}
+                        disabled={currentDetailStepIndex === 0}
+                        onPress={() => setDetailStepIndex((current) => Math.max(0, current - 1))}
+                      >
+                        <Text style={styles.compactActionButtonText}>Previous</Text>
+                      </Pressable>
                       <Pressable
                         style={[
-                          styles.secondaryButton,
-                          actionKey === `retry:${step.id}` ? styles.buttonDisabled : undefined,
+                          styles.compactActionButton,
+                          currentDetailStepIndex >= sortedDetailSteps.length - 1 ? styles.buttonDisabled : undefined,
                         ]}
-                        disabled={Boolean(actionKey)}
-                        onPress={() => {
-                          void requestPayoutRetry(selectedWorkflow.id, step.id);
-                        }}
+                        disabled={currentDetailStepIndex >= sortedDetailSteps.length - 1}
+                        onPress={() =>
+                          setDetailStepIndex((current) => Math.min(sortedDetailSteps.length - 1, current + 1))
+                        }
                       >
-                        <Text style={styles.secondaryButtonText}>
-                          {actionKey === `retry:${step.id}` ? "Requesting..." : "Retry payout"}
-                        </Text>
+                        <Text style={styles.compactActionButtonText}>Next</Text>
                       </Pressable>
-                    ) : null}
-                    {renderStepActions(selectedWorkflow, step)}
+                    </View>
                   </View>
-                ))}
+
+                  {currentDetailStep ? (
+                    <View style={styles.card}>
+                      <View style={styles.cardHeaderRow}>
+                        <View style={styles.cardHeaderCopy}>
+                          <Text style={styles.sectionTitle}>
+                            Step {currentDetailStep.stepOrder}: {currentDetailStep.title}
+                          </Text>
+                        </View>
+                        {renderStatusChip(
+                          formatStatusLabel(currentDetailStep.status),
+                          currentDetailStep.status === "paid_out"
+                            ? "success"
+                            : currentDetailStep.status === "completed"
+                              ? "warning"
+                              : "default",
+                        )}
+                      </View>
+
+                      <Text style={styles.meta}>Bounty: {currentDetailStep.bounty} SFLUV</Text>
+                      {currentDetailStep.assignedImproverName ? (
+                        <Text style={styles.meta}>Assigned: {currentDetailStep.assignedImproverName}</Text>
+                      ) : null}
+                      {currentDetailStep.payoutError ? <Text style={styles.inlineError}>{currentDetailStep.payoutError}</Text> : null}
+
+                      {currentDetailStep.submission ? (
+                        currentDetailStep.submission.stepNotPossible ? (
+                          <View style={styles.submissionCard}>
+                            <Text style={styles.stackLabel}>Submitted as not possible</Text>
+                            <Text style={styles.choiceBody}>
+                              {currentDetailStep.submission.stepNotPossibleDetails || "No details provided."}
+                            </Text>
+                          </View>
+                        ) : (
+                          <View style={styles.submissionCard}>
+                            <View style={styles.sectionHeaderRow}>
+                              <Text style={styles.stackLabel}>
+                                Submitted on {new Date(currentDetailStep.submission.submittedAt * 1000).toLocaleString()}
+                              </Text>
+                              <Pressable
+                                style={styles.compactActionButton}
+                                onPress={() =>
+                                  setSubmissionDetailsOpen((current) => ({
+                                    ...current,
+                                    [currentDetailStep.id]: !current[currentDetailStep.id],
+                                  }))
+                                }
+                              >
+                                <Text style={styles.compactActionButtonText}>
+                                  {detailSubmissionExpanded ? "Hide details" : "View details"}
+                                </Text>
+                              </Pressable>
+                            </View>
+                          </View>
+                        )
+                      ) : null}
+
+                      {(currentDetailStep.submission?.stepNotPossible ||
+                        !currentDetailStep.submission ||
+                        detailSubmissionExpanded) &&
+                      currentDetailStep.description ? (
+                        <Text style={styles.body}>{currentDetailStep.description}</Text>
+                      ) : null}
+
+                      {(currentDetailStep.submission?.stepNotPossible ||
+                        !currentDetailStep.submission ||
+                        detailSubmissionExpanded) &&
+                      currentDetailStep.workItems.length > 0 ? (
+                        <View style={styles.stack}>
+                          {currentDetailStep.workItems
+                            .slice()
+                            .sort((left, right) => left.itemOrder - right.itemOrder)
+                            .map((item) => renderDetailWorkItem(currentDetailStep, item))}
+                        </View>
+                      ) : null}
+
+                      {currentDetailStep.status === "completed" &&
+                      currentDetailStep.assignedImproverId === user?.id &&
+                      currentDetailStep.bounty > 0 &&
+                      currentDetailStep.payoutError ? (
+                        <Pressable
+                          style={[
+                            styles.secondaryButton,
+                            actionKey === `retry:${currentDetailStep.id}` ? styles.buttonDisabled : undefined,
+                          ]}
+                          disabled={Boolean(actionKey)}
+                          onPress={() => {
+                            void requestPayoutRetry(selectedWorkflow.id, currentDetailStep.id);
+                          }}
+                        >
+                          <Text style={styles.secondaryButtonText}>
+                            {actionKey === `retry:${currentDetailStep.id}` ? "Requesting..." : "Retry payout"}
+                          </Text>
+                        </Pressable>
+                      ) : null}
+
+                      {renderStepActions(selectedWorkflow, currentDetailStep)}
+                    </View>
+                  ) : null}
+                </>
+              ) : renderEmptyCard("No workflow steps", "No workflow steps were configured.")}
             </ScrollView>
           ) : null}
         </View>
       </Modal>
 
       <Modal visible={Boolean(cameraTarget)} animationType="slide" onRequestClose={() => setCameraTarget(null)}>
-        <View style={styles.cameraScreen}>
+        <View style={[styles.cameraScreen, { paddingTop: topInset + spacing.xl }]}>
           <View style={styles.cameraHeader}>
-            <View>
-              <Text style={styles.cameraTitle}>Capture Workflow Photo</Text>
+            <View style={styles.cameraHeaderCopy}>
+              <Text style={styles.cameraTitle}>Capture workflow photo</Text>
               <Text style={styles.cameraSubtitle}>{cameraTarget?.title || "Workflow item"}</Text>
             </View>
-            <Pressable style={styles.iconButton} onPress={() => setCameraTarget(null)}>
+            <Pressable style={styles.iconButtonInverse} onPress={() => setCameraTarget(null)}>
               <Ionicons name="close" size={20} color={palette.white} />
             </Pressable>
           </View>
@@ -2522,10 +3116,75 @@ export function ImproverScreen({
         </View>
       </Modal>
 
-      <Modal visible={Boolean(badgePreview)} transparent animationType="fade" onRequestClose={() => setBadgePreview(null)}>
+      <Modal
+        visible={badgesVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setBadgesVisible(false)}
+      >
+        <View style={styles.modalScreen}>
+          <View style={[styles.modalHeader, { paddingTop: topInset + spacing.sm }]}>
+            <View style={styles.modalHeaderCopy}>
+              <Text style={styles.modalTitle}>My badges</Text>
+              <Text style={styles.modalSubtitle}>
+                {filteredBadgeItems.length} result{filteredBadgeItems.length === 1 ? "" : "s"}
+              </Text>
+            </View>
+            <Pressable style={styles.iconButton} onPress={() => setBadgesVisible(false)}>
+              <Ionicons name="arrow-back" size={20} color={palette.primaryStrong} />
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.modalContent} showsVerticalScrollIndicator={false}>
+            <View style={styles.searchWrap}>
+              <Ionicons name="search-outline" size={16} color={palette.textMuted} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search badges"
+                placeholderTextColor={palette.textMuted}
+                value={badgeSearch}
+                onChangeText={setBadgeSearch}
+              />
+            </View>
+            {filteredBadgeItems.length === 0 ? (
+              renderEmptyCard("No badges found", "No badges match your search.")
+            ) : (
+              <View style={styles.badgeGrid}>
+                {filteredBadgeItems.map((badge) => (
+                  <Pressable
+                    key={badge.credential}
+                    style={styles.badgeCard}
+                    disabled={!badge.badgeUri}
+                    onPress={() => {
+                      if (badge.badgeUri) {
+                        setBadgePreview({ label: badge.label, imageUri: badge.badgeUri });
+                      }
+                    }}
+                  >
+                    {badge.badgeUri ? (
+                      <Image source={{ uri: badge.badgeUri }} style={styles.badgeImage} resizeMode="cover" />
+                    ) : (
+                      <View style={styles.badgePlaceholder}>
+                        <Ionicons name="ribbon-outline" size={28} color={palette.textMuted} />
+                      </View>
+                    )}
+                    <Text style={styles.badgeLabel}>{badge.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={Boolean(badgePreview)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setBadgePreview(null)}
+      >
         <Pressable style={styles.modalOverlay} onPress={() => setBadgePreview(null)}>
           <Pressable style={styles.badgePreviewCard} onPress={() => {}}>
-            <Text style={styles.sectionTitle}>{badgePreview?.label || "Badge"}</Text>
+            <Text style={styles.sectionTitle}>{badgePreview?.label || "Preview"}</Text>
             {badgePreview?.imageUri ? (
               <Image source={{ uri: badgePreview.imageUri }} style={styles.badgePreviewImage} resizeMode="contain" />
             ) : null}
@@ -2550,6 +3209,9 @@ function createStyles(
       paddingTop: spacing.md,
       paddingBottom: 140,
       gap: spacing.md,
+    },
+    containerWithActionBar: {
+      paddingBottom: 240,
     },
     heroCard: {
       backgroundColor: palette.surface,
@@ -2579,6 +3241,10 @@ function createStyles(
       gap: spacing.md,
       ...shadows.soft,
     },
+    cardSelected: {
+      borderColor: palette.primary,
+      backgroundColor: palette.primarySoft,
+    },
     sectionStack: {
       gap: spacing.md,
     },
@@ -2592,10 +3258,26 @@ function createStyles(
       flex: 1,
       gap: 4,
     },
+    cardBadgeStack: {
+      alignItems: "flex-end",
+      gap: spacing.xs,
+    },
+    sectionHeaderRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: spacing.sm,
+    },
     sectionTitle: {
       color: palette.text,
       fontSize: 18,
       fontWeight: "900",
+    },
+    workflowTitle: {
+      color: palette.text,
+      fontSize: 16,
+      fontWeight: "900",
+      lineHeight: 22,
     },
     body: {
       color: palette.textMuted,
@@ -2669,6 +3351,20 @@ function createStyles(
     segmentTextActive: {
       color: palette.white,
     },
+    selectorButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+      borderRadius: radii.pill,
+      backgroundColor: palette.primarySoft,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+    },
+    selectorButtonText: {
+      color: palette.primaryStrong,
+      fontWeight: "900",
+      fontSize: 14,
+    },
     searchWrap: {
       flexDirection: "row",
       alignItems: "center",
@@ -2727,6 +3423,21 @@ function createStyles(
       color: palette.text,
       fontWeight: "800",
       fontSize: 14,
+    },
+    compactActionButton: {
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surfaceStrong,
+      paddingHorizontal: 14,
+      paddingVertical: 9,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    compactActionButtonText: {
+      color: palette.text,
+      fontWeight: "800",
+      fontSize: 12,
     },
     deleteButton: {
       borderRadius: radii.pill,
@@ -2896,6 +3607,23 @@ function createStyles(
       width: "47%",
       gap: spacing.xs,
     },
+    photoPlaceholder: {
+      width: "100%",
+      height: 120,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surfaceStrong,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: spacing.sm,
+    },
+    photoPlaceholderText: {
+      color: palette.textMuted,
+      fontSize: 12,
+      lineHeight: 16,
+      textAlign: "center",
+    },
     photoPreview: {
       width: "100%",
       height: 120,
@@ -2929,6 +3657,31 @@ function createStyles(
       backgroundColor: palette.surfaceStrong,
       padding: spacing.md,
       gap: spacing.sm,
+    },
+    responseCard: {
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.background,
+      padding: spacing.md,
+      gap: spacing.sm,
+    },
+    responseLabel: {
+      color: palette.text,
+      fontSize: 12,
+      fontWeight: "800",
+    },
+    responseRow: {
+      gap: 4,
+    },
+    responseKey: {
+      color: palette.textMuted,
+      fontSize: 12,
+      fontWeight: "800",
+    },
+    responseValue: {
+      color: palette.text,
+      lineHeight: 20,
     },
     submissionRow: {
       gap: 4,
@@ -3003,6 +3756,17 @@ function createStyles(
       paddingBottom: 140,
       gap: spacing.md,
     },
+    selectorSheetCard: {
+      width: "100%",
+      maxWidth: 360,
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surface,
+      padding: spacing.lg,
+      gap: spacing.md,
+      ...shadows.card,
+    },
     iconButton: {
       width: 40,
       height: 40,
@@ -3010,6 +3774,14 @@ function createStyles(
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: palette.primarySoft,
+    },
+    iconButtonInverse: {
+      width: 40,
+      height: 40,
+      borderRadius: radii.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "rgba(255,255,255,0.16)",
     },
     cameraScreen: {
       flex: 1,
@@ -3024,6 +3796,10 @@ function createStyles(
       alignItems: "center",
       justifyContent: "space-between",
       gap: spacing.md,
+    },
+    cameraHeaderCopy: {
+      flex: 1,
+      gap: 4,
     },
     cameraTitle: {
       color: palette.white,
@@ -3072,6 +3848,35 @@ function createStyles(
       padding: spacing.lg,
       alignItems: "center",
       justifyContent: "center",
+    },
+    stepPagerRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: spacing.sm,
+    },
+    stepPagerTitle: {
+      color: palette.text,
+      fontSize: 14,
+      fontWeight: "800",
+    },
+    bulkActionBar: {
+      position: "absolute",
+      left: spacing.lg,
+      right: spacing.lg,
+      bottom: spacing.lg,
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surface,
+      padding: spacing.md,
+      gap: spacing.sm,
+      ...shadows.card,
+    },
+    bulkActionTitle: {
+      color: palette.text,
+      fontSize: 15,
+      fontWeight: "900",
     },
     badgePreviewCard: {
       width: "100%",

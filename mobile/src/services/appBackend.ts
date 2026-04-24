@@ -1,3 +1,4 @@
+import { Buffer } from "buffer";
 import { ethers } from "ethers";
 import { mobileConfig } from "../config";
 import {
@@ -1589,6 +1590,20 @@ export class AppBackendClient {
     }
     const body = (await response.json()) as WorkflowResponse;
     return mapWorkflow(body);
+  }
+
+  async getWorkflowPhotoDataUri(photoId: string): Promise<string | null> {
+    const response = await this.authFetch(`/workflow-photos/${encodeURIComponent(photoId)}`);
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load workflow photo");
+    }
+    const contentType = response.headers.get("content-type")?.trim() || "";
+    if (!contentType.startsWith("image/")) {
+      return null;
+    }
+    const payload = await response.arrayBuffer();
+    const base64 = Buffer.from(payload).toString("base64");
+    return `data:${contentType};base64,${base64}`;
   }
 
   async getWallets(): Promise<AppWallet[]> {
