@@ -460,6 +460,7 @@ export function SettingsScreen({
   const [improverError, setImproverError] = useState<string | null>(null);
 
   const hasImproverSection = Boolean(onOpenImprover || improver || user?.isImprover);
+  const isApprovedImprover = Boolean(user?.isImprover || improver?.status === "approved");
 
   const applyThemePreference = (themePreference: ThemePreference) => {
     onUpdatePreferences({ ...preferences, themePreference });
@@ -740,27 +741,19 @@ export function SettingsScreen({
 
       {section === "improver" ? (
         <>
-          {onOpenImprover ? (
+          {onOpenImprover && !isApprovedImprover ? (
             <View style={styles.card}>
-              <Text style={styles.sectionTitle}>
-                {user?.isImprover || improver?.status === "approved" ? "Improver Panel" : "Improver Access"}
-              </Text>
+              <Text style={styles.sectionTitle}>Improver Access</Text>
               <Text style={styles.body}>
-                {user?.isImprover || improver?.status === "approved"
-                  ? "Open the improver panel to claim workflows, manage badges, track payouts, and handle credentials."
-                  : improver
-                    ? "View your improver request and finish any remaining setup steps."
-                    : "Request improver status and manage the verified email used for approval."}
+                {improver
+                  ? "View your improver request and finish any remaining setup steps."
+                  : "Request improver status and manage the verified email used for approval."}
               </Text>
               {improver ? <Text style={styles.meta}>Status: {formatStatusLabel(improver.status)}</Text> : null}
               {improver?.email ? <Text style={styles.meta}>Improver email: {improver.email}</Text> : null}
-              <Pressable style={styles.primaryActionButton} onPress={onOpenImprover}>
+              <Pressable style={[styles.primaryActionButton, styles.settingsWideButton]} onPress={onOpenImprover}>
                 <Text style={styles.primaryActionButtonText}>
-                  {user?.isImprover || improver?.status === "approved"
-                    ? "Open improver panel"
-                    : improver
-                      ? "View improver request"
-                      : "Request improver status"}
+                  {improver ? "View improver request" : "Request improver status"}
                 </Text>
               </Pressable>
             </View>
@@ -789,9 +782,13 @@ export function SettingsScreen({
                   }
                 }}
               />
-              <View style={styles.walletActionRow}>
+              <View style={styles.improverWalletActionRow}>
                 <Pressable
-                  style={[styles.primaryActionButton, saveRewardsWalletDisabled ? styles.buttonDisabled : undefined]}
+                  style={[
+                    styles.primaryActionButton,
+                    styles.settingsWideButton,
+                    saveRewardsWalletDisabled ? styles.buttonDisabled : undefined,
+                  ]}
                   disabled={saveRewardsWalletDisabled}
                   onPress={() => {
                     void handleSaveImproverRewardsWallet();
@@ -803,7 +800,7 @@ export function SettingsScreen({
                 </Pressable>
                 {primaryWalletAddress ? (
                   <Pressable
-                    style={styles.secondaryButton}
+                    style={[styles.secondaryButton, styles.settingsWideButton]}
                     onPress={() => {
                       setRewardsWalletDraft(primaryWalletAddress);
                       setImproverError(null);
@@ -845,7 +842,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       color: palette.text,
       fontSize: 28,
       fontWeight: "900",
-      letterSpacing: -0.4,
+      letterSpacing: 0,
     },
     subtitle: {
       color: palette.textMuted,
@@ -1157,6 +1154,9 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       flexDirection: "row",
       gap: 10,
     },
+    improverWalletActionRow: {
+      gap: spacing.sm,
+    },
     secondaryButton: {
       flex: 1,
       minHeight: 46,
@@ -1182,6 +1182,13 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       alignItems: "center",
       justifyContent: "center",
       paddingHorizontal: 12,
+    },
+    settingsWideButton: {
+      flex: 0,
+      width: "100%",
+      minHeight: 48,
+      borderRadius: radii.lg,
+      paddingVertical: 12,
     },
     primaryActionButtonText: {
       color: palette.white,

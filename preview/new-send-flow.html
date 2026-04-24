@@ -1,0 +1,1601 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SFLuv Mobile Flow Preview</title>
+    <style>
+      :root {
+        --bg: #f3efea;
+        --bg-soft: #ece5de;
+        --surface: #ffffff;
+        --surface-muted: #f8f3ef;
+        --surface-strong: #f5efea;
+        --border: #ded5cf;
+        --border-strong: #cfc3ba;
+        --primary: #ef6d66;
+        --primary-strong: #d95a53;
+        --primary-soft: #fde7e2;
+        --navy: #3a2c2f;
+        --text: #201f24;
+        --text-muted: #6e6974;
+        --success: #178257;
+        --warning: #a66a1f;
+        --danger: #cf4d43;
+        --shadow: rgba(36, 24, 24, 0.12);
+        --overlay: rgba(24, 19, 24, 0.34);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "SF Pro Display", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 14% 14%, rgba(239, 109, 102, 0.16), transparent 22%),
+          radial-gradient(circle at 84% 20%, rgba(255, 255, 255, 0.6), transparent 20%),
+          linear-gradient(180deg, #f8f4ef 0%, #efe7de 100%);
+      }
+
+      body::before,
+      body::after {
+        content: "";
+        position: fixed;
+        border-radius: 999px;
+        pointer-events: none;
+        filter: blur(8px);
+      }
+
+      body::before {
+        width: 280px;
+        height: 280px;
+        top: -72px;
+        right: -56px;
+        background: rgba(239, 109, 102, 0.18);
+      }
+
+      body::after {
+        width: 220px;
+        height: 220px;
+        bottom: -40px;
+        left: -60px;
+        background: rgba(255, 255, 255, 0.55);
+      }
+
+      .preview-shell {
+        display: grid;
+        grid-template-columns: minmax(280px, 340px) minmax(380px, 1fr);
+        gap: 28px;
+        align-items: start;
+        padding: 28px;
+      }
+
+      .inspector {
+        position: sticky;
+        top: 24px;
+        border: 1px solid rgba(255, 255, 255, 0.55);
+        border-radius: 28px;
+        padding: 24px;
+        background: rgba(255, 255, 255, 0.6);
+        backdrop-filter: blur(22px);
+        box-shadow: 0 18px 50px rgba(36, 24, 24, 0.1);
+      }
+
+      .inspector__kicker {
+        margin: 0 0 10px;
+        color: var(--primary-strong);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .inspector h1 {
+        margin: 0;
+        font-size: 34px;
+        line-height: 1;
+        color: var(--navy);
+      }
+
+      .inspector p {
+        margin: 14px 0 0;
+        color: var(--text-muted);
+        line-height: 1.55;
+      }
+
+      .inspector__group {
+        margin-top: 22px;
+        display: grid;
+        gap: 10px;
+      }
+
+      .jump-button {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 14px 16px;
+        background: rgba(255, 255, 255, 0.72);
+        color: var(--text);
+        text-align: left;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+      }
+
+      .jump-button:hover,
+      .jump-button.is-active {
+        transform: translateY(-1px);
+        border-color: var(--primary);
+        background: var(--primary-soft);
+      }
+
+      .inspector__meta {
+        margin-top: 18px;
+        padding: 14px 16px;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.56);
+        color: var(--text-muted);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .stage {
+        display: flex;
+        justify-content: center;
+        padding: 8px 0 32px;
+      }
+
+      .phone-frame {
+        position: relative;
+        width: min(430px, calc(100vw - 32px));
+        aspect-ratio: 390 / 844;
+        border-radius: 42px;
+        padding: 14px;
+        background: #141414;
+        box-shadow:
+          0 28px 70px rgba(24, 19, 24, 0.28),
+          inset 0 1px 0 rgba(255, 255, 255, 0.16);
+      }
+
+      .phone-frame::before {
+        content: "";
+        position: absolute;
+        inset: 6px;
+        border-radius: 36px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        pointer-events: none;
+      }
+
+      .phone-notch {
+        position: absolute;
+        top: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 128px;
+        height: 28px;
+        border-radius: 0 0 18px 18px;
+        background: #0d0d0d;
+        z-index: 20;
+      }
+
+      .phone {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        border-radius: 32px;
+        background:
+          radial-gradient(circle at 90% 8%, rgba(239, 109, 102, 0.16), transparent 22%),
+          radial-gradient(circle at 12% 28%, rgba(255, 255, 255, 0.6), transparent 18%),
+          linear-gradient(180deg, #f3efea 0%, #eee6de 100%);
+      }
+
+      .screen {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateX(42px) scale(0.985);
+        transition: opacity 220ms ease, transform 260ms ease;
+      }
+
+      .screen.is-active {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateX(0) scale(1);
+      }
+
+      .screen__backdrop {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+      }
+
+      .orb {
+        position: absolute;
+        border-radius: 999px;
+      }
+
+      .orb--large {
+        width: 240px;
+        height: 240px;
+        top: -96px;
+        right: -16px;
+        background: rgba(239, 109, 102, 0.12);
+      }
+
+      .orb--small {
+        width: 168px;
+        height: 168px;
+        top: 74px;
+        left: -44px;
+        background: rgba(239, 109, 102, 0.06);
+      }
+
+      .app-shell {
+        position: relative;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        height: 100%;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        padding: 54px 22px 18px;
+      }
+
+      .topbar__copy {
+        display: grid;
+        gap: 4px;
+      }
+
+      .brand-kicker {
+        color: var(--primary-strong);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .brand-title {
+        color: var(--primary-strong);
+        font-size: 31px;
+        line-height: 1;
+        font-weight: 900;
+      }
+
+      .brand-meta {
+        color: var(--text-muted);
+        font-size: 14px;
+      }
+
+      .icon-button {
+        width: 42px;
+        height: 42px;
+        border: 1px solid var(--primary);
+        border-radius: 999px;
+        display: grid;
+        place-items: center;
+        background: rgba(255, 255, 255, 0.72);
+        color: var(--primary-strong);
+        font-size: 18px;
+        font-weight: 700;
+      }
+
+      .surface-shell {
+        position: relative;
+        background: rgba(243, 239, 234, 0.24);
+        overflow: hidden;
+      }
+
+      .surface-shell--content {
+        border-top-left-radius: 36px;
+        border-top-right-radius: 36px;
+      }
+
+      .screen-scroll {
+        height: 100%;
+        overflow: auto;
+        padding: 18px 22px 148px;
+        scrollbar-width: none;
+      }
+
+      .screen-scroll::-webkit-scrollbar {
+        display: none;
+      }
+
+      .hero-card {
+        position: relative;
+        border: 1.5px solid var(--primary);
+        border-radius: 34px;
+        padding: 20px;
+        background: rgba(255, 255, 255, 0.88);
+        overflow: hidden;
+        box-shadow: 0 16px 36px rgba(36, 24, 24, 0.12);
+      }
+
+      .hero-card__glow-large,
+      .hero-card__glow-small {
+        position: absolute;
+        border-radius: 999px;
+      }
+
+      .hero-card__glow-large {
+        width: 220px;
+        height: 220px;
+        top: -124px;
+        right: -58px;
+        background: rgba(239, 109, 102, 0.08);
+      }
+
+      .hero-card__glow-small {
+        width: 160px;
+        height: 160px;
+        bottom: -54px;
+        left: -30px;
+        background: rgba(239, 109, 102, 0.05);
+      }
+
+      .hero-top {
+        position: relative;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 999px;
+        padding: 8px 12px;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .pill--soft {
+        background: var(--primary-soft);
+        color: var(--primary-strong);
+      }
+
+      .pill--surface {
+        background: var(--surface-strong);
+        color: var(--primary-strong);
+        border: 1px solid var(--primary);
+      }
+
+      .hero-eyebrow {
+        position: relative;
+        margin-top: 26px;
+        color: var(--primary-strong);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .hero-balance {
+        position: relative;
+        margin-top: 12px;
+        color: var(--primary-strong);
+        font-size: 44px;
+        line-height: 0.95;
+        font-weight: 900;
+        letter-spacing: -0.05em;
+      }
+
+      .hero-currency {
+        position: relative;
+        margin-top: 8px;
+        color: var(--text-muted);
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .address-bar {
+        position: relative;
+        margin-top: 20px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 10px 14px;
+        background: var(--surface-strong);
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .hero-meta {
+        position: relative;
+        margin-top: 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .owner-text {
+        color: var(--text-muted);
+        font-size: 12px;
+      }
+
+      .hero-actions {
+        position: relative;
+        margin-top: 20px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .button {
+        border: 0;
+        border-radius: 999px;
+        min-height: 56px;
+        padding: 0 18px;
+        font-size: 16px;
+        font-weight: 900;
+        cursor: pointer;
+      }
+
+      .button--primary {
+        background: var(--primary);
+        color: #fff;
+      }
+
+      .button--secondary {
+        background: var(--surface-strong);
+        border: 1px solid var(--primary);
+        color: var(--primary-strong);
+      }
+
+      .section-card {
+        margin-top: 18px;
+        border: 1px solid var(--border);
+        border-radius: 28px;
+        padding: 16px;
+        background: rgba(255, 255, 255, 0.82);
+        box-shadow: 0 10px 22px rgba(36, 24, 24, 0.08);
+      }
+
+      .section-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .section-title {
+        font-size: 20px;
+        font-weight: 900;
+      }
+
+      .section-meta {
+        margin-top: 4px;
+        color: var(--text-muted);
+        font-size: 14px;
+      }
+
+      .link-button {
+        border: 0;
+        background: transparent;
+        color: var(--primary-strong);
+        font-size: 13px;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      .activity-list {
+        display: grid;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .activity-card {
+        display: grid;
+        grid-template-columns: 42px 1fr auto;
+        gap: 10px;
+        align-items: center;
+        border: 1px solid var(--border);
+        border-radius: 22px;
+        padding: 14px;
+        background: var(--surface-muted);
+      }
+
+      .activity-icon {
+        width: 42px;
+        height: 42px;
+        border-radius: 999px;
+        display: grid;
+        place-items: center;
+        font-size: 16px;
+        font-weight: 900;
+      }
+
+      .activity-icon--send {
+        color: var(--primary-strong);
+        background: var(--primary-soft);
+      }
+
+      .activity-icon--receive {
+        color: var(--success);
+        background: #eef7f2;
+      }
+
+      .activity-title {
+        font-size: 15px;
+        font-weight: 800;
+      }
+
+      .activity-meta {
+        margin-top: 4px;
+        color: var(--text-muted);
+        font-size: 12px;
+      }
+
+      .activity-amount {
+        text-align: right;
+      }
+
+      .activity-amount__value {
+        font-size: 17px;
+        font-weight: 900;
+      }
+
+      .activity-amount__value--send {
+        color: var(--primary-strong);
+      }
+
+      .activity-amount__value--receive {
+        color: var(--success);
+      }
+
+      .activity-amount__currency {
+        margin-top: 2px;
+        color: var(--text-muted);
+        font-size: 12px;
+      }
+
+      .dock-shell {
+        position: relative;
+        padding: 10px 22px 12px;
+        background: rgba(243, 239, 234, 0.2);
+        overflow: hidden;
+      }
+
+      .dock-shell::before,
+      .dock-shell::after {
+        content: "";
+        position: absolute;
+        border-radius: 999px;
+        pointer-events: none;
+      }
+
+      .dock-shell::before {
+        width: 180px;
+        height: 74px;
+        top: -18px;
+        left: 28px;
+        background: rgba(255, 255, 255, 0.44);
+      }
+
+      .dock-shell::after {
+        width: 120px;
+        height: 64px;
+        right: 26px;
+        bottom: -24px;
+        background: rgba(239, 109, 102, 0.12);
+      }
+
+      .dock {
+        position: relative;
+        display: flex;
+        gap: 6px;
+        padding: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.74);
+        border-radius: 28px;
+        background: rgba(255, 255, 255, 0.68);
+        overflow: hidden;
+        box-shadow: 0 18px 34px rgba(36, 24, 24, 0.12);
+        backdrop-filter: blur(26px);
+      }
+
+      .dock::before {
+        content: "";
+        position: absolute;
+        left: 10px;
+        right: 10px;
+        top: 0;
+        height: 24px;
+        border-top-left-radius: 28px;
+        border-top-right-radius: 28px;
+        background: rgba(255, 255, 255, 0.22);
+        pointer-events: none;
+      }
+
+      .dock-tab {
+        position: relative;
+        flex: 1;
+        display: grid;
+        gap: 3px;
+        place-items: center;
+        border-radius: 18px;
+        padding: 10px 6px;
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .dock-tab--active {
+        background: var(--primary-soft);
+        color: var(--primary-strong);
+      }
+
+      .dock-tab__icon {
+        font-size: 16px;
+      }
+
+      .send-screen {
+        position: relative;
+        height: 100%;
+        display: grid;
+        grid-template-rows: 1fr auto;
+        padding: 46px 22px 20px;
+      }
+
+      .send-scroll {
+        overflow: auto;
+        padding-bottom: 18px;
+        scrollbar-width: none;
+      }
+
+      .send-scroll::-webkit-scrollbar {
+        display: none;
+      }
+
+      .send-step-header {
+        display: flex;
+        align-items: center;
+        min-height: 44px;
+      }
+
+      .entry-toggle {
+        margin-top: 14px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        padding: 6px;
+        border: 1px solid var(--border);
+        border-radius: 22px;
+        background: var(--surface-strong);
+      }
+
+      .entry-toggle button,
+      .receive-toggle button {
+        border: 0;
+        border-radius: 16px;
+        min-height: 44px;
+        background: transparent;
+        color: var(--text-muted);
+        font-size: 13px;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      .entry-toggle button.is-active,
+      .receive-toggle button.is-active {
+        background: var(--primary);
+        color: #fff;
+      }
+
+      .search-card {
+        margin-top: 14px;
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: 30px;
+        background: rgba(255, 255, 255, 0.84);
+        box-shadow: 0 10px 22px rgba(36, 24, 24, 0.08);
+      }
+
+      .search-bar {
+        min-height: 56px;
+        border-radius: 22px;
+        padding: 0 16px;
+        display: flex;
+        align-items: center;
+        color: var(--text-muted);
+        background: var(--surface-strong);
+        font-size: 15px;
+      }
+
+      .suggestions {
+        display: grid;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .suggestion-card {
+        display: grid;
+        grid-template-columns: 48px 1fr;
+        gap: 10px;
+        align-items: center;
+        padding: 14px;
+        border: 1px solid var(--border);
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.88);
+        box-shadow: 0 10px 20px rgba(36, 24, 24, 0.08);
+        cursor: pointer;
+      }
+
+      .avatar {
+        width: 48px;
+        height: 48px;
+        border: 1px solid var(--primary);
+        border-radius: 999px;
+        display: grid;
+        place-items: center;
+        background: var(--primary-soft);
+        color: var(--primary-strong);
+        font-weight: 900;
+      }
+
+      .suggestion-title-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .suggestion-title {
+        font-size: 15px;
+        font-weight: 900;
+      }
+
+      .badge {
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 4px 8px;
+        font-size: 10px;
+        font-weight: 900;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .badge--merchant {
+        border-color: var(--primary);
+        background: var(--primary-soft);
+        color: var(--primary-strong);
+      }
+
+      .badge--contact {
+        background: var(--surface-strong);
+        color: var(--text-muted);
+      }
+
+      .suggestion-subtitle {
+        margin-top: 4px;
+        color: var(--text-muted);
+        font-size: 12px;
+      }
+
+      .footer-cta {
+        padding-top: 10px;
+      }
+
+      .footer-cta .button {
+        width: 100%;
+      }
+
+      .scanner-card {
+        margin-top: 16px;
+        display: grid;
+        gap: 10px;
+      }
+
+      .scanner-frame {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 1;
+        border: 1px solid var(--border);
+        border-radius: 34px;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 28% 20%, rgba(255, 255, 255, 0.1), transparent 22%),
+          linear-gradient(180deg, rgba(12, 16, 22, 0.96), rgba(20, 24, 30, 0.92));
+        box-shadow: 0 18px 34px rgba(24, 19, 24, 0.18);
+      }
+
+      .scanner-grid {
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+        background-size: 32px 32px;
+      }
+
+      .scanner-sweep {
+        position: absolute;
+        left: 18%;
+        right: 18%;
+        top: 28%;
+        height: 2px;
+        background: rgba(239, 109, 102, 0.9);
+        box-shadow: 0 0 24px rgba(239, 109, 102, 0.7);
+      }
+
+      .scanner-corners {
+        position: absolute;
+        inset: 0;
+      }
+
+      .scanner-corners span {
+        position: absolute;
+        width: 36px;
+        height: 36px;
+        border-color: var(--primary-strong);
+      }
+
+      .scanner-corners span:nth-child(1) {
+        top: calc(50% - 118px);
+        left: calc(50% - 118px);
+        border-top: 4px solid;
+        border-left: 4px solid;
+        border-top-left-radius: 18px;
+      }
+
+      .scanner-corners span:nth-child(2) {
+        top: calc(50% - 118px);
+        right: calc(50% - 118px);
+        border-top: 4px solid;
+        border-right: 4px solid;
+        border-top-right-radius: 18px;
+      }
+
+      .scanner-corners span:nth-child(3) {
+        bottom: calc(50% - 118px);
+        left: calc(50% - 118px);
+        border-bottom: 4px solid;
+        border-left: 4px solid;
+        border-bottom-left-radius: 18px;
+      }
+
+      .scanner-corners span:nth-child(4) {
+        bottom: calc(50% - 118px);
+        right: calc(50% - 118px);
+        border-bottom: 4px solid;
+        border-right: 4px solid;
+        border-bottom-right-radius: 18px;
+      }
+
+      .scanner-hint {
+        color: var(--text-muted);
+        font-size: 13px;
+        text-align: center;
+        line-height: 1.4;
+      }
+
+      .amount-screen {
+        height: 100%;
+        display: grid;
+        grid-template-rows: auto auto auto 1fr auto auto;
+        gap: 14px;
+        padding: 46px 22px 20px;
+      }
+
+      .recipient-line {
+        margin-top: 10px;
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .amount-display {
+        text-align: center;
+        padding: 20px 8px 8px;
+      }
+
+      .amount-value {
+        color: var(--primary-strong);
+        font-size: 58px;
+        line-height: 1;
+        font-weight: 900;
+        letter-spacing: -0.05em;
+      }
+
+      .amount-suffix {
+        margin-top: 10px;
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .balance-line {
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 700;
+        text-align: center;
+      }
+
+      .note-field {
+        min-height: 52px;
+        border: 1px solid var(--border);
+        border-radius: 22px;
+        display: flex;
+        align-items: center;
+        padding: 0 16px;
+        background: rgba(255, 255, 255, 0.82);
+        box-shadow: 0 10px 22px rgba(36, 24, 24, 0.08);
+        color: var(--text-muted);
+        font-size: 15px;
+      }
+
+      .keypad {
+        display: grid;
+        gap: 10px;
+      }
+
+      .keypad-row {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+      }
+
+      .key {
+        min-height: 58px;
+        border: 1px solid var(--border);
+        border-radius: 22px;
+        display: grid;
+        place-items: center;
+        background: rgba(255, 255, 255, 0.82);
+        box-shadow: 0 10px 18px rgba(36, 24, 24, 0.08);
+        font-size: 24px;
+        font-weight: 900;
+      }
+
+      .key--action {
+        background: var(--primary-soft);
+        color: var(--primary-strong);
+      }
+
+      .swipe-track {
+        position: relative;
+        min-height: 66px;
+        border-radius: 999px;
+        background: var(--primary-strong);
+        overflow: hidden;
+        box-shadow: 0 18px 30px rgba(36, 24, 24, 0.15);
+      }
+
+      .swipe-track__label {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: #fff;
+        font-size: 15px;
+        font-weight: 900;
+      }
+
+      .swipe-track__thumb {
+        position: absolute;
+        top: 4px;
+        left: 4px;
+        bottom: 4px;
+        width: 58px;
+        border-radius: 999px;
+        display: grid;
+        place-items: center;
+        background: rgba(255, 255, 255, 0.92);
+        color: var(--primary-strong);
+        font-size: 18px;
+        font-weight: 900;
+      }
+
+      .receive-screen {
+        position: relative;
+        display: grid;
+        grid-template-rows: auto 1fr auto auto;
+        height: 100%;
+      }
+
+      .receive-content {
+        padding: 10px 22px 18px;
+        display: grid;
+        gap: 14px;
+      }
+
+      .receive-toggle {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        padding: 6px;
+        border: 1px solid var(--border);
+        border-radius: 22px;
+        background: var(--surface-strong);
+      }
+
+      .qr-card {
+        flex: 1;
+        display: grid;
+        gap: 12px;
+        align-content: center;
+        border: 1px solid var(--border);
+        border-radius: 28px;
+        padding: 18px;
+        background: rgba(255, 255, 255, 0.84);
+        box-shadow: 0 12px 24px rgba(36, 24, 24, 0.08);
+      }
+
+      .qr-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .qr-title {
+        font-size: 18px;
+        font-weight: 900;
+      }
+
+      .copy-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border: 0;
+        border-radius: 999px;
+        min-height: 40px;
+        padding: 0 12px;
+        background: var(--primary-soft);
+        color: var(--primary-strong);
+        font-size: 13px;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      .qr-frame {
+        justify-self: center;
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        padding: 18px;
+        background: #fff;
+      }
+
+      .qr-caption {
+        color: var(--text-muted);
+        font-size: 11px;
+        line-height: 1.25;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .redeem-wrap {
+        padding: 0 22px 12px;
+      }
+
+      .redeem-wrap .button {
+        width: 100%;
+      }
+
+      .qr-art {
+        width: 184px;
+        height: 184px;
+        display: block;
+      }
+
+      @media (max-width: 980px) {
+        .preview-shell {
+          grid-template-columns: 1fr;
+        }
+
+        .inspector {
+          position: static;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="preview-shell">
+      <aside class="inspector">
+        <p class="inspector__kicker">Preview Export</p>
+        <h1>Wallet + Send + Receive</h1>
+        <p>
+          Click through the mocked mobile views below. The wallet actions, send tabs, send continue button,
+          and receive mode toggle all navigate inside the prototype.
+        </p>
+
+        <div class="inspector__group">
+          <button class="jump-button is-active" data-target="wallet">Wallet screen</button>
+          <button class="jump-button" data-target="send-manual">Send / recipient</button>
+          <button class="jump-button" data-target="send-scan">Send / scan tab</button>
+          <button class="jump-button" data-target="send-amount">Send / amount</button>
+          <button class="jump-button" data-target="receive">Receive screen</button>
+        </div>
+
+        <div class="inspector__meta">
+          File: <strong>/preview/new-send-flow.html</strong><br />
+          Theme: current coral + cream mobile styling<br />
+          Scope: wallet home, send steps, send scanner, receive link/address modes
+        </div>
+      </aside>
+
+      <main class="stage">
+        <div class="phone-frame">
+          <div class="phone-notch"></div>
+
+          <div class="phone" id="phone">
+            <section class="screen is-active" data-view="wallet">
+              <div class="screen__backdrop">
+                <div class="orb orb--large"></div>
+                <div class="orb orb--small"></div>
+              </div>
+
+              <div class="app-shell">
+                <div class="topbar">
+                  <div class="topbar__copy">
+                    <div class="brand-kicker">SFLuv</div>
+                    <div class="brand-title">Wallet</div>
+                    <div class="brand-meta">Citizen Wallet selected</div>
+                  </div>
+                  <div class="icon-button">&#9881;</div>
+                </div>
+
+                <div class="surface-shell surface-shell--content">
+                  <div class="screen-scroll">
+                    <div class="hero-card">
+                      <div class="hero-card__glow-large"></div>
+                      <div class="hero-card__glow-small"></div>
+
+                      <div class="hero-top">
+                        <div class="pill pill--soft">&#10003; Wallet ready</div>
+                        <div class="pill pill--surface">Choose Wallet</div>
+                      </div>
+
+                      <div class="hero-eyebrow">Selected wallet</div>
+                      <div class="hero-balance">3,284.16</div>
+                      <div class="hero-currency">SFLUV available</div>
+
+                      <div class="address-bar">&#9633; 0x8c72b1...9af301</div>
+
+                      <div class="hero-meta">
+                        <div class="pill pill--soft">Citizen Wallet</div>
+                        <div class="owner-text">Owner #02</div>
+                      </div>
+
+                      <div class="hero-actions">
+                        <button class="button button--primary" data-target="send-manual">&#8593; Send</button>
+                        <button class="button button--secondary" data-target="receive">&#8595; Receive</button>
+                      </div>
+                    </div>
+
+                    <div class="section-card">
+                      <div class="section-row">
+                        <div>
+                          <div class="section-title">Recent activity</div>
+                          <div class="section-meta">Your latest SFLUV movement</div>
+                        </div>
+                        <button class="link-button">See all</button>
+                      </div>
+
+                      <div class="activity-list">
+                        <div class="activity-card">
+                          <div class="activity-icon activity-icon--send">&#8593;</div>
+                          <div>
+                            <div class="activity-title">Sent to Flora Cafe</div>
+                            <div class="activity-meta">0x4b27d1...08e312 • Apr 23</div>
+                          </div>
+                          <div class="activity-amount">
+                            <div class="activity-amount__value activity-amount__value--send">-24.50</div>
+                            <div class="activity-amount__currency">SFLUV</div>
+                          </div>
+                        </div>
+
+                        <div class="activity-card">
+                          <div class="activity-icon activity-icon--receive">&#8595;</div>
+                          <div>
+                            <div class="activity-title">Received from Lena Morris</div>
+                            <div class="activity-meta">0xb8f208...9cb8d1 • Apr 22</div>
+                          </div>
+                          <div class="activity-amount">
+                            <div class="activity-amount__value activity-amount__value--receive">+86.00</div>
+                            <div class="activity-amount__currency">SFLUV</div>
+                          </div>
+                        </div>
+
+                        <div class="activity-card">
+                          <div class="activity-icon activity-icon--receive">&#8595;</div>
+                          <div>
+                            <div class="activity-title">Received Reward</div>
+                            <div class="activity-meta">Apr 21</div>
+                          </div>
+                          <div class="activity-amount">
+                            <div class="activity-amount__value activity-amount__value--receive">+15.00</div>
+                            <div class="activity-amount__currency">SFLUV</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="dock-shell">
+                  <div class="dock">
+                    <div class="dock-tab dock-tab--active">
+                      <div class="dock-tab__icon">&#9633;</div>
+                      <div>Wallet</div>
+                    </div>
+                    <div class="dock-tab">
+                      <div class="dock-tab__icon">&#9675;</div>
+                      <div>Activity</div>
+                    </div>
+                    <div class="dock-tab">
+                      <div class="dock-tab__icon">&#9651;</div>
+                      <div>Map</div>
+                    </div>
+                    <div class="dock-tab">
+                      <div class="dock-tab__icon">&#9786;</div>
+                      <div>Contacts</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="screen" data-view="send-manual">
+              <div class="screen__backdrop">
+                <div class="orb orb--large"></div>
+                <div class="orb orb--small"></div>
+              </div>
+
+              <div class="send-screen">
+                <div class="send-scroll">
+                  <div class="send-step-header">
+                    <button class="icon-button" data-target="wallet">&#8592;</button>
+                  </div>
+
+                  <div class="entry-toggle">
+                    <button class="is-active" data-target="send-manual">Manual</button>
+                    <button data-target="send-scan">Scan</button>
+                  </div>
+
+                  <div class="search-card">
+                    <div class="search-bar">Search or paste an address</div>
+                  </div>
+
+                  <div class="suggestions">
+                    <button class="suggestion-card" data-target="send-amount">
+                      <div class="avatar">FC</div>
+                      <div>
+                        <div class="suggestion-title-row">
+                          <div class="suggestion-title">Flora Cafe</div>
+                          <div class="badge badge--merchant">Merchant</div>
+                        </div>
+                        <div class="suggestion-subtitle">0.2 mi away</div>
+                      </div>
+                    </button>
+
+                    <button class="suggestion-card" data-target="send-amount">
+                      <div class="avatar">LM</div>
+                      <div>
+                        <div class="suggestion-title-row">
+                          <div class="suggestion-title">Lena Morris</div>
+                          <div class="badge badge--contact">Contact</div>
+                        </div>
+                        <div class="suggestion-subtitle">0xb8f208...9cb8d1</div>
+                      </div>
+                    </button>
+
+                    <button class="suggestion-card" data-target="send-amount">
+                      <div class="avatar">CT</div>
+                      <div>
+                        <div class="suggestion-title-row">
+                          <div class="suggestion-title">Common Thread Market</div>
+                          <div class="badge badge--merchant">Merchant</div>
+                        </div>
+                        <div class="suggestion-subtitle">Retail • Oakland</div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="footer-cta">
+                  <button class="button button--primary" data-target="send-amount">Continue</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="screen" data-view="send-scan">
+              <div class="screen__backdrop">
+                <div class="orb orb--large"></div>
+                <div class="orb orb--small"></div>
+              </div>
+
+              <div class="send-screen">
+                <div class="send-scroll">
+                  <div class="send-step-header">
+                    <button class="icon-button" data-target="wallet">&#8592;</button>
+                  </div>
+
+                  <div class="entry-toggle">
+                    <button data-target="send-manual">Manual</button>
+                    <button class="is-active" data-target="send-scan">Scan</button>
+                  </div>
+
+                  <div class="scanner-card">
+                    <div class="scanner-frame">
+                      <div class="scanner-grid"></div>
+                      <div class="scanner-sweep"></div>
+                      <div class="scanner-corners">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                      </div>
+                    </div>
+                    <div class="scanner-hint">Scan a payment QR inside the frame.</div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="screen" data-view="send-amount">
+              <div class="screen__backdrop">
+                <div class="orb orb--large"></div>
+                <div class="orb orb--small"></div>
+              </div>
+
+              <div class="amount-screen">
+                <div class="send-step-header">
+                  <button class="icon-button" data-target="send-manual">&#8592;</button>
+                </div>
+
+                <div class="amount-display">
+                  <div class="recipient-line">To Flora Cafe</div>
+                  <div class="amount-value">24.50</div>
+                  <div class="amount-suffix">SFLUV</div>
+                </div>
+
+                <div class="balance-line">Balance 3,284.16</div>
+                <div class="note-field">Add a note</div>
+
+                <div></div>
+
+                <div class="keypad">
+                  <div class="keypad-row">
+                    <div class="key">1</div>
+                    <div class="key">2</div>
+                    <div class="key">3</div>
+                  </div>
+                  <div class="keypad-row">
+                    <div class="key">4</div>
+                    <div class="key">5</div>
+                    <div class="key">6</div>
+                  </div>
+                  <div class="keypad-row">
+                    <div class="key">7</div>
+                    <div class="key">8</div>
+                    <div class="key">9</div>
+                  </div>
+                  <div class="keypad-row">
+                    <div class="key">.</div>
+                    <div class="key">0</div>
+                    <div class="key key--action">&#9003;</div>
+                  </div>
+                </div>
+
+                <div class="swipe-track">
+                  <div class="swipe-track__label">Slide to send</div>
+                  <div class="swipe-track__thumb">&#8594;</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="screen" data-view="receive">
+              <div class="screen__backdrop">
+                <div class="orb orb--large"></div>
+                <div class="orb orb--small"></div>
+              </div>
+
+              <div class="receive-screen">
+                <div class="topbar">
+                  <div class="topbar__copy">
+                    <div class="brand-kicker">SFLuv</div>
+                    <div class="brand-title">Receive</div>
+                    <div class="brand-meta">Citizen Wallet selected</div>
+                  </div>
+                  <button class="icon-button" data-target="wallet">&#8592;</button>
+                </div>
+
+                <div class="surface-shell surface-shell--content receive-content">
+                  <div class="receive-toggle">
+                    <button class="is-active" data-receive-mode="link">Link</button>
+                    <button data-receive-mode="address">Address</button>
+                  </div>
+
+                  <div class="qr-card">
+                    <div class="qr-header">
+                      <div class="qr-title" id="receive-title">Payment link</div>
+                      <button class="copy-chip" id="receive-copy">
+                        <span id="receive-copy-label">Copy</span>
+                      </button>
+                    </div>
+
+                    <div class="qr-frame">
+                      <svg class="qr-art" viewBox="0 0 184 184" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <rect width="184" height="184" fill="#ffffff" />
+                        <rect x="10" y="10" width="48" height="48" fill="#111111" />
+                        <rect x="18" y="18" width="32" height="32" fill="#ffffff" />
+                        <rect x="24" y="24" width="20" height="20" fill="#111111" />
+                        <rect x="126" y="10" width="48" height="48" fill="#111111" />
+                        <rect x="134" y="18" width="32" height="32" fill="#ffffff" />
+                        <rect x="140" y="24" width="20" height="20" fill="#111111" />
+                        <rect x="10" y="126" width="48" height="48" fill="#111111" />
+                        <rect x="18" y="134" width="32" height="32" fill="#ffffff" />
+                        <rect x="24" y="140" width="20" height="20" fill="#111111" />
+                        <rect x="72" y="18" width="8" height="8" fill="#111111" />
+                        <rect x="88" y="18" width="8" height="8" fill="#111111" />
+                        <rect x="72" y="34" width="8" height="8" fill="#111111" />
+                        <rect x="88" y="42" width="8" height="8" fill="#111111" />
+                        <rect x="104" y="34" width="8" height="8" fill="#111111" />
+                        <rect x="64" y="72" width="8" height="8" fill="#111111" />
+                        <rect x="80" y="72" width="8" height="8" fill="#111111" />
+                        <rect x="96" y="72" width="8" height="8" fill="#111111" />
+                        <rect x="112" y="72" width="8" height="8" fill="#111111" />
+                        <rect x="72" y="88" width="8" height="8" fill="#111111" />
+                        <rect x="88" y="88" width="8" height="8" fill="#111111" />
+                        <rect x="104" y="88" width="8" height="8" fill="#111111" />
+                        <rect x="120" y="88" width="8" height="8" fill="#111111" />
+                        <rect x="64" y="104" width="8" height="8" fill="#111111" />
+                        <rect x="80" y="104" width="8" height="8" fill="#111111" />
+                        <rect x="96" y="104" width="8" height="8" fill="#111111" />
+                        <rect x="112" y="104" width="8" height="8" fill="#111111" />
+                        <rect x="128" y="104" width="8" height="8" fill="#111111" />
+                        <rect x="72" y="120" width="8" height="8" fill="#111111" />
+                        <rect x="88" y="120" width="8" height="8" fill="#111111" />
+                        <rect x="104" y="120" width="8" height="8" fill="#111111" />
+                        <rect x="120" y="120" width="8" height="8" fill="#111111" />
+                        <rect x="72" y="136" width="8" height="8" fill="#111111" />
+                        <rect x="88" y="144" width="8" height="8" fill="#111111" />
+                        <rect x="104" y="136" width="8" height="8" fill="#111111" />
+                        <rect x="120" y="144" width="8" height="8" fill="#111111" />
+                        <rect x="136" y="136" width="8" height="8" fill="#111111" />
+                        <rect x="152" y="72" width="8" height="8" fill="#111111" />
+                        <rect x="152" y="88" width="8" height="8" fill="#111111" />
+                        <rect x="152" y="104" width="8" height="8" fill="#111111" />
+                        <rect x="152" y="120" width="8" height="8" fill="#111111" />
+                        <rect x="152" y="136" width="8" height="8" fill="#111111" />
+                      </svg>
+                    </div>
+
+                    <div class="qr-caption" id="receive-caption">
+                      app.sfluv.org/pay/0x8C72B1A4...9AF3012F
+                    </div>
+                  </div>
+                </div>
+
+                <div class="redeem-wrap">
+                  <button class="button button--primary">Redeem code</button>
+                </div>
+
+                <div class="dock-shell">
+                  <div class="dock">
+                    <div class="dock-tab dock-tab--active">
+                      <div class="dock-tab__icon">&#9633;</div>
+                      <div>Wallet</div>
+                    </div>
+                    <div class="dock-tab">
+                      <div class="dock-tab__icon">&#9675;</div>
+                      <div>Activity</div>
+                    </div>
+                    <div class="dock-tab">
+                      <div class="dock-tab__icon">&#9651;</div>
+                      <div>Map</div>
+                    </div>
+                    <div class="dock-tab">
+                      <div class="dock-tab__icon">&#9786;</div>
+                      <div>Contacts</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      (function () {
+        const screens = Array.from(document.querySelectorAll(".screen"));
+        const jumpButtons = Array.from(document.querySelectorAll("[data-target]"));
+        const receiveButtons = Array.from(document.querySelectorAll("[data-receive-mode]"));
+        const receiveTitle = document.getElementById("receive-title");
+        const receiveCaption = document.getElementById("receive-caption");
+        const receiveCopy = document.getElementById("receive-copy");
+        const receiveCopyLabel = document.getElementById("receive-copy-label");
+
+        const receiveValues = {
+          link: {
+            title: "Payment link",
+            caption: "app.sfluv.org/pay/0x8C72B1A4...9AF3012F",
+            value: "https://app.sfluv.org/pay/0x8C72B1A406C0DD29D918A82293411C4D9AF3012F",
+          },
+          address: {
+            title: "Wallet address",
+            caption: "0x8C72B1A4...9AF3012F",
+            value: "0x8C72B1A406C0DD29D918A82293411C4D9AF3012F",
+          },
+        };
+
+        let activeView = "wallet";
+        let activeReceiveMode = "link";
+        let copyTimeout = null;
+
+        function setView(nextView) {
+          activeView = nextView;
+          screens.forEach((screen) => {
+            screen.classList.toggle("is-active", screen.dataset.view === nextView);
+          });
+          jumpButtons.forEach((button) => {
+            button.classList.toggle("is-active", button.dataset.target === nextView);
+          });
+        }
+
+        function setReceiveMode(nextMode) {
+          activeReceiveMode = nextMode;
+          receiveButtons.forEach((button) => {
+            button.classList.toggle("is-active", button.dataset.receiveMode === nextMode);
+          });
+          receiveTitle.textContent = receiveValues[nextMode].title;
+          receiveCaption.textContent = receiveValues[nextMode].caption;
+          receiveCopyLabel.textContent = "Copy";
+        }
+
+        jumpButtons.forEach((button) => {
+          button.addEventListener("click", () => {
+            setView(button.dataset.target);
+          });
+        });
+
+        receiveButtons.forEach((button) => {
+          button.addEventListener("click", () => {
+            setReceiveMode(button.dataset.receiveMode);
+          });
+        });
+
+        receiveCopy.addEventListener("click", async () => {
+          const nextValue = receiveValues[activeReceiveMode].value;
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              await navigator.clipboard.writeText(nextValue);
+            }
+          } catch (error) {
+            console.warn("Clipboard write skipped in preview", error);
+          }
+
+          receiveCopyLabel.textContent = "Copied";
+          window.clearTimeout(copyTimeout);
+          copyTimeout = window.setTimeout(() => {
+            receiveCopyLabel.textContent = "Copy";
+          }, 1600);
+        });
+
+        setView(activeView);
+        setReceiveMode(activeReceiveMode);
+      })();
+    </script>
+  </body>
+</html>

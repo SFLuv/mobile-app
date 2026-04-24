@@ -14,6 +14,7 @@ import {
   TouchableWithoutFeedback,
   Vibration,
   View,
+  useWindowDimensions,
 } from "react-native";
 import Constants from "expo-constants";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -35,6 +36,7 @@ type SendStep = "recipient" | "amount";
 type SendPhase = "editing" | "sending" | "success" | "failure";
 type TipChoice = "10" | "15" | "20" | "custom";
 type RecipientEntryMode = SendFlowEntryMode;
+type SendLayoutMode = "regular" | "compact" | "dense";
 
 type RecipientSuggestion = {
   key: string;
@@ -194,17 +196,19 @@ function SwipeToSend({
   loading,
   label,
   onComplete,
+  layoutMode = "regular",
 }: {
   disabled: boolean;
   loading: boolean;
   label: string;
   onComplete: () => void;
+  layoutMode?: SendLayoutMode;
 }) {
   const { palette, shadows } = useAppTheme();
-  const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
+  const styles = useMemo(() => createStyles(palette, shadows, layoutMode), [layoutMode, palette, shadows]);
   const translateX = useRef(new Animated.Value(0)).current;
   const [trackWidth, setTrackWidth] = useState(0);
-  const thumbSize = 58;
+  const thumbSize = layoutMode === "dense" ? 48 : layoutMode === "compact" ? 54 : 58;
   const swipeDistance = Math.max(trackWidth - thumbSize - 8, 0);
 
   useEffect(() => {
@@ -290,13 +294,15 @@ function NumberPad({
   onDigit,
   onDecimal,
   onBackspace,
+  layoutMode = "regular",
 }: {
   onDigit: (digit: string) => void;
   onDecimal: () => void;
   onBackspace: () => void;
+  layoutMode?: SendLayoutMode;
 }) {
   const { palette, shadows } = useAppTheme();
-  const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
+  const styles = useMemo(() => createStyles(palette, shadows, layoutMode), [layoutMode, palette, shadows]);
 
   const rows = [
     ["1", "2", "3"],
@@ -356,7 +362,9 @@ export function SendScreen({
   onExitFlow,
 }: Props) {
   const { palette, shadows } = useAppTheme();
-  const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
+  const { height: windowHeight } = useWindowDimensions();
+  const layoutMode: SendLayoutMode = windowHeight < 680 ? "dense" : windowHeight < 760 ? "compact" : "regular";
+  const styles = useMemo(() => createStyles(palette, shadows, layoutMode), [layoutMode, palette, shadows]);
   const topInset = Math.max(Constants.statusBarHeight, Platform.OS === "ios" ? spacing.sm : 0);
   const noteInputRef = useRef<TextInput | null>(null);
   const resultIconScale = useRef(new Animated.Value(0.84)).current;
@@ -453,7 +461,7 @@ export function SendScreen({
 
   const filteredSuggestions = useMemo(() => {
     if (!searchQuery) {
-      return merchantSuggestions.slice(0, 5);
+      return [];
     }
     return allSuggestions
       .filter((suggestion) => {
@@ -461,7 +469,7 @@ export function SendScreen({
         return haystack.includes(searchQuery);
       })
       .slice(0, 5);
-  }, [allSuggestions, merchantSuggestions, searchQuery]);
+  }, [allSuggestions, searchQuery]);
 
   useEffect(() => {
     if (!lookupAddress || !backendClient) {
@@ -1126,6 +1134,7 @@ export function SendScreen({
 
             {!noteFocused ? (
               <NumberPad
+                layoutMode={layoutMode}
                 onDigit={(digit) => setAmountInput((current) => appendAmountCharacter(current, digit))}
                 onDecimal={() => setAmountInput((current) => appendAmountCharacter(current, "."))}
                 onBackspace={() => setAmountInput((current) => removeAmountCharacter(current))}
@@ -1136,6 +1145,7 @@ export function SendScreen({
 
             <View style={styles.sendDock}>
               <SwipeToSend
+                layoutMode={layoutMode}
                 disabled={!activeTarget || !amountRaw || amountRaw.lte(0) || phase !== "editing"}
                 loading={phase === "sending"}
                 label="Slide to send"
@@ -1329,7 +1339,21 @@ export function SendScreen({
   );
 }
 
-function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) {
+function createStyles(
+  palette: Palette,
+  shadows: ReturnType<typeof getShadows>,
+  layoutMode: SendLayoutMode = "regular",
+) {
+  const compactLayout = layoutMode !== "regular";
+  const denseLayout = layoutMode === "dense";
+  const amountDisplayMinHeight = denseLayout ? 72 : compactLayout ? 96 : 140;
+  const amountValueFontSize = denseLayout ? 38 : compactLayout ? 46 : 58;
+  const amountValueLineHeight = denseLayout ? 44 : compactLayout ? 52 : 64;
+  const keypadGap = denseLayout ? 4 : compactLayout ? spacing.xs : spacing.sm;
+  const keypadKeyHeight = denseLayout ? 40 : compactLayout ? 46 : 56;
+  const swipeTrackHeight = denseLayout ? 54 : compactLayout ? 60 : 64;
+  const swipeThumbWidth = denseLayout ? 48 : compactLayout ? 54 : 58;
+
   return StyleSheet.create({
     flex: {
       flex: 1,
@@ -1592,13 +1616,13 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     amountScreen: {
       flex: 1,
       paddingHorizontal: spacing.lg,
-      gap: spacing.md,
+      gap: denseLayout ? spacing.xs : compactLayout ? spacing.sm : spacing.md,
     },
     amountHero: {
       alignItems: "center",
       justifyContent: "center",
-      paddingTop: spacing.xl,
-      gap: spacing.sm,
+      paddingTop: denseLayout ? 0 : compactLayout ? spacing.xs : spacing.xl,
+      gap: denseLayout ? 4 : compactLayout ? spacing.xs : spacing.sm,
     },
     recipientLine: {
       color: palette.textMuted,
@@ -1608,17 +1632,17 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     amountDisplay: {
       alignItems: "center",
       justifyContent: "center",
-      minHeight: 140,
+      minHeight: amountDisplayMinHeight,
       paddingHorizontal: spacing.md,
       gap: spacing.xs,
     },
     amountValue: {
       color: palette.primaryStrong,
-      fontSize: 58,
-      lineHeight: 64,
+      fontSize: amountValueFontSize,
+      lineHeight: amountValueLineHeight,
       fontWeight: "900",
       textAlign: "center",
-      letterSpacing: -1.4,
+      letterSpacing: 0,
     },
     amountSuffix: {
       color: palette.textMuted,
@@ -1627,7 +1651,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       letterSpacing: 0.7,
     },
     amountMetaBlock: {
-      gap: spacing.sm,
+      gap: compactLayout ? spacing.xs : spacing.sm,
     },
     balanceLabel: {
       color: palette.textMuted,
@@ -1644,23 +1668,23 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       ...shadows.soft,
     },
     noteInput: {
-      minHeight: 50,
+      minHeight: denseLayout ? 38 : compactLayout ? 44 : 50,
       color: palette.text,
       fontSize: 15,
     },
     keypad: {
-      gap: spacing.sm,
+      gap: keypadGap,
     },
     keypadGap: {
-      minHeight: 252,
+      minHeight: denseLayout ? 176 : compactLayout ? 210 : 252,
     },
     keypadRow: {
       flexDirection: "row",
-      gap: spacing.sm,
+      gap: keypadGap,
     },
     keypadKey: {
       flex: 1,
-      minHeight: 56,
+      minHeight: keypadKeyHeight,
       borderRadius: radii.lg,
       backgroundColor: palette.surface,
       borderWidth: 1,
@@ -1678,11 +1702,11 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       fontWeight: "900",
     },
     sendDock: {
-      paddingTop: spacing.sm,
-      paddingBottom: spacing.lg,
+      paddingTop: denseLayout ? 4 : compactLayout ? spacing.xs : spacing.sm,
+      paddingBottom: denseLayout ? spacing.xs : compactLayout ? spacing.md : spacing.lg,
     },
     swipeTrack: {
-      minHeight: 64,
+      minHeight: swipeTrackHeight,
       borderRadius: radii.pill,
       backgroundColor: palette.primaryStrong,
       justifyContent: "center",
@@ -1709,7 +1733,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       left: 4,
       top: 4,
       bottom: 4,
-      width: 58,
+      width: swipeThumbWidth,
       borderRadius: radii.pill,
       backgroundColor: palette.surface,
       alignItems: "center",

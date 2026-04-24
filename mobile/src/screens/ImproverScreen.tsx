@@ -101,6 +101,7 @@ type WorkflowSelectorOption = {
 };
 
 const MAX_MOBILE_WORKFLOW_PHOTO_BYTES = 2 * 1024 * 1024;
+const IMPROVER_BACKGROUND_POLL_MS = 30000;
 const OPTIONAL_IMAGE_PICKER: any = (() => {
   try {
     // Loaded lazily at runtime so the panel still compiles even if the package has not been installed yet.
@@ -110,14 +111,75 @@ const OPTIONAL_IMAGE_PICKER: any = (() => {
   }
 })();
 
-function shortAddress(address?: string | null): string {
-  if (!address) {
-    return "Not set";
+type LoadOptions = {
+  silent?: boolean;
+};
+
+type ImproverScreenCache = {
+  userId: string | null;
+  section: ImproverSection;
+  workflowView: WorkflowView;
+  includePastWorkflows: boolean;
+  badgeSearch: string;
+  boardSearch: string;
+  myWorkflowsSearch: string;
+  unpaidSearch: string;
+  credentialSearch: string;
+  requestFirstName: string;
+  requestLastName: string;
+  requestEmailInput: string;
+  selectedVerifiedEmailId: string | null;
+  workflows: AppWorkflow[];
+  unpaidWorkflows: AppWorkflow[];
+  activeCredentials: AppCredentialType[];
+  credentialTypes: AppGlobalCredentialType[];
+  credentialRequests: AppCredentialRequest[];
+  absencePeriods: AppImproverAbsencePeriod[];
+  verifiedEmails: VerifiedEmail[];
+  requestDataLoaded: boolean;
+  workflowDataLoaded: boolean;
+  unpaidDataLoaded: boolean;
+  credentialDataLoaded: boolean;
+  absenceDataLoaded: boolean;
+};
+
+function createEmptyImproverScreenCache(userId: string | null): ImproverScreenCache {
+  return {
+    userId,
+    section: "workflows",
+    workflowView: "my-workflows",
+    includePastWorkflows: false,
+    badgeSearch: "",
+    boardSearch: "",
+    myWorkflowsSearch: "",
+    unpaidSearch: "",
+    credentialSearch: "",
+    requestFirstName: "",
+    requestLastName: "",
+    requestEmailInput: "",
+    selectedVerifiedEmailId: null,
+    workflows: [],
+    unpaidWorkflows: [],
+    activeCredentials: [],
+    credentialTypes: [],
+    credentialRequests: [],
+    absencePeriods: [],
+    verifiedEmails: [],
+    requestDataLoaded: false,
+    workflowDataLoaded: false,
+    unpaidDataLoaded: false,
+    credentialDataLoaded: false,
+    absenceDataLoaded: false,
+  };
+}
+
+let improverScreenCache = createEmptyImproverScreenCache(null);
+
+function getImproverScreenCache(userId: string | null): ImproverScreenCache {
+  if (improverScreenCache.userId !== userId) {
+    improverScreenCache = createEmptyImproverScreenCache(userId);
   }
-  if (address.length <= 16) {
-    return address;
-  }
-  return `${address.slice(0, 8)}...${address.slice(-6)}`;
+  return improverScreenCache;
 }
 
 function formatStatusLabel(value?: string | null): string {
@@ -333,41 +395,43 @@ export function ImproverScreen({
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const topInset = Math.max(Constants.statusBarHeight, Platform.OS === "ios" ? spacing.md : 0);
-  const [section, setSection] = useState<ImproverSection>("workflows");
-  const [workflowView, setWorkflowView] = useState<WorkflowView>("my-workflows");
+  const userId = user?.id ?? null;
+  const initialCache = getImproverScreenCache(userId);
+  const [section, setSection] = useState<ImproverSection>(initialCache.section);
+  const [workflowView, setWorkflowView] = useState<WorkflowView>(initialCache.workflowView);
+  const [includePastWorkflows, setIncludePastWorkflows] = useState(initialCache.includePastWorkflows);
   const [workflowSelectorVisible, setWorkflowSelectorVisible] = useState(false);
   const [workflowEditMode, setWorkflowEditMode] = useState(false);
   const [workflowEditAction, setWorkflowEditAction] = useState<WorkflowEditAction>("absence");
   const [selectedWorkflowKeys, setSelectedWorkflowKeys] = useState<string[]>([]);
   const [badgesVisible, setBadgesVisible] = useState(false);
-  const [badgeSearch, setBadgeSearch] = useState("");
-  const [boardSearch, setBoardSearch] = useState("");
-  const [myWorkflowsSearch, setMyWorkflowsSearch] = useState("");
-  const [unpaidSearch, setUnpaidSearch] = useState("");
-  const [credentialSearch, setCredentialSearch] = useState("");
-  const [requestFirstName, setRequestFirstName] = useState("");
-  const [requestLastName, setRequestLastName] = useState("");
-  const [requestEmailInput, setRequestEmailInput] = useState("");
-  const [selectedVerifiedEmailId, setSelectedVerifiedEmailId] = useState<string | null>(null);
+  const [badgeSearch, setBadgeSearch] = useState(initialCache.badgeSearch);
+  const [boardSearch, setBoardSearch] = useState(initialCache.boardSearch);
+  const [myWorkflowsSearch, setMyWorkflowsSearch] = useState(initialCache.myWorkflowsSearch);
+  const [unpaidSearch, setUnpaidSearch] = useState(initialCache.unpaidSearch);
+  const [credentialSearch, setCredentialSearch] = useState(initialCache.credentialSearch);
+  const [requestFirstName, setRequestFirstName] = useState(initialCache.requestFirstName);
+  const [requestLastName, setRequestLastName] = useState(initialCache.requestLastName);
+  const [requestEmailInput, setRequestEmailInput] = useState(initialCache.requestEmailInput);
+  const [selectedVerifiedEmailId, setSelectedVerifiedEmailId] = useState<string | null>(initialCache.selectedVerifiedEmailId);
   const [absenceFrom, setAbsenceFrom] = useState("");
   const [absenceUntil, setAbsenceUntil] = useState("");
-  const [rewardsWalletDraft, setRewardsWalletDraft] = useState(improver?.primaryRewardsAccount || "");
-  const [workflows, setWorkflows] = useState<AppWorkflow[]>([]);
-  const [unpaidWorkflows, setUnpaidWorkflows] = useState<AppWorkflow[]>([]);
-  const [activeCredentials, setActiveCredentials] = useState<AppCredentialType[]>([]);
-  const [credentialTypes, setCredentialTypes] = useState<AppGlobalCredentialType[]>([]);
-  const [credentialRequests, setCredentialRequests] = useState<AppCredentialRequest[]>([]);
-  const [absencePeriods, setAbsencePeriods] = useState<AppImproverAbsencePeriod[]>([]);
-  const [verifiedEmails, setVerifiedEmails] = useState<VerifiedEmail[]>([]);
-  const [requestDataLoaded, setRequestDataLoaded] = useState(false);
+  const [workflows, setWorkflows] = useState<AppWorkflow[]>(initialCache.workflows);
+  const [unpaidWorkflows, setUnpaidWorkflows] = useState<AppWorkflow[]>(initialCache.unpaidWorkflows);
+  const [activeCredentials, setActiveCredentials] = useState<AppCredentialType[]>(initialCache.activeCredentials);
+  const [credentialTypes, setCredentialTypes] = useState<AppGlobalCredentialType[]>(initialCache.credentialTypes);
+  const [credentialRequests, setCredentialRequests] = useState<AppCredentialRequest[]>(initialCache.credentialRequests);
+  const [absencePeriods, setAbsencePeriods] = useState<AppImproverAbsencePeriod[]>(initialCache.absencePeriods);
+  const [verifiedEmails, setVerifiedEmails] = useState<VerifiedEmail[]>(initialCache.verifiedEmails);
+  const [requestDataLoaded, setRequestDataLoaded] = useState(initialCache.requestDataLoaded);
   const [requestDataLoading, setRequestDataLoading] = useState(false);
-  const [workflowDataLoaded, setWorkflowDataLoaded] = useState(false);
+  const [workflowDataLoaded, setWorkflowDataLoaded] = useState(initialCache.workflowDataLoaded);
   const [workflowDataLoading, setWorkflowDataLoading] = useState(false);
-  const [unpaidDataLoaded, setUnpaidDataLoaded] = useState(false);
+  const [unpaidDataLoaded, setUnpaidDataLoaded] = useState(initialCache.unpaidDataLoaded);
   const [unpaidDataLoading, setUnpaidDataLoading] = useState(false);
-  const [credentialDataLoaded, setCredentialDataLoaded] = useState(false);
+  const [credentialDataLoaded, setCredentialDataLoaded] = useState(initialCache.credentialDataLoaded);
   const [credentialDataLoading, setCredentialDataLoading] = useState(false);
-  const [absenceDataLoaded, setAbsenceDataLoaded] = useState(false);
+  const [absenceDataLoaded, setAbsenceDataLoaded] = useState(initialCache.absenceDataLoaded);
   const [absenceDataLoading, setAbsenceDataLoading] = useState(false);
   const [selectedWorkflow, setSelectedWorkflow] = useState<AppWorkflow | null>(null);
   const [detailVisible, setDetailVisible] = useState(false);
@@ -392,6 +456,8 @@ export function ImproverScreen({
   const unpaidDataRequestRef = useRef<Promise<void> | null>(null);
   const credentialDataRequestRef = useRef<Promise<void> | null>(null);
   const absenceDataRequestRef = useRef<Promise<void> | null>(null);
+  const cacheUserIdRef = useRef(userId);
+  const skipCachePersistRef = useRef(false);
 
   const canUsePanel = Boolean(user?.isImprover || user?.isAdmin);
   const imagePickerAvailable = Boolean(OPTIONAL_IMAGE_PICKER?.launchImageLibraryAsync);
@@ -418,20 +484,127 @@ export function ImproverScreen({
   }, [requestFirstName, requestLastName, user?.name]);
 
   useEffect(() => {
-    setRewardsWalletDraft(improver?.primaryRewardsAccount || "");
-  }, [improver?.primaryRewardsAccount]);
+    if (cacheUserIdRef.current === userId) {
+      return;
+    }
+    cacheUserIdRef.current = userId;
+    const nextCache = getImproverScreenCache(userId);
+    skipCachePersistRef.current = true;
+    setSection(nextCache.section);
+    setWorkflowView(nextCache.workflowView);
+    setIncludePastWorkflows(nextCache.includePastWorkflows);
+    setBadgeSearch(nextCache.badgeSearch);
+    setBoardSearch(nextCache.boardSearch);
+    setMyWorkflowsSearch(nextCache.myWorkflowsSearch);
+    setUnpaidSearch(nextCache.unpaidSearch);
+    setCredentialSearch(nextCache.credentialSearch);
+    setRequestFirstName(nextCache.requestFirstName);
+    setRequestLastName(nextCache.requestLastName);
+    setRequestEmailInput(nextCache.requestEmailInput);
+    setSelectedVerifiedEmailId(nextCache.selectedVerifiedEmailId);
+    setWorkflows(nextCache.workflows);
+    setUnpaidWorkflows(nextCache.unpaidWorkflows);
+    setActiveCredentials(nextCache.activeCredentials);
+    setCredentialTypes(nextCache.credentialTypes);
+    setCredentialRequests(nextCache.credentialRequests);
+    setAbsencePeriods(nextCache.absencePeriods);
+    setVerifiedEmails(nextCache.verifiedEmails);
+    setRequestDataLoaded(nextCache.requestDataLoaded);
+    setWorkflowDataLoaded(nextCache.workflowDataLoaded);
+    setUnpaidDataLoaded(nextCache.unpaidDataLoaded);
+    setCredentialDataLoaded(nextCache.credentialDataLoaded);
+    setAbsenceDataLoaded(nextCache.absenceDataLoaded);
+    setRequestDataLoading(false);
+    setWorkflowDataLoading(false);
+    setUnpaidDataLoading(false);
+    setCredentialDataLoading(false);
+    setAbsenceDataLoading(false);
+    setWorkflowSelectorVisible(false);
+    setWorkflowEditMode(false);
+    setSelectedWorkflowKeys([]);
+    setBadgesVisible(false);
+    setBadgePreview(null);
+    setSelectedWorkflow(null);
+    setDetailVisible(false);
+    setError(null);
+    setNotice(null);
+    setActionKey("");
+  }, [userId]);
+
+  useEffect(() => {
+    if (skipCachePersistRef.current) {
+      skipCachePersistRef.current = false;
+      return;
+    }
+    improverScreenCache = {
+      userId,
+      section,
+      workflowView,
+      includePastWorkflows,
+      badgeSearch,
+      boardSearch,
+      myWorkflowsSearch,
+      unpaidSearch,
+      credentialSearch,
+      requestFirstName,
+      requestLastName,
+      requestEmailInput,
+      selectedVerifiedEmailId,
+      workflows,
+      unpaidWorkflows,
+      activeCredentials,
+      credentialTypes,
+      credentialRequests,
+      absencePeriods,
+      verifiedEmails,
+      requestDataLoaded,
+      workflowDataLoaded,
+      unpaidDataLoaded,
+      credentialDataLoaded,
+      absenceDataLoaded,
+    };
+  }, [
+    absenceDataLoaded,
+    absencePeriods,
+    activeCredentials,
+    badgeSearch,
+    boardSearch,
+    credentialDataLoaded,
+    credentialRequests,
+    credentialSearch,
+    credentialTypes,
+    includePastWorkflows,
+    myWorkflowsSearch,
+    requestDataLoaded,
+    requestEmailInput,
+    requestFirstName,
+    requestLastName,
+    section,
+    selectedVerifiedEmailId,
+    unpaidDataLoaded,
+    unpaidSearch,
+    unpaidWorkflows,
+    userId,
+    verifiedEmails,
+    workflowDataLoaded,
+    workflows,
+    workflowView,
+  ]);
 
   const loadRequestData = useCallback(
-    async (force = false) => {
+    async (force = false, options?: LoadOptions) => {
       if (!backendClient) {
         return;
       }
-      if (requestDataRequestRef.current && !force) {
+      const silent = options?.silent === true;
+      if (requestDataRequestRef.current && (!force || silent)) {
         return requestDataRequestRef.current;
       }
 
       const request = (async () => {
-        setRequestDataLoading(true);
+        if (!silent) {
+          setRequestDataLoading(true);
+        }
         try {
           const [emails, loadedCredentialTypes] = await Promise.all([
             backendClient.getVerifiedEmails(),
@@ -439,12 +612,18 @@ export function ImproverScreen({
           ]);
           setVerifiedEmails(emails);
           setCredentialTypes(loadedCredentialTypes);
-          setError(null);
+          if (!silent) {
+            setError(null);
+          }
         } catch (nextError) {
-          setError((nextError as Error)?.message || "Unable to load improver request details.");
+          if (!silent) {
+            setError((nextError as Error)?.message || "Unable to load improver request details.");
+          }
         } finally {
           setRequestDataLoaded(true);
-          setRequestDataLoading(false);
+          if (!silent) {
+            setRequestDataLoading(false);
+          }
           requestDataRequestRef.current = null;
         }
       })();
@@ -456,26 +635,35 @@ export function ImproverScreen({
   );
 
   const loadWorkflowData = useCallback(
-    async (force = false) => {
+    async (force = false, options?: LoadOptions) => {
       if (!backendClient) {
         return;
       }
-      if (workflowDataRequestRef.current && !force) {
+      const silent = options?.silent === true;
+      if (workflowDataRequestRef.current && (!force || silent)) {
         return workflowDataRequestRef.current;
       }
 
       const request = (async () => {
-        setWorkflowDataLoading(true);
+        if (!silent) {
+          setWorkflowDataLoading(true);
+        }
         try {
           const feed = await backendClient.getImproverWorkflows();
           setWorkflows(feed.workflows);
           setActiveCredentials(feed.activeCredentials);
-          setError((current) => (current === "Unable to load workflows." ? null : current));
+          if (!silent) {
+            setError((current) => (current === "Unable to load workflows." ? null : current));
+          }
         } catch (nextError) {
-          setError((nextError as Error)?.message || "Unable to load workflows.");
+          if (!silent) {
+            setError((nextError as Error)?.message || "Unable to load workflows.");
+          }
         } finally {
           setWorkflowDataLoaded(true);
-          setWorkflowDataLoading(false);
+          if (!silent) {
+            setWorkflowDataLoading(false);
+          }
           workflowDataRequestRef.current = null;
         }
       })();
@@ -487,25 +675,34 @@ export function ImproverScreen({
   );
 
   const loadAbsenceData = useCallback(
-    async (force = false) => {
+    async (force = false, options?: LoadOptions) => {
       if (!backendClient) {
         return;
       }
-      if (absenceDataRequestRef.current && !force) {
+      const silent = options?.silent === true;
+      if (absenceDataRequestRef.current && (!force || silent)) {
         return absenceDataRequestRef.current;
       }
 
       const request = (async () => {
-        setAbsenceDataLoading(true);
+        if (!silent) {
+          setAbsenceDataLoading(true);
+        }
         try {
           const nextAbsencePeriods = await backendClient.getImproverAbsencePeriods();
           setAbsencePeriods(nextAbsencePeriods);
-          setError((current) => (current === "Unable to load workflow absence." ? null : current));
+          if (!silent) {
+            setError((current) => (current === "Unable to load workflow absence." ? null : current));
+          }
         } catch (nextError) {
-          setError((nextError as Error)?.message || "Unable to load workflow absence.");
+          if (!silent) {
+            setError((nextError as Error)?.message || "Unable to load workflow absence.");
+          }
         } finally {
           setAbsenceDataLoaded(true);
-          setAbsenceDataLoading(false);
+          if (!silent) {
+            setAbsenceDataLoading(false);
+          }
           absenceDataRequestRef.current = null;
         }
       })();
@@ -517,25 +714,34 @@ export function ImproverScreen({
   );
 
   const loadUnpaidData = useCallback(
-    async (force = false) => {
+    async (force = false, options?: LoadOptions) => {
       if (!backendClient) {
         return;
       }
-      if (unpaidDataRequestRef.current && !force) {
+      const silent = options?.silent === true;
+      if (unpaidDataRequestRef.current && (!force || silent)) {
         return unpaidDataRequestRef.current;
       }
 
       const request = (async () => {
-        setUnpaidDataLoading(true);
+        if (!silent) {
+          setUnpaidDataLoading(true);
+        }
         try {
           const nextUnpaid = await backendClient.getImproverUnpaidWorkflows();
           setUnpaidWorkflows(nextUnpaid);
-          setError((current) => (current === "Unable to load unpaid workflows." ? null : current));
+          if (!silent) {
+            setError((current) => (current === "Unable to load unpaid workflows." ? null : current));
+          }
         } catch (nextError) {
-          setError((nextError as Error)?.message || "Unable to load unpaid workflows.");
+          if (!silent) {
+            setError((nextError as Error)?.message || "Unable to load unpaid workflows.");
+          }
         } finally {
           setUnpaidDataLoaded(true);
-          setUnpaidDataLoading(false);
+          if (!silent) {
+            setUnpaidDataLoading(false);
+          }
           unpaidDataRequestRef.current = null;
         }
       })();
@@ -547,16 +753,19 @@ export function ImproverScreen({
   );
 
   const loadCredentialData = useCallback(
-    async (force = false) => {
+    async (force = false, options?: LoadOptions) => {
       if (!backendClient) {
         return;
       }
-      if (credentialDataRequestRef.current && !force) {
+      const silent = options?.silent === true;
+      if (credentialDataRequestRef.current && (!force || silent)) {
         return credentialDataRequestRef.current;
       }
 
       const request = (async () => {
-        setCredentialDataLoading(true);
+        if (!silent) {
+          setCredentialDataLoading(true);
+        }
         try {
           const shouldLoadFeed = !workflowDataLoaded && activeCredentials.length === 0;
           const [loadedCredentialTypes, loadedCredentialRequests, workflowFeed] = await Promise.all([
@@ -571,12 +780,18 @@ export function ImproverScreen({
             setActiveCredentials(workflowFeed.activeCredentials);
             setWorkflowDataLoaded(true);
           }
-          setError((current) => (current === "Unable to load credentials." ? null : current));
+          if (!silent) {
+            setError((current) => (current === "Unable to load credentials." ? null : current));
+          }
         } catch (nextError) {
-          setError((nextError as Error)?.message || "Unable to load credentials.");
+          if (!silent) {
+            setError((nextError as Error)?.message || "Unable to load credentials.");
+          }
         } finally {
           setCredentialDataLoaded(true);
-          setCredentialDataLoading(false);
+          if (!silent) {
+            setCredentialDataLoading(false);
+          }
           credentialDataRequestRef.current = null;
         }
       })();
@@ -592,11 +807,11 @@ export function ImproverScreen({
       return;
     }
     if (!canUsePanel) {
-      void loadRequestData();
+      void loadRequestData(requestDataLoaded, { silent: requestDataLoaded });
       return;
     }
-    void loadWorkflowData();
-  }, [backendClient, canUsePanel, loadRequestData, loadWorkflowData]);
+    void loadWorkflowData(workflowDataLoaded, { silent: workflowDataLoaded });
+  }, [backendClient, canUsePanel, loadRequestData, loadWorkflowData, userId]);
 
   useEffect(() => {
     if (!canUsePanel) {
@@ -606,13 +821,13 @@ export function ImproverScreen({
       section === "workflows" &&
       (workflowView === "my-workflows" || workflowView === "workflow-board" || workflowEditMode || detailVisible)
     ) {
-      void loadAbsenceData();
+      void loadAbsenceData(absenceDataLoaded, { silent: absenceDataLoaded });
     }
     if (section === "credentials" || badgesVisible) {
-      void loadCredentialData();
+      void loadCredentialData(credentialDataLoaded, { silent: credentialDataLoaded });
     }
     if (workflowSelectorVisible || (section === "workflows" && workflowView === "unpaid-workflows")) {
-      void loadUnpaidData();
+      void loadUnpaidData(unpaidDataLoaded, { silent: unpaidDataLoaded });
     }
   }, [
     badgesVisible,
@@ -628,11 +843,62 @@ export function ImproverScreen({
   ]);
 
   useEffect(() => {
+    if (!backendClient || !canUsePanel) {
+      return;
+    }
+    if (!workflowDataLoaded && !absenceDataLoaded && !credentialDataLoaded && !unpaidDataLoaded) {
+      return;
+    }
+
+    const poll = () => {
+      if (workflowDataLoaded) {
+        void loadWorkflowData(true, { silent: true });
+      }
+      if (absenceDataLoaded) {
+        void loadAbsenceData(true, { silent: true });
+      }
+      if (credentialDataLoaded) {
+        void loadCredentialData(true, { silent: true });
+      }
+      if (unpaidDataLoaded) {
+        void loadUnpaidData(true, { silent: true });
+      }
+    };
+
+    const intervalId = setInterval(poll, IMPROVER_BACKGROUND_POLL_MS);
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [
+    absenceDataLoaded,
+    backendClient,
+    canUsePanel,
+    credentialDataLoaded,
+    loadAbsenceData,
+    loadCredentialData,
+    loadUnpaidData,
+    loadWorkflowData,
+    unpaidDataLoaded,
+    workflowDataLoaded,
+  ]);
+
+  useEffect(() => {
     if (workflowView !== "my-workflows" && workflowEditMode) {
       setWorkflowEditMode(false);
       setSelectedWorkflowKeys([]);
     }
   }, [workflowEditMode, workflowView]);
+
+  const closeBadges = useCallback(() => {
+    setBadgesVisible(false);
+    setBadgePreview(null);
+  }, []);
+
+  useEffect(() => {
+    if (!badgesVisible) {
+      setBadgePreview(null);
+    }
+  }, [badgesVisible]);
 
   const hasClaimedRoleInWorkflow = useCallback(
     (workflow: AppWorkflow) => workflow.steps.some((step) => step.assignedImproverId === user?.id),
@@ -785,6 +1051,7 @@ export function ImproverScreen({
     const search = myWorkflowsSearch.trim().toLowerCase();
     return myWorkflowGroups
       .filter((group) =>
+        includePastWorkflows ||
         group.recurrence !== "one_time" ||
         group.workflows.some((workflow) => workflow.status !== "completed" && workflow.status !== "paid_out"),
       )
@@ -797,7 +1064,7 @@ export function ImproverScreen({
           group.primaryStepTitle.toLowerCase().includes(search)
         );
       });
-  }, [myWorkflowGroups, myWorkflowsSearch]);
+  }, [includePastWorkflows, myWorkflowGroups, myWorkflowsSearch]);
 
   const workflowBoardWorkflows = useMemo(
     () =>
@@ -1577,30 +1844,6 @@ export function ImproverScreen({
     [backendClient, loadRequestData],
   );
 
-  const updateRewardsWallet = useCallback(async () => {
-    if (!backendClient) {
-      return;
-    }
-    if (!rewardsWalletDraft.trim()) {
-      setError("Enter a rewards wallet address.");
-      setNotice(null);
-      return;
-    }
-    setActionKey("update-rewards-wallet");
-    try {
-      await backendClient.updateImproverPrimaryRewardsAccount(rewardsWalletDraft.trim());
-      await onRefreshProfile();
-      await loadWorkflowData(true);
-      setNotice("Improver rewards wallet updated.");
-      setError(null);
-    } catch (nextError) {
-      setError((nextError as Error)?.message || "Unable to update the rewards wallet.");
-      setNotice(null);
-    } finally {
-      setActionKey("");
-    }
-  }, [backendClient, loadWorkflowData, onRefreshProfile, rewardsWalletDraft]);
-
   const revokeAbsence = useCallback(
     async (absenceId: string) => {
       if (!backendClient) {
@@ -2186,20 +2429,37 @@ export function ImproverScreen({
         <View style={styles.card}>
           <View style={styles.sectionHeaderRow}>
             <Pressable style={styles.selectorButton} onPress={() => setWorkflowSelectorVisible(true)}>
-              <Text style={styles.selectorButtonText}>{currentWorkflowOptionsLabel}</Text>
+              <Text style={styles.selectorButtonText} numberOfLines={1}>{currentWorkflowOptionsLabel}</Text>
               <Ionicons name="chevron-down" size={16} color={palette.primaryStrong} />
             </Pressable>
-            {workflowView === "my-workflows" && myWorkflowGroups.some((group) => group.recurrence !== "one_time") ? (
-              <Pressable
-                style={styles.compactActionButton}
-                onPress={() => {
-                  setWorkflowEditMode((current) => !current);
-                  setSelectedWorkflowKeys([]);
-                }}
-              >
-                <Text style={styles.compactActionButtonText}>{workflowEditMode ? "Done" : "Edit"}</Text>
-              </Pressable>
-            ) : null}
+            <View style={styles.headerActions}>
+              {workflowView === "my-workflows" ? (
+                <Pressable
+                  style={[styles.checkboxPill, includePastWorkflows ? styles.checkboxPillActive : undefined]}
+                  onPress={() => setIncludePastWorkflows((current) => !current)}
+                >
+                  <Ionicons
+                    name={includePastWorkflows ? "checkbox" : "square-outline"}
+                    size={16}
+                    color={includePastWorkflows ? palette.white : palette.primaryStrong}
+                  />
+                  <Text style={[styles.checkboxPillText, includePastWorkflows ? styles.checkboxPillTextActive : undefined]}>
+                    Past
+                  </Text>
+                </Pressable>
+              ) : null}
+              {workflowView === "my-workflows" && myWorkflowGroups.some((group) => group.recurrence !== "one_time") ? (
+                <Pressable
+                  style={styles.compactActionButton}
+                  onPress={() => {
+                    setWorkflowEditMode((current) => !current);
+                    setSelectedWorkflowKeys([]);
+                  }}
+                >
+                  <Text style={styles.compactActionButtonText}>{workflowEditMode ? "Done" : "Edit"}</Text>
+                </Pressable>
+              ) : null}
+            </View>
           </View>
 
           <View style={styles.searchWrap}>
@@ -2685,34 +2945,6 @@ export function ImproverScreen({
       >
         {renderBannerStack()}
 
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Improver profile</Text>
-          <Text style={styles.meta}>Status: {formatStatusLabel(improver?.status || "approved")}</Text>
-          {improver?.primaryRewardsAccount ? (
-            <Text style={styles.meta}>Rewards wallet: {shortAddress(improver.primaryRewardsAccount)}</Text>
-          ) : null}
-          <TextInput
-            style={styles.input}
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder="Improver rewards wallet"
-            placeholderTextColor={palette.textMuted}
-            value={rewardsWalletDraft}
-            onChangeText={setRewardsWalletDraft}
-          />
-          <Pressable
-            style={[styles.primaryButton, actionKey === "update-rewards-wallet" ? styles.buttonDisabled : undefined]}
-            disabled={actionKey === "update-rewards-wallet"}
-            onPress={() => {
-              void updateRewardsWallet();
-            }}
-          >
-            <Text style={styles.primaryButtonText}>
-              {actionKey === "update-rewards-wallet" ? "Saving..." : "Save rewards wallet"}
-            </Text>
-          </Pressable>
-        </View>
-
         <View style={styles.segmentWrap}>
           {([
             ["workflows", "Workflows"],
@@ -3120,7 +3352,8 @@ export function ImproverScreen({
         visible={badgesVisible}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => setBadgesVisible(false)}
+        onRequestClose={closeBadges}
+        onDismiss={closeBadges}
       >
         <View style={styles.modalScreen}>
           <View style={[styles.modalHeader, { paddingTop: topInset + spacing.sm }]}>
@@ -3130,7 +3363,7 @@ export function ImproverScreen({
                 {filteredBadgeItems.length} result{filteredBadgeItems.length === 1 ? "" : "s"}
               </Text>
             </View>
-            <Pressable style={styles.iconButton} onPress={() => setBadgesVisible(false)}>
+            <Pressable style={styles.iconButton} onPress={closeBadges}>
               <Ionicons name="arrow-back" size={20} color={palette.primaryStrong} />
             </Pressable>
           </View>
@@ -3226,7 +3459,7 @@ function createStyles(
       color: palette.text,
       fontSize: 28,
       fontWeight: "900",
-      letterSpacing: -0.4,
+      letterSpacing: 0,
     },
     subtitle: {
       color: palette.textMuted,
@@ -3324,7 +3557,6 @@ function createStyles(
     },
     segmentWrap: {
       flexDirection: "row",
-      flexWrap: "wrap",
       gap: spacing.sm,
       backgroundColor: palette.surfaceStrong,
       borderRadius: radii.lg,
@@ -3333,7 +3565,8 @@ function createStyles(
       borderColor: palette.border,
     },
     segmentButton: {
-      minWidth: 88,
+      flex: 1,
+      minWidth: 0,
       borderRadius: radii.md,
       paddingHorizontal: 12,
       paddingVertical: 10,
@@ -3351,7 +3584,15 @@ function createStyles(
     segmentTextActive: {
       color: palette.white,
     },
+    headerActions: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+      flexShrink: 0,
+    },
     selectorButton: {
+      flex: 1,
+      minWidth: 0,
       flexDirection: "row",
       alignItems: "center",
       gap: spacing.xs,
@@ -3361,9 +3602,34 @@ function createStyles(
       paddingVertical: 10,
     },
     selectorButtonText: {
+      flexShrink: 1,
       color: palette.primaryStrong,
       fontWeight: "900",
       fontSize: 14,
+    },
+    checkboxPill: {
+      minHeight: 38,
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surfaceStrong,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+      paddingHorizontal: 12,
+    },
+    checkboxPillActive: {
+      backgroundColor: palette.primary,
+      borderColor: palette.primary,
+    },
+    checkboxPillText: {
+      color: palette.primaryStrong,
+      fontWeight: "900",
+      fontSize: 12,
+    },
+    checkboxPillTextActive: {
+      color: palette.white,
     },
     searchWrap: {
       flexDirection: "row",
@@ -3744,7 +4010,7 @@ function createStyles(
       color: palette.text,
       fontSize: 24,
       fontWeight: "900",
-      letterSpacing: -0.3,
+      letterSpacing: 0,
     },
     modalSubtitle: {
       color: palette.textMuted,

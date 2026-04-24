@@ -1221,6 +1221,7 @@ function WalletAppShellContent({
       return;
     }
 
+    const returnTab = walletPane === "send" ? sendReturnTab : null;
     walletPaneAnimatingRef.current = true;
     walletPaneTranslateX.stopAnimation((currentValue) => {
       walletPaneTranslateX.setValue(currentValue);
@@ -1228,17 +1229,15 @@ function WalletAppShellContent({
         toValue: walletPaneSlideDistance,
         duration: 220,
         useNativeDriver: true,
-      }).start(({ finished }) => {
-        if (finished) {
-          setSendReturnTab(null);
-          setWalletPane("home");
-          setTab("wallet");
-          walletPaneTranslateX.setValue(0);
-        }
+      }).start(() => {
+        setSendReturnTab(null);
+        setWalletPane("home");
+        setTab(returnTab ?? "wallet");
+        walletPaneTranslateX.setValue(0);
         walletPaneAnimatingRef.current = false;
       });
     });
-  }, [walletPane, walletPaneSlideDistance, walletPaneTranslateX]);
+  }, [sendReturnTab, walletPane, walletPaneSlideDistance, walletPaneTranslateX]);
 
   const walletPanePanResponder = useMemo(
     () =>
@@ -1252,27 +1251,11 @@ function WalletAppShellContent({
         onPanResponderMove: (_, gesture) => {
           walletPaneTranslateX.setValue(Math.max(0, Math.min(gesture.dx, walletPaneSlideDistance)));
         },
-        onPanResponderRelease: (_, gesture) => {
-          if (gesture.dx > walletPaneSlideDistance * 0.22 || gesture.vx > 1.05) {
-            closeWalletPaneToWallet();
-            return;
-          }
-          Animated.spring(walletPaneTranslateX, {
-            toValue: 0,
-            useNativeDriver: true,
-            damping: 22,
-            stiffness: 220,
-            mass: 0.9,
-          }).start();
+        onPanResponderRelease: () => {
+          closeWalletPaneToWallet();
         },
         onPanResponderTerminate: () => {
-          Animated.spring(walletPaneTranslateX, {
-            toValue: 0,
-            useNativeDriver: true,
-            damping: 22,
-            stiffness: 220,
-            mass: 0.9,
-          }).start();
+          closeWalletPaneToWallet();
         },
       }),
     [closeWalletPaneToWallet, walletOverlayPane, walletPaneSlideDistance, walletPaneTranslateX],
@@ -2477,6 +2460,7 @@ function WalletAppShellContent({
   const showWalletPaneBack = tab === "wallet" && walletPane !== "home";
   const showBlockingWalletState = runtime.loading && !runtime.service;
   const showStandardChrome = !(tab === "wallet" && walletPane === "send");
+  const RootContainer = showStandardChrome ? SafeAreaView : View;
   const walletHomeContent = (
     <WalletHomeScreen
       balance={smartBalance === "..." ? smartBalance : formatDisplayBalance(smartBalance)}
@@ -2566,7 +2550,7 @@ function WalletAppShellContent({
     );
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <RootContainer style={[styles.safe, !showStandardChrome ? styles.safeFullscreen : undefined]}>
       <StatusBar style={isDark ? "light" : "dark"} />
       <View style={styles.topBackdrop}>
         <View style={styles.topOrbLarge} />
@@ -2626,7 +2610,7 @@ function WalletAppShellContent({
         </View>
       ) : null}
 
-      <View style={styles.contentShell}>
+      <View style={[styles.contentShell, !showStandardChrome ? styles.contentShellFullscreen : undefined]}>
         <View style={styles.content}>
           {showBlockingWalletState ? (
             <View style={styles.centerState}>
@@ -3061,7 +3045,7 @@ function WalletAppShellContent({
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </RootContainer>
   );
 }
 
@@ -4736,6 +4720,9 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     backgroundColor: palette.background,
     paddingBottom: Platform.OS === "android" ? spacing.sm : 0,
   },
+  safeFullscreen: {
+    paddingBottom: 0,
+  },
   topBackdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: palette.background,
@@ -4782,7 +4769,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     color: palette.primaryStrong,
     fontSize: 30,
     fontWeight: "900",
-    letterSpacing: -0.5,
+    letterSpacing: 0,
   },
   topMeta: {
     color: palette.textMuted,
@@ -4811,6 +4798,10 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     borderTopLeftRadius: radii.xl,
     borderTopRightRadius: radii.xl,
     overflow: "hidden",
+  },
+  contentShellFullscreen: {
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
   },
   content: {
     flex: 1,
@@ -4873,8 +4864,8 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     position: "relative",
     paddingHorizontal: spacing.lg,
     paddingTop: Platform.OS === "android" ? spacing.md : spacing.sm,
-    paddingBottom: Platform.OS === "android" ? spacing.md : spacing.sm,
-    backgroundColor: isDark ? "rgba(16,22,27,0.32)" : "rgba(243,239,234,0.22)",
+    paddingBottom: Platform.OS === "android" ? spacing.sm : 6,
+    backgroundColor: isDark ? "rgba(16,22,27,0.28)" : "rgba(243,239,234,0.20)",
     overflow: "hidden",
   },
   bottomDockShellBackdrop: {
@@ -4905,15 +4896,15 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     paddingHorizontal: 8,
     paddingBottom: 8,
     borderRadius: radii.lg,
-    backgroundColor: isDark ? "rgba(23,33,41,0.76)" : "rgba(255,255,255,0.68)",
+    backgroundColor: palette.surface,
     borderWidth: 1,
-    borderColor: isDark ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.78)",
+    borderColor: palette.border,
     overflow: "hidden",
     ...shadows.card,
   },
   bottomDockGlassLayer: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: isDark ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.12)",
+    backgroundColor: "transparent",
   },
   bottomDockGlassSheen: {
     position: "absolute",
@@ -4923,7 +4914,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     height: 24,
     borderTopLeftRadius: radii.lg,
     borderTopRightRadius: radii.lg,
-    backgroundColor: isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.22)",
+    backgroundColor: "transparent",
   },
   bottomTab: {
     flex: 1,

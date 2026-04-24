@@ -1,13 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Dimensions,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from "react-native";
+import Constants from "expo-constants";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import QRCode from "react-native-qrcode-svg";
@@ -55,10 +57,17 @@ function shortLink(rawValue: string): string {
 
 export function ReceiveScreen({ accountAddress, onRedeemCodeScanned }: Props) {
   const { palette, shadows } = useAppTheme();
-  const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
-  const windowFrame = Dimensions.get("window");
-  const topInset = Math.max((windowFrame.height - Dimensions.get("screen").height) * -1, 0);
-  const qrSize = Math.min(Math.max(Math.min(windowFrame.width - 136, windowFrame.height * 0.28), 176), 216);
+  const windowFrame = useWindowDimensions();
+  const compactLayout = windowFrame.height < 740;
+  const styles = useMemo(() => createStyles(palette, shadows, compactLayout), [compactLayout, palette, shadows]);
+  const topInset = Math.max(Constants.statusBarHeight, Platform.OS === "ios" ? spacing.md : 0);
+  const qrSize = Math.min(
+    Math.max(
+      Math.min(windowFrame.width - (compactLayout ? 116 : 136), windowFrame.height * (compactLayout ? 0.24 : 0.28)),
+      compactLayout ? 156 : 176,
+    ),
+    compactLayout ? 190 : 216,
+  );
 
   const [mode, setMode] = useState<ReceiveMode>("link");
   const [copied, setCopied] = useState(false);
@@ -239,18 +248,23 @@ export function ReceiveScreen({ accountAddress, onRedeemCodeScanned }: Props) {
   );
 }
 
-function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) {
+function createStyles(
+  palette: Palette,
+  shadows: ReturnType<typeof getShadows>,
+  compactLayout = false,
+) {
   return StyleSheet.create({
     container: {
       flex: 1,
       paddingHorizontal: spacing.lg,
-      paddingTop: spacing.md,
-      paddingBottom: 112,
-      gap: spacing.md,
+      paddingTop: compactLayout ? spacing.sm : spacing.md,
+      paddingBottom: compactLayout ? spacing.sm : spacing.lg,
+      gap: compactLayout ? spacing.sm : spacing.md,
     },
     content: {
       flex: 1,
-      gap: spacing.md,
+      minHeight: 0,
+      gap: compactLayout ? spacing.sm : spacing.md,
     },
     modeToggle: {
       flexDirection: "row",
@@ -299,13 +313,14 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     qrCard: {
       flex: 1,
+      minHeight: 0,
       backgroundColor: palette.surface,
       borderRadius: radii.lg,
       borderWidth: 1,
       borderColor: palette.border,
-      padding: spacing.md,
-      gap: spacing.sm,
-      justifyContent: "center",
+      padding: compactLayout ? spacing.sm : spacing.md,
+      gap: compactLayout ? spacing.xs : spacing.sm,
+      justifyContent: "space-between",
       ...shadows.soft,
     },
     qrHeader: {
@@ -337,9 +352,10 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     qrFrame: {
       alignSelf: "center",
+      maxWidth: "100%",
       backgroundColor: palette.white,
       borderRadius: radii.lg,
-      padding: 18,
+      padding: compactLayout ? 12 : 16,
       borderWidth: 1,
       borderColor: palette.border,
     },
@@ -350,10 +366,11 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       textAlign: "center",
     },
     redeemButton: {
-      minHeight: 52,
+      minHeight: compactLayout ? 48 : 52,
       borderRadius: radii.lg,
       paddingHorizontal: spacing.lg,
-      backgroundColor: palette.primaryStrong,
+      backgroundColor: palette.primary,
+      flexShrink: 0,
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
