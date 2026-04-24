@@ -2207,6 +2207,12 @@ function WalletAppShellContent({
     setTab(returnTab ?? "wallet");
   };
 
+  const completeSendFlow = () => {
+    setSendReturnTab(null);
+    setWalletPane("home");
+    setTab("wallet");
+  };
+
   const handleRenameWallet = async (wallet: AppWallet, nextName: string) => {
     if (!backendClient) {
       throw new Error("Backend not configured.");
@@ -2331,7 +2337,6 @@ function WalletAppShellContent({
       void refreshActivityTransactionsFromBackend(activeAddress, { silent: true });
     }
     void loadAppProfile();
-    showToast(result.txHash ? "Payment confirmed." : "Payment submitted.", "success");
     return result;
   };
 
@@ -2368,6 +2373,7 @@ function WalletAppShellContent({
           : "Settings";
   const showWalletPaneBack = tab === "wallet" && walletPane !== "home";
   const showBlockingWalletState = runtime.loading && !runtime.service;
+  const showStandardChrome = !(tab === "wallet" && walletPane === "send");
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -2377,52 +2383,54 @@ function WalletAppShellContent({
         <View style={styles.topOrbSmall} />
       </View>
 
-      <View style={styles.topBar}>
-        <View style={styles.topTitleWrap}>
-          <Text style={styles.brandKicker}>SFLUV Wallet</Text>
-          <Text style={styles.brand}>{activeTitle}</Text>
-          <Text style={styles.topMeta}>
-            {tab === "settings"
-              ? "Preferences and account details"
-              : tab === "contacts"
-                ? "People and wallets you trust"
-                : tab === "activity"
-                  ? "Recent wallet transfers and rewards"
-                  : tab === "improver"
-                    ? "Claims, payouts, badges, and credentials"
-                    : selectedWalletLabel
-                      ? `${selectedWalletLabel} selected`
-                      : "Fast SFLUV payments"}
-          </Text>
-        </View>
-        <View style={styles.topActions}>
-          {showWalletPaneBack ? (
-            <Pressable
-              style={styles.iconButton}
-              onPress={() => {
-                if (walletPane === "send" && sendReturnTab) {
+      {showStandardChrome ? (
+        <View style={styles.topBar}>
+          <View style={styles.topTitleWrap}>
+            <Text style={styles.brandKicker}>SFLUV Wallet</Text>
+            <Text style={styles.brand}>{activeTitle}</Text>
+            <Text style={styles.topMeta}>
+              {tab === "settings"
+                ? "Preferences and account details"
+                : tab === "contacts"
+                  ? "People and wallets you trust"
+                  : tab === "activity"
+                    ? "Recent wallet transfers and rewards"
+                    : tab === "improver"
+                      ? "Claims, payouts, badges, and credentials"
+                      : selectedWalletLabel
+                        ? `${selectedWalletLabel} selected`
+                        : "Fast SFLUV payments"}
+            </Text>
+          </View>
+          <View style={styles.topActions}>
+            {showWalletPaneBack ? (
+              <Pressable
+                style={styles.iconButton}
+                onPress={() => {
+                  if (walletPane === "send" && sendReturnTab) {
+                    setSendReturnTab(null);
+                    setWalletPane("home");
+                    setTab(sendReturnTab);
+                    return;
+                  }
                   setSendReturnTab(null);
                   setWalletPane("home");
-                  setTab(sendReturnTab);
-                  return;
-                }
-                setSendReturnTab(null);
-                setWalletPane("home");
+                }}
+              >
+                <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
+              </Pressable>
+            ) : null}
+            <Pressable
+              style={[styles.iconButton, tab === "settings" ? styles.iconButtonActive : undefined]}
+              onPress={() => {
+                setTab("settings");
               }}
             >
-              <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
+              <Ionicons name={tab === "settings" ? "settings" : "settings-outline"} size={18} color={palette.primaryStrong} />
             </Pressable>
-          ) : null}
-          <Pressable
-            style={[styles.iconButton, tab === "settings" ? styles.iconButtonActive : undefined]}
-            onPress={() => {
-              setTab("settings");
-            }}
-          >
-            <Ionicons name={tab === "settings" ? "settings" : "settings-outline"} size={18} color={palette.primaryStrong} />
-          </Pressable>
+          </View>
         </View>
-      </View>
+      ) : null}
 
       <View style={styles.contentShell}>
         <View style={styles.content}>
@@ -2442,16 +2450,14 @@ function WalletAppShellContent({
               <SendScreen
                 contacts={contacts}
                 merchants={locations}
+                availableBalance={smartBalance}
                 backendClient={backendClient}
                 hapticsEnabled={preferences.hapticsEnabled}
                 onPrepareSend={handleSend}
-                onCompleteFlow={finishSendFlow}
+                onCompleteFlow={completeSendFlow}
+                onExitFlow={finishSendFlow}
                 draft={sendDraft}
                 onDraftApplied={() => setSendDraft(null)}
-                onOpenMerchantList={() => {
-                  setMerchantMapViewMode("list");
-                  setTab("map");
-                }}
                 onOpenUniversalLink={(link) => {
                   if (link.type === "redeem") {
                     openRedeemFlowForCode(link.code);
@@ -2660,74 +2666,76 @@ function WalletAppShellContent({
           )}
         </View>
 
-        <View style={styles.bottomDock}>
-          <BottomTab
-            label="Wallet"
-            icon={tab === "wallet" ? "wallet" : "wallet-outline"}
-            active={tab === "wallet"}
-            onPress={() => {
-              setTab("wallet");
-              setWalletPane("home");
-            }}
-          />
-          {hasImproverTab ? (
-            <>
-              <BottomTab
-                label="Improver"
-                icon={tab === "improver" ? "construct" : "construct-outline"}
-                active={tab === "improver"}
-                onPress={() => {
-                  setTab("improver");
-                }}
-              />
-              <BottomTab
-                label="Map"
-                icon={tab === "map" ? "map" : "map-outline"}
-                active={tab === "map"}
-                onPress={() => {
-                  setMerchantMapViewMode("map");
-                  setTab("map");
-                }}
-              />
-              <BottomTab
-                label="More"
-                icon={moreTabActive ? "ellipsis-horizontal-circle" : "ellipsis-horizontal-circle-outline"}
-                active={moreTabActive}
-                onPress={() => {
-                  setShowMoreMenu(true);
-                }}
-              />
-            </>
-          ) : (
-            <>
-              <BottomTab
-                label="Activity"
-                icon={tab === "activity" ? "pulse" : "pulse-outline"}
-                active={tab === "activity"}
-                onPress={() => {
-                  setTab("activity");
-                }}
-              />
-              <BottomTab
-                label="Map"
-                icon={tab === "map" ? "map" : "map-outline"}
-                active={tab === "map"}
-                onPress={() => {
-                  setMerchantMapViewMode("map");
-                  setTab("map");
-                }}
-              />
-              <BottomTab
-                label="Contacts"
-                icon={tab === "contacts" ? "people" : "people-outline"}
-                active={tab === "contacts"}
-                onPress={() => {
-                  setTab("contacts");
-                }}
-              />
-            </>
-          )}
-        </View>
+        {showStandardChrome ? (
+          <View style={styles.bottomDock}>
+            <BottomTab
+              label="Wallet"
+              icon={tab === "wallet" ? "wallet" : "wallet-outline"}
+              active={tab === "wallet"}
+              onPress={() => {
+                setTab("wallet");
+                setWalletPane("home");
+              }}
+            />
+            {hasImproverTab ? (
+              <>
+                <BottomTab
+                  label="Improver"
+                  icon={tab === "improver" ? "construct" : "construct-outline"}
+                  active={tab === "improver"}
+                  onPress={() => {
+                    setTab("improver");
+                  }}
+                />
+                <BottomTab
+                  label="Map"
+                  icon={tab === "map" ? "map" : "map-outline"}
+                  active={tab === "map"}
+                  onPress={() => {
+                    setMerchantMapViewMode("map");
+                    setTab("map");
+                  }}
+                />
+                <BottomTab
+                  label="More"
+                  icon={moreTabActive ? "ellipsis-horizontal-circle" : "ellipsis-horizontal-circle-outline"}
+                  active={moreTabActive}
+                  onPress={() => {
+                    setShowMoreMenu(true);
+                  }}
+                />
+              </>
+            ) : (
+              <>
+                <BottomTab
+                  label="Activity"
+                  icon={tab === "activity" ? "pulse" : "pulse-outline"}
+                  active={tab === "activity"}
+                  onPress={() => {
+                    setTab("activity");
+                  }}
+                />
+                <BottomTab
+                  label="Map"
+                  icon={tab === "map" ? "map" : "map-outline"}
+                  active={tab === "map"}
+                  onPress={() => {
+                    setMerchantMapViewMode("map");
+                    setTab("map");
+                  }}
+                />
+                <BottomTab
+                  label="Contacts"
+                  icon={tab === "contacts" ? "people" : "people-outline"}
+                  active={tab === "contacts"}
+                  onPress={() => {
+                    setTab("contacts");
+                  }}
+                />
+              </>
+            )}
+          </View>
+        ) : null}
 
         {toast ? (
           <View
