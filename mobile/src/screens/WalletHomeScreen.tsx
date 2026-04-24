@@ -1,10 +1,16 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { TransactionDetailsModal } from "../components/TransactionDetailsModal";
 import { AppContact, AppLocation, AppTransaction } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
-
-const FAUCET_ADDRESS = "0x21df0dfce7420c2dc4c92ec335e9f9ad447e864a";
+import {
+  buildAddressNameMaps,
+  buildTransactionDetailPayload,
+  FAUCET_ADDRESS,
+  shortAddress,
+  TransactionDetailPayload,
+} from "../utils/transactions";
 
 type Props = {
   balance: string;
@@ -26,12 +32,6 @@ type Props = {
   showWalletChooser?: boolean;
 };
 
-function shortAddress(address: string): string {
-  if (!address) return "";
-  if (address.length <= 16) return address;
-  return `${address.slice(0, 8)}...${address.slice(-6)}`;
-}
-
 function formatTxTitle(tx: AppTransaction): string {
   if (tx.direction !== "send" && tx.from.toLowerCase() === FAUCET_ADDRESS) {
     return "Received Reward";
@@ -44,30 +44,6 @@ function formatTxDate(timestamp: number): string {
     month: "short",
     day: "numeric",
   });
-}
-
-function resolveAddressLabel(
-  address: string,
-  activeAddress: string,
-  contactNameByAddress: Record<string, string>,
-  merchantNameByAddress: Record<string, string>,
-): string {
-  const normalizedAddress = address.toLowerCase();
-  if (activeAddress && normalizedAddress === activeAddress.toLowerCase()) {
-    return "You";
-  }
-  if (normalizedAddress === FAUCET_ADDRESS) {
-    return "SFLUV Faucet";
-  }
-  const contactName = contactNameByAddress[normalizedAddress];
-  if (contactName) {
-    return contactName;
-  }
-  const merchantName = merchantNameByAddress[normalizedAddress];
-  if (merchantName) {
-    return merchantName;
-  }
-  return shortAddress(address);
 }
 
 export function WalletHomeScreen({
@@ -91,160 +67,159 @@ export function WalletHomeScreen({
 }: Props) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
+  const [selectedTransaction, setSelectedTransaction] = useState<TransactionDetailPayload | null>(null);
   const refreshAccent = palette.primary;
 
-  const contactNameByAddress = useMemo(() => {
-    const next: Record<string, string> = {};
-    for (const contact of contacts) {
-      next[contact.address.toLowerCase()] = contact.name;
-    }
-    return next;
-  }, [contacts]);
+  const { contactNameByAddress, merchantNameByAddress } = useMemo(
+    () => buildAddressNameMaps(contacts, merchants, merchantLabels),
+    [contacts, merchantLabels, merchants],
+  );
 
-  const merchantNameByAddress = useMemo(() => {
-    const next: Record<string, string> = { ...merchantLabels };
-    for (const merchant of merchants) {
-      if (!merchant.payToAddress) {
-        continue;
-      }
-      const normalizedAddress = merchant.payToAddress.toLowerCase();
-      if (!next[normalizedAddress]) {
-        next[normalizedAddress] = merchant.name.trim();
-      }
-    }
-    return next;
-  }, [merchantLabels, merchants]);
+  const decoratedTransactions = useMemo(
+    () =>
+      recentTransactions.map((transaction) =>
+        buildTransactionDetailPayload(transaction, activeAddress, contactNameByAddress, merchantNameByAddress),
+      ),
+    [activeAddress, contactNameByAddress, merchantNameByAddress, recentTransactions],
+  );
 
   return (
-    <ScrollView
-      contentContainerStyle={styles.container}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => void onRefresh()}
-          tintColor={refreshAccent}
-          colors={[refreshAccent]}
-          progressBackgroundColor={isDark ? palette.backgroundMuted : palette.surfaceStrong}
-          title={refreshing ? "Refreshing…" : undefined}
-          titleColor={refreshAccent}
-        />
-      }
-      showsVerticalScrollIndicator={false}
-    >
-      <View style={styles.heroWrap}>
-        <View style={styles.heroGlowLarge} />
-        <View style={styles.heroGlowSmall} />
+    <>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => void onRefresh()}
+            tintColor={refreshAccent}
+            colors={[refreshAccent]}
+            progressBackgroundColor={isDark ? palette.backgroundMuted : palette.surfaceStrong}
+            title={refreshing ? "Refreshing…" : undefined}
+            titleColor={refreshAccent}
+          />
+        }
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.heroWrap}>
+          <View style={styles.heroGlowLarge} />
+          <View style={styles.heroGlowSmall} />
 
-        <View style={styles.heroTopRow}>
-          <View style={styles.heroBadge}>
-            <Ionicons name="shield-checkmark" size={14} color={palette.primaryStrong} />
-            <Text style={styles.heroBadgeText}>Wallet ready</Text>
-          </View>
-          {showWalletChooser ? (
-            <Pressable style={styles.chooseWalletButton} onPress={onOpenWalletChooser}>
-              <Text style={styles.chooseWalletButtonText}>Choose Wallet</Text>
-              <Ionicons name="chevron-down" size={14} color={palette.primaryStrong} />
-            </Pressable>
-          ) : null}
-        </View>
-
-        <Text style={styles.heroEyebrow}>Selected wallet</Text>
-        <Text style={styles.heroBalance}>{balance}</Text>
-        <Text style={styles.heroCurrency}>SFLUV available</Text>
-
-        <View style={styles.addressBar}>
-          <Ionicons name="wallet-outline" size={16} color={palette.primaryStrong} />
-          <Text style={styles.addressText}>{shortAddress(smartAddress)}</Text>
-        </View>
-
-        <View style={styles.metaRow}>
-          {selectedWalletLabel ? (
-            <View style={styles.routePill}>
-              <Text style={styles.routePillText}>{selectedWalletLabel}</Text>
+          <View style={styles.heroTopRow}>
+            <View style={styles.heroBadge}>
+              <Ionicons name="shield-checkmark" size={14} color={palette.primaryStrong} />
+              <Text style={styles.heroBadgeText}>Wallet ready</Text>
             </View>
-          ) : null}
-          {ownerBadge ? <Text style={styles.ownerText}>Owner {ownerBadge}</Text> : null}
-        </View>
-
-        <View style={styles.heroActionRow}>
-          <Pressable style={styles.heroPrimaryAction} onPress={onOpenSend}>
-            <Ionicons name="arrow-up" size={16} color={palette.white} />
-            <Text style={styles.heroPrimaryActionText}>Send</Text>
-          </Pressable>
-          <Pressable style={styles.heroSecondaryAction} onPress={onOpenReceive}>
-            <Ionicons name="arrow-down" size={16} color={palette.primaryStrong} />
-            <Text style={styles.heroSecondaryActionText}>Receive</Text>
-          </Pressable>
-        </View>
-      </View>
-
-      <View style={styles.sectionCard}>
-        <View style={styles.sectionHeaderRow}>
-          <View>
-            <Text style={styles.sectionTitle}>Recent activity</Text>
-            <Text style={styles.sectionMeta}>Your latest SFLUV movement</Text>
+            {showWalletChooser ? (
+              <Pressable style={styles.chooseWalletButton} onPress={onOpenWalletChooser}>
+                <Text style={styles.chooseWalletButtonText}>Choose Wallet</Text>
+                <Ionicons name="chevron-down" size={14} color={palette.primaryStrong} />
+              </Pressable>
+            ) : null}
           </View>
-          <Pressable onPress={onOpenActivity}>
-            <Text style={styles.link}>See all</Text>
-          </Pressable>
-        </View>
 
-        {!transactionsLoaded ? (
-          <View style={styles.emptyState}>
-            <ActivityIndicator size="small" color={palette.primaryStrong} />
-            <Text style={styles.emptyTitle}>loading transactions</Text>
+          <Text style={styles.heroEyebrow}>Selected wallet</Text>
+          <Text style={styles.heroBalance}>{balance}</Text>
+          <Text style={styles.heroCurrency}>SFLUV available</Text>
+
+          <View style={styles.addressBar}>
+            <Ionicons name="wallet-outline" size={16} color={palette.primaryStrong} />
+            <Text style={styles.addressText}>{shortAddress(smartAddress, 8, 6)}</Text>
           </View>
-        ) : recentTransactions.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="time-outline" size={22} color={palette.textMuted} />
-            <Text style={styles.emptyTitle}>No payments yet</Text>
-            <Text style={styles.emptyBody}>Your latest sends and receives will appear here after the first transfer.</Text>
-          </View>
-        ) : (
-          recentTransactions.slice(0, 5).map((tx) => {
-            const incoming = tx.direction !== "send";
-            const reward = incoming && tx.from.toLowerCase() === FAUCET_ADDRESS;
-            const counterpartyAddress = incoming ? tx.from : tx.to;
-            const counterpartyLabel = resolveAddressLabel(
-              counterpartyAddress,
-              activeAddress,
-              contactNameByAddress,
-              merchantNameByAddress,
-            );
-            const counterpartyMeta =
-              reward
-                ? formatTxDate(tx.timestamp)
-                : counterpartyLabel === shortAddress(counterpartyAddress)
-                ? formatTxDate(tx.timestamp)
-                : `${shortAddress(counterpartyAddress)} • ${formatTxDate(tx.timestamp)}`;
-            return (
-              <View key={tx.id} style={styles.txCard}>
-                <View style={[styles.txIconWrap, incoming ? styles.txIconReceive : styles.txIconSend]}>
-                  <Ionicons
-                    name={incoming ? "arrow-down" : "arrow-up"}
-                    size={16}
-                    color={incoming ? palette.success : palette.primaryStrong}
-                  />
-                </View>
-                <View style={styles.txBody}>
-                  <Text style={styles.txTitle}>
-                    {reward ? "Received Reward" : `${formatTxTitle(tx)} ${incoming ? "from" : "to"} ${counterpartyLabel}`}
-                  </Text>
-                  <Text style={styles.txMeta}>{counterpartyMeta}</Text>
-                </View>
-                <View style={styles.txAmountWrap}>
-                  <Text style={[styles.txAmount, incoming ? styles.txAmountReceive : styles.txAmountSend]}>
-                    {incoming ? "+" : "-"}
-                    {tx.amountFormatted}
-                  </Text>
-                  <Text style={styles.txCurrency}>SFLUV</Text>
-                </View>
+
+          <View style={styles.metaRow}>
+            {selectedWalletLabel ? (
+              <View style={styles.routePill}>
+                <Text style={styles.routePillText}>{selectedWalletLabel}</Text>
               </View>
-            );
-          })
-        )}
-      </View>
-    </ScrollView>
+            ) : null}
+            {ownerBadge ? <Text style={styles.ownerText}>Owner {ownerBadge}</Text> : null}
+          </View>
+
+          <View style={styles.heroActionRow}>
+            <Pressable style={styles.heroPrimaryAction} onPress={onOpenSend}>
+              <Ionicons name="arrow-up" size={16} color={palette.white} />
+              <Text style={styles.heroPrimaryActionText}>Send</Text>
+            </Pressable>
+            <Pressable style={styles.heroSecondaryAction} onPress={onOpenReceive}>
+              <Ionicons name="arrow-down" size={16} color={palette.primaryStrong} />
+              <Text style={styles.heroSecondaryActionText}>Receive</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeaderRow}>
+            <View>
+              <Text style={styles.sectionTitle}>Recent activity</Text>
+              <Text style={styles.sectionMeta}>Your latest SFLUV movement</Text>
+            </View>
+            <Pressable onPress={onOpenActivity}>
+              <Text style={styles.link}>See all</Text>
+            </Pressable>
+          </View>
+
+          {!transactionsLoaded ? (
+            <View style={styles.emptyState}>
+              <ActivityIndicator size="small" color={palette.primaryStrong} />
+              <Text style={styles.emptyTitle}>loading transactions</Text>
+            </View>
+          ) : decoratedTransactions.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="time-outline" size={22} color={palette.textMuted} />
+              <Text style={styles.emptyTitle}>No payments yet</Text>
+              <Text style={styles.emptyBody}>Your latest sends and receives will appear here after the first transfer.</Text>
+            </View>
+          ) : (
+            decoratedTransactions.slice(0, 5).map((details) => {
+              const incoming = details.received;
+              const reward = incoming && details.transaction.from.toLowerCase() === FAUCET_ADDRESS;
+              const counterpartyAddress = incoming ? details.transaction.from : details.transaction.to;
+              const counterpartyLabel = incoming ? details.fromLabel : details.toLabel;
+              const shortCounterparty = shortAddress(counterpartyAddress);
+              const counterpartyMeta =
+                reward
+                  ? formatTxDate(details.transaction.timestamp)
+                  : counterpartyLabel === shortCounterparty
+                    ? formatTxDate(details.transaction.timestamp)
+                    : `${shortCounterparty} • ${formatTxDate(details.transaction.timestamp)}`;
+
+              return (
+                <Pressable key={details.transaction.id} style={styles.txCard} onPress={() => setSelectedTransaction(details)}>
+                  <View style={[styles.txIconWrap, incoming ? styles.txIconReceive : styles.txIconSend]}>
+                    <Ionicons
+                      name={incoming ? "arrow-down" : "arrow-up"}
+                      size={16}
+                      color={incoming ? palette.success : palette.primaryStrong}
+                    />
+                  </View>
+                  <View style={styles.txBody}>
+                    <Text style={styles.txTitle}>
+                      {reward
+                        ? "Received Reward"
+                        : `${formatTxTitle(details.transaction)} ${incoming ? "from" : "to"} ${counterpartyLabel}`}
+                    </Text>
+                    <Text style={styles.txMeta}>{counterpartyMeta}</Text>
+                  </View>
+                  <View style={styles.txAmountWrap}>
+                    <Text style={[styles.txAmount, incoming ? styles.txAmountReceive : styles.txAmountSend]}>
+                      {incoming ? "+" : "-"}
+                      {details.transaction.amountFormatted}
+                    </Text>
+                    <Text style={styles.txCurrency}>SFLUV</Text>
+                  </View>
+                </Pressable>
+              );
+            })
+          )}
+        </View>
+      </ScrollView>
+
+      <TransactionDetailsModal
+        visible={Boolean(selectedTransaction)}
+        details={selectedTransaction}
+        onClose={() => setSelectedTransaction(null)}
+      />
+    </>
   );
 }
 

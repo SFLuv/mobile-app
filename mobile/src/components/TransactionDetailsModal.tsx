@@ -1,18 +1,21 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
-import { Linking, Modal, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
-import { AppTransaction } from "../types/app";
+import {
+  Animated,
+  Easing,
+  Linking,
+  Modal,
+  PanResponder,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
-
-export type TransactionDetailPayload = {
-  transaction: AppTransaction;
-  fromLabel: string;
-  toLabel: string;
-  received: boolean;
-  typeLabel: string;
-  statusLabel: string;
-};
+import { TransactionDetailPayload } from "../utils/transactions";
 
 type Props = {
   visible: boolean;
@@ -41,8 +44,13 @@ function explorerUrl(hash: string): string {
 
 export function TransactionDetailsModal({ visible, details, onClose }: Props) {
   const { palette, shadows } = useAppTheme();
+  const { height: windowHeight } = useWindowDimensions();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(visible && Boolean(details));
+  const [renderedDetails, setRenderedDetails] = useState<TransactionDetailPayload | null>(details);
+  const progress = useRef(new Animated.Value(visible && details ? 1 : 0)).current;
+  const dragY = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (!copiedField) {
@@ -56,7 +64,95 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
     };
   }, [copiedField]);
 
-  if (!details) {
+  useEffect(() => {
+    if (visible && details) {
+      setRenderedDetails(details);
+      setMounted(true);
+    }
+  }, [details, visible]);
+
+  useEffect(() => {
+    progress.stopAnimation();
+    dragY.stopAnimation();
+
+    if (visible && details) {
+      dragY.setValue(0);
+      Animated.timing(progress, {
+        toValue: 1,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    Animated.timing(progress, {
+      toValue: 0,
+      duration: 220,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        dragY.setValue(0);
+        setMounted(false);
+        setRenderedDetails(null);
+      }
+    });
+  }, [details, dragY, mounted, progress, visible]);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gestureState) =>
+          visible && gestureState.dy > 6 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+        onPanResponderMove: (_, gestureState) => {
+          dragY.setValue(Math.max(0, gestureState.dy));
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          const shouldClose = gestureState.dy > 110 || gestureState.vy > 1.1;
+          if (shouldClose) {
+            onClose();
+            return;
+          }
+          Animated.spring(dragY, {
+            toValue: 0,
+            damping: 18,
+            stiffness: 180,
+            mass: 0.9,
+            useNativeDriver: true,
+          }).start();
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(dragY, {
+            toValue: 0,
+            damping: 18,
+            stiffness: 180,
+            mass: 0.9,
+            useNativeDriver: true,
+          }).start();
+        },
+      }),
+    [dragY, onClose, visible],
+  );
+
+  const backdropOpacity = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 1],
+  });
+
+  const sheetTranslateY = Animated.add(
+    progress.interpolate({
+      inputRange: [0, 1],
+      outputRange: [windowHeight, 0],
+    }),
+    dragY,
+  );
+
+  if (!mounted || !renderedDetails) {
     return null;
   }
 
@@ -66,21 +162,25 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.overlay}>
-          <Pressable style={styles.backdrop} onPress={onClose} />
-          <View style={styles.sheet}>
+    <Modal visible={mounted} animationType="none" presentationStyle="overFullScreen" statusBarTranslucent transparent onRequestClose={onClose}>
+      <View style={styles.modalRoot}>
+        <Pressable style={styles.backdropPressTarget} onPress={onClose}>
+          <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]} />
+        </Pressable>
+
+        <Animated.View style={[styles.sheet, { transform: [{ translateY: sheetTranslateY }] }]}>
+          <View style={styles.headerGestureZone} {...panResponder.panHandlers}>
+            <View style={styles.dragHandle} />
             <View style={styles.headerRow}>
               <View style={styles.headerCopy}>
                 <Text style={styles.title}>Transaction Details</Text>
                 <View style={styles.badgeRow}>
                   <View style={styles.typeBadge}>
-                    <Text style={styles.typeBadgeText}>{details.typeLabel}</Text>
+                    <Text style={styles.typeBadgeText}>{renderedDetails.typeLabel}</Text>
                   </View>
                   <View style={styles.statusBadge}>
                     <Ionicons name="checkmark-circle" size={14} color={palette.white} />
-                    <Text style={styles.statusBadgeText}>{details.statusLabel}</Text>
+                    <Text style={styles.statusBadgeText}>{renderedDetails.statusLabel}</Text>
                   </View>
                 </View>
               </View>
@@ -88,113 +188,116 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
                 <Ionicons name="close" size={20} color={palette.primaryStrong} />
               </Pressable>
             </View>
+          </View>
 
-            <ScrollView style={styles.scrollArea} contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-              <View style={styles.amountCard}>
-                <Text style={[styles.amountText, details.received ? styles.amountReceive : styles.amountSend]}>
-                  {signedAmount(details)}
-                </Text>
-                <Text style={styles.amountDate}>{formatDate(details.transaction.timestamp)}</Text>
-              </View>
+          <ScrollView style={styles.scrollArea} contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+            <View style={styles.amountCard}>
+              <Text style={[styles.amountText, renderedDetails.received ? styles.amountReceive : styles.amountSend]}>
+                {signedAmount(renderedDetails)}
+              </Text>
+              <Text style={styles.amountDate}>{formatDate(renderedDetails.transaction.timestamp)}</Text>
+            </View>
 
-              <View style={styles.section}>
-                <Text style={styles.sectionLabel}>From</Text>
-                <Text style={styles.sectionTitle}>{details.fromLabel}</Text>
-                <View style={styles.codeRow}>
-                  <Text style={styles.codeText}>{details.transaction.from}</Text>
-                  <Pressable style={styles.copyButton} onPress={() => void copyField(details.transaction.from, "from")}>
-                    <Ionicons
-                      name={copiedField === "from" ? "checkmark-circle" : "copy-outline"}
-                      size={16}
-                      color={copiedField === "from" ? palette.success : palette.primaryStrong}
-                    />
-                  </Pressable>
-                </View>
-              </View>
-
-              <View style={styles.section}>
-                <Text style={styles.sectionLabel}>To</Text>
-                <Text style={styles.sectionTitle}>{details.toLabel}</Text>
-                <View style={styles.codeRow}>
-                  <Text style={styles.codeText}>{details.transaction.to}</Text>
-                  <Pressable style={styles.copyButton} onPress={() => void copyField(details.transaction.to, "to")}>
-                    <Ionicons
-                      name={copiedField === "to" ? "checkmark-circle" : "copy-outline"}
-                      size={16}
-                      color={copiedField === "to" ? palette.success : palette.primaryStrong}
-                    />
-                  </Pressable>
-                </View>
-              </View>
-
-              {details.transaction.memo ? (
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>Memo</Text>
-                  <View style={styles.codeRow}>
-                    <Text style={styles.memoText}>{details.transaction.memo}</Text>
-                    <Pressable style={styles.copyButton} onPress={() => void copyField(details.transaction.memo || "", "memo")}>
-                      <Ionicons
-                        name={copiedField === "memo" ? "checkmark-circle" : "copy-outline"}
-                        size={16}
-                        color={copiedField === "memo" ? palette.success : palette.primaryStrong}
-                      />
-                    </Pressable>
-                  </View>
-                </View>
-              ) : null}
-
-              <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Transaction ID</Text>
-                <View style={styles.codeRow}>
-                  <Text style={styles.codeText}>{details.transaction.hash}</Text>
-                  <Pressable style={styles.copyButton} onPress={() => void copyField(details.transaction.hash, "hash")}>
-                    <Ionicons
-                      name={copiedField === "hash" ? "checkmark-circle" : "copy-outline"}
-                      size={16}
-                      color={copiedField === "hash" ? palette.success : palette.primaryStrong}
-                    />
-                  </Pressable>
-                </View>
-                <Pressable
-                  style={styles.inlineExplorerButton}
-                  onPress={() => {
-                    void Linking.openURL(explorerUrl(details.transaction.hash));
-                  }}
-                >
-                  <Ionicons name="open-outline" size={16} color={palette.primaryStrong} />
-                  <Text style={styles.inlineExplorerButtonText}>View on Explorer</Text>
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>From</Text>
+              <Text style={styles.sectionTitle}>{renderedDetails.fromLabel}</Text>
+              <View style={styles.codeRow}>
+                <Text style={styles.codeText}>{renderedDetails.transaction.from}</Text>
+                <Pressable style={styles.copyButton} onPress={() => void copyField(renderedDetails.transaction.from, "from")}>
+                  <Ionicons
+                    name={copiedField === "from" ? "checkmark-circle" : "copy-outline"}
+                    size={16}
+                    color={copiedField === "from" ? palette.success : palette.primaryStrong}
+                  />
                 </Pressable>
               </View>
-            </ScrollView>
-          </View>
-        </View>
-      </SafeAreaView>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>To</Text>
+              <Text style={styles.sectionTitle}>{renderedDetails.toLabel}</Text>
+              <View style={styles.codeRow}>
+                <Text style={styles.codeText}>{renderedDetails.transaction.to}</Text>
+                <Pressable style={styles.copyButton} onPress={() => void copyField(renderedDetails.transaction.to, "to")}>
+                  <Ionicons
+                    name={copiedField === "to" ? "checkmark-circle" : "copy-outline"}
+                    size={16}
+                    color={copiedField === "to" ? palette.success : palette.primaryStrong}
+                  />
+                </Pressable>
+              </View>
+            </View>
+
+            {renderedDetails.transaction.memo ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionLabel}>Memo</Text>
+                <View style={styles.codeRow}>
+                  <Text style={styles.memoText}>{renderedDetails.transaction.memo}</Text>
+                  <Pressable style={styles.copyButton} onPress={() => void copyField(renderedDetails.transaction.memo || "", "memo")}>
+                    <Ionicons
+                      name={copiedField === "memo" ? "checkmark-circle" : "copy-outline"}
+                      size={16}
+                      color={copiedField === "memo" ? palette.success : palette.primaryStrong}
+                    />
+                  </Pressable>
+                </View>
+              </View>
+            ) : null}
+
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>Transaction ID</Text>
+              <View style={styles.codeRow}>
+                <Text style={styles.codeText}>{renderedDetails.transaction.hash}</Text>
+                <Pressable style={styles.copyButton} onPress={() => void copyField(renderedDetails.transaction.hash, "hash")}>
+                  <Ionicons
+                    name={copiedField === "hash" ? "checkmark-circle" : "copy-outline"}
+                    size={16}
+                    color={copiedField === "hash" ? palette.success : palette.primaryStrong}
+                  />
+                </Pressable>
+              </View>
+              <Pressable
+                style={styles.inlineExplorerButton}
+                onPress={() => {
+                  void Linking.openURL(explorerUrl(renderedDetails.transaction.hash));
+                }}
+              >
+                <Ionicons name="open-outline" size={16} color={palette.primaryStrong} />
+                <Text style={styles.inlineExplorerButtonText}>View on Explorer</Text>
+              </Pressable>
+            </View>
+          </ScrollView>
+        </Animated.View>
+      </View>
     </Modal>
   );
 }
 
 function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) {
   return StyleSheet.create({
-    safeArea: {
+    modalRoot: {
       flex: 1,
     },
-    overlay: {
-      flex: 1,
-      justifyContent: "flex-end",
+    backdropPressTarget: {
+      ...StyleSheet.absoluteFillObject,
     },
     backdrop: {
       ...StyleSheet.absoluteFillObject,
-      backgroundColor: "rgba(0,0,0,0.45)",
+      backgroundColor: palette.overlay,
     },
     sheet: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      bottom: 0,
       backgroundColor: palette.background,
       borderTopLeftRadius: radii.xl,
       borderTopRightRadius: radii.xl,
-      paddingTop: spacing.lg,
       paddingHorizontal: spacing.lg,
       paddingBottom: spacing.lg,
       maxHeight: "90%",
       gap: spacing.md,
+      ...shadows.card,
     },
     scrollArea: {
       flexShrink: 1,
@@ -202,6 +305,17 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     container: {
       gap: spacing.md,
       paddingBottom: spacing.sm,
+    },
+    headerGestureZone: {
+      paddingTop: spacing.sm,
+      gap: spacing.md,
+    },
+    dragHandle: {
+      alignSelf: "center",
+      width: 44,
+      height: 5,
+      borderRadius: radii.pill,
+      backgroundColor: palette.borderStrong,
     },
     headerRow: {
       flexDirection: "row",

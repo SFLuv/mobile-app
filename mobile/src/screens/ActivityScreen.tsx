@@ -1,11 +1,16 @@
 import React, { useMemo, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import { TransactionDetailPayload, TransactionDetailsModal } from "../components/TransactionDetailsModal";
+import { TransactionDetailsModal } from "../components/TransactionDetailsModal";
 import { AppContact, AppLocation, AppTransaction } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
-
-const FAUCET_ADDRESS = "0x21df0dfce7420c2dc4c92ec335e9f9ad447e864a";
+import {
+  buildAddressNameMaps,
+  buildTransactionDetailPayload,
+  FAUCET_ADDRESS,
+  shortAddress,
+  TransactionDetailPayload,
+} from "../utils/transactions";
 
 type Props = {
   transactions: AppTransaction[];
@@ -24,13 +29,6 @@ type Props = {
   onLoadMore: () => Promise<void>;
 };
 
-function shortAddress(address: string): string {
-  if (!address) {
-    return "";
-  }
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
-}
-
 function formatDate(timestamp: number): string {
   return new Date(timestamp * 1000).toLocaleString("en-US", {
     month: "short",
@@ -39,30 +37,6 @@ function formatDate(timestamp: number): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function resolveAddressLabel(
-  address: string,
-  activeAddress: string,
-  contactNameByAddress: Record<string, string>,
-  merchantNameByAddress: Record<string, string>,
-): string {
-  const normalizedAddress = address.toLowerCase();
-  if (activeAddress && normalizedAddress === activeAddress.toLowerCase()) {
-    return "You";
-  }
-  if (normalizedAddress === FAUCET_ADDRESS) {
-    return "SFLUV Faucet";
-  }
-  const contactName = contactNameByAddress[normalizedAddress];
-  if (contactName) {
-    return contactName;
-  }
-  const merchantName = merchantNameByAddress[normalizedAddress];
-  if (merchantName) {
-    return merchantName;
-  }
-  return shortAddress(address);
 }
 
 export function ActivityScreen({
@@ -86,44 +60,15 @@ export function ActivityScreen({
   const [selectedTransaction, setSelectedTransaction] = useState<TransactionDetailPayload | null>(null);
   const refreshAccent = palette.primary;
 
-  const contactNameByAddress = useMemo(() => {
-    const next: Record<string, string> = {};
-    for (const contact of contacts) {
-      next[contact.address.toLowerCase()] = contact.name;
-    }
-    return next;
-  }, [contacts]);
-
-  const merchantNameByAddress = useMemo(() => {
-    const next: Record<string, string> = { ...merchantLabels };
-    for (const merchant of merchants) {
-      if (!merchant.payToAddress) {
-        continue;
-      }
-      const normalizedAddress = merchant.payToAddress.toLowerCase();
-      if (!next[normalizedAddress]) {
-        next[normalizedAddress] = merchant.name.trim();
-      }
-    }
-    return next;
-  }, [merchantLabels, merchants]);
+  const { contactNameByAddress, merchantNameByAddress } = useMemo(
+    () => buildAddressNameMaps(contacts, merchants, merchantLabels),
+    [contacts, merchantLabels, merchants],
+  );
 
   const decoratedTransactions = useMemo<TransactionDetailPayload[]>(() => {
-    return transactions.map((transaction) => {
-      const received = transaction.direction !== "send";
-      const reward = received && transaction.from.toLowerCase() === FAUCET_ADDRESS;
-      const fromLabel = resolveAddressLabel(transaction.from, activeAddress, contactNameByAddress, merchantNameByAddress);
-      const toLabel = resolveAddressLabel(transaction.to, activeAddress, contactNameByAddress, merchantNameByAddress);
-
-      return {
-        transaction,
-        received,
-        fromLabel,
-        toLabel,
-        typeLabel: reward ? "Reward" : "Currency Transfer",
-        statusLabel: "Completed",
-      };
-    });
+    return transactions.map((transaction) =>
+      buildTransactionDetailPayload(transaction, activeAddress, contactNameByAddress, merchantNameByAddress),
+    );
   }, [activeAddress, contactNameByAddress, merchantNameByAddress, transactions]);
 
   return (

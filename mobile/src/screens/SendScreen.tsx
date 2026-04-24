@@ -4,7 +4,6 @@ import {
   Animated,
   Keyboard,
   KeyboardAvoidingView,
-  Modal,
   PanResponder,
   Platform,
   Pressable,
@@ -20,11 +19,13 @@ import Constants from "expo-constants";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { ethers } from "ethers";
+import { ScannerCornerGuide } from "../components/ScannerCornerGuide";
 import { mobileConfig } from "../config";
 import { useCurrentLocation } from "../hooks/useCurrentLocation";
 import { AmountUnit, SendResult } from "../services/smartWallet";
 import type { AppBackendClient } from "../services/appBackend";
 import { AppContact, AppLocation, AppWalletOwnerLookup } from "../types/app";
+import { SendFlowEntryMode } from "../types/preferences";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { formatDistanceLabel, locationDistanceMeters, sortLocationsByProximity } from "../utils/location";
 import { parseSendTarget, parseSfluvUniversalLink, SendTarget, SfluvUniversalLink } from "../utils/universalLinks";
@@ -33,6 +34,7 @@ type RecipientKind = "contact" | "merchant" | "payment-link";
 type SendStep = "recipient" | "amount";
 type SendPhase = "editing" | "sending" | "success" | "failure";
 type TipChoice = "10" | "15" | "20" | "custom";
+type RecipientEntryMode = SendFlowEntryMode;
 
 type RecipientSuggestion = {
   key: string;
@@ -62,6 +64,7 @@ type Props = {
   availableBalance: string;
   backendClient?: AppBackendClient | null;
   hapticsEnabled: boolean;
+  defaultEntryMode: RecipientEntryMode;
   onPrepareSend: (
     recipient: string,
     amount: string,
@@ -344,6 +347,7 @@ export function SendScreen({
   availableBalance,
   backendClient,
   hapticsEnabled,
+  defaultEntryMode,
   onPrepareSend,
   draft,
   onDraftApplied,
@@ -361,12 +365,12 @@ export function SendScreen({
 
   const [step, setStep] = useState<SendStep>("recipient");
   const [phase, setPhase] = useState<SendPhase>("editing");
+  const [entryMode, setEntryMode] = useState<RecipientEntryMode>(defaultEntryMode);
   const [recipientInput, setRecipientInput] = useState("");
   const [activeTarget, setActiveTarget] = useState<SendTarget | null>(null);
   const [amountInput, setAmountInput] = useState("");
   const [memoInput, setMemoInput] = useState("");
   const [feedback, setFeedback] = useState<string | null>(null);
-  const [scannerOpen, setScannerOpen] = useState(false);
   const [scanLocked, setScanLocked] = useState(false);
   const [recipientLookup, setRecipientLookup] = useState<AppWalletOwnerLookup | null>(null);
   const [draftRecipient, setDraftRecipient] = useState<RecipientSuggestion | null>(null);
@@ -392,6 +396,7 @@ export function SendScreen({
     }
   }, [availableBalance]);
   const amountRaw = useMemo(() => parseTokenAmount(amountInput), [amountInput]);
+  const scannerPermissionGranted = permission?.granted === true;
 
   const payableMerchants = useMemo(
     () => sortLocationsByProximity(merchants.filter((merchant) => Boolean(merchant.payToAddress)), userLocation),
@@ -614,6 +619,10 @@ export function SendScreen({
   }, [draft, onDraftApplied]);
 
   useEffect(() => {
+    setEntryMode(defaultEntryMode);
+  }, [defaultEntryMode]);
+
+  useEffect(() => {
     if (!feedback) {
       return;
     }
@@ -653,6 +662,23 @@ export function SendScreen({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (entryMode !== "scan" || step !== "recipient" || phase !== "editing") {
+      setScanLocked(false);
+    }
+  }, [entryMode, phase, step]);
+
+  useEffect(() => {
+    if (
+      step === "recipient" &&
+      phase === "editing" &&
+      entryMode === "scan" &&
+      permission?.status === "undetermined"
+    ) {
+      void requestPermission();
+    }
+  }, [entryMode, permission?.status, phase, requestPermission, step]);
 
   const dismissNoteEditor = useCallback(() => {
     setNoteFocused(false);
@@ -738,19 +764,6 @@ export function SendScreen({
     },
     [continueToAmount],
   );
-
-  const openScanner = useCallback(async () => {
-    const status = permission?.status;
-    if (status !== "granted") {
-      const nextPermission = await requestPermission();
-      if (!nextPermission.granted) {
-        setFeedback("Camera permission required.");
-        return;
-      }
-    }
-    setScanLocked(false);
-    setScannerOpen(true);
-  }, [permission?.status, requestPermission]);
 
   const primaryRecipient = activeTarget?.recipient ?? parsedTarget?.recipient ?? "";
   const primaryRecipientLabel = resolvedRecipient?.label || (primaryRecipient ? shortAddress(primaryRecipient) : "");
@@ -880,10 +893,46 @@ export function SendScreen({
     exitFlow();
   }, [exitFlow, selectedTipAmountRaw, sendTip, tipStatus]);
 
-  const scannerClose = useCallback(() => {
-    setScannerOpen(false);
-    setScanLocked(false);
-  }, []);
+  const handleInlineScan = useCallback(
+    (rawValue: string) => {
+      if (scanLocked) {
+        return;
+      }
+
+      setScanLocked(true);
+      if (hapticsEnabled) {
+        Vibration.vibrate(10);
+      }
+
+      const universalLink = parseSfluvUniversalLink(rawValue);
+      if (universalLink?.type === "redeem" || universalLink?.type === "addcontact") {
+        if (onOpenUniversalLink) {
+          onOpenUniversalLink(universalLink);
+          return;
+        }
+        setFeedback("Unsupported QR.");
+        setScanLocked(false);
+        return;
+      }
+
+      const scannedTarget = parseSendTarget(rawValue);
+      if (scannedTarget) {
+        const suggestion = suggestionByAddress.get(scannedTarget.recipient.toLowerCase()) || undefined;
+        if (suggestion) {
+          setDraftRecipient(suggestion);
+        }
+        continueToAmount(scannedTarget, suggestion);
+        return;
+      }
+
+      setRecipientInput(rawValue);
+      setActiveTarget(null);
+      setDraftRecipient(null);
+      setEntryMode("manual");
+      setFeedback("Scanned.");
+    },
+    [continueToAmount, hapticsEnabled, onOpenUniversalLink, scanLocked, suggestionByAddress],
+  );
 
   const renderSuggestionCard = (suggestion: RecipientSuggestion) => (
     <Pressable key={suggestion.key} style={styles.suggestionCard} onPress={() => selectSuggestion(suggestion)}>
@@ -917,7 +966,13 @@ export function SendScreen({
   const renderRecipientStep = () => (
     <View style={styles.flex}>
       <ScrollView
-        contentContainerStyle={[styles.recipientContainer, { paddingTop: topInset + spacing.sm, paddingBottom: 136 }]}
+        contentContainerStyle={[
+          styles.recipientContainer,
+          {
+            paddingTop: topInset + spacing.sm,
+            paddingBottom: entryMode === "manual" ? 136 : spacing.xl,
+          },
+        ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
@@ -933,48 +988,100 @@ export function SendScreen({
           </View>
         ) : null}
 
-        <View style={styles.recipientSearchCard}>
-          <View style={styles.searchRow}>
-            <TextInput
-              style={styles.searchInput}
-              value={recipientInput}
-              onChangeText={(value) => {
-                setRecipientInput(value);
-                setActiveTarget(null);
-                setDraftRecipient(null);
-                setFeedback(null);
-              }}
-              placeholder="Search or paste an address"
-              placeholderTextColor={palette.textMuted}
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="done"
-              blurOnSubmit
-            />
-            <Pressable style={styles.scanButton} onPress={() => void openScanner()}>
-              <Ionicons name="scan-outline" size={18} color={palette.primaryStrong} />
-            </Pressable>
-          </View>
+        <View style={styles.entryModeRow}>
+          <Pressable
+            style={[styles.entryModeButton, entryMode === "manual" ? styles.entryModeButtonActive : undefined]}
+            onPress={() => setEntryMode("manual")}
+          >
+            <Text style={[styles.entryModeText, entryMode === "manual" ? styles.entryModeTextActive : undefined]}>Manual</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.entryModeButton, entryMode === "scan" ? styles.entryModeButtonActive : undefined]}
+            onPress={() => setEntryMode("scan")}
+          >
+            <Text style={[styles.entryModeText, entryMode === "scan" ? styles.entryModeTextActive : undefined]}>Scan</Text>
+          </Pressable>
         </View>
 
-        {filteredSuggestions.length > 0 ? (
-          <View style={styles.suggestionList}>{filteredSuggestions.map((suggestion) => renderSuggestionCard(suggestion))}</View>
-        ) : null}
+        {entryMode === "manual" ? (
+          <>
+            <View style={styles.recipientSearchCard}>
+              <View style={styles.searchRow}>
+                <TextInput
+                  style={styles.searchInput}
+                  value={recipientInput}
+                  onChangeText={(value) => {
+                    setRecipientInput(value);
+                    setActiveTarget(null);
+                    setDraftRecipient(null);
+                    setFeedback(null);
+                  }}
+                  placeholder="Search or paste an address"
+                  placeholderTextColor={palette.textMuted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="done"
+                  blurOnSubmit
+                />
+              </View>
+            </View>
+
+            {filteredSuggestions.length > 0 ? (
+              <View style={styles.suggestionList}>{filteredSuggestions.map((suggestion) => renderSuggestionCard(suggestion))}</View>
+            ) : null}
+          </>
+        ) : (
+          <View style={styles.inlineScannerCard}>
+            <View style={styles.inlineScannerFrame}>
+              {scannerPermissionGranted ? (
+                <>
+                  <CameraView
+                    style={StyleSheet.absoluteFillObject}
+                    facing="back"
+                    barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+                    onBarcodeScanned={(result) => {
+                      handleInlineScan(result.data);
+                    }}
+                  />
+                  <ScannerCornerGuide color={palette.primaryStrong} style={styles.inlineScannerGuide} />
+                </>
+              ) : (
+                <View style={styles.inlinePermissionCard}>
+                  <Ionicons name="camera-outline" size={28} color={palette.primaryStrong} />
+                  <Text style={styles.inlinePermissionTitle}>Camera access needed</Text>
+                  <Text style={styles.inlinePermissionBody}>Allow camera access to scan payment QRs here.</Text>
+                  <Pressable
+                    style={styles.inlinePermissionButton}
+                    onPress={() => {
+                      void requestPermission();
+                    }}
+                  >
+                    <Text style={styles.inlinePermissionButtonText}>Enable camera</Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+
+            <Text style={styles.inlineScannerHint}>Scan a payment QR inside the frame.</Text>
+          </View>
+        )}
       </ScrollView>
 
-      <View style={styles.footerDock}>
-        <Pressable
-          style={[styles.primaryButton, !parsedTarget ? styles.primaryButtonDisabled : undefined]}
-          disabled={!parsedTarget}
-          onPress={() => {
-            if (parsedTarget) {
-              continueToAmount(parsedTarget, resolvedRecipient);
-            }
-          }}
-        >
-          <Text style={styles.primaryButtonText}>Continue</Text>
-        </Pressable>
-      </View>
+      {entryMode === "manual" ? (
+        <View style={styles.footerDock}>
+          <Pressable
+            style={[styles.primaryButton, !parsedTarget ? styles.primaryButtonDisabled : undefined]}
+            disabled={!parsedTarget}
+            onPress={() => {
+              if (parsedTarget) {
+                continueToAmount(parsedTarget, resolvedRecipient);
+              }
+            }}
+          >
+            <Text style={styles.primaryButtonText}>Continue</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 
@@ -1235,61 +1342,6 @@ export function SendScreen({
   return (
     <View style={styles.flex}>
       {step === "recipient" ? renderRecipientStep() : renderAmountStep()}
-
-      <Modal visible={scannerOpen} animationType="slide" onRequestClose={scannerClose}>
-        <View style={styles.scannerScreen}>
-          <View style={[styles.scannerHeader, { paddingTop: topInset + spacing.xl }]}>
-            <Pressable style={styles.scannerClose} onPress={scannerClose}>
-              <Ionicons name="arrow-back" size={20} color={palette.white} />
-            </Pressable>
-          </View>
-
-          <View style={styles.scannerFrame}>
-            <CameraView
-              style={StyleSheet.absoluteFillObject}
-              barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-              onBarcodeScanned={(result) => {
-                if (scanLocked) {
-                  return;
-                }
-                setScanLocked(true);
-                if (hapticsEnabled) {
-                  Vibration.vibrate(10);
-                }
-
-                const universalLink = parseSfluvUniversalLink(result.data);
-                if (universalLink?.type === "redeem") {
-                  scannerClose();
-                  onOpenUniversalLink?.(universalLink);
-                  return;
-                }
-
-                if (universalLink?.type === "addcontact") {
-                  scannerClose();
-                  onOpenUniversalLink?.(universalLink);
-                  return;
-                }
-
-                const scannedTarget = parseSendTarget(result.data);
-                if (scannedTarget) {
-                  const suggestion = suggestionByAddress.get(scannedTarget.recipient.toLowerCase()) || undefined;
-                  if (suggestion) {
-                    setDraftRecipient(suggestion);
-                  }
-                  scannerClose();
-                  continueToAmount(scannedTarget, suggestion);
-                  return;
-                }
-
-                setRecipientInput(result.data);
-                scannerClose();
-                setFeedback("Scanned.");
-              }}
-            />
-            <View pointerEvents="none" style={styles.scannerGuide} />
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -1358,15 +1410,88 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       color: palette.text,
       fontSize: 15,
     },
-    scanButton: {
-      width: 56,
-      height: 56,
+    entryModeRow: {
+      flexDirection: "row",
+      gap: spacing.xs,
+      backgroundColor: palette.surfaceStrong,
       borderRadius: radii.lg,
       borderWidth: 1,
       borderColor: palette.border,
+      padding: 6,
+    },
+    entryModeButton: {
+      flex: 1,
+      minHeight: 44,
+      borderRadius: radii.md,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: palette.primarySoft,
+    },
+    entryModeButtonActive: {
+      backgroundColor: palette.primary,
+    },
+    entryModeText: {
+      color: palette.textMuted,
+      fontWeight: "800",
+      fontSize: 13,
+    },
+    entryModeTextActive: {
+      color: palette.white,
+    },
+    inlineScannerCard: {
+      gap: spacing.sm,
+    },
+    inlineScannerFrame: {
+      width: "100%",
+      aspectRatio: 1,
+      borderRadius: radii.xl,
+      overflow: "hidden",
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: "#05070b",
+      alignItems: "center",
+      justifyContent: "center",
+      ...shadows.card,
+    },
+    inlineScannerGuide: {
+      position: "absolute",
+    },
+    inlineScannerHint: {
+      color: palette.textMuted,
+      textAlign: "center",
+      fontSize: 13,
+      lineHeight: 18,
+    },
+    inlinePermissionCard: {
+      width: "100%",
+      maxWidth: 280,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: spacing.sm,
+      paddingHorizontal: spacing.lg,
+    },
+    inlinePermissionTitle: {
+      color: palette.white,
+      fontSize: 18,
+      fontWeight: "900",
+      textAlign: "center",
+    },
+    inlinePermissionBody: {
+      color: "rgba(255,255,255,0.78)",
+      textAlign: "center",
+      lineHeight: 20,
+    },
+    inlinePermissionButton: {
+      minHeight: 44,
+      borderRadius: radii.pill,
+      backgroundColor: palette.primary,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: spacing.lg,
+      marginTop: spacing.xs,
+    },
+    inlinePermissionButtonText: {
+      color: palette.white,
+      fontWeight: "900",
     },
     suggestionList: {
       gap: spacing.sm,
@@ -1735,44 +1860,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       flexDirection: "row",
       alignItems: "center",
       gap: 6,
-    },
-    scannerScreen: {
-      flex: 1,
-      backgroundColor: "rgba(8, 12, 20, 0.95)",
-      paddingHorizontal: spacing.lg,
-      paddingBottom: spacing.xl,
-    },
-    scannerHeader: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "flex-start",
-      paddingBottom: spacing.lg,
-    },
-    scannerClose: {
-      width: 42,
-      height: 42,
-      borderRadius: 21,
-      backgroundColor: "rgba(255,255,255,0.14)",
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    scannerFrame: {
-      flex: 1,
-      borderRadius: radii.xl,
-      overflow: "hidden",
-      borderWidth: 2,
-      borderColor: "rgba(255,255,255,0.16)",
-      backgroundColor: "#05070b",
-      justifyContent: "center",
-      alignItems: "center",
-    },
-    scannerGuide: {
-      width: 236,
-      height: 236,
-      borderRadius: 32,
-      borderWidth: 3,
-      borderColor: palette.primaryStrong,
-      backgroundColor: "transparent",
     },
   });
 }

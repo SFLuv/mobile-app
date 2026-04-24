@@ -903,6 +903,10 @@ function mergePreferences(input: unknown): AppPreferences {
         : defaultAppPreferences.notificationsEnabled,
     hapticsEnabled:
       typeof candidate.hapticsEnabled === "boolean" ? candidate.hapticsEnabled : defaultAppPreferences.hapticsEnabled,
+    defaultSendEntryMode:
+      candidate.defaultSendEntryMode === "manual" || candidate.defaultSendEntryMode === "scan"
+        ? candidate.defaultSendEntryMode
+        : defaultAppPreferences.defaultSendEntryMode,
   };
 }
 
@@ -2386,7 +2390,7 @@ function WalletAppShellContent({
       {showStandardChrome ? (
         <View style={styles.topBar}>
           <View style={styles.topTitleWrap}>
-            <Text style={styles.brandKicker}>SFLUV Wallet</Text>
+            <Text style={styles.brandKicker}>SFLuv</Text>
             <Text style={styles.brand}>{activeTitle}</Text>
             <Text style={styles.topMeta}>
               {tab === "settings"
@@ -2399,7 +2403,7 @@ function WalletAppShellContent({
                       ? "Claims, payouts, badges, and credentials"
                       : selectedWalletLabel
                         ? `${selectedWalletLabel} selected`
-                        : "Fast SFLUV payments"}
+                        : "Fast SFLuv payments"}
             </Text>
           </View>
           <View style={styles.topActions}>
@@ -2453,6 +2457,7 @@ function WalletAppShellContent({
                 availableBalance={smartBalance}
                 backendClient={backendClient}
                 hapticsEnabled={preferences.hapticsEnabled}
+                defaultEntryMode={preferences.defaultSendEntryMode}
                 onPrepareSend={handleSend}
                 onCompleteFlow={completeSendFlow}
                 onExitFlow={finishSendFlow}
@@ -2762,9 +2767,8 @@ function WalletAppShellContent({
         <Pressable style={styles.modalOverlay} onPress={() => setShowWalletChooser(false)}>
           <Pressable style={styles.walletChooserCard} onPress={() => {}}>
             <View style={styles.walletChooserHeader}>
-              <View>
+              <View style={styles.walletChooserHeaderCopy}>
                 <Text style={styles.walletChooserTitle}>Choose Wallet</Text>
-                <Text style={styles.walletChooserSubtitle}>Switch between your available Citizen Wallet accounts.</Text>
               </View>
               <Pressable style={styles.walletChooserClose} onPress={() => setShowWalletChooser(false)}>
                 <Ionicons name="close" size={20} color={palette.primaryStrong} />
@@ -5169,14 +5173,14 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     alignItems: "flex-start",
     gap: spacing.md,
   },
+  walletChooserHeaderCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
   walletChooserTitle: {
     color: palette.primaryStrong,
     fontSize: 24,
     fontWeight: "900",
-  },
-  walletChooserSubtitle: {
-    color: palette.textMuted,
-    marginTop: 4,
   },
   walletChooserClose: {
     width: 38,

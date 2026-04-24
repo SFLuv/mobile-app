@@ -3,7 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { ethers } from "ethers";
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { AppImprover, AppUser, AppWallet } from "../types/app";
-import { AppPreferences, ThemePreference } from "../types/preferences";
+import { AppPreferences, SendFlowEntryMode, ThemePreference } from "../types/preferences";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 
 type Props = {
@@ -107,6 +107,25 @@ function formatStatusLabel(value?: string | null): string {
 }
 
 function ThemeOption({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  const { palette } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
+
+  return (
+    <Pressable style={[styles.themeOption, active ? styles.themeOptionActive : undefined]} onPress={onPress}>
+      <Text style={[styles.themeOptionText, active ? styles.themeOptionTextActive : undefined]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function SendFlowOption({
   label,
   active,
   onPress,
@@ -446,6 +465,10 @@ export function SettingsScreen({
     onUpdatePreferences({ ...preferences, themePreference });
   };
 
+  const applyDefaultSendEntryMode = (defaultSendEntryMode: SendFlowEntryMode) => {
+    onUpdatePreferences({ ...preferences, defaultSendEntryMode });
+  };
+
   useEffect(() => {
     if (!hasImproverSection && section === "improver") {
       setSection("account");
@@ -556,6 +579,24 @@ export function SettingsScreen({
               value={preferences.hapticsEnabled}
               onValueChange={(hapticsEnabled) => onUpdatePreferences({ ...preferences, hapticsEnabled })}
             />
+            <View style={styles.preferenceStack}>
+              <View style={styles.preferenceCopy}>
+                <Text style={styles.preferenceTitle}>Send flow</Text>
+                <Text style={styles.preferenceBody}>Choose whether Send opens on manual entry or QR scan first.</Text>
+              </View>
+              <View style={styles.themeRow}>
+                <SendFlowOption
+                  label="Manual"
+                  active={preferences.defaultSendEntryMode === "manual"}
+                  onPress={() => applyDefaultSendEntryMode("manual")}
+                />
+                <SendFlowOption
+                  label="QR scan"
+                  active={preferences.defaultSendEntryMode === "scan"}
+                  onPress={() => applyDefaultSendEntryMode("scan")}
+                />
+              </View>
+            </View>
             <View style={styles.pushStatusCard}>
               <View style={styles.pushStatusHeader}>
                 <Text style={styles.pushStatusTitle}>Push status</Text>
@@ -942,6 +983,9 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       flexDirection: "row",
       alignItems: "center",
       gap: spacing.md,
+    },
+    preferenceStack: {
+      gap: spacing.sm,
     },
     preferenceCopy: {
       flex: 1,
