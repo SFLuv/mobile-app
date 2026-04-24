@@ -4,7 +4,6 @@ import { mobileConfig } from "../config";
 import {
   AppAccountDeletionPreview,
   AppAccountDeletionStatusResponse,
-  AppAppleRecoveryResponse,
   AppContact,
   AppCredentialRequest,
   AppGlobalCredentialType,
@@ -422,26 +421,6 @@ type AccountDeletionStatusResponse = {
   can_cancel: boolean;
   purge_enabled: boolean;
   purge_enabled_by?: string;
-};
-
-type AppleRecoveryResponse = {
-  current_user_id: string;
-  current_user_exists: boolean;
-  apple_linked: boolean;
-  apple_email?: string | null;
-  is_private_relay: boolean;
-  resolution:
-    | "current_account_exists"
-    | "recovery_suggested"
-    | "no_match"
-    | "ambiguous_match"
-    | "no_apple_account";
-  suggested_existing_account?: {
-    user_id: string;
-    contact_name?: string;
-    verified_email?: string;
-    primary_wallet_address?: string;
-  } | null;
 };
 
 type UserPolicyStatusResponse = {
@@ -1021,34 +1000,6 @@ function mapAccountDeletionStatus(input: AccountDeletionStatusResponse): AppAcco
   };
 }
 
-function mapAppleRecovery(input: AppleRecoveryResponse): AppAppleRecoveryResponse {
-  return {
-    currentUserId: input.current_user_id,
-    currentUserExists: input.current_user_exists === true,
-    appleLinked: input.apple_linked === true,
-    appleEmail: typeof input.apple_email === "string" ? input.apple_email : undefined,
-    isPrivateRelay: input.is_private_relay === true,
-    resolution: input.resolution,
-    suggestedExistingAccount: input.suggested_existing_account
-      ? {
-          userId: input.suggested_existing_account.user_id,
-          contactName:
-            typeof input.suggested_existing_account.contact_name === "string"
-              ? input.suggested_existing_account.contact_name
-              : undefined,
-          verifiedEmail:
-            typeof input.suggested_existing_account.verified_email === "string"
-              ? input.suggested_existing_account.verified_email
-              : undefined,
-          primaryWalletAddress:
-            typeof input.suggested_existing_account.primary_wallet_address === "string"
-              ? input.suggested_existing_account.primary_wallet_address
-              : undefined,
-        }
-      : undefined,
-  };
-}
-
 function formatTokenAmount(raw: string): string {
   try {
     const formatted = ethers.utils.formatUnits(raw, mobileConfig.tokenDecimals);
@@ -1259,29 +1210,6 @@ export class AppBackendClient {
     if (!response.ok) {
       await throwRequestError(response, "Unable to store Apple OAuth credentials in the shared app backend");
     }
-  }
-
-  async resolveAppleRecovery(input?: {
-    providerSubject?: string;
-    providerEmail?: string;
-    isPrivateRelay?: boolean;
-  }): Promise<AppAppleRecoveryResponse> {
-    const response = await this.authFetch("/users/apple/recovery", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        provider_subject: input?.providerSubject ?? "",
-        provider_email: input?.providerEmail ?? "",
-        is_private_relay: input?.isPrivateRelay === true,
-      }),
-    });
-
-    if (!response.ok) {
-      await throwRequestError(response, "Unable to resolve Apple account recovery status from the shared app backend");
-    }
-
-    const body = (await response.json()) as AppleRecoveryResponse;
-    return mapAppleRecovery(body);
   }
 
   async updateUserInfo(input: {

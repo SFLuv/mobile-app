@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -83,6 +83,7 @@ type Props = {
   } | null;
   onDraftApplied?: () => void;
   onOpenUniversalLink?: (link: SfluvUniversalLink) => void;
+  onNavigationSwipeEnabledChange?: (enabled: boolean) => void;
   onCompleteFlow?: () => void;
   onExitFlow?: () => void;
 };
@@ -359,6 +360,7 @@ export function SendScreen({
   draft,
   onDraftApplied,
   onOpenUniversalLink,
+  onNavigationSwipeEnabledChange,
   onCompleteFlow,
   onExitFlow,
 }: Props) {
@@ -640,6 +642,13 @@ export function SendScreen({
     setEntryMode(defaultEntryMode);
   }, [defaultEntryMode]);
 
+  useLayoutEffect(() => {
+    onNavigationSwipeEnabledChange?.(step !== "amount");
+    return () => {
+      onNavigationSwipeEnabledChange?.(true);
+    };
+  }, [onNavigationSwipeEnabledChange, step]);
+
   useEffect(() => {
     if (!feedback) {
       return;
@@ -774,8 +783,19 @@ export function SendScreen({
     [continueToAmount],
   );
 
+  const clearRecipientSelection = useCallback(() => {
+    setRecipientInput("");
+    setActiveTarget(null);
+    setDraftRecipient(null);
+    setRecipientLookup(null);
+    setFeedback(null);
+  }, []);
+
   const primaryRecipient = activeTarget?.recipient ?? parsedTarget?.recipient ?? "";
-  const primaryRecipientLabel = resolvedRecipient?.label || (primaryRecipient ? shortAddress(primaryRecipient) : "");
+  const primaryRecipientLabel =
+    resolvedRecipient?.kind === "payment-link" && primaryRecipient
+      ? shortAddress(primaryRecipient)
+      : resolvedRecipient?.label || (primaryRecipient ? shortAddress(primaryRecipient) : "");
   const selectedRecipientForInput = activeTarget ? resolvedRecipient : null;
 
   const submitPayment = useCallback(async () => {
@@ -973,6 +993,47 @@ export function SendScreen({
     </Pressable>
   );
 
+  const renderSelectedRecipientInput = (suggestion: RecipientSuggestion) => (
+    <View style={styles.selectedRecipientPill}>
+      <View style={styles.selectedRecipientAvatar}>
+        <Text style={styles.selectedRecipientAvatarText}>{initials(suggestion.label)}</Text>
+      </View>
+      <View style={styles.selectedRecipientBody}>
+        <View style={styles.selectedRecipientHeader}>
+          <Text style={styles.selectedRecipientTitle} numberOfLines={1}>
+            {suggestion.label}
+          </Text>
+          <View
+            style={[
+              styles.kindBadge,
+              suggestion.kind === "merchant" ? styles.kindBadgeMerchant : styles.kindBadgeContact,
+            ]}
+          >
+            <Text
+              style={[
+                styles.kindBadgeText,
+                suggestion.kind === "merchant" ? styles.kindBadgeTextMerchant : styles.kindBadgeTextContact,
+              ]}
+            >
+              {suggestion.kind === "merchant" ? "Merchant" : suggestion.kind === "payment-link" ? "Link" : "Contact"}
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.selectedRecipientMeta} numberOfLines={1}>
+          {suggestion.subtitle || shortAddress(suggestion.address)}
+        </Text>
+      </View>
+      <Pressable
+        style={styles.selectedRecipientClearButton}
+        accessibilityLabel="Clear selected recipient"
+        accessibilityRole="button"
+        onPress={clearRecipientSelection}
+      >
+        <Ionicons name="close" size={18} color={palette.primaryStrong} />
+      </Pressable>
+    </View>
+  );
+
   const renderRecipientStep = () => (
     <View style={styles.flex}>
       <ScrollView
@@ -1018,28 +1079,30 @@ export function SendScreen({
           <>
             <View style={styles.recipientSearchCard}>
               <View style={styles.searchRow}>
-                <TextInput
-                  style={styles.searchInput}
-                  value={recipientInput}
-                  onChangeText={(value) => {
-                    setRecipientInput(value);
-                    setActiveTarget(null);
-                    setDraftRecipient(null);
-                    setFeedback(null);
-                  }}
-                  placeholder="Search or paste an address"
-                  placeholderTextColor={palette.textMuted}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  returnKeyType="done"
-                  blurOnSubmit
-                />
+                {selectedRecipientForInput ? (
+                  renderSelectedRecipientInput(selectedRecipientForInput)
+                ) : (
+                  <TextInput
+                    style={styles.searchInput}
+                    value={recipientInput}
+                    onChangeText={(value) => {
+                      setRecipientInput(value);
+                      setActiveTarget(null);
+                      setDraftRecipient(null);
+                      setFeedback(null);
+                    }}
+                    placeholder="Search or paste an address"
+                    placeholderTextColor={palette.textMuted}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    returnKeyType="done"
+                    blurOnSubmit
+                  />
+                )}
               </View>
             </View>
 
-            {selectedRecipientForInput ? (
-              <View style={styles.suggestionList}>{renderSuggestionCard(selectedRecipientForInput)}</View>
-            ) : filteredSuggestions.length > 0 ? (
+            {!selectedRecipientForInput && filteredSuggestions.length > 0 ? (
               <View style={styles.suggestionList}>{filteredSuggestions.map((suggestion) => renderSuggestionCard(suggestion))}</View>
             ) : null}
           </>
@@ -1369,10 +1432,11 @@ function createStyles(
 ) {
   const compactLayout = layoutMode !== "regular";
   const denseLayout = layoutMode === "dense";
-  const amountDisplayMinHeight = denseLayout ? 72 : compactLayout ? 96 : 140;
-  const amountValueFontSize = denseLayout ? 38 : compactLayout ? 46 : 58;
-  const amountValueLineHeight = denseLayout ? 44 : compactLayout ? 52 : 64;
+  const amountDisplayMinHeight = denseLayout ? 78 : compactLayout ? 104 : 148;
+  const amountValueFontSize = denseLayout ? 42 : compactLayout ? 52 : 66;
+  const amountValueLineHeight = denseLayout ? 48 : compactLayout ? 58 : 72;
   const keypadGap = denseLayout ? 4 : compactLayout ? spacing.xs : spacing.sm;
+  const focusedNoteGap = denseLayout ? spacing.sm : compactLayout ? spacing.md : spacing.lg;
   const keypadKeyHeight = denseLayout ? 40 : compactLayout ? 46 : 56;
   const swipeTrackHeight = denseLayout ? 54 : compactLayout ? 60 : 64;
   const swipeThumbWidth = denseLayout ? 48 : compactLayout ? 54 : 58;
@@ -1446,6 +1510,63 @@ function createStyles(
       paddingHorizontal: spacing.md,
       color: palette.text,
       fontSize: 15,
+    },
+    selectedRecipientPill: {
+      flex: 1,
+      minHeight: 64,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      borderRadius: radii.lg,
+      backgroundColor: palette.surfaceStrong,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.sm,
+    },
+    selectedRecipientAvatar: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      backgroundColor: palette.primarySoft,
+      borderWidth: 1,
+      borderColor: palette.primary,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    selectedRecipientAvatarText: {
+      color: palette.primaryStrong,
+      fontWeight: "900",
+      fontSize: 13,
+    },
+    selectedRecipientBody: {
+      flex: 1,
+      minWidth: 0,
+      gap: 3,
+    },
+    selectedRecipientHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+    },
+    selectedRecipientTitle: {
+      flex: 1,
+      color: palette.text,
+      fontSize: 15,
+      fontWeight: "900",
+    },
+    selectedRecipientMeta: {
+      color: palette.textMuted,
+      fontSize: 12,
+      lineHeight: 16,
+    },
+    selectedRecipientClearButton: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: palette.surface,
+      borderWidth: 1,
+      borderColor: palette.border,
     },
     entryModeRow: {
       flexDirection: "row",
@@ -1706,7 +1827,7 @@ function createStyles(
       gap: keypadGap,
     },
     keypadGap: {
-      minHeight: denseLayout ? 176 : compactLayout ? 210 : 252,
+      minHeight: focusedNoteGap,
     },
     keypadRow: {
       flexDirection: "row",

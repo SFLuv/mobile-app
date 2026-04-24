@@ -62,7 +62,6 @@ import {
 import {
   AppAccountDeletionPreview,
   AppAccountDeletionStatusResponse,
-  AppAppleRecoveryResponse,
   AppContact,
   AppImprover,
   AppLocation,
@@ -98,8 +97,6 @@ type PendingLinkIntent = {
 type AppleOAuthUserInfoHint = {
   email?: string | null;
 };
-
-type AppleAccountPromptAction = "idle" | "continuing" | "returning";
 
 type SendDraft = {
   recipient: string;
@@ -844,53 +841,6 @@ function getLinkedEmailAccount(currentUser: unknown): {
   return null;
 }
 
-function describeAppleRecoveryPrompt(
-  recovery: AppAppleRecoveryResponse,
-): {
-  title: string;
-  body: string;
-  primaryLabel: string;
-  secondaryLabel: string;
-} {
-  if (recovery.resolution === "recovery_suggested") {
-    const existingAccountLabel =
-      recovery.suggestedExistingAccount?.contactName?.trim() ||
-      recovery.suggestedExistingAccount?.verifiedEmail?.trim() ||
-      "your existing SFLUV account";
-    return {
-      title: "We found an existing account",
-      body: `Apple signed you into a new Privy identity, but ${existingAccountLabel} already exists in SFLUV. To keep using that account and wallet, go back, sign in with Google or email, then link Apple in Settings. If you continue here and Apple does not share your real email with us, we will not be able to link the accounts together and you will end up with two separate SFLUV accounts.`,
-      primaryLabel: "Use my existing account",
-      secondaryLabel: "Continue with Apple anyway",
-    };
-  }
-
-  if (recovery.isPrivateRelay || !recovery.appleEmail) {
-    return {
-      title: "Continue with Apple?",
-      body: "Apple may have hidden your real email. If you create an Apple account without sharing your real email with us, we will not be able to link it to an existing SFLUV account and you will end up with two separate accounts. Go back and sign in with Google or email first if you already have an account.",
-      primaryLabel: "I already have an account",
-      secondaryLabel: "Continue with Apple anyway",
-    };
-  }
-
-  if (recovery.resolution === "ambiguous_match") {
-    return {
-      title: "Multiple accounts found",
-      body: `Apple shared ${recovery.appleEmail}, but more than one active SFLUV account is associated with that address. Go back and sign in with the account you want to keep, then link Apple in Settings. If you continue here, you may create a separate Apple account.`,
-      primaryLabel: "Go back to sign in",
-      secondaryLabel: "Continue with Apple anyway",
-    };
-  }
-
-  return {
-    title: "Continue with Apple?",
-    body: "If you already have an SFLUV account, go back and sign in with Google or email first, then link Apple in Settings. Otherwise continue to create a new Apple account here.",
-    primaryLabel: "I already have an account",
-    secondaryLabel: "Continue with Apple",
-  };
-}
-
 function mergePreferences(input: unknown): AppPreferences {
   if (!input || typeof input !== "object") {
     return defaultAppPreferences;
@@ -1159,8 +1109,10 @@ function WalletAppShellContent({
   const [walletPane, setWalletPane] = useState<WalletPane>("home");
   const walletPaneSlideDistance = Dimensions.get("window").width;
   const walletPaneTranslateX = useRef(new Animated.Value(0)).current;
+  const walletPaneTranslateXValueRef = useRef(0);
   const previousWalletPaneRef = useRef<WalletPane>("home");
   const walletPaneAnimatingRef = useRef(false);
+  const walletPaneAnimationIDRef = useRef(0);
   const [smartAddress, setSmartAddress] = useState("");
   const [smartBalance, setSmartBalance] = useState("...");
   const [walletTransactions, setWalletTransactions] = useState<AppTransaction[]>([]);
@@ -1197,6 +1149,7 @@ function WalletAppShellContent({
   const [pendingContactAddress, setPendingContactAddress] = useState<string | null>(null);
   const [sendDraft, setSendDraft] = useState<SendDraft | null>(null);
   const [sendReturnTab, setSendReturnTab] = useState<Tab | null>(null);
+  const [walletPaneBackSwipeEnabled, setWalletPaneBackSwipeEnabled] = useState(true);
   const [redeemFlow, setRedeemFlow] = useState<RedeemFlowState | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const walletSurfaceRequestRef = useRef(0);
@@ -1210,38 +1163,55 @@ function WalletAppShellContent({
   const walletTransactionsRef = useRef<AppTransaction[]>(walletTransactions);
   const activityTransactionsRef = useRef<AppTransaction[]>(activityTransactions);
   const walletPaneGestureMaxXRef = useRef(0);
+  const walletPaneGestureActiveRef = useRef(false);
   const walletOverlayPane: OverlayWalletPane | null = walletPane === "home" ? null : walletPane;
 
-  const resetWalletPanePosition = React.useCallback(() => {
-    walletPaneTranslateX.stopAnimation();
-    walletPaneTranslateX.setValue(0);
-    walletPaneAnimatingRef.current = false;
-  }, [walletPaneTranslateX]);
+  const setWalletPaneTranslateX = React.useCallback(
+    (value: number) => {
+      const nextValue = Math.max(0, Math.min(value, walletPaneSlideDistance));
+      walletPaneTranslateXValueRef.current = nextValue;
+      walletPaneTranslateX.setValue(nextValue);
+      return nextValue;
+    },
+    [walletPaneSlideDistance, walletPaneTranslateX],
+  );
 
-  const closeWalletPaneToWallet = React.useCallback(() => {
-    if (walletPane === "home" || walletPaneAnimatingRef.current) {
+  const resetWalletPanePosition = React.useCallback(() => {
+    walletPaneAnimationIDRef.current += 1;
+    walletPaneTranslateX.stopAnimation();
+    setWalletPaneTranslateX(0);
+    walletPaneAnimatingRef.current = false;
+    walletPaneGestureActiveRef.current = false;
+    walletPaneGestureMaxXRef.current = 0;
+  }, [setWalletPaneTranslateX, walletPaneTranslateX]);
+
+  const closeWalletPaneToWallet = React.useCallback((fromValue?: number) => {
+    if (walletPane === "home") {
       return;
     }
 
     const returnTab = walletPane === "send" ? sendReturnTab : null;
-    const runCloseAnimation = (currentValue: number) => {
-      walletPaneTranslateX.setValue(currentValue);
-      Animated.timing(walletPaneTranslateX, {
-        toValue: walletPaneSlideDistance,
-        duration: 220,
-        useNativeDriver: true,
-      }).start(() => {
-        setSendReturnTab(null);
-        setWalletPane("home");
-        setTab(returnTab ?? "wallet");
-        walletPaneTranslateX.setValue(0);
-        walletPaneAnimatingRef.current = false;
-      });
-    };
-
+    const animationID = walletPaneAnimationIDRef.current + 1;
+    walletPaneAnimationIDRef.current = animationID;
+    walletPaneGestureActiveRef.current = false;
+    walletPaneGestureMaxXRef.current = 0;
     walletPaneAnimatingRef.current = true;
-    walletPaneTranslateX.stopAnimation(runCloseAnimation);
-  }, [sendReturnTab, walletPane, walletPaneSlideDistance, walletPaneTranslateX]);
+    setWalletPaneTranslateX(typeof fromValue === "number" ? fromValue : walletPaneTranslateXValueRef.current);
+    Animated.timing(walletPaneTranslateX, {
+      toValue: walletPaneSlideDistance,
+      duration: 220,
+      useNativeDriver: true,
+    }).start(() => {
+      if (walletPaneAnimationIDRef.current !== animationID) {
+        return;
+      }
+      setSendReturnTab(null);
+      setWalletPane("home");
+      setTab(returnTab ?? "wallet");
+      setWalletPaneTranslateX(0);
+      walletPaneAnimatingRef.current = false;
+    });
+  }, [sendReturnTab, setWalletPaneTranslateX, walletPane, walletPaneSlideDistance, walletPaneTranslateX]);
 
   const resetWalletPaneSwipe = React.useCallback(
     (fromValue?: number) => {
@@ -1250,80 +1220,12 @@ function WalletAppShellContent({
         return;
       }
 
-      const runResetAnimation = (currentValue: number) => {
-        walletPaneTranslateX.setValue(Math.max(0, Math.min(currentValue, walletPaneSlideDistance)));
-        walletPaneAnimatingRef.current = true;
-        Animated.spring(walletPaneTranslateX, {
-          toValue: 0,
-          useNativeDriver: true,
-          damping: 22,
-          stiffness: 220,
-          mass: 0.9,
-        }).start(() => {
-          walletPaneTranslateX.setValue(0);
-          walletPaneAnimatingRef.current = false;
-        });
-      };
-
-      if (typeof fromValue === "number") {
-        runResetAnimation(fromValue);
-        return;
-      }
-
-      walletPaneTranslateX.stopAnimation(runResetAnimation);
-    },
-    [resetWalletPanePosition, walletPane, walletPaneSlideDistance, walletPaneTranslateX],
-  );
-
-  const walletPanePanResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_, gesture) =>
-          walletOverlayPane !== null &&
-          !walletPaneAnimatingRef.current &&
-          gesture.x0 <= 28 &&
-          gesture.dx > 10 &&
-          Math.abs(gesture.dx) > Math.abs(gesture.dy),
-        onPanResponderGrant: () => {
-          walletPaneGestureMaxXRef.current = 0;
-        },
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderMove: (_, gesture) => {
-          const currentValue = Math.max(0, Math.min(gesture.dx, walletPaneSlideDistance));
-          walletPaneGestureMaxXRef.current = Math.max(walletPaneGestureMaxXRef.current, currentValue);
-          walletPaneTranslateX.setValue(currentValue);
-        },
-        onPanResponderRelease: (_, gesture) => {
-          const currentValue = Math.max(0, Math.min(gesture.dx, walletPaneSlideDistance));
-          const maxValue = Math.max(walletPaneGestureMaxXRef.current, currentValue);
-          walletPaneGestureMaxXRef.current = 0;
-          if (maxValue >= walletPaneSlideDistance * 0.25 || gesture.vx > 1.05) {
-            closeWalletPaneToWallet();
-            return;
-          }
-          resetWalletPaneSwipe(currentValue);
-        },
-        onPanResponderTerminate: () => {
-          walletPaneTranslateX.stopAnimation((currentValue) => {
-            const maxValue = Math.max(walletPaneGestureMaxXRef.current, currentValue);
-            walletPaneGestureMaxXRef.current = 0;
-            if (maxValue >= walletPaneSlideDistance * 0.25) {
-              closeWalletPaneToWallet();
-              return;
-            }
-            resetWalletPaneSwipe(currentValue);
-          });
-        },
-      }),
-    [closeWalletPaneToWallet, resetWalletPaneSwipe, walletOverlayPane, walletPaneSlideDistance, walletPaneTranslateX],
-  );
-
-  useEffect(() => {
-    const previousWalletPane = previousWalletPaneRef.current;
-    if (walletPane !== "home" && previousWalletPane !== walletPane) {
+      const animationID = walletPaneAnimationIDRef.current + 1;
+      walletPaneAnimationIDRef.current = animationID;
+      walletPaneGestureActiveRef.current = false;
+      walletPaneGestureMaxXRef.current = 0;
       walletPaneAnimatingRef.current = true;
-      walletPaneTranslateX.stopAnimation();
-      walletPaneTranslateX.setValue(walletPaneSlideDistance);
+      setWalletPaneTranslateX(typeof fromValue === "number" ? fromValue : walletPaneTranslateXValueRef.current);
       Animated.spring(walletPaneTranslateX, {
         toValue: 0,
         useNativeDriver: true,
@@ -1331,6 +1233,98 @@ function WalletAppShellContent({
         stiffness: 220,
         mass: 0.9,
       }).start(() => {
+        if (walletPaneAnimationIDRef.current !== animationID) {
+          return;
+        }
+        setWalletPaneTranslateX(0);
+        walletPaneAnimatingRef.current = false;
+      });
+    },
+    [resetWalletPanePosition, setWalletPaneTranslateX, walletPane, walletPaneTranslateX],
+  );
+
+  const finishWalletPaneSwipe = React.useCallback(
+    (currentValue: number, velocityX = 0) => {
+      const clampedValue = setWalletPaneTranslateX(currentValue);
+      const maxValue = Math.max(walletPaneGestureMaxXRef.current, clampedValue);
+      walletPaneGestureActiveRef.current = false;
+      walletPaneGestureMaxXRef.current = 0;
+      if (maxValue >= walletPaneSlideDistance * 0.25 || velocityX > 1.05) {
+        closeWalletPaneToWallet(clampedValue);
+        return;
+      }
+      resetWalletPaneSwipe(clampedValue);
+    },
+    [closeWalletPaneToWallet, resetWalletPaneSwipe, setWalletPaneTranslateX, walletPaneSlideDistance],
+  );
+
+  const walletPanePanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          walletOverlayPane !== null &&
+          walletPaneBackSwipeEnabled &&
+          !walletPaneAnimatingRef.current &&
+          gesture.x0 <= 28 &&
+          gesture.dx > 10 &&
+          Math.abs(gesture.dx) > Math.abs(gesture.dy),
+        onPanResponderGrant: () => {
+          walletPaneAnimationIDRef.current += 1;
+          walletPaneTranslateX.stopAnimation();
+          walletPaneGestureActiveRef.current = true;
+          walletPaneGestureMaxXRef.current = 0;
+        },
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderMove: (_, gesture) => {
+          const currentValue = Math.max(0, Math.min(gesture.dx, walletPaneSlideDistance));
+          walletPaneGestureMaxXRef.current = Math.max(walletPaneGestureMaxXRef.current, currentValue);
+          setWalletPaneTranslateX(currentValue);
+        },
+        onPanResponderRelease: (_, gesture) => {
+          const currentValue = Math.max(0, Math.min(gesture.dx, walletPaneSlideDistance));
+          finishWalletPaneSwipe(currentValue, gesture.vx);
+        },
+        onPanResponderTerminate: () => {
+          finishWalletPaneSwipe(walletPaneTranslateXValueRef.current);
+        },
+        onPanResponderReject: () => {
+          if (walletPaneGestureActiveRef.current) {
+            finishWalletPaneSwipe(walletPaneTranslateXValueRef.current);
+          }
+        },
+        onShouldBlockNativeResponder: () => true,
+      }),
+    [
+      finishWalletPaneSwipe,
+      setWalletPaneTranslateX,
+      walletOverlayPane,
+      walletPaneBackSwipeEnabled,
+      walletPaneSlideDistance,
+      walletPaneTranslateX,
+    ],
+  );
+
+  useEffect(() => {
+    const previousWalletPane = previousWalletPaneRef.current;
+    if (walletPane !== "home" && previousWalletPane !== walletPane) {
+      const animationID = walletPaneAnimationIDRef.current + 1;
+      walletPaneAnimationIDRef.current = animationID;
+      walletPaneAnimatingRef.current = true;
+      walletPaneGestureActiveRef.current = false;
+      walletPaneGestureMaxXRef.current = 0;
+      walletPaneTranslateX.stopAnimation();
+      setWalletPaneTranslateX(walletPaneSlideDistance);
+      Animated.spring(walletPaneTranslateX, {
+        toValue: 0,
+        useNativeDriver: true,
+        damping: 22,
+        stiffness: 220,
+        mass: 0.9,
+      }).start(() => {
+        if (walletPaneAnimationIDRef.current !== animationID) {
+          return;
+        }
+        setWalletPaneTranslateX(0);
         walletPaneAnimatingRef.current = false;
       });
     }
@@ -1338,7 +1332,14 @@ function WalletAppShellContent({
       resetWalletPanePosition();
     }
     previousWalletPaneRef.current = walletPane;
-  }, [resetWalletPanePosition, walletPane, walletPaneSlideDistance, walletPaneTranslateX]);
+  }, [resetWalletPanePosition, setWalletPaneTranslateX, walletPane, walletPaneSlideDistance, walletPaneTranslateX]);
+
+  useEffect(() => {
+    if (walletPane !== "send" && !walletPaneBackSwipeEnabled) {
+      setWalletPaneBackSwipeEnabled(true);
+    }
+  }, [walletPane, walletPaneBackSwipeEnabled]);
+
   const merchantLabelsRef = useRef<Record<string, string>>(merchantLabelsByAddress);
   const walletCandidates = runtime.discovery?.candidates ?? [];
   const hiddenWalletSet = useMemo(
@@ -2566,6 +2567,7 @@ function WalletAppShellContent({
         onPrepareSend={handleSend}
         onCompleteFlow={completeSendFlow}
         onExitFlow={finishSendFlow}
+        onNavigationSwipeEnabledChange={setWalletPaneBackSwipeEnabled}
         draft={sendDraft}
         onDraftApplied={() => setSendDraft(null)}
         onOpenUniversalLink={(link) => {
@@ -2840,10 +2842,7 @@ function WalletAppShellContent({
               tint={isDark ? "dark" : "light"}
               style={styles.bottomDockShellBackdrop}
             />
-            <View pointerEvents="none" style={styles.bottomDockLiquidLayer}>
-              <View style={styles.bottomDockShellGlowLarge} />
-              <View style={styles.bottomDockShellGlowSmall} />
-            </View>
+            <View pointerEvents="none" style={styles.bottomDockLiquidLayer} />
             <View style={styles.bottomDock}>
               <View pointerEvents="none" style={styles.bottomDockGlassLayer} />
               <View pointerEvents="none" style={styles.bottomDockGlassSheen} />
@@ -3172,14 +3171,6 @@ function PrivyWalletApp({
     providerEmail?: string;
     isPrivateRelay?: boolean;
   } | null>(null);
-  const [appleRecovery, setAppleRecovery] = useState<AppAppleRecoveryResponse | null>(null);
-  const [appleRecoveryState, setAppleRecoveryState] = useState<
-    "idle" | "checking" | "ready"
-  >("idle");
-  const [appleRecoveryAction, setAppleRecoveryAction] =
-    useState<AppleAccountPromptAction>("idle");
-  const [appleRecoveryError, setAppleRecoveryError] = useState<string | null>(null);
-  const [showAppleLoginInfo, setShowAppleLoginInfo] = useState(false);
   const [appleLinkMessage, setAppleLinkMessage] = useState<string | null>(null);
   const [appleUnlinkBusy, setAppleUnlinkBusy] = useState(false);
   const [googleMessage, setGoogleMessage] = useState<string | null>(null);
@@ -3355,10 +3346,6 @@ function PrivyWalletApp({
       setPolicyError(null);
       setAppleUserInfoHint(null);
       setPendingAppleTokens(null);
-      setAppleRecovery(null);
-      setAppleRecoveryState("idle");
-      setAppleRecoveryAction("idle");
-      setAppleRecoveryError(null);
       setAppleLinkMessage(null);
       manualWalletSelectionRef.current = false;
       bootstrappedIdentityRef.current = null;
@@ -3370,9 +3357,6 @@ function PrivyWalletApp({
     if (policyStatus) {
       return;
     }
-    if (appleRecoveryState !== "ready" || appleRecovery) {
-      return;
-    }
     if (wallets.length > 0 || creatingWalletRef.current) {
       return;
     }
@@ -3381,6 +3365,25 @@ function PrivyWalletApp({
     creatingWalletRef.current = true;
     const createEmbeddedWallet = async () => {
       try {
+        try {
+          const status = await withTimeout(
+            backendClient.getDeleteAccountStatus(),
+            BACKEND_BOOTSTRAP_TIMEOUT_MS,
+            "check your account status",
+          );
+          if (cancelled) {
+            return;
+          }
+          if (status && status.status !== "active") {
+            showDeletedAccountGate(status);
+            return;
+          }
+        } catch (statusError) {
+          if (cancelled) {
+            return;
+          }
+          console.warn("Unable to load deleted-account status", statusError);
+        }
         await withTimeout(
           backendClient.ensureUser(),
           BACKEND_BOOTSTRAP_TIMEOUT_MS,
@@ -3412,7 +3415,7 @@ function PrivyWalletApp({
     return () => {
       cancelled = true;
     };
-  }, [appleRecovery, appleRecoveryState, backendClient, create, deletedAccountStatus, isReady, policyStatus, user, wallets.length]);
+  }, [backendClient, create, deletedAccountStatus, isReady, policyStatus, user, wallets.length]);
 
   useEffect(() => {
     if (!isReady || !user?.id) {
@@ -3539,110 +3542,13 @@ function PrivyWalletApp({
   }, [appleUserInfoHint?.email, backendClient, linkedAppleAccount?.email, linkedAppleAccount?.subject, pendingAppleTokens, user?.id]);
 
   useEffect(() => {
-    if (!isReady || !user || deletedAccountStatus || appleRecoveryState !== "idle") {
-      return;
-    }
-
-    let cancelled = false;
-    const hasAppleRecoveryIdentity = Boolean(
-      linkedAppleAccount?.subject || linkedAppleAccount?.email || appleUserInfoHint?.email,
-    );
-    const resolveAppleRecovery = async () => {
-      setAppleRecoveryState("checking");
-      setAppleRecoveryError(null);
-      try {
-        const status = await withTimeout(
-          backendClient.getDeleteAccountStatus(),
-          BACKEND_BOOTSTRAP_TIMEOUT_MS,
-          "check your account status",
-        );
-        if (cancelled) {
-          return;
-        }
-        if (status && status.status !== "active") {
-          showDeletedAccountGate(status);
-          setAppleRecoveryState("ready");
-          return;
-        }
-
-        if (!hasAppleRecoveryIdentity) {
-          setAppleRecovery(null);
-          setAppleRecoveryState("ready");
-          return;
-        }
-
-        const recovery = await withTimeout(
-          backendClient.resolveAppleRecovery({
-          providerSubject: linkedAppleAccount?.subject,
-          providerEmail: linkedAppleAccount?.email || appleUserInfoHint?.email || undefined,
-          isPrivateRelay: Boolean(
-            (linkedAppleAccount?.email || appleUserInfoHint?.email || "")
-              .toLowerCase()
-              .endsWith("@privaterelay.appleid.com"),
-          ),
-          }),
-          BACKEND_BOOTSTRAP_TIMEOUT_MS,
-          "check Apple account recovery",
-        );
-        if (cancelled) {
-          return;
-        }
-
-        if (recovery.resolution === "current_account_exists" || recovery.resolution === "no_apple_account") {
-          setAppleRecovery(null);
-        } else {
-          setAppleRecovery(recovery);
-        }
-        setAppleRecoveryState("ready");
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-        if (linkedAppleAccount || appleUserInfoHint?.email) {
-          setAppleRecovery({
-            currentUserId: user.id,
-            currentUserExists: false,
-            appleLinked: true,
-            appleEmail: linkedAppleAccount?.email || appleUserInfoHint?.email || undefined,
-            isPrivateRelay: Boolean(
-              (linkedAppleAccount?.email || appleUserInfoHint?.email || "")
-                .toLowerCase()
-                .endsWith("@privaterelay.appleid.com"),
-            ),
-            resolution: "no_match",
-          });
-        } else {
-          setAppleRecovery(null);
-        }
-        setAppleRecoveryState("ready");
-        console.warn("Unable to resolve Apple recovery state", error);
-      }
-    };
-
-    void resolveAppleRecovery();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    appleUserInfoHint?.email,
-    backendClient,
-    deletedAccountStatus,
-    isReady,
-    linkedAppleAccount?.email,
-    linkedAppleAccount?.subject,
-    user?.id,
-  ]);
-
-  useEffect(() => {
     if (
       !isReady ||
       !user ||
       !embeddedWallet ||
       !walletPreferencesReady ||
       deletedAccountStatus ||
-      policyStatus ||
-      appleRecoveryState !== "ready" ||
-      Boolean(appleRecovery)
+      policyStatus
     ) {
       return;
     }
@@ -3806,8 +3712,6 @@ function PrivyWalletApp({
       cancelled = true;
     };
   }, [
-    appleRecovery,
-    appleRecoveryState,
     backendClient,
     deletedAccountStatus,
     embeddedWallet,
@@ -3850,15 +3754,11 @@ function PrivyWalletApp({
   const authLoading = oauthLoading || emailLoading;
   const selectedCandidateKey = runtime.discovery?.selectedCandidateKey;
   const walletInitializingMessage =
-    appleRecoveryState === "checking"
-      ? "Checking your account status..."
-      : appleRecoveryState !== "ready"
-        ? "Preparing account recovery checks..."
-        : !walletPreferencesReady
-          ? "Loading wallet preferences..."
-          : !embeddedWallet
-            ? "Creating your Privy wallet..."
-            : runtime.loadingMessage || (runtime.loading ? "Preparing your wallet..." : null);
+    !walletPreferencesReady
+      ? "Loading wallet preferences..."
+      : !embeddedWallet
+        ? "Creating your Privy wallet..."
+        : runtime.loadingMessage || (runtime.loading ? "Preparing your wallet..." : null);
   const walletInitializing =
     Boolean(user) &&
     !runtime.error &&
@@ -3900,7 +3800,7 @@ function PrivyWalletApp({
     if (authLoading) {
       return;
     }
-    setShowAppleLoginInfo(true);
+    void startAppleLogin();
   };
 
   const handleSendEmailCode = async () => {
@@ -4002,27 +3902,6 @@ function PrivyWalletApp({
       await logout();
     } finally {
       setDeletedAccountAction("idle");
-    }
-  };
-
-  const handleContinueWithNewAppleAccount = () => {
-    setAppleRecoveryAction("continuing");
-    setAppleRecoveryError(null);
-    setAppleRecovery(null);
-    setAppleRecoveryState("ready");
-    setAppleRecoveryAction("idle");
-  };
-
-  const handleReturnFromAppleRecovery = async () => {
-    setAppleRecoveryAction("returning");
-    setAppleRecoveryError(null);
-    try {
-      await logout();
-      setLoginNotice("Sign in with Google or email, then link Apple from Settings.");
-    } catch (error) {
-      setAppleRecoveryError((error as Error)?.message || "Unable to sign out right now.");
-    } finally {
-      setAppleRecoveryAction("idle");
     }
   };
 
@@ -4179,20 +4058,6 @@ function PrivyWalletApp({
         onReturnToLogin={() => {
           void handlePolicyReturnToLogin();
         }}
-      />
-    );
-  }
-
-  if (user && appleRecovery) {
-    return (
-      <AppleRecoveryPromptScreen
-        recovery={appleRecovery}
-        action={appleRecoveryAction}
-        error={appleRecoveryError}
-        onUseExistingAccount={() => {
-          void handleReturnFromAppleRecovery();
-        }}
-        onContinueWithApple={handleContinueWithNewAppleAccount}
       />
     );
   }
@@ -4364,57 +4229,6 @@ function PrivyWalletApp({
           </View>
           {runtime.error ? <Text style={styles.errorText}>{runtime.error}</Text> : null}
         </View>
-        <Modal
-          visible={showAppleLoginInfo}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowAppleLoginInfo(false)}
-        >
-          <View style={styles.loginInfoOverlay}>
-            <View style={styles.loginInfoCard}>
-              <Text style={styles.loginInfoTitle}>Before you continue with Apple</Text>
-              <Text style={styles.loginInfoBody}>
-                Apple can hide your real email behind a private relay address. If that happens during
-                a new sign-in, SFLuv may create a separate account that cannot be auto-linked to an
-                existing Google or email account.
-              </Text>
-              <View style={styles.loginInfoNote}>
-                <Text style={styles.loginInfoNoteText}>
-                  If you already have an SFLuv account, use Google or email first, then link Apple
-                  from Settings.
-                </Text>
-              </View>
-              <View style={styles.loginInfoNote}>
-                <Text style={styles.loginInfoNoteText}>
-                  If Apple no longer shows the email choice, reset it in iPhone Settings &gt; your
-                  name &gt; Sign-In &amp; Security &gt; Sign in with Apple &gt; SFLuv &gt; Stop Using Apple ID,
-                  then try again.
-                </Text>
-              </View>
-              <View style={styles.loginInfoActionStack}>
-                <Pressable
-                  style={[styles.loginInfoPrimaryButton, authLoading ? styles.loginButtonDisabled : undefined]}
-                  disabled={authLoading}
-                  onPress={() => {
-                    setShowAppleLoginInfo(false);
-                    void startAppleLogin();
-                  }}
-                >
-                  <Text style={styles.loginInfoPrimaryButtonText}>
-                    {oauthLoading ? "Connecting..." : "Continue with Apple"}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.loginInfoSecondaryButton, authLoading ? styles.loginButtonDisabled : undefined]}
-                  disabled={authLoading}
-                  onPress={() => setShowAppleLoginInfo(false)}
-                >
-                  <Text style={styles.loginInfoSecondaryButtonText}>Use email or Google instead</Text>
-                </Pressable>
-              </View>
-            </View>
-          </View>
-        </Modal>
       </SafeAreaView>
     );
   }
@@ -4670,64 +4484,6 @@ function PolicyAcceptanceScreen({
   );
 }
 
-function AppleRecoveryPromptScreen({
-  recovery,
-  action,
-  error,
-  onUseExistingAccount,
-  onContinueWithApple,
-}: {
-  recovery: AppAppleRecoveryResponse;
-  action: AppleAccountPromptAction;
-  error: string | null;
-  onUseExistingAccount: () => void;
-  onContinueWithApple: () => void;
-}) {
-  const { palette, shadows, isDark } = useAppTheme();
-  const styles = useMemo(
-    () => createStyles(palette, shadows, isDark),
-    [palette, shadows, isDark],
-  );
-  const prompt = describeAppleRecoveryPrompt(recovery);
-  const busy = action !== "idle";
-
-  return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.loginWrap}>
-        <Text style={styles.loginBrand}>SFLUV</Text>
-        <Text style={styles.loginTitle}>{prompt.title}</Text>
-        <Text style={styles.loginBody}>{prompt.body}</Text>
-        {recovery.suggestedExistingAccount?.primaryWalletAddress ? (
-          <View style={styles.deletedAccountNotice}>
-            <Text style={styles.deletedAccountNoticeText}>
-              Existing wallet: {shortAddress(recovery.suggestedExistingAccount.primaryWalletAddress)}
-            </Text>
-          </View>
-        ) : null}
-        <Pressable
-          style={[styles.loginButton, busy ? styles.loginButtonDisabled : undefined]}
-          disabled={busy}
-          onPress={onUseExistingAccount}
-        >
-          <Text style={styles.loginButtonText}>
-            {action === "returning" ? "Returning..." : prompt.primaryLabel}
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.loginSecondaryButton, busy ? styles.loginButtonDisabled : undefined]}
-          disabled={busy}
-          onPress={onContinueWithApple}
-        >
-          <Text style={styles.loginSecondaryButtonText}>
-            {action === "continuing" ? "Continuing..." : prompt.secondaryLabel}
-          </Text>
-        </Pressable>
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
-      </View>
-    </SafeAreaView>
-  );
-}
-
 function MissingPrivyConfigScreen() {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
@@ -4929,12 +4685,12 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     position: "absolute",
     left: 0,
     right: 0,
-    bottom: 0,
+    bottom: Platform.OS === "ios" ? -spacing.xl : 0,
     zIndex: 20,
     elevation: 20,
     paddingHorizontal: spacing.lg,
     paddingTop: Platform.OS === "android" ? spacing.md : spacing.sm,
-    paddingBottom: Platform.OS === "android" ? spacing.sm : 6,
+    paddingBottom: Platform.OS === "android" ? spacing.sm : spacing.xl + 6,
     backgroundColor: "transparent",
     overflow: "hidden",
   },
@@ -4946,24 +4702,6 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     backgroundColor: isDark ? "rgba(16,22,27,0.22)" : "rgba(255,255,255,0.26)",
     borderTopWidth: 1,
     borderTopColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.64)",
-  },
-  bottomDockShellGlowLarge: {
-    position: "absolute",
-    top: -16,
-    left: spacing.lg,
-    right: spacing.lg,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.52)",
-  },
-  bottomDockShellGlowSmall: {
-    position: "absolute",
-    left: spacing.lg,
-    right: spacing.lg,
-    bottom: -20,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: isDark ? "rgba(239,109,102,0.10)" : "rgba(239,109,102,0.12)",
   },
   bottomDock: {
     position: "relative",
@@ -5056,78 +4794,6 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   loginPolicyLinkDivider: {
     color: palette.textMuted,
     fontSize: 12,
-  },
-  loginInfoOverlay: {
-    flex: 1,
-    backgroundColor: palette.overlay,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: spacing.lg,
-  },
-  loginInfoCard: {
-    width: "100%",
-    maxWidth: 360,
-    backgroundColor: palette.surface,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: palette.border,
-    padding: spacing.lg,
-    gap: spacing.md,
-    ...shadows.card,
-  },
-  loginInfoTitle: {
-    color: palette.primaryStrong,
-    fontSize: 24,
-    fontWeight: "900",
-    lineHeight: 28,
-  },
-  loginInfoBody: {
-    color: palette.textMuted,
-    lineHeight: 22,
-  },
-  loginInfoNote: {
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: palette.border,
-    backgroundColor: palette.surfaceStrong,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  loginInfoNoteText: {
-    color: palette.text,
-    lineHeight: 21,
-    fontWeight: "600",
-  },
-  loginInfoActionStack: {
-    gap: spacing.sm,
-  },
-  loginInfoPrimaryButton: {
-    minHeight: 52,
-    borderRadius: radii.pill,
-    backgroundColor: "#111111",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: spacing.lg,
-  },
-  loginInfoPrimaryButtonText: {
-    color: palette.white,
-    fontWeight: "900",
-    fontSize: 16,
-  },
-  loginInfoSecondaryButton: {
-    minHeight: 52,
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: palette.border,
-    backgroundColor: palette.surface,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: spacing.lg,
-  },
-  loginInfoSecondaryButtonText: {
-    color: palette.primaryStrong,
-    fontWeight: "800",
-    fontSize: 15,
   },
   deletedAccountNotice: {
     borderRadius: radii.md,

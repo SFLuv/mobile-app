@@ -442,30 +442,6 @@ export interface AppAccountDeletionStatusResponse {
   purgeEnabledBy?: string;
 }
 
-export type AppAppleRecoveryResolution =
-  | "current_account_exists"
-  | "recovery_suggested"
-  | "no_match"
-  | "ambiguous_match"
-  | "no_apple_account";
-
-export interface AppAppleRecoverySuggestedAccount {
-  userId: string;
-  contactName?: string;
-  verifiedEmail?: string;
-  primaryWalletAddress?: string;
-}
-
-export interface AppAppleRecoveryResponse {
-  currentUserId: string;
-  currentUserExists: boolean;
-  appleLinked: boolean;
-  appleEmail?: string;
-  isPrivateRelay: boolean;
-  resolution: AppAppleRecoveryResolution;
-  suggestedExistingAccount?: AppAppleRecoverySuggestedAccount;
-}
-
 export interface MerchantPlaceCandidate {
   googleId: string;
   name: string;
