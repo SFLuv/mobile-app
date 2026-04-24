@@ -3596,8 +3596,8 @@ function createStyles(
       flexShrink: 0,
     },
     selectorButton: {
-      flex: 1,
-      minWidth: 0,
+      maxWidth: "62%",
+      flexShrink: 1,
       flexDirection: "row",
       alignItems: "center",
       gap: spacing.xs,
