@@ -2,9 +2,12 @@ import "./src/polyfills";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   AppState,
   Alert,
+  Dimensions,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   SafeAreaView,
@@ -142,6 +145,7 @@ type PushSyncState = {
 
 type Tab = "wallet" | "activity" | "improver" | "map" | "contacts" | "settings";
 type WalletPane = "home" | "send" | "receive";
+type OverlayWalletPane = Exclude<WalletPane, "home">;
 
 const PREFERENCES_STORAGE_KEY = "sfluv-wallet:preferences";
 const PUSH_TOKEN_STORAGE_KEY = "sfluv-wallet:push-token";
@@ -1152,6 +1156,10 @@ function WalletAppShellContent({
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const [tab, setTab] = useState<Tab>("wallet");
   const [walletPane, setWalletPane] = useState<WalletPane>("home");
+  const walletPaneSlideDistance = Dimensions.get("window").width;
+  const walletPaneTranslateX = useRef(new Animated.Value(0)).current;
+  const previousWalletPaneRef = useRef<WalletPane>("home");
+  const walletPaneAnimatingRef = useRef(false);
   const [smartAddress, setSmartAddress] = useState("");
   const [smartBalance, setSmartBalance] = useState("...");
   const [walletTransactions, setWalletTransactions] = useState<AppTransaction[]>([]);
@@ -1200,6 +1208,97 @@ function WalletAppShellContent({
   const handledPendingLinkIdRef = useRef<number | null>(null);
   const walletTransactionsRef = useRef<AppTransaction[]>(walletTransactions);
   const activityTransactionsRef = useRef<AppTransaction[]>(activityTransactions);
+  const walletOverlayPane: OverlayWalletPane | null = walletPane === "home" ? null : walletPane;
+
+  const resetWalletPanePosition = React.useCallback(() => {
+    walletPaneTranslateX.stopAnimation();
+    walletPaneTranslateX.setValue(0);
+    walletPaneAnimatingRef.current = false;
+  }, [walletPaneTranslateX]);
+
+  const closeWalletPaneToWallet = React.useCallback(() => {
+    if (walletPane === "home" || walletPaneAnimatingRef.current) {
+      return;
+    }
+
+    walletPaneAnimatingRef.current = true;
+    walletPaneTranslateX.stopAnimation((currentValue) => {
+      walletPaneTranslateX.setValue(currentValue);
+      Animated.timing(walletPaneTranslateX, {
+        toValue: walletPaneSlideDistance,
+        duration: 220,
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (finished) {
+          setSendReturnTab(null);
+          setWalletPane("home");
+          setTab("wallet");
+          walletPaneTranslateX.setValue(0);
+        }
+        walletPaneAnimatingRef.current = false;
+      });
+    });
+  }, [walletPane, walletPaneSlideDistance, walletPaneTranslateX]);
+
+  const walletPanePanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          walletOverlayPane !== null &&
+          !walletPaneAnimatingRef.current &&
+          gesture.x0 <= 28 &&
+          gesture.dx > 10 &&
+          Math.abs(gesture.dx) > Math.abs(gesture.dy),
+        onPanResponderMove: (_, gesture) => {
+          walletPaneTranslateX.setValue(Math.max(0, Math.min(gesture.dx, walletPaneSlideDistance)));
+        },
+        onPanResponderRelease: (_, gesture) => {
+          if (gesture.dx > walletPaneSlideDistance * 0.22 || gesture.vx > 1.05) {
+            closeWalletPaneToWallet();
+            return;
+          }
+          Animated.spring(walletPaneTranslateX, {
+            toValue: 0,
+            useNativeDriver: true,
+            damping: 22,
+            stiffness: 220,
+            mass: 0.9,
+          }).start();
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(walletPaneTranslateX, {
+            toValue: 0,
+            useNativeDriver: true,
+            damping: 22,
+            stiffness: 220,
+            mass: 0.9,
+          }).start();
+        },
+      }),
+    [closeWalletPaneToWallet, walletOverlayPane, walletPaneSlideDistance, walletPaneTranslateX],
+  );
+
+  useEffect(() => {
+    const previousWalletPane = previousWalletPaneRef.current;
+    if (walletPane !== "home" && previousWalletPane !== walletPane) {
+      walletPaneAnimatingRef.current = true;
+      walletPaneTranslateX.stopAnimation();
+      walletPaneTranslateX.setValue(walletPaneSlideDistance);
+      Animated.spring(walletPaneTranslateX, {
+        toValue: 0,
+        useNativeDriver: true,
+        damping: 22,
+        stiffness: 220,
+        mass: 0.9,
+      }).start(() => {
+        walletPaneAnimatingRef.current = false;
+      });
+    }
+    if (walletPane === "home") {
+      resetWalletPanePosition();
+    }
+    previousWalletPaneRef.current = walletPane;
+  }, [resetWalletPanePosition, walletPane, walletPaneSlideDistance, walletPaneTranslateX]);
   const merchantLabelsRef = useRef<Record<string, string>>(merchantLabelsByAddress);
   const walletCandidates = runtime.discovery?.candidates ?? [];
   const hiddenWalletSet = useMemo(
@@ -2378,6 +2477,93 @@ function WalletAppShellContent({
   const showWalletPaneBack = tab === "wallet" && walletPane !== "home";
   const showBlockingWalletState = runtime.loading && !runtime.service;
   const showStandardChrome = !(tab === "wallet" && walletPane === "send");
+  const walletHomeContent = (
+    <WalletHomeScreen
+      balance={smartBalance === "..." ? smartBalance : formatDisplayBalance(smartBalance)}
+      smartAddress={smartAddress}
+      ownerBadge={ownerBadge}
+      selectedWalletLabel={selectedWalletLabel}
+      recentTransactions={walletTransactions}
+      transactionsLoaded={walletTransactionsLoaded}
+      contacts={contacts}
+      merchants={locations}
+      merchantLabels={merchantLabelsByAddress}
+      activeAddress={smartAddress}
+      refreshing={refreshingHome}
+      onRefresh={async () => {
+        setRefreshingHome(true);
+        try {
+          await refreshEverything();
+        } finally {
+          setRefreshingHome(false);
+        }
+      }}
+      onOpenSend={() => {
+        setWalletPane("send");
+      }}
+      onOpenReceive={() => {
+        setWalletPane("receive");
+      }}
+      onOpenActivity={() => {
+        setTab("activity");
+      }}
+      onOpenWalletChooser={() => {
+        setShowWalletChooser(true);
+      }}
+      showWalletChooser={canChooseWallet}
+    />
+  );
+  const walletOverlayContent =
+    walletOverlayPane === "send" ? (
+      <SendScreen
+        contacts={contacts}
+        merchants={locations}
+        availableBalance={smartBalance}
+        backendClient={backendClient}
+        hapticsEnabled={preferences.hapticsEnabled}
+        defaultEntryMode={preferences.defaultSendEntryMode}
+        onPrepareSend={handleSend}
+        onCompleteFlow={completeSendFlow}
+        onExitFlow={finishSendFlow}
+        draft={sendDraft}
+        onDraftApplied={() => setSendDraft(null)}
+        onOpenUniversalLink={(link) => {
+          if (link.type === "redeem") {
+            openRedeemFlowForCode(link.code);
+            return;
+          }
+          if (link.type === "addcontact") {
+            setPendingContactAddress(link.address);
+            setTab("contacts");
+            return;
+          }
+          openSendDraft({
+            recipient: link.address,
+            amount: link.type === "request" ? link.amount : undefined,
+            memo: link.type === "request" ? link.memo : undefined,
+          });
+        }}
+      />
+    ) : walletOverlayPane === "receive" ? (
+      <ReceiveScreen
+        accountAddress={smartAddress || runtime.discovery?.ownerAddress || ethers.constants.AddressZero}
+        onRedeemCodeScanned={openRedeemFlowForCode}
+      />
+    ) : null;
+  const walletTabContent =
+    walletOverlayPane !== null ? (
+      <View style={styles.walletPaneStack}>
+        <View style={styles.walletPaneBase}>{walletHomeContent}</View>
+        <Animated.View
+          style={[styles.walletPaneOverlay, { transform: [{ translateX: walletPaneTranslateX }] }]}
+          {...walletPanePanResponder.panHandlers}
+        >
+          {walletOverlayContent}
+        </Animated.View>
+      </View>
+    ) : (
+      walletHomeContent
+    );
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -2411,6 +2597,10 @@ function WalletAppShellContent({
               <Pressable
                 style={styles.iconButton}
                 onPress={() => {
+                  if (walletPane === "receive") {
+                    closeWalletPaneToWallet();
+                    return;
+                  }
                   if (walletPane === "send" && sendReturnTab) {
                     setSendReturnTab(null);
                     setWalletPane("home");
@@ -2450,77 +2640,7 @@ function WalletAppShellContent({
               <Text style={styles.errorText}>{runtime.error}</Text>
             </View>
           ) : tab === "wallet" ? (
-            walletPane === "send" ? (
-              <SendScreen
-                contacts={contacts}
-                merchants={locations}
-                availableBalance={smartBalance}
-                backendClient={backendClient}
-                hapticsEnabled={preferences.hapticsEnabled}
-                defaultEntryMode={preferences.defaultSendEntryMode}
-                onPrepareSend={handleSend}
-                onCompleteFlow={completeSendFlow}
-                onExitFlow={finishSendFlow}
-                draft={sendDraft}
-                onDraftApplied={() => setSendDraft(null)}
-                onOpenUniversalLink={(link) => {
-                  if (link.type === "redeem") {
-                    openRedeemFlowForCode(link.code);
-                    return;
-                  }
-                  if (link.type === "addcontact") {
-                    setPendingContactAddress(link.address);
-                    setTab("contacts");
-                    return;
-                  }
-                  openSendDraft({
-                    recipient: link.address,
-                    amount: link.type === "request" ? link.amount : undefined,
-                    memo: link.type === "request" ? link.memo : undefined,
-                  });
-                }}
-              />
-            ) : walletPane === "receive" ? (
-              <ReceiveScreen
-                accountAddress={smartAddress || runtime.discovery?.ownerAddress || ethers.constants.AddressZero}
-                onRedeemCodeScanned={openRedeemFlowForCode}
-              />
-            ) : (
-              <WalletHomeScreen
-                balance={smartBalance === "..." ? smartBalance : formatDisplayBalance(smartBalance)}
-                smartAddress={smartAddress}
-                ownerBadge={ownerBadge}
-                selectedWalletLabel={selectedWalletLabel}
-                recentTransactions={walletTransactions}
-                transactionsLoaded={walletTransactionsLoaded}
-                contacts={contacts}
-                merchants={locations}
-                merchantLabels={merchantLabelsByAddress}
-                activeAddress={smartAddress}
-                refreshing={refreshingHome}
-                onRefresh={async () => {
-                  setRefreshingHome(true);
-                  try {
-                    await refreshEverything();
-                  } finally {
-                    setRefreshingHome(false);
-                  }
-                }}
-                onOpenSend={() => {
-                  setWalletPane("send");
-                }}
-                onOpenReceive={() => {
-                  setWalletPane("receive");
-                }}
-                onOpenActivity={() => {
-                  setTab("activity");
-                }}
-                onOpenWalletChooser={() => {
-                  setShowWalletChooser(true);
-                }}
-                showWalletChooser={canChooseWallet}
-              />
-            )
+            walletTabContent
           ) : tab === "activity" ? (
             <ActivityScreen
               transactions={activityTransactions}
@@ -2672,73 +2792,81 @@ function WalletAppShellContent({
         </View>
 
         {showStandardChrome ? (
-          <View style={styles.bottomDock}>
-            <BottomTab
-              label="Wallet"
-              icon={tab === "wallet" ? "wallet" : "wallet-outline"}
-              active={tab === "wallet"}
-              onPress={() => {
-                setTab("wallet");
-                setWalletPane("home");
-              }}
-            />
-            {hasImproverTab ? (
-              <>
-                <BottomTab
-                  label="Improver"
-                  icon={tab === "improver" ? "construct" : "construct-outline"}
-                  active={tab === "improver"}
-                  onPress={() => {
-                    setTab("improver");
-                  }}
-                />
-                <BottomTab
-                  label="Map"
-                  icon={tab === "map" ? "map" : "map-outline"}
-                  active={tab === "map"}
-                  onPress={() => {
-                    setMerchantMapViewMode("map");
-                    setTab("map");
-                  }}
-                />
-                <BottomTab
-                  label="More"
-                  icon={moreTabActive ? "ellipsis-horizontal-circle" : "ellipsis-horizontal-circle-outline"}
-                  active={moreTabActive}
-                  onPress={() => {
-                    setShowMoreMenu(true);
-                  }}
-                />
-              </>
-            ) : (
-              <>
-                <BottomTab
-                  label="Activity"
-                  icon={tab === "activity" ? "pulse" : "pulse-outline"}
-                  active={tab === "activity"}
-                  onPress={() => {
-                    setTab("activity");
-                  }}
-                />
-                <BottomTab
-                  label="Map"
-                  icon={tab === "map" ? "map" : "map-outline"}
-                  active={tab === "map"}
-                  onPress={() => {
-                    setMerchantMapViewMode("map");
-                    setTab("map");
-                  }}
-                />
-                <BottomTab
-                  label="Contacts"
-                  icon={tab === "contacts" ? "people" : "people-outline"}
-                  active={tab === "contacts"}
-                  onPress={() => {
-                    setTab("contacts");
-                  }}
-                />
-              </>
-            )}
+          <View style={styles.bottomDockShell}>
+            <View pointerEvents="none" style={styles.bottomDockShellBackdrop}>
+              <View style={styles.bottomDockShellGlowLarge} />
+              <View style={styles.bottomDockShellGlowSmall} />
+            </View>
+            <View style={styles.bottomDock}>
+              <View pointerEvents="none" style={styles.bottomDockGlassLayer} />
+              <View pointerEvents="none" style={styles.bottomDockGlassSheen} />
+              <BottomTab
+                label="Wallet"
+                icon={tab === "wallet" ? "wallet" : "wallet-outline"}
+                active={tab === "wallet"}
+                onPress={() => {
+                  setTab("wallet");
+                  setWalletPane("home");
+                }}
+              />
+              {hasImproverTab ? (
+                <>
+                  <BottomTab
+                    label="Improver"
+                    icon={tab === "improver" ? "construct" : "construct-outline"}
+                    active={tab === "improver"}
+                    onPress={() => {
+                      setTab("improver");
+                    }}
+                  />
+                  <BottomTab
+                    label="Map"
+                    icon={tab === "map" ? "map" : "map-outline"}
+                    active={tab === "map"}
+                    onPress={() => {
+                      setMerchantMapViewMode("map");
+                      setTab("map");
+                    }}
+                  />
+                  <BottomTab
+                    label="More"
+                    icon={moreTabActive ? "ellipsis-horizontal-circle" : "ellipsis-horizontal-circle-outline"}
+                    active={moreTabActive}
+                    onPress={() => {
+                      setShowMoreMenu(true);
+                    }}
+                  />
+                </>
+              ) : (
+                <>
+                  <BottomTab
+                    label="Activity"
+                    icon={tab === "activity" ? "pulse" : "pulse-outline"}
+                    active={tab === "activity"}
+                    onPress={() => {
+                      setTab("activity");
+                    }}
+                  />
+                  <BottomTab
+                    label="Map"
+                    icon={tab === "map" ? "map" : "map-outline"}
+                    active={tab === "map"}
+                    onPress={() => {
+                      setMerchantMapViewMode("map");
+                      setTab("map");
+                    }}
+                  />
+                  <BottomTab
+                    label="Contacts"
+                    icon={tab === "contacts" ? "people" : "people-outline"}
+                    active={tab === "contacts"}
+                    onPress={() => {
+                      setTab("contacts");
+                    }}
+                  />
+                </>
+              )}
+            </View>
           </View>
         ) : null}
 
@@ -4687,11 +4815,21 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   content: {
     flex: 1,
   },
+  walletPaneStack: {
+    flex: 1,
+  },
+  walletPaneBase: {
+    flex: 1,
+  },
+  walletPaneOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: palette.background,
+  },
   toastCard: {
     position: "absolute",
     left: spacing.lg,
     right: spacing.lg,
-    bottom: 92,
+    bottom: Platform.OS === "android" ? 112 : 100,
     borderRadius: radii.md,
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -4731,18 +4869,61 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     textAlign: "center",
     lineHeight: 20,
   },
+  bottomDockShell: {
+    position: "relative",
+    paddingHorizontal: spacing.lg,
+    paddingTop: Platform.OS === "android" ? spacing.md : spacing.sm,
+    paddingBottom: Platform.OS === "android" ? spacing.md : spacing.sm,
+    backgroundColor: isDark ? "rgba(16,22,27,0.32)" : "rgba(243,239,234,0.22)",
+    overflow: "hidden",
+  },
+  bottomDockShellBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  bottomDockShellGlowLarge: {
+    position: "absolute",
+    top: -18,
+    left: spacing.xl,
+    width: 180,
+    height: 74,
+    borderRadius: 37,
+    backgroundColor: isDark ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.46)",
+  },
+  bottomDockShellGlowSmall: {
+    position: "absolute",
+    right: spacing.xl,
+    bottom: -24,
+    width: 120,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: isDark ? "rgba(239,109,102,0.09)" : "rgba(239,109,102,0.13)",
+  },
   bottomDock: {
+    position: "relative",
     flexDirection: "row",
-    marginHorizontal: spacing.lg,
-    marginBottom: Platform.OS === "android" ? spacing.xl : spacing.lg,
     paddingTop: 8,
     paddingHorizontal: 8,
-    paddingBottom: Platform.OS === "android" ? 14 : 8,
+    paddingBottom: 8,
     borderRadius: radii.lg,
-    backgroundColor: palette.surface,
+    backgroundColor: isDark ? "rgba(23,33,41,0.76)" : "rgba(255,255,255,0.68)",
     borderWidth: 1,
-    borderColor: palette.border,
+    borderColor: isDark ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.78)",
+    overflow: "hidden",
     ...shadows.card,
+  },
+  bottomDockGlassLayer: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: isDark ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.12)",
+  },
+  bottomDockGlassSheen: {
+    position: "absolute",
+    left: 10,
+    right: 10,
+    top: 0,
+    height: 24,
+    borderTopLeftRadius: radii.lg,
+    borderTopRightRadius: radii.lg,
+    backgroundColor: isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.22)",
   },
   bottomTab: {
     flex: 1,

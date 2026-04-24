@@ -713,23 +713,6 @@ export function SendScreen({
     onExitFlow?.();
   }, [dismissNoteEditor, onExitFlow, phase, step]);
 
-  const edgeBackResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_, gesture) =>
-          phase === "editing" &&
-          gesture.x0 <= 28 &&
-          gesture.dx > 12 &&
-          Math.abs(gesture.dx) > Math.abs(gesture.dy),
-        onPanResponderRelease: (_, gesture) => {
-          if (gesture.x0 <= 28 && gesture.dx > 78) {
-            handleBack();
-          }
-        },
-      }),
-    [handleBack, phase],
-  );
-
   const continueToAmount = useCallback(
     (target: SendTarget, suggestion?: RecipientSuggestion | null) => {
       setActiveTarget(target);
@@ -1096,7 +1079,7 @@ export function SendScreen({
             }
           }}
         >
-          <View style={[styles.amountScreen, { paddingTop: topInset + spacing.sm }]} {...edgeBackResponder.panHandlers}>
+          <View style={[styles.amountScreen, { paddingTop: topInset + spacing.sm }]}>
             <View style={styles.stepHeader}>
               <Pressable style={styles.iconButton} onPress={handleBack}>
                 <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
