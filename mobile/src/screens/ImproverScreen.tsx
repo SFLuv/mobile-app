@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Animated,
   Image,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   RefreshControl,
@@ -10,8 +12,8 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  Vibration,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import Constants from "expo-constants";
@@ -25,6 +27,8 @@ import {
   AppImprover,
   AppImproverAbsencePeriod,
   AppImproverAbsencePeriodCreateResult,
+  AppImproverWorkflowListItem,
+  AppImproverWorkflowStepSummary,
   AppUser,
   AppWorkflowDropdownOption,
   AppWorkflow,
@@ -35,6 +39,7 @@ import {
   VerifiedEmail,
 } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
+import { triggerClickHaptic } from "../utils/haptics";
 
 type Props = {
   user: AppUser | null;
@@ -71,13 +76,18 @@ type StepNotPossibleForm = {
 type WorkflowSeriesGroup = {
   key: string;
   seriesId: string;
-  primaryStepOrder: number;
-  primaryStepTitle: string;
+  primaryStepOrder: number | null;
+  primaryStepTitle: string | null;
   workflowTitle: string;
-  recurrence: AppWorkflow["recurrence"];
+  recurrence: AppImproverWorkflowListItem["recurrence"];
   absence: AppImproverAbsencePeriod | null;
   canRevokeAbsence: boolean;
-  workflows: AppWorkflow[];
+  workflows: AppImproverWorkflowListItem[];
+};
+
+type TouchPoint = {
+  pageX: number;
+  pageY: number;
 };
 
 type RecurringClaimOption = {
@@ -86,7 +96,7 @@ type RecurringClaimOption = {
   stepOrder: number;
   workflowTitle: string;
   stepTitle: string;
-  recurrence: AppWorkflow["recurrence"];
+  recurrence: AppImproverWorkflowListItem["recurrence"];
   claimedCount: number;
 };
 
@@ -132,7 +142,7 @@ type ImproverScreenCache = {
   requestLastName: string;
   requestEmailInput: string;
   selectedVerifiedEmailId: string | null;
-  workflows: AppWorkflow[];
+  workflows: AppImproverWorkflowListItem[];
   unpaidWorkflows: AppWorkflow[];
   activeCredentials: AppCredentialType[];
   credentialTypes: AppGlobalCredentialType[];
@@ -293,6 +303,18 @@ function getWorkflowPhotoAspectRatioValue(aspectRatio: AppWorkflowPhotoAspectRat
   return 1;
 }
 
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function getTouchDistance(touches: readonly TouchPoint[]): number {
+  if (touches.length < 2) {
+    return 0;
+  }
+  const [first, second] = touches;
+  return Math.hypot(second.pageX - first.pageX, second.pageY - first.pageY);
+}
+
 function getCompletionItemErrorKey(stepId: string, itemId: string): string {
   return `${stepId}:${itemId}`;
 }
@@ -322,6 +344,30 @@ function resolveAssignedStep(workflow: AppWorkflow, userId?: string | null): App
       .filter((step) => step.assignedImproverId === userId)
       .sort((left, right) => left.stepOrder - right.stepOrder)[0] || null
   );
+}
+
+function getAssignedStepSummaries(workflow: AppImproverWorkflowListItem): AppImproverWorkflowStepSummary[] {
+  return [...(workflow.assignedSteps || [])].sort((left, right) => left.stepOrder - right.stepOrder);
+}
+
+function getPrimaryAssignedStepSummary(workflow: AppImproverWorkflowListItem): AppImproverWorkflowStepSummary | null {
+  return getAssignedStepSummaries(workflow)[0] || null;
+}
+
+function getInitialStepIndexForWorkflowCard(workflow: AppImproverWorkflowListItem): number {
+  const assignedSteps = getAssignedStepSummaries(workflow);
+  const preferred =
+    assignedSteps.find(
+      (step) => step.status === "available" || step.status === "in_progress" || step.status === "locked",
+    ) ||
+    assignedSteps[0] ||
+    workflow.claimableStep ||
+    null;
+  return preferred ? Math.max(0, preferred.stepOrder - 1) : 0;
+}
+
+function isFullWorkflow(workflow: AppWorkflow | AppImproverWorkflowListItem): workflow is AppWorkflow {
+  return Array.isArray((workflow as AppWorkflow).steps);
 }
 
 function uniqueBy<T>(items: T[], getKey: (item: T) => string): T[] {
@@ -411,6 +457,7 @@ export function ImproverScreen({
   onRefreshProfile,
 }: Props) {
   const { palette, shadows, isDark } = useAppTheme();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const refreshAccent = palette.primaryStrong;
   const refreshControlKey = `${isDark ? "dark" : "light"}:${refreshAccent}:${palette.surfaceStrong}`;
@@ -436,7 +483,7 @@ export function ImproverScreen({
   const [selectedVerifiedEmailId, setSelectedVerifiedEmailId] = useState<string | null>(initialCache.selectedVerifiedEmailId);
   const [absenceFrom, setAbsenceFrom] = useState("");
   const [absenceUntil, setAbsenceUntil] = useState("");
-  const [workflows, setWorkflows] = useState<AppWorkflow[]>(initialCache.workflows);
+  const [workflows, setWorkflows] = useState<AppImproverWorkflowListItem[]>(initialCache.workflows);
   const [unpaidWorkflows, setUnpaidWorkflows] = useState<AppWorkflow[]>(initialCache.unpaidWorkflows);
   const [activeCredentials, setActiveCredentials] = useState<AppCredentialType[]>(initialCache.activeCredentials);
   const [credentialTypes, setCredentialTypes] = useState<AppGlobalCredentialType[]>(initialCache.credentialTypes);
@@ -466,6 +513,7 @@ export function ImproverScreen({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [workflowRefreshing, setWorkflowRefreshing] = useState(false);
   const [badgePreview, setBadgePreview] = useState<{ label: string; imageUri: string } | null>(null);
+  const [imagePreviewHost, setImagePreviewHost] = useState<"detail" | "badges" | null>(null);
   const [photoPreviewUris, setPhotoPreviewUris] = useState<Record<string, string>>({});
   const [photoPreviewLoading, setPhotoPreviewLoading] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
@@ -473,6 +521,19 @@ export function ImproverScreen({
   const [actionKey, setActionKey] = useState("");
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView | null>(null);
+  const detailScrollRef = useRef<ScrollView | null>(null);
+  const detailScrollYRef = useRef(0);
+  const pendingDetailScrollYRef = useRef<number | null>(null);
+  const imagePreviewScale = useRef(new Animated.Value(1)).current;
+  const imagePreviewPan = useRef(new Animated.ValueXY()).current;
+  const imagePreviewScaleRef = useRef(1);
+  const imagePreviewPanRef = useRef({ x: 0, y: 0 });
+  const imagePreviewGestureStartRef = useRef({
+    distance: 0,
+    scale: 1,
+    panX: 0,
+    panY: 0,
+  });
   const requestDataRequestRef = useRef<Promise<void> | null>(null);
   const workflowDataRequestRef = useRef<Promise<void> | null>(null);
   const unpaidDataRequestRef = useRef<Promise<void> | null>(null);
@@ -496,6 +557,134 @@ export function ImproverScreen({
       ),
     [credentialRequests],
   );
+
+  const clampImagePreviewPan = useCallback(
+    (x: number, y: number, scale: number) => {
+      const maxX = Math.max(0, (windowWidth * 0.82 * (scale - 1)) / 2);
+      const maxY = Math.max(0, (windowHeight * 0.64 * (scale - 1)) / 2);
+      return {
+        x: clampNumber(x, -maxX, maxX),
+        y: clampNumber(y, -maxY, maxY),
+      };
+    },
+    [windowHeight, windowWidth],
+  );
+
+  const setImagePreviewTransform = useCallback(
+    (scale: number, x = imagePreviewPanRef.current.x, y = imagePreviewPanRef.current.y, animated = false) => {
+      const nextScale = clampNumber(scale, 1, 4);
+      const nextPan = nextScale <= 1.02 ? { x: 0, y: 0 } : clampImagePreviewPan(x, y, nextScale);
+      imagePreviewScaleRef.current = nextScale;
+      imagePreviewPanRef.current = nextPan;
+
+      if (animated) {
+        Animated.parallel([
+          Animated.spring(imagePreviewScale, {
+            toValue: nextScale,
+            useNativeDriver: true,
+            speed: 22,
+            bounciness: 4,
+          }),
+          Animated.spring(imagePreviewPan, {
+            toValue: nextPan,
+            useNativeDriver: true,
+            speed: 22,
+            bounciness: 4,
+          }),
+        ]).start();
+        return;
+      }
+
+      imagePreviewScale.setValue(nextScale);
+      imagePreviewPan.setValue(nextPan);
+    },
+    [clampImagePreviewPan, imagePreviewPan, imagePreviewScale],
+  );
+
+  const resetImagePreviewTransform = useCallback(
+    (animated = false) => {
+      setImagePreviewTransform(1, 0, 0, animated);
+    },
+    [setImagePreviewTransform],
+  );
+
+  const closeImagePreview = useCallback(() => {
+    setBadgePreview(null);
+    setImagePreviewHost(null);
+    resetImagePreviewTransform(false);
+  }, [resetImagePreviewTransform]);
+
+  const openImagePreview = useCallback(
+    (preview: { label: string; imageUri: string }, host: "detail" | "badges") => {
+      setImagePreviewHost(host);
+      setBadgePreview(preview);
+    },
+    [],
+  );
+
+  const imagePreviewPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: (event) =>
+          event.nativeEvent.touches.length > 1 || imagePreviewScaleRef.current > 1.02,
+        onMoveShouldSetPanResponder: (event, gesture) =>
+          event.nativeEvent.touches.length > 1 ||
+          (imagePreviewScaleRef.current > 1.02 && Math.abs(gesture.dx) + Math.abs(gesture.dy) > 3),
+        onPanResponderGrant: (event) => {
+          const touches = event.nativeEvent.touches as readonly TouchPoint[];
+          imagePreviewGestureStartRef.current = {
+            distance: getTouchDistance(touches),
+            scale: imagePreviewScaleRef.current,
+            panX: imagePreviewPanRef.current.x,
+            panY: imagePreviewPanRef.current.y,
+          };
+        },
+        onPanResponderMove: (event, gesture) => {
+          const touches = event.nativeEvent.touches as readonly TouchPoint[];
+          if (touches.length > 1) {
+            const distance = getTouchDistance(touches);
+            const startDistance = imagePreviewGestureStartRef.current.distance || distance;
+            if (startDistance <= 0) {
+              return;
+            }
+            const nextScale = clampNumber(
+              (imagePreviewGestureStartRef.current.scale * distance) / startDistance,
+              1,
+              4,
+            );
+            setImagePreviewTransform(nextScale);
+            return;
+          }
+
+          if (imagePreviewScaleRef.current <= 1.02) {
+            return;
+          }
+
+          setImagePreviewTransform(
+            imagePreviewScaleRef.current,
+            imagePreviewGestureStartRef.current.panX + gesture.dx,
+            imagePreviewGestureStartRef.current.panY + gesture.dy,
+          );
+        },
+        onPanResponderRelease: () => {
+          if (imagePreviewScaleRef.current <= 1.02) {
+            resetImagePreviewTransform(true);
+          }
+        },
+        onPanResponderTerminate: () => {
+          if (imagePreviewScaleRef.current <= 1.02) {
+            resetImagePreviewTransform(true);
+          }
+        },
+      }),
+    [resetImagePreviewTransform, setImagePreviewTransform],
+  );
+
+  useEffect(() => {
+    if (badgePreview?.imageUri) {
+      resetImagePreviewTransform(false);
+    }
+  }, [badgePreview?.imageUri, resetImagePreviewTransform]);
 
   const selectWorkflowView = useCallback((nextView: WorkflowView) => {
     workflowViewManualSelectionRef.current = true;
@@ -555,6 +744,7 @@ export function ImproverScreen({
     setSelectedWorkflowKeys([]);
     setBadgesVisible(false);
     setBadgePreview(null);
+    setImagePreviewHost(null);
     setSelectedWorkflow(null);
     setDetailVisible(false);
     setCompletionForms({});
@@ -562,6 +752,8 @@ export function ImproverScreen({
     setItemErrors({});
     setStepNotPossibleForms({});
     setCameraTarget(null);
+    detailScrollYRef.current = 0;
+    pendingDetailScrollYRef.current = null;
     setCameraError(null);
     setWorkflowRefreshing(false);
     setError(null);
@@ -929,28 +1121,30 @@ export function ImproverScreen({
 
   const closeBadges = useCallback(() => {
     setBadgesVisible(false);
-    setBadgePreview(null);
-  }, []);
+    closeImagePreview();
+  }, [closeImagePreview]);
 
   useEffect(() => {
-    if (!badgesVisible) {
-      setBadgePreview(null);
+    if (!badgesVisible && imagePreviewHost === "badges") {
+      closeImagePreview();
     }
-  }, [badgesVisible]);
+  }, [badgesVisible, closeImagePreview, imagePreviewHost]);
 
-  const hasClaimedRoleInWorkflow = useCallback(
+  const hasClaimedRoleInFullWorkflow = useCallback(
     (workflow: AppWorkflow) => workflow.steps.some((step) => step.assignedImproverId === user?.id),
     [user?.id],
   );
 
-  const isWorkflowActiveForUser = useCallback(
-    (workflow: AppWorkflow) =>
-      workflow.steps.some(
-        (step) =>
-          step.assignedImproverId === user?.id &&
-          (step.status === "available" || step.status === "in_progress"),
-      ),
-    [user?.id],
+  const hasClaimedWorkflowCard = useCallback(
+    (workflow: AppImproverWorkflowListItem) => workflow.hasClaimedStep || workflow.assignedSteps.length > 0,
+    [],
+  );
+
+  const isWorkflowCardActiveForUser = useCallback(
+    (workflow: AppImproverWorkflowListItem) =>
+      workflow.hasActiveClaimedStep ||
+      workflow.assignedSteps.some((step) => step.status === "available" || step.status === "in_progress"),
+    [],
   );
 
   const isStepCoveredByAbsence = useCallback(
@@ -977,7 +1171,7 @@ export function ImproverScreen({
       if (step.status !== "available" && step.status !== "locked") {
         return false;
       }
-      if (hasClaimedRoleInWorkflow(workflow)) {
+      if (hasClaimedRoleInFullWorkflow(workflow)) {
         return false;
       }
       if (isStepCoveredByAbsence(workflow, step)) {
@@ -992,12 +1186,12 @@ export function ImproverScreen({
       }
       return role.requiredCredentials.every((credential) => credentialSet.has(credential));
     },
-    [credentialSet, hasClaimedRoleInWorkflow, isStepCoveredByAbsence, user?.id],
+    [credentialSet, hasClaimedRoleInFullWorkflow, isStepCoveredByAbsence, user?.id],
   );
 
   const myClaimedWorkflows = useMemo(
-    () => workflows.filter((workflow) => hasClaimedRoleInWorkflow(workflow)),
-    [hasClaimedRoleInWorkflow, workflows],
+    () => workflows.filter((workflow) => hasClaimedWorkflowCard(workflow)),
+    [hasClaimedWorkflowCard, workflows],
   );
 
   const myWorkflowGroups = useMemo<WorkflowSeriesGroup[]>(() => {
@@ -1007,7 +1201,7 @@ export function ImproverScreen({
     const groups = new Map<string, WorkflowSeriesGroup>();
 
     for (const workflow of myClaimedWorkflows) {
-      const assignedStep = resolveAssignedStep(workflow, user.id);
+      const assignedStep = getPrimaryAssignedStepSummary(workflow);
       if (!assignedStep) {
         continue;
       }
@@ -1045,45 +1239,22 @@ export function ImproverScreen({
           )
           .sort((left, right) => left.absentFrom - right.absentFrom)[0] || null;
 
-        const canRevokeAbsence =
-          Boolean(matchingAbsence) &&
-          !workflows.some((candidateWorkflow) => {
-            if (!matchingAbsence) {
-              return false;
-            }
-            if (candidateWorkflow.seriesId !== matchingAbsence.seriesId) {
-              return false;
-            }
-            if (
-              candidateWorkflow.startAt < matchingAbsence.absentFrom ||
-              candidateWorkflow.startAt >= matchingAbsence.absentUntil
-            ) {
-              return false;
-            }
-            return candidateWorkflow.steps.some(
-              (step) =>
-                step.stepOrder === matchingAbsence.stepOrder &&
-                Boolean(step.assignedImproverId) &&
-                step.assignedImproverId !== user.id,
-            );
-          });
-
         return {
           ...group,
           absence: matchingAbsence,
-          canRevokeAbsence,
+          canRevokeAbsence: Boolean(matchingAbsence),
           workflows: [...group.workflows].sort((left, right) => right.startAt - left.startAt),
         };
       })
       .sort((left, right) => {
-        const leftActive = left.workflows.some((workflow) => isWorkflowActiveForUser(workflow));
-        const rightActive = right.workflows.some((workflow) => isWorkflowActiveForUser(workflow));
+        const leftActive = left.workflows.some((workflow) => isWorkflowCardActiveForUser(workflow));
+        const rightActive = right.workflows.some((workflow) => isWorkflowCardActiveForUser(workflow));
         if (leftActive !== rightActive) {
           return leftActive ? -1 : 1;
         }
         return (right.workflows[0]?.startAt || 0) - (left.workflows[0]?.startAt || 0);
       });
-  }, [absencePeriods, isWorkflowActiveForUser, myClaimedWorkflows, user?.id, workflows]);
+  }, [absencePeriods, isWorkflowCardActiveForUser, myClaimedWorkflows, user?.id]);
 
   const filteredMyWorkflowGroups = useMemo(() => {
     const search = myWorkflowsSearch.trim().toLowerCase();
@@ -1099,7 +1270,7 @@ export function ImproverScreen({
         }
         return (
           group.workflowTitle.toLowerCase().includes(search) ||
-          group.primaryStepTitle.toLowerCase().includes(search)
+          (group.primaryStepTitle || "").toLowerCase().includes(search)
         );
       });
   }, [includePastWorkflows, myWorkflowGroups, myWorkflowsSearch]);
@@ -1107,12 +1278,12 @@ export function ImproverScreen({
   const workflowBoardWorkflows = useMemo(
     () =>
       workflows.filter((workflow) => {
-        if (hasClaimedRoleInWorkflow(workflow)) {
+        if (hasClaimedWorkflowCard(workflow)) {
           return false;
         }
-        return workflow.steps.some((step) => canClaimStep(workflow, step));
+        return Boolean(workflow.claimableStep);
       }),
-    [canClaimStep, hasClaimedRoleInWorkflow, workflows],
+    [hasClaimedWorkflowCard, workflows],
   );
 
   const filteredWorkflowBoard = useMemo(() => {
@@ -1168,10 +1339,10 @@ export function ImproverScreen({
     }
 
     setWorkflowView(
-      workflows.some((workflow) => isWorkflowActiveForUser(workflow)) ? "my-workflows" : "workflow-board",
+      workflows.some((workflow) => isWorkflowCardActiveForUser(workflow)) ? "my-workflows" : "workflow-board",
     );
     workflowViewAutoSelectedRef.current = true;
-  }, [isWorkflowActiveForUser, workflowDataLoaded, workflows]);
+  }, [isWorkflowCardActiveForUser, workflowDataLoaded, workflows]);
 
   useEffect(() => {
     setSelectedWorkflowKeys((current) =>
@@ -1248,12 +1419,77 @@ export function ImproverScreen({
     }
   }, [selectedVerifiedEmailId, verifiedEmailsByStatus.verified]);
 
+  const summarizeWorkflowForFeed = useCallback(
+    (workflow: AppWorkflow): AppImproverWorkflowListItem => {
+      const assignedSteps = workflow.steps
+        .filter((step) => step.assignedImproverId === user?.id)
+        .sort((left, right) => left.stepOrder - right.stepOrder)
+        .map((step) => ({
+          id: step.id,
+          stepOrder: step.stepOrder,
+          title: step.title,
+          status: step.status,
+        }));
+      const claimableStep = assignedSteps.length === 0
+        ? workflow.steps
+            .slice()
+            .sort((left, right) => left.stepOrder - right.stepOrder)
+            .find((step) => canClaimStep(workflow, step))
+        : undefined;
+
+      return {
+        id: workflow.id,
+        seriesId: workflow.seriesId,
+        workflowStateId: workflow.workflowStateId,
+        proposerId: workflow.proposerId,
+        title: workflow.title,
+        description: workflow.description,
+        recurrence: workflow.recurrence,
+        recurrenceEndAt: workflow.recurrenceEndAt,
+        startAt: workflow.startAt,
+        status: workflow.status,
+        isStartBlocked: workflow.isStartBlocked,
+        blockedByWorkflowId: workflow.blockedByWorkflowId,
+        totalBounty: workflow.totalBounty,
+        weeklyBountyRequirement: workflow.weeklyBountyRequirement,
+        createdAt: workflow.createdAt,
+        updatedAt: workflow.updatedAt,
+        voteDecision: workflow.voteDecision,
+        isManager: false,
+        isManagerEligible: false,
+        hasClaimedStep: assignedSteps.length > 0,
+        hasActiveClaimedStep: assignedSteps.some((step) => step.status === "available" || step.status === "in_progress"),
+        assignedSteps,
+        claimableStep: claimableStep
+          ? {
+              id: claimableStep.id,
+              stepOrder: claimableStep.stepOrder,
+              title: claimableStep.title,
+              status: claimableStep.status,
+            }
+          : null,
+      };
+    },
+    [canClaimStep, user?.id],
+  );
+
   const mergeWorkflow = useCallback((updatedWorkflow: AppWorkflow) => {
+    const updatedCard = summarizeWorkflowForFeed(updatedWorkflow);
     setWorkflows((current) => {
-      const existing = current.some((workflow) => workflow.id === updatedWorkflow.id);
+      const existing = current.some((workflow) => workflow.id === updatedCard.id);
       return existing
-        ? current.map((workflow) => (workflow.id === updatedWorkflow.id ? updatedWorkflow : workflow))
-        : [updatedWorkflow, ...current];
+        ? current.map((workflow) =>
+            workflow.id === updatedCard.id
+              ? {
+                  ...workflow,
+                  ...updatedCard,
+                  approvedAt: workflow.approvedAt ?? updatedCard.approvedAt,
+                  isManager: workflow.isManager,
+                  isManagerEligible: workflow.isManagerEligible,
+                }
+              : workflow,
+          )
+        : [updatedCard, ...current];
     });
     setUnpaidWorkflows((current) => {
       const existing = current.some((workflow) => workflow.id === updatedWorkflow.id);
@@ -1262,7 +1498,7 @@ export function ImproverScreen({
         : [updatedWorkflow, ...current];
     });
     setSelectedWorkflow((current) => (current?.id === updatedWorkflow.id ? updatedWorkflow : current));
-  }, []);
+  }, [summarizeWorkflowForFeed]);
 
   const getInitialStepIndexForWorkflow = useCallback(
     (workflow: AppWorkflow): number => {
@@ -1282,9 +1518,13 @@ export function ImproverScreen({
   );
 
   const openWorkflowDetail = useCallback(
-    async (workflow: AppWorkflow) => {
-      setSelectedWorkflow(workflow);
-      setDetailStepIndex(getInitialStepIndexForWorkflow(workflow));
+    async (workflow: AppWorkflow | AppImproverWorkflowListItem) => {
+      detailScrollYRef.current = 0;
+      pendingDetailScrollYRef.current = null;
+      setSelectedWorkflow(isFullWorkflow(workflow) ? workflow : null);
+      setDetailStepIndex(
+        isFullWorkflow(workflow) ? getInitialStepIndexForWorkflow(workflow) : getInitialStepIndexForWorkflowCard(workflow),
+      );
       setDetailVisible(true);
       setSubmissionDetailsOpen({});
       if (workflow.recurrence !== "one_time") {
@@ -1296,6 +1536,7 @@ export function ImproverScreen({
       setDetailLoading(true);
       try {
         const refreshedWorkflow = await backendClient.getWorkflow(workflow.id);
+        mergeWorkflow(refreshedWorkflow);
         setSelectedWorkflow(refreshedWorkflow);
         setDetailStepIndex(getInitialStepIndexForWorkflow(refreshedWorkflow));
       } catch (nextError) {
@@ -1304,7 +1545,7 @@ export function ImproverScreen({
         setDetailLoading(false);
       }
     },
-    [backendClient, getInitialStepIndexForWorkflow, loadAbsenceData],
+    [backendClient, getInitialStepIndexForWorkflow, loadAbsenceData, mergeWorkflow],
   );
 
   const refreshSelectedWorkflow = useCallback(
@@ -1477,9 +1718,39 @@ export function ImproverScreen({
     [completionForms, setItemForm],
   );
 
+  const restoreDetailScrollPosition = useCallback((attempt = 0) => {
+    requestAnimationFrame(() => {
+      const y = pendingDetailScrollYRef.current;
+      if (typeof y === "number" && detailScrollRef.current) {
+        detailScrollRef.current.scrollTo({ y, animated: false });
+        pendingDetailScrollYRef.current = null;
+        return;
+      }
+      if (attempt < 6) {
+        setTimeout(() => restoreDetailScrollPosition(attempt + 1), 50);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (cameraTarget || !detailVisible) {
+      return;
+    }
+    if (pendingDetailScrollYRef.current !== null) {
+      restoreDetailScrollPosition();
+    }
+  }, [cameraTarget, detailVisible, restoreDetailScrollPosition]);
+
+  useEffect(() => {
+    if (!detailVisible && imagePreviewHost === "detail") {
+      closeImagePreview();
+    }
+  }, [closeImagePreview, detailVisible, imagePreviewHost]);
+
   const openCameraCapture = useCallback(
     async (stepId: string, itemId: string, title: string, aspectRatio: AppWorkflowPhotoAspectRatio, maxCount: number | null) => {
       setCameraError(null);
+      pendingDetailScrollYRef.current = detailScrollYRef.current;
       setCameraTarget({
         stepId,
         itemId,
@@ -1500,9 +1771,7 @@ export function ImproverScreen({
     if (!cameraTarget) {
       return;
     }
-    if (hapticsEnabled) {
-      Vibration.vibrate(10);
-    }
+    triggerClickHaptic(hapticsEnabled, "selection");
     setCameraError(null);
     try {
       const result = await (cameraRef.current as any)?.takePictureAsync({
@@ -2000,6 +2269,9 @@ export function ImproverScreen({
                 setActionKey("bulk-revoke");
                 try {
                   for (const group of selectedWorkflowGroups) {
+                    if (group.primaryStepOrder === null) {
+                      continue;
+                    }
                     await backendClient.unclaimImproverWorkflowSeries(group.seriesId, group.primaryStepOrder);
                   }
                   setNotice(
@@ -2041,6 +2313,9 @@ export function ImproverScreen({
       try {
         const summaries: AppImproverAbsencePeriodCreateResult[] = [];
         for (const group of selectedWorkflowGroups) {
+          if (group.primaryStepOrder === null) {
+            continue;
+          }
           summaries.push(
             await backendClient.createImproverAbsencePeriod({
               seriesId: group.seriesId,
@@ -2107,24 +2382,8 @@ export function ImproverScreen({
     if (!selectedWorkflowAbsence || !selectedWorkflowAssignedStep || !selectedWorkflow || !user?.id) {
       return false;
     }
-    return !workflows.some((workflow) => {
-      if (workflow.seriesId !== selectedWorkflowAbsence.seriesId) {
-        return false;
-      }
-      if (
-        workflow.startAt < selectedWorkflowAbsence.absentFrom ||
-        workflow.startAt >= selectedWorkflowAbsence.absentUntil
-      ) {
-        return false;
-      }
-      return workflow.steps.some(
-        (step) =>
-          step.stepOrder === selectedWorkflowAssignedStep.stepOrder &&
-          Boolean(step.assignedImproverId) &&
-          step.assignedImproverId !== user.id,
-      );
-    });
-  }, [selectedWorkflowAbsence, selectedWorkflowAssignedStep, selectedWorkflow, user?.id, workflows]);
+    return true;
+  }, [selectedWorkflowAbsence, selectedWorkflowAssignedStep, selectedWorkflow, user?.id]);
 
   const shouldShowSelectedWorkflowActions = Boolean(
     (selectedWorkflowAssignedStep && selectedWorkflow?.recurrence !== "one_time") ||
@@ -2370,7 +2629,7 @@ export function ImproverScreen({
 
   const renderMyWorkflowCard = (group: WorkflowSeriesGroup) => {
     const focusWorkflow =
-      group.workflows.find((workflow) => isWorkflowActiveForUser(workflow)) || group.workflows[0];
+      group.workflows.find((workflow) => isWorkflowCardActiveForUser(workflow)) || group.workflows[0];
     const selected = selectedWorkflowKeys.includes(group.key);
     const isEditable = group.recurrence !== "one_time";
 
@@ -2399,7 +2658,9 @@ export function ImproverScreen({
               {group.workflowTitle}
             </Text>
             <Text style={styles.meta}>
-              Step {group.primaryStepOrder}: {group.primaryStepTitle}
+              {group.primaryStepOrder === null
+                ? group.primaryStepTitle || "Assigned step"
+                : `Step ${group.primaryStepOrder}: ${group.primaryStepTitle}`}
             </Text>
             <Text style={styles.meta}>Next: {formatWorkflowDate(focusWorkflow.startAt)}</Text>
           </View>
@@ -2429,8 +2690,8 @@ export function ImproverScreen({
     );
   };
 
-  const renderWorkflowBoardCard = (workflow: AppWorkflow) => {
-    const claimableStep = workflow.steps.find((step) => canClaimStep(workflow, step));
+  const renderWorkflowBoardCard = (workflow: AppImproverWorkflowListItem) => {
+    const claimableStep = workflow.claimableStep;
     return (
       <Pressable key={workflow.id} style={styles.card} onPress={() => void openWorkflowDetail(workflow)}>
         <View style={styles.cardHeaderRow}>
@@ -2724,7 +2985,7 @@ export function ImproverScreen({
               disabled={!previewUri}
               onPress={() => {
                 if (previewUri) {
-                  setBadgePreview({ label: fileName, imageUri: previewUri });
+                  openImagePreview({ label: fileName, imageUri: previewUri }, "detail");
                 }
               }}
             >
@@ -2748,7 +3009,7 @@ export function ImproverScreen({
           <Pressable
             key={`${photoUrl}-${photoIndex}`}
             style={styles.photoCard}
-            onPress={() => setBadgePreview({ label: `Photo ${photoIndex + 1}`, imageUri: photoUrl })}
+            onPress={() => openImagePreview({ label: `Photo ${photoIndex + 1}`, imageUri: photoUrl }, "detail")}
           >
             <Image source={{ uri: photoUrl }} style={styles.photoPreview} resizeMode="cover" />
             <Text style={styles.photoLabel} numberOfLines={1}>
@@ -2968,7 +3229,7 @@ export function ImproverScreen({
                               <Pressable
                                 key={photo.id}
                                 style={styles.photoCard}
-                                onPress={() => setBadgePreview({ label: photo.fileName, imageUri: photo.previewUri })}
+                                onPress={() => openImagePreview({ label: photo.fileName, imageUri: photo.previewUri }, "detail")}
                               >
                                 <Image source={{ uri: photo.previewUri }} style={styles.photoPreview} resizeMode="cover" />
                                 <Pressable
@@ -3093,14 +3354,58 @@ export function ImproverScreen({
   const renderBadgePreviewOverlay = (inline = false) => (
     <Pressable
       style={inline ? styles.inlineImagePreviewOverlay : styles.modalOverlay}
-      onPress={() => setBadgePreview(null)}
+      onPress={closeImagePreview}
     >
-      <Pressable style={styles.badgePreviewCard} onPress={() => {}}>
-        <Text style={styles.sectionTitle}>{badgePreview?.label || "Preview"}</Text>
-        {badgePreview?.imageUri ? (
-          <Image source={{ uri: badgePreview.imageUri }} style={styles.badgePreviewImage} resizeMode="contain" />
-        ) : null}
-        <Pressable style={styles.secondaryButton} onPress={() => setBadgePreview(null)}>
+      <Pressable style={styles.imagePreviewCard} onPress={() => {}}>
+        <View style={styles.imagePreviewHeader}>
+          <Text style={styles.sectionTitle} numberOfLines={1}>
+            {badgePreview?.label || "Preview"}
+          </Text>
+          <Pressable style={styles.iconButton} onPress={closeImagePreview}>
+            <Ionicons name="close" size={20} color={palette.primaryStrong} />
+          </Pressable>
+        </View>
+
+        <View style={styles.imagePreviewViewport} {...imagePreviewPanResponder.panHandlers}>
+          {badgePreview?.imageUri ? (
+            <Animated.Image
+              source={{ uri: badgePreview.imageUri }}
+              style={[
+                styles.imagePreviewImage,
+                {
+                  transform: [
+                    { scale: imagePreviewScale },
+                    ...imagePreviewPan.getTranslateTransform(),
+                  ],
+                },
+              ]}
+              resizeMode="contain"
+            />
+          ) : null}
+        </View>
+
+        <View style={styles.imagePreviewControls}>
+          <Pressable
+            style={styles.imagePreviewControlButton}
+            onPress={() => setImagePreviewTransform(imagePreviewScaleRef.current - 0.5, undefined, undefined, true)}
+          >
+            <Ionicons name="remove" size={20} color={palette.primaryStrong} />
+          </Pressable>
+          <Pressable
+            style={styles.imagePreviewControlButton}
+            onPress={() => resetImagePreviewTransform(true)}
+          >
+            <Ionicons name="resize-outline" size={20} color={palette.primaryStrong} />
+          </Pressable>
+          <Pressable
+            style={styles.imagePreviewControlButton}
+            onPress={() => setImagePreviewTransform(imagePreviewScaleRef.current + 0.5, undefined, undefined, true)}
+          >
+            <Ionicons name="add" size={20} color={palette.primaryStrong} />
+          </Pressable>
+        </View>
+
+        <Pressable style={styles.secondaryButton} onPress={closeImagePreview}>
           <Text style={styles.secondaryButtonText}>Close</Text>
         </Pressable>
       </Pressable>
@@ -3283,8 +3588,13 @@ export function ImproverScreen({
             </View>
           ) : selectedWorkflow ? (
             <ScrollView
+              ref={detailScrollRef}
               contentContainerStyle={styles.modalContent}
               showsVerticalScrollIndicator={false}
+              onScroll={(event) => {
+                detailScrollYRef.current = event.nativeEvent.contentOffset.y;
+              }}
+              scrollEventThrottle={16}
               refreshControl={
                 <RefreshControl
                   key={refreshControlKey}
@@ -3501,6 +3811,7 @@ export function ImproverScreen({
               ) : renderEmptyCard("No workflow steps", "No workflow steps were configured.")}
             </ScrollView>
           ) : null}
+          {badgePreview && imagePreviewHost === "detail" ? renderBadgePreviewOverlay(true) : null}
           </View>
         )}
       </Modal>
@@ -3546,7 +3857,7 @@ export function ImproverScreen({
                     disabled={!badge.badgeUri}
                     onPress={() => {
                       if (badge.badgeUri) {
-                        setBadgePreview({ label: badge.label, imageUri: badge.badgeUri });
+                        openImagePreview({ label: badge.label, imageUri: badge.badgeUri }, "badges");
                       }
                     }}
                   >
@@ -3563,16 +3874,16 @@ export function ImproverScreen({
               </View>
             )}
           </ScrollView>
-          {badgePreview ? renderBadgePreviewOverlay(true) : null}
+          {badgePreview && imagePreviewHost === "badges" ? renderBadgePreviewOverlay(true) : null}
         </View>
       </Modal>
 
       <Modal
-        visible={Boolean(badgePreview) && !badgesVisible}
+        visible={Boolean(badgePreview) && imagePreviewHost !== "detail" && !badgesVisible}
         transparent
         presentationStyle="overFullScreen"
         animationType="none"
-        onRequestClose={() => setBadgePreview(null)}
+        onRequestClose={closeImagePreview}
       >
         {renderBadgePreviewOverlay(false)}
       </Modal>
@@ -4344,9 +4655,11 @@ function createStyles(
       fontSize: 15,
       fontWeight: "900",
     },
-    badgePreviewCard: {
+    imagePreviewCard: {
       width: "100%",
-      maxWidth: 360,
+      maxWidth: 720,
+      height: "84%",
+      maxHeight: 760,
       borderRadius: radii.lg,
       borderWidth: 1,
       borderColor: palette.border,
@@ -4355,11 +4668,41 @@ function createStyles(
       gap: spacing.md,
       ...shadows.card,
     },
-    badgePreviewImage: {
+    imagePreviewHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: spacing.md,
+    },
+    imagePreviewViewport: {
+      flex: 1,
       width: "100%",
-      height: 320,
+      minHeight: 300,
       borderRadius: radii.md,
+      backgroundColor: isDark ? "#050607" : "#f6f7fb",
+      overflow: "hidden",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    imagePreviewImage: {
+      width: "100%",
+      height: "100%",
+    },
+    imagePreviewControls: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: spacing.sm,
+    },
+    imagePreviewControlButton: {
+      width: 42,
+      height: 42,
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: palette.border,
       backgroundColor: palette.surfaceStrong,
+      alignItems: "center",
+      justifyContent: "center",
     },
     choiceList: {
       gap: spacing.sm,

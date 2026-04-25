@@ -14,7 +14,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  Vibration,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -1534,13 +1533,6 @@ function WalletAppShellContent({
     }));
   }, [notificationAddresses.length]);
 
-  const emitTransferHaptic = () => {
-    if (!preferences.hapticsEnabled) {
-      return;
-    }
-    Vibration.vibrate(10);
-  };
-
   const loadPublicLocations = async () => {
     try {
       const nextLocations = await publicBackendClient.getPublicLocations();
@@ -2473,7 +2465,6 @@ function WalletAppShellContent({
         // Memo save failure should not block the transfer UX.
       });
     }
-    emitTransferHaptic();
     const activeAddress = smartAddressRef.current || selectedCandidate?.accountAddress || "";
     void refreshSelectedWalletBalance({ silent: true });
     if (activeAddress) {
@@ -4691,7 +4682,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     elevation: 20,
     paddingHorizontal: spacing.lg,
     paddingTop: Platform.OS === "android" ? spacing.md : spacing.sm,
-    paddingBottom: Platform.OS === "android" ? spacing.sm : spacing.xl + 6,
+    paddingBottom: Platform.OS === "android" ? spacing.md : spacing.xl + 12,
     backgroundColor: "transparent",
     overflow: "hidden",
   },

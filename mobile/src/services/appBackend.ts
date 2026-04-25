@@ -12,6 +12,7 @@ import {
   AppImproverAbsencePeriodCreateResult,
   AppImproverAbsencePeriodDeleteResult,
   AppImproverWorkflowFeed,
+  AppImproverWorkflowListItem,
   AppImproverWorkflowSeriesUnclaimResult,
   AppLocation,
   AppOwnedLocation,
@@ -313,9 +314,46 @@ type WorkflowResponse = {
   };
 };
 
+type ImproverWorkflowStepSummaryResponse = {
+  id: string;
+  step_order: number;
+  title: string;
+  status: WorkflowResponse["steps"][number]["status"];
+};
+
+type ImproverWorkflowListItemResponse = {
+  id: string;
+  series_id: string;
+  workflow_state_id?: string | null;
+  proposer_id: string;
+  title: string;
+  description: string;
+  recurrence: WorkflowResponse["recurrence"];
+  recurrence_end_at?: number | null;
+  start_at: number;
+  status: WorkflowResponse["status"];
+  is_start_blocked: boolean;
+  blocked_by_workflow_id?: string | null;
+  total_bounty: number;
+  weekly_bounty_requirement: number;
+  created_at: number;
+  updated_at: number;
+  vote_decision?: WorkflowResponse["vote_decision"];
+  approved_at?: number | null;
+  is_manager: boolean;
+  is_manager_eligible: boolean;
+  has_claimed_step: boolean;
+  has_active_claimed_step: boolean;
+  assigned_steps?: ImproverWorkflowStepSummaryResponse[] | null;
+  claimable_step?: ImproverWorkflowStepSummaryResponse | null;
+};
+
 type ImproverWorkflowFeedResponse = {
   active_credentials: string[];
-  workflows: WorkflowResponse[];
+  workflows: ImproverWorkflowListItemResponse[];
+  total?: number;
+  page?: number;
+  count?: number;
 };
 
 type ImproverAbsencePeriodResponse = Array<{
@@ -849,6 +887,57 @@ function mapWorkflow(input: WorkflowResponse): AppWorkflow {
   };
 }
 
+function mapImproverWorkflowStepSummary(
+  input: ImproverWorkflowStepSummaryResponse,
+): AppImproverWorkflowListItem["assignedSteps"][number] {
+  return {
+    id: input.id,
+    stepOrder: input.step_order,
+    title: input.title,
+    status: input.status,
+  };
+}
+
+function mapImproverWorkflowListItem(
+  input: ImproverWorkflowListItemResponse,
+): AppImproverWorkflowListItem {
+  return {
+    id: input.id,
+    seriesId: input.series_id,
+    workflowStateId:
+      typeof input.workflow_state_id === "string" ? input.workflow_state_id : undefined,
+    proposerId: input.proposer_id,
+    title: input.title,
+    description: input.description,
+    recurrence: input.recurrence,
+    recurrenceEndAt:
+      typeof input.recurrence_end_at === "number" ? input.recurrence_end_at : undefined,
+    startAt: input.start_at,
+    status: input.status,
+    isStartBlocked: input.is_start_blocked === true,
+    blockedByWorkflowId:
+      typeof input.blocked_by_workflow_id === "string"
+        ? input.blocked_by_workflow_id
+        : undefined,
+    totalBounty: input.total_bounty,
+    weeklyBountyRequirement: input.weekly_bounty_requirement,
+    createdAt: input.created_at,
+    updatedAt: input.updated_at,
+    voteDecision: input.vote_decision,
+    approvedAt: typeof input.approved_at === "number" ? input.approved_at : undefined,
+    isManager: input.is_manager === true,
+    isManagerEligible: input.is_manager_eligible === true,
+    hasClaimedStep: input.has_claimed_step === true,
+    hasActiveClaimedStep: input.has_active_claimed_step === true,
+    assignedSteps: Array.isArray(input.assigned_steps)
+      ? input.assigned_steps.map(mapImproverWorkflowStepSummary)
+      : [],
+    claimableStep: input.claimable_step
+      ? mapImproverWorkflowStepSummary(input.claimable_step)
+      : null,
+  };
+}
+
 function mapImproverAbsencePeriod(
   input: ImproverAbsencePeriodResponse[number],
 ): AppImproverAbsencePeriod {
@@ -1261,8 +1350,11 @@ export class AppBackendClient {
     return Array.isArray(body) ? body.map(mapGlobalCredentialType) : [];
   }
 
-  async getImproverWorkflows(): Promise<AppImproverWorkflowFeed> {
-    const response = await this.authFetch("/improvers/workflows");
+  async getImproverWorkflows(
+    scope?: "assigned" | "claimed" | "mine" | "board" | "claimable",
+  ): Promise<AppImproverWorkflowFeed> {
+    const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";
+    const response = await this.authFetch(`/improvers/workflows${query}`);
     if (!response.ok) {
       await throwRequestError(response, "Unable to load improver workflows");
     }
@@ -1271,7 +1363,20 @@ export class AppBackendClient {
       activeCredentials: Array.isArray(body.active_credentials)
         ? body.active_credentials
         : [],
-      workflows: Array.isArray(body.workflows) ? body.workflows.map(mapWorkflow) : [],
+      workflows: Array.isArray(body.workflows) ? body.workflows.map(mapImproverWorkflowListItem) : [],
+      total:
+        typeof body.total === "number"
+          ? body.total
+          : Array.isArray(body.workflows)
+            ? body.workflows.length
+            : 0,
+      page: typeof body.page === "number" ? body.page : 0,
+      count:
+        typeof body.count === "number"
+          ? body.count
+          : Array.isArray(body.workflows)
+            ? body.workflows.length
+            : 0,
     };
   }
 

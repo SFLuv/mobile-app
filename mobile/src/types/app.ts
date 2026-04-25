@@ -341,9 +341,46 @@ export interface AppWorkflow {
   votes: AppWorkflowVotes;
 }
 
+export interface AppImproverWorkflowStepSummary {
+  id: string;
+  stepOrder: number;
+  title: string;
+  status: AppWorkflowStep["status"];
+}
+
+export interface AppImproverWorkflowListItem {
+  id: string;
+  seriesId: string;
+  workflowStateId?: string | null;
+  proposerId: string;
+  title: string;
+  description: string;
+  recurrence: AppWorkflowRecurrence;
+  recurrenceEndAt?: number | null;
+  startAt: number;
+  status: AppWorkflow["status"];
+  isStartBlocked: boolean;
+  blockedByWorkflowId?: string | null;
+  totalBounty: number;
+  weeklyBountyRequirement: number;
+  createdAt: number;
+  updatedAt: number;
+  voteDecision?: AppWorkflow["voteDecision"];
+  approvedAt?: number | null;
+  isManager: boolean;
+  isManagerEligible: boolean;
+  hasClaimedStep: boolean;
+  hasActiveClaimedStep: boolean;
+  assignedSteps: AppImproverWorkflowStepSummary[];
+  claimableStep?: AppImproverWorkflowStepSummary | null;
+}
+
 export interface AppImproverWorkflowFeed {
   activeCredentials: AppCredentialType[];
-  workflows: AppWorkflow[];
+  workflows: AppImproverWorkflowListItem[];
+  total: number;
+  page: number;
+  count: number;
 }
 
 export interface AppImproverAbsencePeriod {

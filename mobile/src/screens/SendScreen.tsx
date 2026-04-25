@@ -11,7 +11,6 @@ import {
   Text,
   TextInput,
   TouchableWithoutFeedback,
-  Vibration,
   View,
   useWindowDimensions,
 } from "react-native";
@@ -30,6 +29,7 @@ import { SendFlowEntryMode } from "../types/preferences";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { formatDistanceLabel, locationDistanceMeters, sortLocationsByProximity } from "../utils/location";
 import { parseSendTarget, parseSfluvUniversalLink, SendTarget, SfluvUniversalLink } from "../utils/universalLinks";
+import { triggerClickHaptic } from "../utils/haptics";
 
 type RecipientKind = "contact" | "merchant" | "payment-link";
 type SendStep = "recipient" | "amount";
@@ -373,6 +373,7 @@ export function SendScreen({
   const resultIconScale = useRef(new Animated.Value(0.84)).current;
   const resultIconOpacity = useRef(new Animated.Value(0)).current;
   const tipExitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tipSubmissionLockedRef = useRef(false);
 
   const [step, setStep] = useState<SendStep>("recipient");
   const [phase, setPhase] = useState<SendPhase>("editing");
@@ -717,6 +718,7 @@ export function SendScreen({
   }, []);
 
   const clearTipState = useCallback(() => {
+    tipSubmissionLockedRef.current = false;
     setTipChoice(null);
     setCustomTipInput("");
     setTipStatus("idle");
@@ -828,6 +830,7 @@ export function SendScreen({
     try {
       await onPrepareSend(target.recipient, normalizedAmount, "token", memoInput.trim());
       setPhase("success");
+      triggerClickHaptic(hapticsEnabled, "medium");
     } catch {
       setPhase("failure");
     }
@@ -837,6 +840,7 @@ export function SendScreen({
     amountRaw,
     clearTipState,
     dismissNoteEditor,
+    hapticsEnabled,
     memoInput,
     onPrepareSend,
     parsedBalanceRaw,
@@ -866,9 +870,10 @@ export function SendScreen({
           key: `${percentage}` as TipChoice,
           label: `${percentage}%`,
           amountValue: ethers.utils.formatUnits(amount, mobileConfig.tokenDecimals),
+          amountLabel: `${formatTokenAmount(amount, 2)} SFLUV`,
         };
       })
-      .filter(Boolean) as Array<{ key: TipChoice; label: string; amountValue: string }>;
+      .filter(Boolean) as Array<{ key: TipChoice; label: string; amountValue: string; amountLabel: string }>;
   }, [resultAttempt]);
 
   const canUseCustomTip = useMemo(
@@ -894,10 +899,16 @@ export function SendScreen({
   const selectedTipAmountRaw = useMemo(() => parseTokenAmount(selectedTipAmount), [selectedTipAmount]);
 
   const sendTip = useCallback(async () => {
-    if (!resultAttempt?.tipTarget || !selectedTipAmountRaw || selectedTipAmountRaw.lte(0)) {
+    if (
+      tipSubmissionLockedRef.current ||
+      !resultAttempt?.tipTarget ||
+      !selectedTipAmountRaw ||
+      selectedTipAmountRaw.lte(0)
+    ) {
       return;
     }
 
+    tipSubmissionLockedRef.current = true;
     setTipStatus("sending");
     setTipMessage(null);
     try {
@@ -908,6 +919,7 @@ export function SendScreen({
         exitFlow();
       }, 2000);
     } catch {
+      tipSubmissionLockedRef.current = false;
       setTipStatus("error");
       setTipMessage("Tip failed to send.");
       setTipChoice(null);
@@ -916,7 +928,8 @@ export function SendScreen({
   }, [exitFlow, onPrepareSend, resultAttempt, selectedTipAmount, selectedTipAmountRaw]);
 
   const handlePrimarySuccessAction = useCallback(() => {
-    if (tipStatus === "sending" || tipStatus === "sent") {
+    Keyboard.dismiss();
+    if (tipSubmissionLockedRef.current || tipStatus === "sending" || tipStatus === "sent") {
       return;
     }
     if (selectedTipAmountRaw && selectedTipAmountRaw.gt(0)) {
@@ -933,9 +946,7 @@ export function SendScreen({
       }
 
       setScanLocked(true);
-      if (hapticsEnabled) {
-        Vibration.vibrate(10);
-      }
+      triggerClickHaptic(hapticsEnabled, "medium");
 
       const universalLink = parseSfluvUniversalLink(rawValue);
       if (universalLink?.type === "redeem" || universalLink?.type === "addcontact") {
@@ -1259,146 +1270,211 @@ export function SendScreen({
         ? "Sent"
         : "Failed";
     const canTip = success && Boolean(resultAttempt?.tipTarget);
+    const tipSelectionLocked = tipStatus === "sending" || tipStatus === "sent";
+    const customTipActive = tipChoice === "custom";
 
     return (
-      <View style={[styles.stateScreen, { paddingTop: topInset + spacing.xl, paddingBottom: spacing.xl }]}>
-        <View style={styles.stateInner}>
-          <Animated.View
-            style={[
-              styles.resultIconWrap,
-              success ? styles.resultIconSuccess : styles.resultIconFailure,
-              {
-                opacity: resultIconOpacity,
-                transform: [{ scale: resultIconScale }],
-              },
-            ]}
-          >
-            <Ionicons name={success ? "checkmark" : "close"} size={68} color={palette.white} />
-          </Animated.View>
-
-          <Text style={styles.resultTitle}>{title}</Text>
-          <Text style={styles.resultMessage}>{message}</Text>
-
-          {canTip ? (
-            <View style={styles.tipCard}>
-              <Text style={styles.tipTitle}>Add tip</Text>
-              {resultAttempt?.tipTarget ? (
-                <Text style={styles.tipBody}>For {resultAttempt.tipTarget.merchantName}</Text>
-              ) : null}
-
-              <View style={styles.tipChoices}>
-                {tipPresetOptions.map((option) => {
-                  const selected = tipChoice === option.key;
-                  return (
-                    <Pressable
-                      key={option.key}
-                      style={[styles.tipChoice, selected ? styles.tipChoiceActive : undefined]}
-                      onPress={() => {
-                        Keyboard.dismiss();
-                        setTipChoice(option.key);
-                        setCustomTipInput("");
-                        setTipStatus("idle");
-                        setTipMessage(null);
-                      }}
-                    >
-                      <Text style={[styles.tipChoiceText, selected ? styles.tipChoiceTextActive : undefined]}>
-                        {option.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-
-                {canUseCustomTip ? (
-                  <Pressable
-                    style={[styles.tipChoice, tipChoice === "custom" ? styles.tipChoiceActive : undefined]}
-                    onPress={() => {
-                      setTipChoice("custom");
-                      setTipStatus("idle");
-                      setTipMessage(null);
-                    }}
-                  >
-                    <Text
-                      style={[styles.tipChoiceText, tipChoice === "custom" ? styles.tipChoiceTextActive : undefined]}
-                    >
-                      Custom
-                    </Text>
-                  </Pressable>
-                ) : null}
-              </View>
-
-              {tipChoice === "custom" ? (
-                <TextInput
-                  style={styles.customTipInput}
-                  value={customTipInput}
-                  onChangeText={(value) => {
-                    setCustomTipInput(sanitizeTokenInput(value));
-                    setTipStatus("idle");
-                    setTipMessage(null);
-                  }}
-                  placeholder="0"
-                  placeholderTextColor={palette.textMuted}
-                  keyboardType={Platform.select({ ios: "decimal-pad", android: "numeric" })}
-                  autoFocus
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+      >
+        <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
+          <View style={[styles.stateScreen, { paddingTop: topInset + spacing.xl, paddingBottom: spacing.xl }]}>
+            <View style={[styles.stateInner, customTipActive ? styles.stateInnerCustomTip : undefined]}>
+              <Animated.View
+                style={[
+                  styles.resultIconWrap,
+                  customTipActive ? styles.resultIconWrapCompact : undefined,
+                  success ? styles.resultIconSuccess : styles.resultIconFailure,
+                  {
+                    opacity: resultIconOpacity,
+                    transform: [{ scale: resultIconScale }],
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={success ? "checkmark" : "close"}
+                  size={customTipActive ? 38 : 68}
+                  color={palette.white}
                 />
-              ) : null}
+              </Animated.View>
 
-              {tipMessage ? (
-                <View style={styles.tipMessageRow}>
-                  {tipStatus === "sent" ? (
-                    <Ionicons name="checkmark-circle" size={16} color={palette.success} />
-                  ) : tipStatus === "error" ? (
-                    <Ionicons name="close-circle" size={16} color={palette.danger} />
+              <Text style={styles.resultTitle}>{title}</Text>
+              <Text style={styles.resultMessage}>{message}</Text>
+
+              {canTip ? (
+                <View style={styles.tipCard}>
+                  <Text style={styles.tipTitle}>Add tip</Text>
+                  {resultAttempt?.tipTarget ? (
+                    <Text style={styles.tipBody}>For {resultAttempt.tipTarget.merchantName}</Text>
                   ) : null}
-                  <Text
-                    style={[
-                      styles.tipMessageText,
-                      tipStatus === "sent"
-                        ? styles.tipMessageTextSuccess
-                        : tipStatus === "error"
-                          ? styles.tipMessageTextError
-                          : undefined,
-                    ]}
-                  >
-                    {tipMessage}
-                  </Text>
+
+                  {customTipActive ? (
+                    <View style={styles.customTipBlock}>
+                      <Text style={styles.customTipLabel}>Custom tip amount</Text>
+                      <TextInput
+                        style={[
+                          styles.customTipInput,
+                          tipSelectionLocked ? styles.customTipInputDisabled : undefined,
+                        ]}
+                        value={customTipInput}
+                        editable={!tipSelectionLocked}
+                        onChangeText={(value) => {
+                          if (tipSelectionLocked || tipSubmissionLockedRef.current) {
+                            return;
+                          }
+                          setCustomTipInput(sanitizeTokenInput(value));
+                          setTipStatus("idle");
+                          setTipMessage(null);
+                        }}
+                        placeholder="0"
+                        placeholderTextColor={palette.textMuted}
+                        keyboardType={Platform.select({ ios: "decimal-pad", android: "numeric" })}
+                        autoFocus
+                      />
+                    </View>
+                  ) : null}
+
+                  <View style={styles.tipChoices}>
+                    {tipPresetOptions.map((option) => {
+                      const selected = tipChoice === option.key;
+                      return (
+                        <Pressable
+                          key={option.key}
+                          style={[
+                            styles.tipChoice,
+                            selected ? styles.tipChoiceActive : undefined,
+                            tipSelectionLocked ? styles.tipChoiceDisabled : undefined,
+                          ]}
+                          disabled={tipSelectionLocked}
+                          onPress={() => {
+                            if (tipSelectionLocked || tipSubmissionLockedRef.current) {
+                              return;
+                            }
+                            Keyboard.dismiss();
+                            setTipChoice(selected ? null : option.key);
+                            setCustomTipInput("");
+                            setTipStatus("idle");
+                            setTipMessage(null);
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.tipChoiceText,
+                              selected ? styles.tipChoiceTextActive : undefined,
+                              tipSelectionLocked ? styles.tipChoiceTextDisabled : undefined,
+                            ]}
+                          >
+                            {option.label}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.tipChoiceAmountText,
+                              selected ? styles.tipChoiceAmountTextActive : undefined,
+                              tipSelectionLocked ? styles.tipChoiceTextDisabled : undefined,
+                            ]}
+                          >
+                            {option.amountLabel}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+
+                    {canUseCustomTip ? (
+                      <Pressable
+                        style={[
+                          styles.tipChoice,
+                          tipChoice === "custom" ? styles.tipChoiceActive : undefined,
+                          tipSelectionLocked ? styles.tipChoiceDisabled : undefined,
+                        ]}
+                        disabled={tipSelectionLocked}
+                        onPress={() => {
+                          if (tipSelectionLocked || tipSubmissionLockedRef.current) {
+                            return;
+                          }
+                          if (tipChoice === "custom") {
+                            Keyboard.dismiss();
+                            setTipChoice(null);
+                            setCustomTipInput("");
+                          } else {
+                            setTipChoice("custom");
+                          }
+                          setTipStatus("idle");
+                          setTipMessage(null);
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.tipChoiceText,
+                            tipChoice === "custom" ? styles.tipChoiceTextActive : undefined,
+                            tipSelectionLocked ? styles.tipChoiceTextDisabled : undefined,
+                          ]}
+                        >
+                          Custom
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+
+                  {tipMessage ? (
+                    <View style={styles.tipMessageRow}>
+                      {tipStatus === "sent" ? (
+                        <Ionicons name="checkmark-circle" size={16} color={palette.success} />
+                      ) : tipStatus === "error" ? (
+                        <Ionicons name="close-circle" size={16} color={palette.danger} />
+                      ) : null}
+                      <Text
+                        style={[
+                          styles.tipMessageText,
+                          tipStatus === "sent"
+                            ? styles.tipMessageTextSuccess
+                            : tipStatus === "error"
+                              ? styles.tipMessageTextError
+                              : undefined,
+                        ]}
+                      >
+                        {tipMessage}
+                      </Text>
+                    </View>
+                  ) : null}
                 </View>
               ) : null}
             </View>
-          ) : null}
-        </View>
 
-        <View style={styles.resultFooter}>
-          {success ? (
-            <Pressable
-              style={[styles.primaryButton, tipStatus === "sending" ? styles.primaryButtonDisabled : undefined]}
-              disabled={tipStatus === "sending" || tipStatus === "sent"}
-              onPress={handlePrimarySuccessAction}
-            >
-              {tipStatus === "sending" ? (
-                <ThemedActivityIndicator size="small" color={palette.white} />
-              ) : tipStatus === "sent" ? (
-                <View style={styles.buttonRow}>
-                  <Ionicons name="checkmark-circle" size={16} color={palette.white} />
-                  <Text style={styles.primaryButtonText}>Tip sent</Text>
-                </View>
+            <View style={styles.resultFooter}>
+              {success ? (
+                <Pressable
+                  style={[styles.primaryButton, tipStatus === "sending" ? styles.primaryButtonDisabled : undefined]}
+                  disabled={tipStatus === "sending" || tipStatus === "sent"}
+                  onPress={handlePrimarySuccessAction}
+                >
+                  {tipStatus === "sending" ? (
+                    <ThemedActivityIndicator size="small" color={palette.white} />
+                  ) : tipStatus === "sent" ? (
+                    <View style={styles.buttonRow}>
+                      <Ionicons name="checkmark-circle" size={16} color={palette.white} />
+                      <Text style={styles.primaryButtonText}>Tip sent</Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.primaryButtonText}>
+                      {selectedTipAmountRaw && selectedTipAmountRaw.gt(0) ? "Send tip" : "Done"}
+                    </Text>
+                  )}
+                </Pressable>
               ) : (
-                <Text style={styles.primaryButtonText}>
-                  {selectedTipAmountRaw && selectedTipAmountRaw.gt(0) ? "Send tip" : "Done"}
-                </Text>
+                <>
+                  <Pressable style={styles.primaryButton} onPress={retryPayment}>
+                    <Text style={styles.primaryButtonText}>Try again</Text>
+                  </Pressable>
+                  <Pressable style={styles.secondaryButton} onPress={exitFlow}>
+                    <Text style={styles.secondaryButtonText}>Done</Text>
+                  </Pressable>
+                </>
               )}
-            </Pressable>
-          ) : (
-            <>
-              <Pressable style={styles.primaryButton} onPress={retryPayment}>
-                <Text style={styles.primaryButtonText}>Try again</Text>
-              </Pressable>
-              <Pressable style={styles.secondaryButton} onPress={exitFlow}>
-                <Text style={styles.secondaryButtonText}>Done</Text>
-              </Pressable>
-            </>
-          )}
-        </View>
-      </View>
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
     );
   };
 
@@ -1907,6 +1983,10 @@ function createStyles(
       justifyContent: "center",
       gap: spacing.md,
     },
+    stateInnerCustomTip: {
+      justifyContent: "flex-start",
+      paddingTop: denseLayout ? spacing.xs : compactLayout ? spacing.sm : spacing.md,
+    },
     resultIconWrap: {
       width: 140,
       height: 140,
@@ -1914,6 +1994,11 @@ function createStyles(
       alignItems: "center",
       justifyContent: "center",
       ...shadows.card,
+    },
+    resultIconWrapCompact: {
+      width: 76,
+      height: 76,
+      borderRadius: 38,
     },
     resultIconSuccess: {
       backgroundColor: palette.success,
@@ -1966,8 +2051,8 @@ function createStyles(
       justifyContent: "center",
     },
     tipChoice: {
-      minWidth: 72,
-      minHeight: 42,
+      minWidth: 84,
+      minHeight: 52,
       borderRadius: radii.pill,
       borderWidth: 1,
       borderColor: palette.border,
@@ -1975,10 +2060,14 @@ function createStyles(
       alignItems: "center",
       justifyContent: "center",
       paddingHorizontal: spacing.md,
+      gap: 2,
     },
     tipChoiceActive: {
       borderColor: palette.primary,
       backgroundColor: palette.primarySoft,
+    },
+    tipChoiceDisabled: {
+      opacity: 0.48,
     },
     tipChoiceText: {
       color: palette.text,
@@ -1987,6 +2076,27 @@ function createStyles(
     },
     tipChoiceTextActive: {
       color: palette.primaryStrong,
+    },
+    tipChoiceTextDisabled: {
+      color: palette.textMuted,
+    },
+    tipChoiceAmountText: {
+      color: palette.textMuted,
+      fontSize: 11,
+      fontWeight: "800",
+    },
+    tipChoiceAmountTextActive: {
+      color: palette.primaryStrong,
+    },
+    customTipBlock: {
+      width: "100%",
+      gap: spacing.xs,
+    },
+    customTipLabel: {
+      color: palette.textMuted,
+      fontSize: 12,
+      fontWeight: "800",
+      textAlign: "center",
     },
     customTipInput: {
       minHeight: 50,
@@ -1999,6 +2109,9 @@ function createStyles(
       fontSize: 18,
       fontWeight: "800",
       textAlign: "center",
+    },
+    customTipInputDisabled: {
+      opacity: 0.55,
     },
     tipMessageRow: {
       flexDirection: "row",
