@@ -1,7 +1,6 @@
 import "./src/polyfills";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Animated,
   AppState,
   Alert,
@@ -45,6 +44,7 @@ import { MapScreen } from "./src/screens/MapScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { ContactsScreen } from "./src/screens/ContactsScreen";
 import { ImproverScreen } from "./src/screens/ImproverScreen";
+import { ThemedActivityIndicator } from "./src/components/ThemedActivityIndicator";
 import { mobileConfig } from "./src/config";
 import {
   clearCachedRouteDiscovery,
@@ -2673,7 +2673,7 @@ function WalletAppShellContent({
         <View style={styles.content}>
           {showBlockingWalletState ? (
             <View style={styles.centerState}>
-              <ActivityIndicator size="large" color={palette.primary} />
+              <ThemedActivityIndicator size="large" color={palette.primaryStrong} />
               <Text style={styles.stateText}>
                 {runtime.loadingMessage || "Preparing your wallet..."}
               </Text>
@@ -2718,6 +2718,7 @@ function WalletAppShellContent({
               user={appUser}
               improver={appImprover}
               backendClient={backendClient}
+              hapticsEnabled={preferences.hapticsEnabled}
               onRefreshProfile={loadAppProfile}
             />
           ) : tab === "map" ? (
@@ -2834,88 +2835,6 @@ function WalletAppShellContent({
           )}
         </View>
 
-        {showStandardChrome ? (
-          <View pointerEvents="box-none" style={styles.bottomDockShell}>
-            <BlurView
-              pointerEvents="none"
-              intensity={Platform.OS === "android" ? 24 : 42}
-              tint={isDark ? "dark" : "light"}
-              style={styles.bottomDockShellBackdrop}
-            />
-            <View pointerEvents="none" style={styles.bottomDockLiquidLayer} />
-            <View style={styles.bottomDock}>
-              <View pointerEvents="none" style={styles.bottomDockGlassLayer} />
-              <View pointerEvents="none" style={styles.bottomDockGlassSheen} />
-              <BottomTab
-                label="Wallet"
-                icon={tab === "wallet" ? "wallet" : "wallet-outline"}
-                active={tab === "wallet"}
-                onPress={() => {
-                  setTab("wallet");
-                  setWalletPane("home");
-                }}
-              />
-              {hasImproverTab ? (
-                <>
-                  <BottomTab
-                    label="Improver"
-                    icon={tab === "improver" ? "construct" : "construct-outline"}
-                    active={tab === "improver"}
-                    onPress={() => {
-                      setTab("improver");
-                    }}
-                  />
-                  <BottomTab
-                    label="Map"
-                    icon={tab === "map" ? "map" : "map-outline"}
-                    active={tab === "map"}
-                    onPress={() => {
-                      setMerchantMapViewMode("map");
-                      setTab("map");
-                    }}
-                  />
-                  <BottomTab
-                    label="More"
-                    icon={moreTabActive ? "ellipsis-horizontal-circle" : "ellipsis-horizontal-circle-outline"}
-                    active={moreTabActive}
-                    onPress={() => {
-                      setShowMoreMenu(true);
-                    }}
-                  />
-                </>
-              ) : (
-                <>
-                  <BottomTab
-                    label="Activity"
-                    icon={tab === "activity" ? "pulse" : "pulse-outline"}
-                    active={tab === "activity"}
-                    onPress={() => {
-                      setTab("activity");
-                    }}
-                  />
-                  <BottomTab
-                    label="Map"
-                    icon={tab === "map" ? "map" : "map-outline"}
-                    active={tab === "map"}
-                    onPress={() => {
-                      setMerchantMapViewMode("map");
-                      setTab("map");
-                    }}
-                  />
-                  <BottomTab
-                    label="Contacts"
-                    icon={tab === "contacts" ? "people" : "people-outline"}
-                    active={tab === "contacts"}
-                    onPress={() => {
-                      setTab("contacts");
-                    }}
-                  />
-                </>
-              )}
-            </View>
-          </View>
-        ) : null}
-
         {toast ? (
           <View
             style={[
@@ -2931,6 +2850,88 @@ function WalletAppShellContent({
           </View>
         ) : null}
       </View>
+
+      {showStandardChrome ? (
+        <View pointerEvents="box-none" style={styles.bottomDockShell}>
+          <BlurView
+            pointerEvents="none"
+            intensity={Platform.OS === "android" ? 24 : 42}
+            tint={isDark ? "dark" : "light"}
+            style={styles.bottomDockShellBackdrop}
+          />
+          <View pointerEvents="none" style={styles.bottomDockLiquidLayer} />
+          <View style={styles.bottomDock}>
+            <View pointerEvents="none" style={styles.bottomDockGlassLayer} />
+            <View pointerEvents="none" style={styles.bottomDockGlassSheen} />
+            <BottomTab
+              label="Wallet"
+              icon={tab === "wallet" ? "wallet" : "wallet-outline"}
+              active={tab === "wallet"}
+              onPress={() => {
+                setTab("wallet");
+                setWalletPane("home");
+              }}
+            />
+            {hasImproverTab ? (
+              <>
+                <BottomTab
+                  label="Improver"
+                  icon={tab === "improver" ? "construct" : "construct-outline"}
+                  active={tab === "improver"}
+                  onPress={() => {
+                    setTab("improver");
+                  }}
+                />
+                <BottomTab
+                  label="Map"
+                  icon={tab === "map" ? "map" : "map-outline"}
+                  active={tab === "map"}
+                  onPress={() => {
+                    setMerchantMapViewMode("map");
+                    setTab("map");
+                  }}
+                />
+                <BottomTab
+                  label="More"
+                  icon={moreTabActive ? "ellipsis-horizontal-circle" : "ellipsis-horizontal-circle-outline"}
+                  active={moreTabActive}
+                  onPress={() => {
+                    setShowMoreMenu(true);
+                  }}
+                />
+              </>
+            ) : (
+              <>
+                <BottomTab
+                  label="Activity"
+                  icon={tab === "activity" ? "pulse" : "pulse-outline"}
+                  active={tab === "activity"}
+                  onPress={() => {
+                    setTab("activity");
+                  }}
+                />
+                <BottomTab
+                  label="Map"
+                  icon={tab === "map" ? "map" : "map-outline"}
+                  active={tab === "map"}
+                  onPress={() => {
+                    setMerchantMapViewMode("map");
+                    setTab("map");
+                  }}
+                />
+                <BottomTab
+                  label="Contacts"
+                  icon={tab === "contacts" ? "people" : "people-outline"}
+                  active={tab === "contacts"}
+                  onPress={() => {
+                    setTab("contacts");
+                  }}
+                />
+              </>
+            )}
+          </View>
+        </View>
+      ) : null}
 
       <Modal
         visible={showWalletChooser && canChooseWallet}
@@ -3058,7 +3059,7 @@ function WalletAppShellContent({
             ) : redeemFlow?.stage === "error" ? (
               <Ionicons name="alert-circle" size={42} color={palette.danger} />
             ) : (
-              <ActivityIndicator size="large" color={palette.primary} />
+              <ThemedActivityIndicator size="large" color={palette.primaryStrong} />
             )}
             <Text style={styles.sendingTitle}>
               {redeemFlow?.stage === "awaiting_wallet"
@@ -4024,7 +4025,7 @@ function PrivyWalletApp({
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.centerState}>
-          <ActivityIndicator size="large" color={palette.primary} />
+          <ThemedActivityIndicator size="large" color={palette.primaryStrong} />
           <Text style={styles.stateText}>Initializing Privy…</Text>
         </View>
       </SafeAreaView>

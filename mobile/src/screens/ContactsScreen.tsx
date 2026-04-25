@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import QRCode from "react-native-qrcode-svg";
 import { ethers } from "ethers";
+import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { AppContact } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { buildUniversalAddContactLink, parseSendTarget, parseSfluvUniversalLink } from "../utils/universalLinks";
@@ -344,7 +345,7 @@ export function ContactsScreen({
                     }}
                   >
                     {busyID === "scan" ? (
-                      <ActivityIndicator size="small" color={palette.white} />
+                      <ThemedActivityIndicator size="small" color={palette.white} />
                     ) : (
                       <Text style={styles.primaryButtonText}>Save contact</Text>
                     )}

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { TransactionDetailsModal } from "../components/TransactionDetailsModal";
 import { AppContact, AppLocation, AppTransaction } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
@@ -68,7 +69,8 @@ export function WalletHomeScreen({
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const [selectedTransaction, setSelectedTransaction] = useState<TransactionDetailPayload | null>(null);
-  const refreshAccent = palette.primary;
+  const refreshAccent = palette.primaryStrong;
+  const refreshControlKey = `${isDark ? "dark" : "light"}:${refreshAccent}:${palette.surfaceStrong}`;
 
   const { contactNameByAddress, merchantNameByAddress } = useMemo(
     () => buildAddressNameMaps(contacts, merchants, merchantLabels),
@@ -89,13 +91,12 @@ export function WalletHomeScreen({
         contentContainerStyle={styles.container}
         refreshControl={
           <RefreshControl
+            key={refreshControlKey}
             refreshing={refreshing}
             onRefresh={() => void onRefresh()}
             tintColor={refreshAccent}
             colors={[refreshAccent]}
             progressBackgroundColor={isDark ? palette.backgroundMuted : palette.surfaceStrong}
-            title={refreshing ? "Refreshing…" : undefined}
-            titleColor={refreshAccent}
           />
         }
         showsVerticalScrollIndicator={false}
@@ -160,7 +161,7 @@ export function WalletHomeScreen({
 
           {!transactionsLoaded ? (
             <View style={styles.emptyState}>
-              <ActivityIndicator size="small" color={palette.primaryStrong} />
+              <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
               <Text style={styles.emptyTitle}>loading transactions</Text>
             </View>
           ) : decoratedTransactions.length === 0 ? (

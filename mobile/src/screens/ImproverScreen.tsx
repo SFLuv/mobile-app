@@ -1,20 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   Image,
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  Vibration,
   View,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import Constants from "expo-constants";
 import { Ionicons } from "@expo/vector-icons";
+import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { AppBackendClient } from "../services/appBackend";
 import {
   AppCredentialRequest,
@@ -38,6 +40,7 @@ type Props = {
   user: AppUser | null;
   improver: AppImprover | null;
   backendClient?: AppBackendClient | null;
+  hapticsEnabled?: boolean;
   onRefreshProfile: () => Promise<void>;
 };
 
@@ -280,6 +283,20 @@ function formatWorkItemRequirements(item: AppWorkflowWorkItem): string {
   return requirements.length > 0 ? requirements.join(" + ") : "No requirement";
 }
 
+function getWorkflowPhotoAspectRatioValue(aspectRatio: AppWorkflowPhotoAspectRatio): number {
+  if (aspectRatio === "vertical") {
+    return 3 / 4;
+  }
+  if (aspectRatio === "horizontal") {
+    return 4 / 3;
+  }
+  return 1;
+}
+
+function getCompletionItemErrorKey(stepId: string, itemId: string): string {
+  return `${stepId}:${itemId}`;
+}
+
 function resolveWorkflowTone(
   workflow: Pick<AppWorkflow, "status" | "startAt">,
 ): "default" | "success" | "danger" | "warning" {
@@ -390,10 +407,13 @@ export function ImproverScreen({
   user,
   improver,
   backendClient,
+  hapticsEnabled = true,
   onRefreshProfile,
 }: Props) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
+  const refreshAccent = palette.primaryStrong;
+  const refreshControlKey = `${isDark ? "dark" : "light"}:${refreshAccent}:${palette.surfaceStrong}`;
   const topInset = Math.max(Constants.statusBarHeight, Platform.OS === "ios" ? spacing.md : 0);
   const userId = user?.id ?? null;
   const initialCache = getImproverScreenCache(userId);
@@ -440,9 +460,11 @@ export function ImproverScreen({
   const [submissionDetailsOpen, setSubmissionDetailsOpen] = useState<Record<string, boolean>>({});
   const [completionForms, setCompletionForms] = useState<Record<string, Record<string, CompletionItemForm>>>({});
   const [stepErrors, setStepErrors] = useState<Record<string, string>>({});
+  const [itemErrors, setItemErrors] = useState<Record<string, string>>({});
   const [stepNotPossibleForms, setStepNotPossibleForms] = useState<Record<string, StepNotPossibleForm>>({});
   const [cameraTarget, setCameraTarget] = useState<CameraTarget | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [workflowRefreshing, setWorkflowRefreshing] = useState(false);
   const [badgePreview, setBadgePreview] = useState<{ label: string; imageUri: string } | null>(null);
   const [photoPreviewUris, setPhotoPreviewUris] = useState<Record<string, string>>({});
   const [photoPreviewLoading, setPhotoPreviewLoading] = useState<Record<string, boolean>>({});
@@ -458,6 +480,8 @@ export function ImproverScreen({
   const absenceDataRequestRef = useRef<Promise<void> | null>(null);
   const cacheUserIdRef = useRef(userId);
   const skipCachePersistRef = useRef(false);
+  const workflowViewAutoSelectedRef = useRef(false);
+  const workflowViewManualSelectionRef = useRef(false);
 
   const canUsePanel = Boolean(user?.isImprover || user?.isAdmin);
   const imagePickerAvailable = Boolean(OPTIONAL_IMAGE_PICKER?.launchImageLibraryAsync);
@@ -472,6 +496,11 @@ export function ImproverScreen({
       ),
     [credentialRequests],
   );
+
+  const selectWorkflowView = useCallback((nextView: WorkflowView) => {
+    workflowViewManualSelectionRef.current = true;
+    setWorkflowView(nextView);
+  }, []);
 
   useEffect(() => {
     const parsed = splitName(user?.name);
@@ -490,6 +519,8 @@ export function ImproverScreen({
     cacheUserIdRef.current = userId;
     const nextCache = getImproverScreenCache(userId);
     skipCachePersistRef.current = true;
+    workflowViewAutoSelectedRef.current = false;
+    workflowViewManualSelectionRef.current = false;
     setSection(nextCache.section);
     setWorkflowView(nextCache.workflowView);
     setIncludePastWorkflows(nextCache.includePastWorkflows);
@@ -526,6 +557,13 @@ export function ImproverScreen({
     setBadgePreview(null);
     setSelectedWorkflow(null);
     setDetailVisible(false);
+    setCompletionForms({});
+    setStepErrors({});
+    setItemErrors({});
+    setStepNotPossibleForms({});
+    setCameraTarget(null);
+    setCameraError(null);
+    setWorkflowRefreshing(false);
     setError(null);
     setNotice(null);
     setActionKey("");
@@ -1121,6 +1159,21 @@ export function ImproverScreen({
   }, [hasUnpaidWorkflowOption, workflowView]);
 
   useEffect(() => {
+    if (
+      !workflowDataLoaded ||
+      workflowViewAutoSelectedRef.current ||
+      workflowViewManualSelectionRef.current
+    ) {
+      return;
+    }
+
+    setWorkflowView(
+      workflows.some((workflow) => isWorkflowActiveForUser(workflow)) ? "my-workflows" : "workflow-board",
+    );
+    workflowViewAutoSelectedRef.current = true;
+  }, [isWorkflowActiveForUser, workflowDataLoaded, workflows]);
+
+  useEffect(() => {
     setSelectedWorkflowKeys((current) =>
       current.filter((key) => myWorkflowGroups.some((group) => group.key === key && group.recurrence !== "one_time")),
     );
@@ -1280,6 +1333,25 @@ export function ImproverScreen({
     [loadAbsenceData, loadUnpaidData, loadWorkflowData, unpaidDataLoaded, workflowView],
   );
 
+  const handleWorkflowRefresh = useCallback(async () => {
+    setWorkflowRefreshing(true);
+    try {
+      await refreshWorkflowSurfaces(true);
+      if (selectedWorkflow?.id) {
+        await refreshSelectedWorkflow(selectedWorkflow.id);
+      }
+    } finally {
+      setWorkflowRefreshing(false);
+    }
+  }, [refreshSelectedWorkflow, refreshWorkflowSurfaces, selectedWorkflow?.id]);
+
+  const setCompletionItemError = useCallback((stepId: string, itemId: string, message: string) => {
+    setItemErrors((current) => ({
+      ...current,
+      [getCompletionItemErrorKey(stepId, itemId)]: message,
+    }));
+  }, []);
+
   const setItemForm = useCallback((stepId: string, itemId: string, patch: Partial<CompletionItemForm>) => {
     setStepErrors((current) => {
       if (!current[stepId]) {
@@ -1287,6 +1359,15 @@ export function ImproverScreen({
       }
       const next = { ...current };
       delete next[stepId];
+      return next;
+    });
+    setItemErrors((current) => {
+      const key = getCompletionItemErrorKey(stepId, itemId);
+      if (!current[key]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[key];
       return next;
     });
     setCompletionForms((current) => {
@@ -1398,11 +1479,6 @@ export function ImproverScreen({
 
   const openCameraCapture = useCallback(
     async (stepId: string, itemId: string, title: string, aspectRatio: AppWorkflowPhotoAspectRatio, maxCount: number | null) => {
-      const currentPermission = permission?.granted ? permission : await requestPermission();
-      if (!currentPermission?.granted) {
-        setCameraError("Camera permission is required to add workflow photos.");
-        return;
-      }
       setCameraError(null);
       setCameraTarget({
         stepId,
@@ -1411,13 +1487,21 @@ export function ImproverScreen({
         aspectRatio,
         maxCount,
       });
+      const currentPermission = permission?.granted ? permission : await requestPermission();
+      if (!currentPermission?.granted) {
+        setCameraTarget(null);
+        setCompletionItemError(stepId, itemId, "Camera permission is required to add workflow photos.");
+      }
     },
-    [permission, requestPermission],
+    [permission, requestPermission, setCompletionItemError],
   );
 
   const captureWorkflowPhoto = useCallback(async () => {
     if (!cameraTarget) {
       return;
+    }
+    if (hapticsEnabled) {
+      Vibration.vibrate(10);
     }
     setCameraError(null);
     try {
@@ -1439,21 +1523,15 @@ export function ImproverScreen({
     } catch (nextError) {
       setCameraError((nextError as Error)?.message || "Unable to capture a workflow photo.");
     }
-  }, [addPhotosToItem, cameraTarget, createCompletionPhoto]);
+  }, [addPhotosToItem, cameraTarget, createCompletionPhoto, hapticsEnabled]);
 
   const pickLibraryPhotos = useCallback(
     async (stepId: string, itemId: string, title: string, maxCount: number | null) => {
       if (!OPTIONAL_IMAGE_PICKER?.launchImageLibraryAsync) {
-        setError("Photo library uploads are not available on this build yet.");
-        setNotice(null);
+        setCompletionItemError(stepId, itemId, "Photo library uploads are not available on this build yet.");
         return;
       }
       try {
-        const permissionResult = await OPTIONAL_IMAGE_PICKER.requestMediaLibraryPermissionsAsync();
-        if (!permissionResult?.granted) {
-          throw new Error("Photo library permission is required to attach workflow photos.");
-        }
-
         const result = await OPTIONAL_IMAGE_PICKER.launchImageLibraryAsync({
           mediaTypes:
             OPTIONAL_IMAGE_PICKER.MediaTypeOptions?.Images ?? OPTIONAL_IMAGE_PICKER.MediaType?.images ?? ["images"],
@@ -1488,11 +1566,10 @@ export function ImproverScreen({
           setError(null);
         }
       } catch (nextError) {
-        setError((nextError as Error)?.message || "Unable to attach library photos.");
-        setNotice(null);
+        setCompletionItemError(stepId, itemId, (nextError as Error)?.message || "Unable to attach library photos.");
       }
     },
-    [addPhotosToItem, createCompletionPhoto],
+    [addPhotosToItem, createCompletionPhoto, setCompletionItemError],
   );
 
   const buildCompletionPayload = useCallback(
@@ -1604,6 +1681,16 @@ export function ImproverScreen({
           delete next[step.id];
           return next;
         });
+        setItemErrors((current) => {
+          const nextEntries = Object.entries(current).filter(([key]) => !key.startsWith(`${step.id}:`));
+          if (nextEntries.length === Object.keys(current).length) {
+            return current;
+          }
+          return nextEntries.reduce<Record<string, string>>((next, [key, value]) => {
+            next[key] = value;
+            return next;
+          }, {});
+        });
         setStepNotPossibleForms((current) => {
           if (!current[step.id]) {
             return current;
@@ -1694,10 +1781,13 @@ export function ImproverScreen({
       try {
         const updatedWorkflow = await backendClient.claimWorkflowStep(workflowId, stepId);
         mergeWorkflow(updatedWorkflow);
+        setWorkflowView("my-workflows");
+        setWorkflowEditMode(false);
+        setSelectedWorkflowKeys([]);
         setNotice("Workflow step claimed.");
         setError(null);
+        void openWorkflowDetail(updatedWorkflow);
         await refreshWorkflowSurfaces();
-        await refreshSelectedWorkflow(workflowId);
       } catch (nextError) {
         setError((nextError as Error)?.message || "Unable to claim this workflow step.");
         setNotice(null);
@@ -1705,7 +1795,7 @@ export function ImproverScreen({
         setActionKey("");
       }
     },
-    [backendClient, mergeWorkflow, refreshSelectedWorkflow, refreshWorkflowSurfaces],
+    [backendClient, mergeWorkflow, openWorkflowDetail, refreshWorkflowSurfaces],
   );
 
   const startWorkflowStep = useCallback(
@@ -2036,6 +2126,11 @@ export function ImproverScreen({
     });
   }, [selectedWorkflowAbsence, selectedWorkflowAssignedStep, selectedWorkflow, user?.id, workflows]);
 
+  const shouldShowSelectedWorkflowActions = Boolean(
+    (selectedWorkflowAssignedStep && selectedWorkflow?.recurrence !== "one_time") ||
+      (selectedWorkflowAbsence && canRevokeSelectedWorkflowAbsence),
+  );
+
   const sortedDetailSteps = useMemo(
     () => (selectedWorkflow ? [...selectedWorkflow.steps].sort((left, right) => left.stepOrder - right.stepOrder) : []),
     [selectedWorkflow],
@@ -2043,6 +2138,11 @@ export function ImproverScreen({
   const currentDetailStepIndex = Math.min(detailStepIndex, Math.max(sortedDetailSteps.length - 1, 0));
   const currentDetailStep = sortedDetailSteps[currentDetailStepIndex] || null;
   const detailSubmissionExpanded = currentDetailStep ? Boolean(submissionDetailsOpen[currentDetailStep.id]) : false;
+  const currentDetailStepHasCompletionForm = Boolean(
+    currentDetailStep &&
+      currentDetailStep.assignedImproverId === user?.id &&
+      (currentDetailStep.status === "available" || currentDetailStep.status === "in_progress"),
+  );
 
   useEffect(() => {
     if (!detailVisible) {
@@ -2107,8 +2207,14 @@ export function ImproverScreen({
 
   const renderLoadingCard = (label: string) => (
     <View style={styles.loadingInlineCard}>
-      <ActivityIndicator size="small" color={palette.primary} />
+      <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
       <Text style={styles.loadingInlineText}>{label}</Text>
+    </View>
+  );
+
+  const renderLoadingIndicatorCard = () => (
+    <View style={styles.loadingInlineCard}>
+      <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
     </View>
   );
 
@@ -2793,6 +2899,7 @@ export function ImproverScreen({
                 .sort((left, right) => left.itemOrder - right.itemOrder)
                 .map((item) => {
                   const form = completionForms[step.id]?.[item.id] || emptyItemForm();
+                  const itemError = itemErrors[getCompletionItemErrorKey(step.id, item.id)];
                   const selectedOption = form.dropdown
                     ? item.dropdownOptions.find((option) => option.value === form.dropdown)
                     : undefined;
@@ -2858,18 +2965,26 @@ export function ImproverScreen({
                           ) : null}
                           <View style={styles.photoGrid}>
                             {form.photos.map((photo) => (
-                              <View key={photo.id} style={styles.photoCard}>
+                              <Pressable
+                                key={photo.id}
+                                style={styles.photoCard}
+                                onPress={() => setBadgePreview({ label: photo.fileName, imageUri: photo.previewUri })}
+                              >
                                 <Image source={{ uri: photo.previewUri }} style={styles.photoPreview} resizeMode="cover" />
+                                <Pressable
+                                  style={styles.photoRemoveIconButton}
+                                  onPress={(event) => {
+                                    event.stopPropagation();
+                                    removeCompletionPhoto(step.id, item.id, photo.id);
+                                  }}
+                                  hitSlop={8}
+                                >
+                                  <Ionicons name="close" size={16} color={palette.white} />
+                                </Pressable>
                                 <Text style={styles.photoLabel} numberOfLines={1}>
                                   {photo.fileName}
                                 </Text>
-                                <Pressable
-                                  style={styles.photoRemoveButton}
-                                  onPress={() => removeCompletionPhoto(step.id, item.id, photo.id)}
-                                >
-                                  <Text style={styles.photoRemoveText}>Remove</Text>
-                                </Pressable>
-                              </View>
+                              </Pressable>
                             ))}
                           </View>
 
@@ -2905,6 +3020,7 @@ export function ImproverScreen({
                           {!imagePickerAvailable && !effectiveCameraOnly ? (
                             <Text style={styles.meta}>Photo library uploads will work once the image picker dependency is installed.</Text>
                           ) : null}
+                          {itemError ? <Text style={styles.inlineError}>{itemError}</Text> : null}
                         </View>
                       ) : null}
                     </View>
@@ -2934,6 +3050,63 @@ export function ImproverScreen({
     );
   };
 
+  const renderWorkflowCameraCapture = () => (
+    <View style={[styles.cameraScreen, { paddingTop: topInset + spacing.xl }]}>
+      <View style={styles.cameraHeader}>
+        <View style={styles.cameraHeaderCopy}>
+          <Text style={styles.cameraTitle}>Capture workflow photo</Text>
+          <Text style={styles.cameraSubtitle}>{cameraTarget?.title || "Workflow item"}</Text>
+        </View>
+        <Pressable style={styles.iconButtonInverse} onPress={() => setCameraTarget(null)}>
+          <Ionicons name="close" size={20} color={palette.white} />
+        </Pressable>
+      </View>
+      <View
+        style={[
+          styles.cameraFrame,
+          { aspectRatio: getWorkflowPhotoAspectRatioValue(cameraTarget?.aspectRatio || "square") },
+        ]}
+      >
+        {permission?.granted ? (
+          <CameraView ref={cameraRef} style={styles.cameraView} facing="back" />
+        ) : (
+          <View style={styles.cameraPendingWrap}>
+            <ThemedActivityIndicator size="large" color={palette.white} />
+            <Text style={styles.cameraPendingText}>Waiting for camera permission...</Text>
+          </View>
+        )}
+      </View>
+      {cameraError ? <Text style={styles.cameraError}>{cameraError}</Text> : null}
+      <View style={styles.cameraActions}>
+        <Pressable
+          style={[styles.cameraCaptureButton, !permission?.granted ? styles.buttonDisabled : undefined]}
+          disabled={!permission?.granted}
+          onPress={() => void captureWorkflowPhoto()}
+        >
+          <Ionicons name="camera" size={22} color={palette.white} />
+          <Text style={styles.cameraCaptureText}>Capture</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+
+  const renderBadgePreviewOverlay = (inline = false) => (
+    <Pressable
+      style={inline ? styles.inlineImagePreviewOverlay : styles.modalOverlay}
+      onPress={() => setBadgePreview(null)}
+    >
+      <Pressable style={styles.badgePreviewCard} onPress={() => {}}>
+        <Text style={styles.sectionTitle}>{badgePreview?.label || "Preview"}</Text>
+        {badgePreview?.imageUri ? (
+          <Image source={{ uri: badgePreview.imageUri }} style={styles.badgePreviewImage} resizeMode="contain" />
+        ) : null}
+        <Pressable style={styles.secondaryButton} onPress={() => setBadgePreview(null)}>
+          <Text style={styles.secondaryButtonText}>Close</Text>
+        </Pressable>
+      </Pressable>
+    </Pressable>
+  );
+
   return (
     <>
       <ScrollView
@@ -2942,6 +3115,18 @@ export function ImproverScreen({
           workflowEditMode && workflowView === "my-workflows" ? styles.containerWithActionBar : undefined,
         ]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          section === "workflows" ? (
+            <RefreshControl
+              key={refreshControlKey}
+              refreshing={workflowRefreshing}
+              onRefresh={handleWorkflowRefresh}
+              tintColor={refreshAccent}
+              colors={[refreshAccent]}
+              progressBackgroundColor={isDark ? palette.backgroundMuted : palette.surfaceStrong}
+            />
+          ) : undefined
+        }
       >
         {renderBannerStack()}
 
@@ -3049,7 +3234,7 @@ export function ImproverScreen({
                     key={option.value}
                     style={[styles.choiceRow, selected ? styles.choiceRowActive : undefined]}
                     onPress={() => {
-                      setWorkflowView(option.value);
+                      selectWorkflowView(option.value);
                       setWorkflowSelectorVisible(false);
                     }}
                   >
@@ -3064,8 +3249,21 @@ export function ImproverScreen({
         </Pressable>
       </Modal>
 
-      <Modal visible={detailVisible} animationType="slide" onRequestClose={() => setDetailVisible(false)}>
-        <View style={styles.modalScreen}>
+      <Modal
+        visible={detailVisible}
+        animationType="slide"
+        onRequestClose={() => {
+          if (cameraTarget) {
+            setCameraTarget(null);
+            return;
+          }
+          setDetailVisible(false);
+        }}
+      >
+        {cameraTarget ? (
+          renderWorkflowCameraCapture()
+        ) : (
+          <View style={styles.modalScreen}>
           <View style={[styles.modalHeader, { paddingTop: topInset + spacing.sm }]}>
             <View style={styles.modalHeaderCopy}>
               <Text style={styles.modalTitle}>{selectedWorkflow?.title || "Workflow"}</Text>
@@ -3080,50 +3278,27 @@ export function ImproverScreen({
 
           {!selectedWorkflow && detailLoading ? (
             <View style={styles.loadingWrap}>
-              <ActivityIndicator size="large" color={palette.primary} />
+              <ThemedActivityIndicator size="large" color={palette.primaryStrong} />
               <Text style={styles.loadingText}>Loading workflow details...</Text>
             </View>
           ) : selectedWorkflow ? (
-            <ScrollView contentContainerStyle={styles.modalContent} showsVerticalScrollIndicator={false}>
-              {detailLoading ? renderLoadingCard("Refreshing workflow details...") : null}
+            <ScrollView
+              contentContainerStyle={styles.modalContent}
+              showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl
+                  key={refreshControlKey}
+                  refreshing={workflowRefreshing}
+                  onRefresh={handleWorkflowRefresh}
+                  tintColor={refreshAccent}
+                  colors={[refreshAccent]}
+                  progressBackgroundColor={isDark ? palette.backgroundMuted : palette.surfaceStrong}
+                />
+              }
+            >
+              {detailLoading ? renderLoadingIndicatorCard() : null}
 
-              <View style={styles.card}>
-                <View style={styles.cardHeaderRow}>
-                  <View style={styles.cardHeaderCopy}>
-                    <Text style={styles.sectionTitle}>{selectedWorkflow.title}</Text>
-                    <Text style={styles.meta}>Status: {formatWorkflowDisplayStatus(selectedWorkflow)}</Text>
-                    <Text style={styles.meta}>Start: {formatWorkflowDate(selectedWorkflow.startAt)}</Text>
-                    {selectedWorkflow.supervisorRequired ? (
-                      <Text style={styles.meta}>
-                        Supervisor: {selectedWorkflow.supervisorTitle || selectedWorkflow.supervisorOrganization || "Assigned"}
-                      </Text>
-                    ) : null}
-                  </View>
-                  {renderStatusChip(formatWorkflowDisplayStatus(selectedWorkflow), resolveWorkflowTone(selectedWorkflow))}
-                </View>
-
-                {selectedWorkflow.description ? <Text style={styles.body}>{selectedWorkflow.description}</Text> : null}
-
-                {selectedWorkflow.roles.length > 0 ? (
-                  <View style={styles.stack}>
-                    <Text style={styles.stackLabel}>Roles</Text>
-                    {selectedWorkflow.roles.map((role) => (
-                      <View key={role.id} style={styles.subCard}>
-                        <Text style={styles.choiceTitle}>{role.title}</Text>
-                        <View style={styles.chipWrap}>
-                          {role.requiredCredentials.length === 0 ? (
-                            renderStatusChip("No required credentials", "default")
-                          ) : (
-                            role.requiredCredentials.map((credential) =>
-                              renderStatusChip(formatCredentialLabel(credential, labelMap), "default"),
-                            )
-                          )}
-                        </View>
-                      </View>
-                    ))}
-                  </View>
-                ) : null}
-
+              {shouldShowSelectedWorkflowActions ? (
                 <View style={styles.inlineActions}>
                   {selectedWorkflowAssignedStep && selectedWorkflow.recurrence !== "one_time" ? (
                     <Pressable
@@ -3189,7 +3364,7 @@ export function ImproverScreen({
                     </Pressable>
                   ) : null}
                 </View>
-              </View>
+              ) : null}
 
               {sortedDetailSteps.length > 0 ? (
                 <>
@@ -3238,81 +3413,85 @@ export function ImproverScreen({
                         )}
                       </View>
 
-                      <Text style={styles.meta}>Bounty: {currentDetailStep.bounty} SFLUV</Text>
-                      {currentDetailStep.assignedImproverName ? (
-                        <Text style={styles.meta}>Assigned: {currentDetailStep.assignedImproverName}</Text>
-                      ) : null}
-                      {currentDetailStep.payoutError ? <Text style={styles.inlineError}>{currentDetailStep.payoutError}</Text> : null}
+                      {!currentDetailStepHasCompletionForm ? (
+                        <>
+                          <Text style={styles.meta}>Bounty: {currentDetailStep.bounty} SFLUV</Text>
+                          {currentDetailStep.assignedImproverName ? (
+                            <Text style={styles.meta}>Assigned: {currentDetailStep.assignedImproverName}</Text>
+                          ) : null}
+                          {currentDetailStep.payoutError ? <Text style={styles.inlineError}>{currentDetailStep.payoutError}</Text> : null}
 
-                      {currentDetailStep.submission ? (
-                        currentDetailStep.submission.stepNotPossible ? (
-                          <View style={styles.submissionCard}>
-                            <Text style={styles.stackLabel}>Submitted as not possible</Text>
-                            <Text style={styles.choiceBody}>
-                              {currentDetailStep.submission.stepNotPossibleDetails || "No details provided."}
-                            </Text>
-                          </View>
-                        ) : (
-                          <View style={styles.submissionCard}>
-                            <View style={styles.sectionHeaderRow}>
-                              <Text style={styles.stackLabel}>
-                                Submitted on {new Date(currentDetailStep.submission.submittedAt * 1000).toLocaleString()}
-                              </Text>
-                              <Pressable
-                                style={styles.compactActionButton}
-                                onPress={() =>
-                                  setSubmissionDetailsOpen((current) => ({
-                                    ...current,
-                                    [currentDetailStep.id]: !current[currentDetailStep.id],
-                                  }))
-                                }
-                              >
-                                <Text style={styles.compactActionButtonText}>
-                                  {detailSubmissionExpanded ? "Hide details" : "View details"}
+                          {currentDetailStep.submission ? (
+                            currentDetailStep.submission.stepNotPossible ? (
+                              <View style={styles.submissionCard}>
+                                <Text style={styles.stackLabel}>Submitted as not possible</Text>
+                                <Text style={styles.choiceBody}>
+                                  {currentDetailStep.submission.stepNotPossibleDetails || "No details provided."}
                                 </Text>
-                              </Pressable>
+                              </View>
+                            ) : (
+                              <View style={styles.submissionCard}>
+                                <View style={styles.sectionHeaderRow}>
+                                  <Text style={styles.stackLabel}>
+                                    Submitted on {new Date(currentDetailStep.submission.submittedAt * 1000).toLocaleString()}
+                                  </Text>
+                                  <Pressable
+                                    style={styles.compactActionButton}
+                                    onPress={() =>
+                                      setSubmissionDetailsOpen((current) => ({
+                                        ...current,
+                                        [currentDetailStep.id]: !current[currentDetailStep.id],
+                                      }))
+                                    }
+                                  >
+                                    <Text style={styles.compactActionButtonText}>
+                                      {detailSubmissionExpanded ? "Hide details" : "View details"}
+                                    </Text>
+                                  </Pressable>
+                                </View>
+                              </View>
+                            )
+                          ) : null}
+
+                          {(currentDetailStep.submission?.stepNotPossible ||
+                            !currentDetailStep.submission ||
+                            detailSubmissionExpanded) &&
+                          currentDetailStep.description ? (
+                            <Text style={styles.body}>{currentDetailStep.description}</Text>
+                          ) : null}
+
+                          {(currentDetailStep.submission?.stepNotPossible ||
+                            !currentDetailStep.submission ||
+                            detailSubmissionExpanded) &&
+                          currentDetailStep.workItems.length > 0 ? (
+                            <View style={styles.stack}>
+                              {currentDetailStep.workItems
+                                .slice()
+                                .sort((left, right) => left.itemOrder - right.itemOrder)
+                                .map((item) => renderDetailWorkItem(currentDetailStep, item))}
                             </View>
-                          </View>
-                        )
-                      ) : null}
+                          ) : null}
 
-                      {(currentDetailStep.submission?.stepNotPossible ||
-                        !currentDetailStep.submission ||
-                        detailSubmissionExpanded) &&
-                      currentDetailStep.description ? (
-                        <Text style={styles.body}>{currentDetailStep.description}</Text>
-                      ) : null}
-
-                      {(currentDetailStep.submission?.stepNotPossible ||
-                        !currentDetailStep.submission ||
-                        detailSubmissionExpanded) &&
-                      currentDetailStep.workItems.length > 0 ? (
-                        <View style={styles.stack}>
-                          {currentDetailStep.workItems
-                            .slice()
-                            .sort((left, right) => left.itemOrder - right.itemOrder)
-                            .map((item) => renderDetailWorkItem(currentDetailStep, item))}
-                        </View>
-                      ) : null}
-
-                      {currentDetailStep.status === "completed" &&
-                      currentDetailStep.assignedImproverId === user?.id &&
-                      currentDetailStep.bounty > 0 &&
-                      currentDetailStep.payoutError ? (
-                        <Pressable
-                          style={[
-                            styles.secondaryButton,
-                            actionKey === `retry:${currentDetailStep.id}` ? styles.buttonDisabled : undefined,
-                          ]}
-                          disabled={Boolean(actionKey)}
-                          onPress={() => {
-                            void requestPayoutRetry(selectedWorkflow.id, currentDetailStep.id);
-                          }}
-                        >
-                          <Text style={styles.secondaryButtonText}>
-                            {actionKey === `retry:${currentDetailStep.id}` ? "Requesting..." : "Retry payout"}
-                          </Text>
-                        </Pressable>
+                          {currentDetailStep.status === "completed" &&
+                          currentDetailStep.assignedImproverId === user?.id &&
+                          currentDetailStep.bounty > 0 &&
+                          currentDetailStep.payoutError ? (
+                            <Pressable
+                              style={[
+                                styles.secondaryButton,
+                                actionKey === `retry:${currentDetailStep.id}` ? styles.buttonDisabled : undefined,
+                              ]}
+                              disabled={Boolean(actionKey)}
+                              onPress={() => {
+                                void requestPayoutRetry(selectedWorkflow.id, currentDetailStep.id);
+                              }}
+                            >
+                              <Text style={styles.secondaryButtonText}>
+                                {actionKey === `retry:${currentDetailStep.id}` ? "Requesting..." : "Retry payout"}
+                              </Text>
+                            </Pressable>
+                          ) : null}
+                        </>
                       ) : null}
 
                       {renderStepActions(selectedWorkflow, currentDetailStep)}
@@ -3322,31 +3501,8 @@ export function ImproverScreen({
               ) : renderEmptyCard("No workflow steps", "No workflow steps were configured.")}
             </ScrollView>
           ) : null}
-        </View>
-      </Modal>
-
-      <Modal visible={Boolean(cameraTarget)} animationType="slide" onRequestClose={() => setCameraTarget(null)}>
-        <View style={[styles.cameraScreen, { paddingTop: topInset + spacing.xl }]}>
-          <View style={styles.cameraHeader}>
-            <View style={styles.cameraHeaderCopy}>
-              <Text style={styles.cameraTitle}>Capture workflow photo</Text>
-              <Text style={styles.cameraSubtitle}>{cameraTarget?.title || "Workflow item"}</Text>
-            </View>
-            <Pressable style={styles.iconButtonInverse} onPress={() => setCameraTarget(null)}>
-              <Ionicons name="close" size={20} color={palette.white} />
-            </Pressable>
           </View>
-          <View style={styles.cameraFrame}>
-            <CameraView ref={cameraRef} style={styles.cameraView} facing="back" />
-          </View>
-          {cameraError ? <Text style={styles.cameraError}>{cameraError}</Text> : null}
-          <View style={styles.cameraActions}>
-            <Pressable style={styles.cameraCaptureButton} onPress={() => void captureWorkflowPhoto()}>
-              <Ionicons name="camera" size={22} color={palette.white} />
-              <Text style={styles.cameraCaptureText}>Capture</Text>
-            </Pressable>
-          </View>
-        </View>
+        )}
       </Modal>
 
       <Modal
@@ -3407,27 +3563,18 @@ export function ImproverScreen({
               </View>
             )}
           </ScrollView>
+          {badgePreview ? renderBadgePreviewOverlay(true) : null}
         </View>
       </Modal>
 
       <Modal
-        visible={Boolean(badgePreview)}
+        visible={Boolean(badgePreview) && !badgesVisible}
         transparent
         presentationStyle="overFullScreen"
         animationType="none"
         onRequestClose={() => setBadgePreview(null)}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setBadgePreview(null)}>
-          <Pressable style={styles.badgePreviewCard} onPress={() => {}}>
-            <Text style={styles.sectionTitle}>{badgePreview?.label || "Preview"}</Text>
-            {badgePreview?.imageUri ? (
-              <Image source={{ uri: badgePreview.imageUri }} style={styles.badgePreviewImage} resizeMode="contain" />
-            ) : null}
-            <Pressable style={styles.secondaryButton} onPress={() => setBadgePreview(null)}>
-              <Text style={styles.secondaryButtonText}>Close</Text>
-            </Pressable>
-          </Pressable>
-        </Pressable>
+        {renderBadgePreviewOverlay(false)}
       </Modal>
     </>
   );
@@ -3883,6 +4030,7 @@ function createStyles(
       flexBasis: "47%",
       flexGrow: 1,
       minWidth: 128,
+      position: "relative",
       gap: spacing.xs,
     },
     photoPlaceholder: {
@@ -3927,6 +4075,17 @@ function createStyles(
       color: palette.text,
       fontSize: 12,
       fontWeight: "800",
+    },
+    photoRemoveIconButton: {
+      position: "absolute",
+      top: 8,
+      right: 8,
+      width: 28,
+      height: 28,
+      borderRadius: radii.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "rgba(0,0,0,0.58)",
     },
     submissionCard: {
       borderRadius: radii.md,
@@ -4090,13 +4249,29 @@ function createStyles(
       lineHeight: 18,
     },
     cameraFrame: {
-      flex: 1,
+      width: "100%",
+      maxWidth: 520,
+      minHeight: 240,
+      alignSelf: "center",
       borderRadius: radii.lg,
       overflow: "hidden",
       backgroundColor: "#000000",
     },
     cameraView: {
       flex: 1,
+    },
+    cameraPendingWrap: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: spacing.sm,
+      padding: spacing.lg,
+    },
+    cameraPendingText: {
+      color: "rgba(255,255,255,0.78)",
+      lineHeight: 18,
+      textAlign: "center",
+      fontWeight: "700",
     },
     cameraActions: {
       alignItems: "center",
@@ -4123,6 +4298,15 @@ function createStyles(
     },
     modalOverlay: {
       flex: 1,
+      backgroundColor: palette.overlay,
+      padding: spacing.lg,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    inlineImagePreviewOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      zIndex: 20,
+      elevation: 20,
       backgroundColor: palette.overlay,
       padding: spacing.lg,
       alignItems: "center",

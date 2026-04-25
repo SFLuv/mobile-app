@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { TransactionDetailsModal } from "../components/TransactionDetailsModal";
 import { AppContact, AppLocation, AppTransaction } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
@@ -58,7 +59,8 @@ export function ActivityScreen({
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const [selectedTransaction, setSelectedTransaction] = useState<TransactionDetailPayload | null>(null);
-  const refreshAccent = palette.primary;
+  const refreshAccent = palette.primaryStrong;
+  const refreshControlKey = `${isDark ? "dark" : "light"}:${refreshAccent}:${palette.surfaceStrong}`;
 
   const { contactNameByAddress, merchantNameByAddress } = useMemo(
     () => buildAddressNameMaps(contacts, merchants, merchantLabels),
@@ -77,13 +79,12 @@ export function ActivityScreen({
         contentContainerStyle={styles.container}
         refreshControl={
           <RefreshControl
+            key={refreshControlKey}
             refreshing={refreshing}
             onRefresh={() => void onRefresh()}
             tintColor={refreshAccent}
             colors={[refreshAccent]}
             progressBackgroundColor={isDark ? palette.backgroundMuted : palette.surfaceStrong}
-            title={refreshing ? "Refreshing…" : undefined}
-            titleColor={refreshAccent}
           />
         }
         showsVerticalScrollIndicator={false}
@@ -95,12 +96,6 @@ export function ActivityScreen({
             <Text style={styles.walletBarMeta}>
               {activeAddress ? shortAddress(activeAddress) : "Wallet not loaded yet"}
             </Text>
-            {refreshing ? (
-              <View style={styles.refreshState}>
-                <Ionicons name="refresh" size={14} color={refreshAccent} />
-                <Text style={styles.refreshStateText}>Refreshing history…</Text>
-              </View>
-            ) : null}
           </View>
           {showWalletChooser && onOpenWalletChooser ? (
             <Pressable style={styles.chooseWalletButton} onPress={onOpenWalletChooser}>
@@ -112,7 +107,7 @@ export function ActivityScreen({
 
         {!transactionsLoaded ? (
           <View style={styles.emptyCard}>
-            <ActivityIndicator size="small" color={palette.primaryStrong} />
+            <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
             <Text style={styles.emptyTitle}>loading transactions</Text>
           </View>
         ) : decoratedTransactions.length === 0 ? (
@@ -159,7 +154,7 @@ export function ActivityScreen({
             disabled={loadingMore}
             onPress={() => void onLoadMore()}
           >
-            {loadingMore ? <ActivityIndicator size="small" color={palette.white} /> : null}
+            {loadingMore ? <ThemedActivityIndicator size="small" color={palette.white} /> : null}
             <Text style={styles.loadMoreText}>{loadingMore ? "Loading..." : "Load 10 more"}</Text>
           </Pressable>
         ) : null}
@@ -213,17 +208,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     walletBarMeta: {
       color: palette.textMuted,
       fontSize: 13,
-    },
-    refreshState: {
-      marginTop: 4,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6,
-    },
-    refreshStateText: {
-      color: palette.primaryStrong,
-      fontSize: 12,
-      fontWeight: "700",
     },
     chooseWalletButton: {
       flexDirection: "row",

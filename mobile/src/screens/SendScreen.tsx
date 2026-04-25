@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Animated,
   Keyboard,
   KeyboardAvoidingView,
@@ -21,6 +20,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { ethers } from "ethers";
 import { ScannerCornerGuide } from "../components/ScannerCornerGuide";
+import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { mobileConfig } from "../config";
 import { useCurrentLocation } from "../hooks/useCurrentLocation";
 import { AmountUnit, SendResult } from "../services/smartWallet";
@@ -283,7 +283,7 @@ function SwipeToSend({
         {...panResponder.panHandlers}
       >
         {loading ? (
-          <ActivityIndicator size="small" color={palette.primaryStrong} />
+          <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
         ) : (
           <Ionicons name="arrow-forward" size={18} color={palette.primaryStrong} />
         )}
@@ -565,6 +565,16 @@ export function SendScreen({
       return null;
     }
 
+    if (target.tipToAddress) {
+      return {
+        merchantName:
+          resolvedRecipient?.kind === "payment-link"
+            ? "this merchant"
+            : resolvedRecipient?.label || "this merchant",
+        tipToAddress: target.tipToAddress,
+      };
+    }
+
     if (
       recipientLookup?.found &&
       recipientLookup.isMerchant &&
@@ -574,13 +584,6 @@ export function SendScreen({
       return {
         merchantName: (recipientLookup.merchantName || recipientLookup.walletName || resolvedRecipient?.label || "Merchant").trim() || "Merchant",
         tipToAddress: recipientLookup.tipToAddress,
-      };
-    }
-
-    if (target.tipToAddress && target.tipToAddress.toLowerCase() !== target.recipient.toLowerCase()) {
-      return {
-        merchantName: resolvedRecipient?.label || "Merchant",
-        tipToAddress: target.tipToAddress,
       };
     }
 
@@ -599,7 +602,7 @@ export function SendScreen({
       merchantName: merchant.name,
       tipToAddress: merchant.tipToAddress,
     };
-  }, [activeTarget, merchants, parsedTarget, recipientLookup, resolvedRecipient?.label]);
+  }, [activeTarget, merchants, parsedTarget, recipientLookup, resolvedRecipient?.kind, resolvedRecipient?.label]);
 
   useEffect(() => {
     if (!draft) {
@@ -1065,7 +1068,7 @@ export function SendScreen({
             style={[styles.entryModeButton, entryMode === "manual" ? styles.entryModeButtonActive : undefined]}
             onPress={() => setEntryMode("manual")}
           >
-            <Text style={[styles.entryModeText, entryMode === "manual" ? styles.entryModeTextActive : undefined]}>Manual</Text>
+            <Text style={[styles.entryModeText, entryMode === "manual" ? styles.entryModeTextActive : undefined]}>Search</Text>
           </Pressable>
           <Pressable
             style={[styles.entryModeButton, entryMode === "scan" ? styles.entryModeButtonActive : undefined]}
@@ -1372,7 +1375,7 @@ export function SendScreen({
               onPress={handlePrimarySuccessAction}
             >
               {tipStatus === "sending" ? (
-                <ActivityIndicator size="small" color={palette.white} />
+                <ThemedActivityIndicator size="small" color={palette.white} />
               ) : tipStatus === "sent" ? (
                 <View style={styles.buttonRow}>
                   <Ionicons name="checkmark-circle" size={16} color={palette.white} />
@@ -1403,7 +1406,7 @@ export function SendScreen({
     return (
       <View style={[styles.stateScreen, { paddingTop: topInset + spacing.xl, paddingBottom: spacing.xl }]}>
         <View style={styles.stateInner}>
-          <ActivityIndicator size="large" color={palette.primary} />
+          <ThemedActivityIndicator size="large" color={palette.primaryStrong} />
           <Text style={styles.resultTitle}>Sending</Text>
         </View>
       </View>

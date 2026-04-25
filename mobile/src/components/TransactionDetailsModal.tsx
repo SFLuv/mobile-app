@@ -107,15 +107,25 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
   const panResponder = useMemo(
     () =>
       PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_, gestureState) =>
+          visible && gestureState.dy > 4 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
         onMoveShouldSetPanResponder: (_, gestureState) =>
-          visible && gestureState.dy > 6 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+          visible && gestureState.dy > 4 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+        onPanResponderGrant: () => {
+          dragY.stopAnimation();
+        },
         onPanResponderMove: (_, gestureState) => {
           dragY.setValue(Math.max(0, gestureState.dy));
         },
         onPanResponderRelease: (_, gestureState) => {
-          const shouldClose = gestureState.dy > 110 || gestureState.vy > 1.1;
+          const shouldClose = gestureState.dy > 72 || (gestureState.dy > 24 && gestureState.vy > 0.65);
           if (shouldClose) {
-            onClose();
+            Animated.timing(dragY, {
+              toValue: windowHeight,
+              duration: 180,
+              easing: Easing.out(Easing.cubic),
+              useNativeDriver: true,
+            }).start(() => onClose());
             return;
           }
           Animated.spring(dragY, {
@@ -126,6 +136,7 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
             useNativeDriver: true,
           }).start();
         },
+        onPanResponderTerminationRequest: () => false,
         onPanResponderTerminate: () => {
           Animated.spring(dragY, {
             toValue: 0,
@@ -136,7 +147,7 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
           }).start();
         },
       }),
-    [dragY, onClose, visible],
+    [dragY, onClose, visible, windowHeight],
   );
 
   const backdropOpacity = progress.interpolate({
@@ -169,7 +180,7 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
         </Pressable>
 
         <Animated.View style={[styles.sheet, { transform: [{ translateY: sheetTranslateY }] }]}>
-          <View style={styles.headerGestureZone} {...panResponder.panHandlers}>
+          <View collapsable={false} style={styles.headerGestureZone} {...panResponder.panHandlers}>
             <View style={styles.dragHandle} />
             <View style={styles.headerRow}>
               <View style={styles.headerCopy}>

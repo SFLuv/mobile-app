@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { ethers } from "ethers";
-import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { AppImprover, AppUser, AppWallet } from "../types/app";
 import { AppPreferences, SendFlowEntryMode, ThemePreference } from "../types/preferences";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
@@ -179,10 +179,6 @@ function SocialAccountRow({
   iconName,
   iconColor,
   linked,
-  description,
-  email,
-  message,
-  disabledReason,
   buttonLabel,
   buttonBusyLabel,
   busy,
@@ -194,10 +190,6 @@ function SocialAccountRow({
   iconName: React.ComponentProps<typeof Ionicons>["name"];
   iconColor: string;
   linked: boolean;
-  description: string;
-  email?: string;
-  message?: string | null;
-  disabledReason?: string | null;
   buttonLabel: string;
   buttonBusyLabel: string;
   busy?: boolean;
@@ -216,11 +208,14 @@ function SocialAccountRow({
             <Ionicons name={iconName} size={24} color={iconColor} />
           </View>
           <View style={styles.socialCopy}>
-            <Text style={styles.socialProviderTitle}>{provider}</Text>
-            <Text style={styles.socialProviderBody}>{description}</Text>
-            {email ? <Text style={styles.socialProviderMeta}>{provider} email: {email}</Text> : null}
-            {disabledReason ? <Text style={styles.socialProviderMeta}>{disabledReason}</Text> : null}
-            {message ? <Text style={styles.socialProviderMeta}>{message}</Text> : null}
+            <View style={styles.socialProviderTitleRow}>
+              <Text style={styles.socialProviderTitle}>{provider}</Text>
+              {linked ? (
+                <View style={styles.socialLinkedPill}>
+                  <Text style={styles.socialLinkedPillText}>Linked</Text>
+                </View>
+              ) : null}
+            </View>
           </View>
         </View>
         <Pressable
@@ -249,7 +244,6 @@ function SocialAccountRow({
           </View>
         </Pressable>
       </View>
-      {linked ? <View style={styles.socialLinkedPill}><Text style={styles.socialLinkedPillText}>Linked</Text></View> : null}
     </View>
   );
 }
@@ -458,6 +452,7 @@ export function SettingsScreen({
   const [improverBusy, setImproverBusy] = useState(false);
   const [improverMessage, setImproverMessage] = useState<string | null>(null);
   const [improverError, setImproverError] = useState<string | null>(null);
+  const [socialHelpVisible, setSocialHelpVisible] = useState(false);
 
   const hasImproverSection = Boolean(onOpenImprover || improver || user?.isImprover);
   const isApprovedImprover = Boolean(user?.isImprover || improver?.status === "approved");
@@ -517,7 +512,8 @@ export function SettingsScreen({
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+    <>
+      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       {syncNotice ? (
         <View style={styles.noticeCard}>
           <Text style={styles.noticeTitle}>App Sync</Text>
@@ -583,11 +579,11 @@ export function SettingsScreen({
             <View style={styles.preferenceStack}>
               <View style={styles.preferenceCopy}>
                 <Text style={styles.preferenceTitle}>Send flow</Text>
-                <Text style={styles.preferenceBody}>Choose whether Send opens on manual entry or QR scan first.</Text>
+                <Text style={styles.preferenceBody}>Choose whether Send opens on search or QR scan first.</Text>
               </View>
               <View style={styles.themeRow}>
                 <SendFlowOption
-                  label="Manual"
+                  label="Search"
                   active={preferences.defaultSendEntryMode === "manual"}
                   onPress={() => applyDefaultSendEntryMode("manual")}
                 />
@@ -651,21 +647,22 @@ export function SettingsScreen({
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Link Socials</Text>
-            <Text style={styles.body}>Manage the Google and Apple sign-in methods attached to this account.</Text>
+            <View style={styles.sectionTitleRow}>
+              <Text style={styles.sectionTitle}>Link Socials</Text>
+              <Pressable
+                style={styles.titleInfoButton}
+                accessibilityRole="button"
+                accessibilityLabel="About linked socials"
+                onPress={() => setSocialHelpVisible(true)}
+              >
+                <Ionicons name="information-circle-outline" size={19} color={palette.primaryStrong} />
+              </Pressable>
+            </View>
             <SocialAccountRow
               provider="Google"
               iconName="logo-google"
               iconColor={palette.primaryStrong}
               linked={googleLinkedNow}
-              description={
-                googleLinkedNow
-                  ? "Google is linked to this account for future sign-ins."
-                  : "Link Google so future Google sign-ins land on this account."
-              }
-              email={googleLinkedEmail}
-              message={googleMessage}
-              disabledReason={googleLinkedNow ? googleDisconnectDisabledReason : null}
               buttonLabel={
                 googleLinkedNow
                   ? googleCanDisconnect
@@ -685,14 +682,6 @@ export function SettingsScreen({
               iconName="logo-apple"
               iconColor={palette.text}
               linked={appleLinkedNow}
-              description={
-                appleLinkedNow
-                  ? "Apple is linked to this account for future sign-ins."
-                  : "Link Apple so future Apple sign-ins land on this account."
-              }
-              email={appleLinkedEmail}
-              message={appleLinkMessage}
-              disabledReason={appleLinkedNow ? appleDisconnectDisabledReason : null}
               buttonLabel={
                 appleLinkedNow
                   ? appleCanDisconnect
@@ -817,7 +806,53 @@ export function SettingsScreen({
           ) : null}
         </>
       ) : null}
-    </ScrollView>
+      </ScrollView>
+      <Modal
+        visible={socialHelpVisible}
+        transparent
+        presentationStyle="overFullScreen"
+        animationType="none"
+        onRequestClose={() => setSocialHelpVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setSocialHelpVisible(false)}>
+          <Pressable style={styles.socialHelpCard} onPress={() => {}}>
+            <View style={styles.socialHelpHeader}>
+              <Text style={styles.sectionTitle}>Link Socials</Text>
+              <Pressable style={styles.titleInfoButton} onPress={() => setSocialHelpVisible(false)}>
+                <Ionicons name="close" size={18} color={palette.primaryStrong} />
+              </Pressable>
+            </View>
+            <Text style={styles.body}>Attach Google or Apple sign-in methods to this SFLUV account so future social sign-ins land here.</Text>
+            <View style={styles.socialHelpProviderCard}>
+              <Text style={styles.socialProviderTitle}>Google</Text>
+              <Text style={styles.socialProviderMeta}>
+                {googleLinkedNow
+                  ? "Google is linked to this account for future sign-ins."
+                  : "Link Google so future Google sign-ins land on this account."}
+              </Text>
+              {googleLinkedEmail ? <Text style={styles.socialProviderMeta}>Google email: {googleLinkedEmail}</Text> : null}
+              {googleLinkedNow && googleDisconnectDisabledReason ? (
+                <Text style={styles.socialProviderMeta}>{googleDisconnectDisabledReason}</Text>
+              ) : null}
+              {googleMessage ? <Text style={styles.socialProviderMeta}>{googleMessage}</Text> : null}
+            </View>
+            <View style={styles.socialHelpProviderCard}>
+              <Text style={styles.socialProviderTitle}>Apple</Text>
+              <Text style={styles.socialProviderMeta}>
+                {appleLinkedNow
+                  ? "Apple is linked to this account for future sign-ins."
+                  : "Link Apple so future Apple sign-ins land on this account."}
+              </Text>
+              {appleLinkedEmail ? <Text style={styles.socialProviderMeta}>Apple email: {appleLinkedEmail}</Text> : null}
+              {appleLinkedNow && appleDisconnectDisabledReason ? (
+                <Text style={styles.socialProviderMeta}>{appleDisconnectDisabledReason}</Text>
+              ) : null}
+              {appleLinkMessage ? <Text style={styles.socialProviderMeta}>{appleLinkMessage}</Text> : null}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </>
   );
 }
 
@@ -874,6 +909,22 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       color: palette.text,
       fontSize: 18,
       fontWeight: "900",
+    },
+    sectionTitleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: spacing.sm,
+    },
+    titleInfoButton: {
+      width: 36,
+      height: 36,
+      borderRadius: radii.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: palette.primarySoft,
+      borderWidth: 1,
+      borderColor: palette.primary,
     },
     body: {
       color: palette.textMuted,
@@ -1031,9 +1082,11 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       fontSize: 16,
       fontWeight: "900",
     },
-    socialProviderBody: {
-      color: palette.textMuted,
-      lineHeight: 20,
+    socialProviderTitleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: spacing.xs,
     },
     socialProviderMeta: {
       color: palette.textMuted,
@@ -1083,6 +1136,38 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     socialDivider: {
       height: 1,
       backgroundColor: palette.border,
+    },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: palette.overlay,
+      padding: spacing.lg,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    socialHelpCard: {
+      width: "100%",
+      maxWidth: 380,
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surface,
+      padding: spacing.lg,
+      gap: spacing.md,
+      ...shadows.card,
+    },
+    socialHelpHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: spacing.md,
+    },
+    socialHelpProviderCard: {
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surfaceStrong,
+      padding: spacing.md,
+      gap: spacing.xs,
     },
     walletAddress: {
       color: palette.text,

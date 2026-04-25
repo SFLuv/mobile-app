@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -8,6 +7,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { MerchantApplicationDraft, MerchantPlaceCandidate } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { getMerchantPlaceDetails, searchMerchantPlaces } from "../services/googlePlaces";
@@ -132,7 +132,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
           <Text style={styles.primaryButtonText}>Search Google Places</Text>
         </Pressable>
         <Text style={styles.selectedText}>{selectedSummary}</Text>
-        {searching ? <ActivityIndicator color={palette.primary} /> : null}
+        {searching ? <ThemedActivityIndicator color={palette.primaryStrong} /> : null}
         {results.map((result) => (
           <Pressable key={result.googleId} style={styles.resultCard} onPress={() => void choosePlace(result.googleId)}>
             <Text style={styles.resultTitle}>{result.name}</Text>

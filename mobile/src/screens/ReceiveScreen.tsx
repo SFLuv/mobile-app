@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -15,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import QRCode from "react-native-qrcode-svg";
 import * as Clipboard from "expo-clipboard";
 import { ScannerCornerGuide } from "../components/ScannerCornerGuide";
+import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { buildUniversalPayLink, parseSfluvUniversalLink } from "../utils/universalLinks";
 
@@ -63,10 +64,10 @@ export function ReceiveScreen({ accountAddress, onRedeemCodeScanned }: Props) {
   const topInset = Math.max(Constants.statusBarHeight, Platform.OS === "ios" ? spacing.md : 0);
   const qrSize = Math.min(
     Math.max(
-      Math.min(windowFrame.width - (compactLayout ? 116 : 136), windowFrame.height * (compactLayout ? 0.24 : 0.28)),
-      compactLayout ? 156 : 176,
+      Math.min(windowFrame.width - (compactLayout ? 152 : 164), windowFrame.height * (compactLayout ? 0.18 : 0.22)),
+      compactLayout ? 132 : 148,
     ),
-    compactLayout ? 190 : 216,
+    compactLayout ? 166 : 188,
   );
 
   const [mode, setMode] = useState<ReceiveMode>("link");
@@ -120,7 +121,11 @@ export function ReceiveScreen({ accountAddress, onRedeemCodeScanned }: Props) {
 
   return (
     <>
-      <View style={styles.container}>
+      <ScrollView
+        style={styles.scrollRoot}
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.content}>
           <View style={styles.modeToggle}>
             <Pressable
@@ -169,7 +174,7 @@ export function ReceiveScreen({ accountAddress, onRedeemCodeScanned }: Props) {
           <Ionicons name="scan-outline" size={18} color={palette.white} />
           <Text style={styles.redeemButtonText}>Redeem code</Text>
         </Pressable>
-      </View>
+      </ScrollView>
 
       <Modal
         visible={scannerOpen}
@@ -239,7 +244,7 @@ export function ReceiveScreen({ accountAddress, onRedeemCodeScanned }: Props) {
             <ScannerCornerGuide color={palette.primaryStrong} />
           </View>
           <View style={styles.scannerFooter}>
-            {scanLocked ? <ActivityIndicator size="small" color={palette.white} /> : null}
+            {scanLocked ? <ThemedActivityIndicator size="small" color={palette.white} /> : null}
             <Text style={styles.scannerHint}>Center the faucet QR inside the frame to redeem it to this wallet.</Text>
           </View>
         </View>
@@ -254,12 +259,16 @@ function createStyles(
   compactLayout = false,
 ) {
   return StyleSheet.create({
-    container: {
+    scrollRoot: {
       flex: 1,
+    },
+    container: {
+      flexGrow: 1,
       paddingHorizontal: spacing.lg,
       paddingTop: compactLayout ? spacing.sm : spacing.md,
-      paddingBottom: compactLayout ? spacing.sm : spacing.lg,
+      paddingBottom: compactLayout ? 104 : 116,
       gap: compactLayout ? spacing.sm : spacing.md,
+      justifyContent: "space-between",
     },
     content: {
       flex: 1,
@@ -277,7 +286,7 @@ function createStyles(
     },
     modeButton: {
       flex: 1,
-      minHeight: 44,
+      minHeight: compactLayout ? 40 : 42,
       borderRadius: radii.md,
       alignItems: "center",
       justifyContent: "center",
@@ -318,8 +327,8 @@ function createStyles(
       borderRadius: radii.lg,
       borderWidth: 1,
       borderColor: palette.border,
-      padding: compactLayout ? spacing.sm : spacing.md,
-      gap: compactLayout ? spacing.xs : spacing.sm,
+      padding: compactLayout ? spacing.xs : spacing.sm,
+      gap: spacing.xs,
       justifyContent: "space-between",
       ...shadows.soft,
     },
@@ -332,13 +341,13 @@ function createStyles(
     qrTitle: {
       flex: 1,
       color: palette.text,
-      fontSize: 18,
+      fontSize: compactLayout ? 16 : 17,
       fontWeight: "900",
     },
     copyButton: {
-      minHeight: 40,
+      minHeight: compactLayout ? 34 : 36,
       borderRadius: radii.pill,
-      paddingHorizontal: 12,
+      paddingHorizontal: 10,
       backgroundColor: palette.primarySoft,
       alignItems: "center",
       justifyContent: "center",
@@ -354,8 +363,8 @@ function createStyles(
       alignSelf: "center",
       maxWidth: "100%",
       backgroundColor: palette.white,
-      borderRadius: radii.lg,
-      padding: compactLayout ? 12 : 16,
+      borderRadius: radii.md,
+      padding: compactLayout ? 6 : 8,
       borderWidth: 1,
       borderColor: palette.border,
     },
