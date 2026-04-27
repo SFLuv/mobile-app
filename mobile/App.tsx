@@ -101,8 +101,10 @@ type SendDraft = {
   recipient: string;
   amount?: string;
   memo?: string;
+  tipToAddress?: string;
+  source?: "sfluv-link" | "citizenwallet-link" | "citizenwallet-plugin-link" | "transfer-qr";
   recipientLabel?: string;
-  recipientKind?: "contact" | "merchant";
+  recipientKind?: "contact" | "merchant" | "payment-link";
 };
 
 type SendDraftOptions = {
@@ -725,6 +727,25 @@ function describeLoginIssue(error: unknown, fallback = "Unable to sign in right 
   return message || fallback;
 }
 
+function isConnectivityErrorMessage(message: string | null | undefined): boolean {
+  if (!message) {
+    return false;
+  }
+  const normalized = message.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    normalized.includes("timed out") ||
+    normalized.includes("check your connection") ||
+    normalized.includes("network request failed") ||
+    normalized.includes("no internet") ||
+    normalized.includes("offline") ||
+    normalized.includes("unable to connect") ||
+    normalized.includes("internet connection")
+  );
+}
+
 function formatDeletionDateLabel(value?: string | null): string | null {
   if (!value) {
     return null;
@@ -960,6 +981,7 @@ function WalletAppShell({
   googleDisconnectDisabledReason,
   onLinkGoogle,
   onDisconnectGoogle,
+  onRetryConnection,
   showRecoveryFundsNotice,
   onDismissRecoveryFundsNotice,
   onPolicyRequired,
@@ -993,6 +1015,7 @@ function WalletAppShell({
   googleDisconnectDisabledReason?: string | null;
   onLinkGoogle?: () => void;
   onDisconnectGoogle?: () => void;
+  onRetryConnection?: () => void;
   showRecoveryFundsNotice: boolean;
   onDismissRecoveryFundsNotice: () => void;
   onPolicyRequired?: (status: AppUserPolicyStatus) => void;
@@ -1028,6 +1051,7 @@ function WalletAppShell({
       googleDisconnectDisabledReason={googleDisconnectDisabledReason}
       onLinkGoogle={onLinkGoogle}
       onDisconnectGoogle={onDisconnectGoogle}
+      onRetryConnection={onRetryConnection}
       showRecoveryFundsNotice={showRecoveryFundsNotice}
       onDismissRecoveryFundsNotice={onDismissRecoveryFundsNotice}
       onPolicyRequired={onPolicyRequired}
@@ -1065,6 +1089,7 @@ function WalletAppShellContent({
   googleDisconnectDisabledReason,
   onLinkGoogle,
   onDisconnectGoogle,
+  onRetryConnection,
   showRecoveryFundsNotice,
   onDismissRecoveryFundsNotice,
   onPolicyRequired,
@@ -1098,6 +1123,7 @@ function WalletAppShellContent({
   googleDisconnectDisabledReason?: string | null;
   onLinkGoogle?: () => void;
   onDisconnectGoogle?: () => void;
+  onRetryConnection?: () => void;
   showRecoveryFundsNotice: boolean;
   onDismissRecoveryFundsNotice: () => void;
   onPolicyRequired?: (status: AppUserPolicyStatus) => void;
@@ -1164,6 +1190,7 @@ function WalletAppShellContent({
   const walletPaneGestureMaxXRef = useRef(0);
   const walletPaneGestureActiveRef = useRef(false);
   const walletOverlayPane: OverlayWalletPane | null = walletPane === "home" ? null : walletPane;
+  const runtimeOffline = isConnectivityErrorMessage(runtime.error);
 
   const setWalletPaneTranslateX = React.useCallback(
     (value: number) => {
@@ -1207,7 +1234,6 @@ function WalletAppShellContent({
       setSendReturnTab(null);
       setWalletPane("home");
       setTab(returnTab ?? "wallet");
-      setWalletPaneTranslateX(0);
       walletPaneAnimatingRef.current = false;
     });
   }, [sendReturnTab, setWalletPaneTranslateX, walletPane, walletPaneSlideDistance, walletPaneTranslateX]);
@@ -1664,6 +1690,8 @@ function WalletAppShellContent({
     if (link.type === "pay") {
       openSendDraft({
         recipient: link.address,
+        recipientKind: "payment-link",
+        source: "sfluv-link",
       });
       onConsumePendingLink();
       return;
@@ -1674,6 +1702,9 @@ function WalletAppShellContent({
         recipient: link.address,
         amount: link.amount,
         memo: link.memo,
+        tipToAddress: link.tipToAddress,
+        recipientKind: "payment-link",
+        source: "sfluv-link",
       });
       onConsumePendingLink();
       return;
@@ -2575,6 +2606,9 @@ function WalletAppShellContent({
             recipient: link.address,
             amount: link.type === "request" ? link.amount : undefined,
             memo: link.type === "request" ? link.memo : undefined,
+            tipToAddress: link.type === "request" ? link.tipToAddress : undefined,
+            recipientKind: "payment-link",
+            source: "sfluv-link",
           });
         }}
       />
@@ -2671,7 +2705,22 @@ function WalletAppShellContent({
             </View>
           ) : runtime.error ? (
             <View style={styles.centerState}>
-              <Text style={styles.errorText}>{runtime.error}</Text>
+              {runtimeOffline ? (
+                <View style={styles.connectionStateCard}>
+                  <View style={styles.connectionStateIconWrap}>
+                    <Ionicons name="cloud-offline-outline" size={26} color={palette.primaryStrong} />
+                  </View>
+                  <Text style={styles.connectionStateTitle}>No Connection</Text>
+                  <Text style={styles.connectionStateBody}>
+                    We couldn&apos;t load your account because the app appears to be offline. Reconnect and try again.
+                  </Text>
+                  <Pressable style={styles.connectionStateButton} onPress={onRetryConnection}>
+                    <Text style={styles.connectionStateButtonText}>Try again</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <Text style={styles.errorText}>{runtime.error}</Text>
+              )}
             </View>
           ) : tab === "wallet" ? (
             walletTabContent
@@ -2724,6 +2773,11 @@ function WalletAppShellContent({
                 }
                 openSendDraft({
                   recipient: location.payToAddress,
+                  tipToAddress:
+                    location.tipToAddress &&
+                    location.tipToAddress.toLowerCase() !== location.payToAddress.toLowerCase()
+                      ? location.tipToAddress
+                      : undefined,
                   recipientLabel: location.name,
                   recipientKind: "merchant",
                 }, { returnTab: "map" });
@@ -3125,6 +3179,7 @@ function PrivyWalletApp({
   const [preferredCandidateKey, setPreferredCandidateKey] = useState<string | undefined>(undefined);
   const [pendingLinkIntent, setPendingLinkIntent] = useState<PendingLinkIntent | null>(null);
   const [backendBootstrapReady, setBackendBootstrapReady] = useState(false);
+  const [bootstrapRetryVersion, setBootstrapRetryVersion] = useState(0);
   const [walletPreferencesReady, setWalletPreferencesReady] = useState(false);
   const [walletPreferences, setWalletPreferences] = useState<StoredWalletPreferences>({
     defaultWalletAddress: undefined,
@@ -3233,6 +3288,18 @@ function PrivyWalletApp({
       loadingMessage: null,
     });
   };
+
+  const retryRuntimeConnection = React.useCallback(() => {
+    bootstrappedIdentityRef.current = null;
+    setBackendBootstrapReady(false);
+    setRuntime((state) => ({
+      ...state,
+      loading: true,
+      error: null,
+      loadingMessage: "Checking your connection...",
+    }));
+    setBootstrapRetryVersion((current) => current + 1);
+  }, []);
 
   const showDeletedAccountGate = (
     nextDeletedAccountStatus: AppAccountDeletionStatusResponse,
@@ -3705,6 +3772,7 @@ function PrivyWalletApp({
     };
   }, [
     backendClient,
+    bootstrapRetryVersion,
     deletedAccountStatus,
     embeddedWallet,
     getAccessToken,
@@ -4054,6 +4122,8 @@ function PrivyWalletApp({
     );
   }
 
+  const runtimeOffline = isConnectivityErrorMessage(runtime.error);
+
   if (!user) {
     return (
       <SafeAreaView style={styles.safe}>
@@ -4219,7 +4289,18 @@ function PrivyWalletApp({
               <Text style={styles.loginPolicyLinkText}>Email Opt-In Policy</Text>
             </Pressable>
           </View>
-          {runtime.error ? <Text style={styles.errorText}>{runtime.error}</Text> : null}
+          {runtime.error ? (
+            runtimeOffline ? (
+              <View style={styles.loginConnectionStateCard}>
+                <Text style={styles.connectionStateTitle}>No Connection</Text>
+                <Text style={styles.connectionStateBody}>
+                  The app needs an internet connection before we can finish loading your account.
+                </Text>
+              </View>
+            ) : (
+              <Text style={styles.errorText}>{runtime.error}</Text>
+            )
+          ) : null}
         </View>
       </SafeAreaView>
     );
@@ -4269,6 +4350,7 @@ function PrivyWalletApp({
       googleDisconnectDisabledReason={googleDisconnectDisabledReason}
       onLinkGoogle={handleLinkGoogle}
       onDisconnectGoogle={handleDisconnectGoogle}
+      onRetryConnection={retryRuntimeConnection}
       showRecoveryFundsNotice={showRecoveryFundsNotice}
       onDismissRecoveryFundsNotice={dismissRecoveryFundsNotice}
       onPolicyRequired={showPolicyGate}
@@ -4672,6 +4754,64 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     color: palette.danger,
     textAlign: "center",
     lineHeight: 20,
+  },
+  connectionStateCard: {
+    width: "100%",
+    maxWidth: 320,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.surfaceMuted,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.lg,
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  loginConnectionStateCard: {
+    width: "100%",
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.surfaceMuted,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  connectionStateIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: palette.surface,
+    borderWidth: 1,
+    borderColor: palette.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  connectionStateTitle: {
+    color: palette.primaryStrong,
+    fontSize: 22,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  connectionStateBody: {
+    color: palette.textMuted,
+    textAlign: "center",
+    lineHeight: 21,
+  },
+  connectionStateButton: {
+    minWidth: 160,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 14,
+    borderRadius: radii.pill,
+    backgroundColor: palette.primaryStrong,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  connectionStateButtonText: {
+    color: palette.white,
+    fontWeight: "800",
+    fontSize: 15,
   },
   bottomDockShell: {
     position: "absolute",

@@ -513,7 +513,7 @@ export function ImproverScreen({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [workflowRefreshing, setWorkflowRefreshing] = useState(false);
   const [badgePreview, setBadgePreview] = useState<{ label: string; imageUri: string } | null>(null);
-  const [imagePreviewHost, setImagePreviewHost] = useState<"detail" | "badges" | null>(null);
+  const [imagePreviewHost, setImagePreviewHost] = useState<"detail" | "badges" | "credentials" | null>(null);
   const [photoPreviewUris, setPhotoPreviewUris] = useState<Record<string, string>>({});
   const [photoPreviewLoading, setPhotoPreviewLoading] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
@@ -615,7 +615,7 @@ export function ImproverScreen({
   }, [resetImagePreviewTransform]);
 
   const openImagePreview = useCallback(
-    (preview: { label: string; imageUri: string }, host: "detail" | "badges") => {
+    (preview: { label: string; imageUri: string }, host: "detail" | "badges" | "credentials") => {
       setImagePreviewHost(host);
       setBadgePreview(preview);
     },
@@ -2876,9 +2876,19 @@ export function ImproverScreen({
         </Pressable>
         {activeCredentials.length > 0 ? (
           <View style={styles.chipWrap}>
-            {activeCredentials.map((credential) =>
-              renderStatusChip(formatCredentialLabel(credential, labelMap), "default"),
-            )}
+            {myBadgeItems.map((badge) => (
+              <Pressable
+                key={badge.credential}
+                disabled={!badge.badgeUri}
+                onPress={() => {
+                  if (badge.badgeUri) {
+                    openImagePreview({ label: badge.label, imageUri: badge.badgeUri }, "credentials");
+                  }
+                }}
+              >
+                {renderStatusChip(badge.label, "default")}
+              </Pressable>
+            ))}
           </View>
         ) : null}
       </View>
@@ -3351,9 +3361,12 @@ export function ImproverScreen({
     </View>
   );
 
-  const renderBadgePreviewOverlay = (inline = false) => (
+  const imagePreviewBaseWidth = Math.min(windowWidth - spacing.lg * 4, 640);
+  const imagePreviewBaseHeight = Math.min(windowHeight * 0.58, 520);
+
+  const renderBadgePreviewOverlay = () => (
     <Pressable
-      style={inline ? styles.inlineImagePreviewOverlay : styles.modalOverlay}
+      style={styles.modalOverlay}
       onPress={closeImagePreview}
     >
       <Pressable style={styles.imagePreviewCard} onPress={() => {}}>
@@ -3366,44 +3379,38 @@ export function ImproverScreen({
           </Pressable>
         </View>
 
-        <View style={styles.imagePreviewViewport} {...imagePreviewPanResponder.panHandlers}>
+        <View style={styles.imagePreviewViewport}>
           {badgePreview?.imageUri ? (
-            <Animated.Image
-              source={{ uri: badgePreview.imageUri }}
-              style={[
-                styles.imagePreviewImage,
-                {
-                  transform: [
-                    { scale: imagePreviewScale },
-                    ...imagePreviewPan.getTranslateTransform(),
-                  ],
-                },
-              ]}
-              resizeMode="contain"
-            />
+            <ScrollView
+              style={styles.imagePreviewScroll}
+              contentContainerStyle={styles.imagePreviewScrollContent}
+              maximumZoomScale={4}
+              minimumZoomScale={1}
+              pinchGestureEnabled
+              bounces={false}
+              bouncesZoom={false}
+              alwaysBounceHorizontal={false}
+              alwaysBounceVertical={false}
+              centerContent
+              showsHorizontalScrollIndicator={false}
+              showsVerticalScrollIndicator={false}
+            >
+              <Image
+                source={{ uri: badgePreview.imageUri }}
+                style={[
+                  styles.imagePreviewImage,
+                  {
+                    width: imagePreviewBaseWidth,
+                    height: imagePreviewBaseHeight,
+                  },
+                ]}
+                resizeMode="contain"
+              />
+            </ScrollView>
           ) : null}
         </View>
 
-        <View style={styles.imagePreviewControls}>
-          <Pressable
-            style={styles.imagePreviewControlButton}
-            onPress={() => setImagePreviewTransform(imagePreviewScaleRef.current - 0.5, undefined, undefined, true)}
-          >
-            <Ionicons name="remove" size={20} color={palette.primaryStrong} />
-          </Pressable>
-          <Pressable
-            style={styles.imagePreviewControlButton}
-            onPress={() => resetImagePreviewTransform(true)}
-          >
-            <Ionicons name="resize-outline" size={20} color={palette.primaryStrong} />
-          </Pressable>
-          <Pressable
-            style={styles.imagePreviewControlButton}
-            onPress={() => setImagePreviewTransform(imagePreviewScaleRef.current + 0.5, undefined, undefined, true)}
-          >
-            <Ionicons name="add" size={20} color={palette.primaryStrong} />
-          </Pressable>
-        </View>
+        <Text style={styles.imagePreviewHint}>Pinch to zoom and drag to pan.</Text>
 
         <Pressable style={styles.secondaryButton} onPress={closeImagePreview}>
           <Text style={styles.secondaryButtonText}>Close</Text>
@@ -3811,7 +3818,6 @@ export function ImproverScreen({
               ) : renderEmptyCard("No workflow steps", "No workflow steps were configured.")}
             </ScrollView>
           ) : null}
-          {badgePreview && imagePreviewHost === "detail" ? renderBadgePreviewOverlay(true) : null}
           </View>
         )}
       </Modal>
@@ -3874,18 +3880,17 @@ export function ImproverScreen({
               </View>
             )}
           </ScrollView>
-          {badgePreview && imagePreviewHost === "badges" ? renderBadgePreviewOverlay(true) : null}
         </View>
       </Modal>
 
       <Modal
-        visible={Boolean(badgePreview) && imagePreviewHost !== "detail" && !badgesVisible}
+        visible={Boolean(badgePreview)}
         transparent
         presentationStyle="overFullScreen"
-        animationType="none"
+        animationType="fade"
         onRequestClose={closeImagePreview}
       >
-        {renderBadgePreviewOverlay(false)}
+        {renderBadgePreviewOverlay()}
       </Modal>
     </>
   );
@@ -4684,9 +4689,23 @@ function createStyles(
       alignItems: "center",
       justifyContent: "center",
     },
-    imagePreviewImage: {
+    imagePreviewScroll: {
+      flex: 1,
       width: "100%",
-      height: "100%",
+    },
+    imagePreviewScrollContent: {
+      flexGrow: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingVertical: spacing.sm,
+    },
+    imagePreviewImage: {
+      maxWidth: "100%",
+      maxHeight: "100%",
+    },
+    imagePreviewHint: {
+      color: palette.textMuted,
+      textAlign: "center",
     },
     imagePreviewControls: {
       flexDirection: "row",

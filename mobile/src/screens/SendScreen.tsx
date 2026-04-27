@@ -78,6 +78,8 @@ type Props = {
     recipient: string;
     amount?: string;
     memo?: string;
+    tipToAddress?: string;
+    source?: SendTarget["source"];
     recipientLabel?: string;
     recipientKind?: RecipientKind;
   } | null;
@@ -539,6 +541,7 @@ export function SendScreen({
       label: "Payment link",
       address: target.recipient,
       subtitle: shortAddress(target.recipient),
+      tipToAddress: target.tipToAddress,
     };
   }, [activeTarget, parsedTarget]);
 
@@ -614,6 +617,12 @@ export function SendScreen({
       recipient: draft.recipient,
       amount: draft.amount?.trim() || undefined,
       memo: draft.memo?.trim() || undefined,
+      tipToAddress:
+        draft.tipToAddress &&
+        draft.tipToAddress.trim().toLowerCase() !== draft.recipient.trim().toLowerCase()
+          ? draft.tipToAddress.trim()
+          : undefined,
+      source: draft.source,
       amountUnit: "token",
     };
 
@@ -1164,7 +1173,7 @@ export function SendScreen({
             disabled={!parsedTarget}
             onPress={() => {
               if (parsedTarget) {
-                continueToAmount(parsedTarget, resolvedRecipient);
+                continueToAmount(activeTarget ?? parsedTarget, resolvedRecipient);
               }
             }}
           >
