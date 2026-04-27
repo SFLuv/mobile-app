@@ -1,10 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
-  Animated,
   Image,
   Modal,
-  PanResponder,
   Platform,
   Pressable,
   RefreshControl,
@@ -83,11 +81,6 @@ type WorkflowSeriesGroup = {
   absence: AppImproverAbsencePeriod | null;
   canRevokeAbsence: boolean;
   workflows: AppImproverWorkflowListItem[];
-};
-
-type TouchPoint = {
-  pageX: number;
-  pageY: number;
 };
 
 type RecurringClaimOption = {
@@ -303,18 +296,6 @@ function getWorkflowPhotoAspectRatioValue(aspectRatio: AppWorkflowPhotoAspectRat
   return 1;
 }
 
-function clampNumber(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function getTouchDistance(touches: readonly TouchPoint[]): number {
-  if (touches.length < 2) {
-    return 0;
-  }
-  const [first, second] = touches;
-  return Math.hypot(second.pageX - first.pageX, second.pageY - first.pageY);
-}
-
 function getCompletionItemErrorKey(stepId: string, itemId: string): string {
   return `${stepId}:${itemId}`;
 }
@@ -524,16 +505,6 @@ export function ImproverScreen({
   const detailScrollRef = useRef<ScrollView | null>(null);
   const detailScrollYRef = useRef(0);
   const pendingDetailScrollYRef = useRef<number | null>(null);
-  const imagePreviewScale = useRef(new Animated.Value(1)).current;
-  const imagePreviewPan = useRef(new Animated.ValueXY()).current;
-  const imagePreviewScaleRef = useRef(1);
-  const imagePreviewPanRef = useRef({ x: 0, y: 0 });
-  const imagePreviewGestureStartRef = useRef({
-    distance: 0,
-    scale: 1,
-    panX: 0,
-    panY: 0,
-  });
   const requestDataRequestRef = useRef<Promise<void> | null>(null);
   const workflowDataRequestRef = useRef<Promise<void> | null>(null);
   const unpaidDataRequestRef = useRef<Promise<void> | null>(null);
@@ -558,61 +529,10 @@ export function ImproverScreen({
     [credentialRequests],
   );
 
-  const clampImagePreviewPan = useCallback(
-    (x: number, y: number, scale: number) => {
-      const maxX = Math.max(0, (windowWidth * 0.82 * (scale - 1)) / 2);
-      const maxY = Math.max(0, (windowHeight * 0.64 * (scale - 1)) / 2);
-      return {
-        x: clampNumber(x, -maxX, maxX),
-        y: clampNumber(y, -maxY, maxY),
-      };
-    },
-    [windowHeight, windowWidth],
-  );
-
-  const setImagePreviewTransform = useCallback(
-    (scale: number, x = imagePreviewPanRef.current.x, y = imagePreviewPanRef.current.y, animated = false) => {
-      const nextScale = clampNumber(scale, 1, 4);
-      const nextPan = nextScale <= 1.02 ? { x: 0, y: 0 } : clampImagePreviewPan(x, y, nextScale);
-      imagePreviewScaleRef.current = nextScale;
-      imagePreviewPanRef.current = nextPan;
-
-      if (animated) {
-        Animated.parallel([
-          Animated.spring(imagePreviewScale, {
-            toValue: nextScale,
-            useNativeDriver: true,
-            speed: 22,
-            bounciness: 4,
-          }),
-          Animated.spring(imagePreviewPan, {
-            toValue: nextPan,
-            useNativeDriver: true,
-            speed: 22,
-            bounciness: 4,
-          }),
-        ]).start();
-        return;
-      }
-
-      imagePreviewScale.setValue(nextScale);
-      imagePreviewPan.setValue(nextPan);
-    },
-    [clampImagePreviewPan, imagePreviewPan, imagePreviewScale],
-  );
-
-  const resetImagePreviewTransform = useCallback(
-    (animated = false) => {
-      setImagePreviewTransform(1, 0, 0, animated);
-    },
-    [setImagePreviewTransform],
-  );
-
   const closeImagePreview = useCallback(() => {
     setBadgePreview(null);
     setImagePreviewHost(null);
-    resetImagePreviewTransform(false);
-  }, [resetImagePreviewTransform]);
+  }, []);
 
   const openImagePreview = useCallback(
     (preview: { label: string; imageUri: string }, host: "detail" | "badges" | "credentials") => {
@@ -621,70 +541,6 @@ export function ImproverScreen({
     },
     [],
   );
-
-  const imagePreviewPanResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: (event) =>
-          event.nativeEvent.touches.length > 1 || imagePreviewScaleRef.current > 1.02,
-        onMoveShouldSetPanResponder: (event, gesture) =>
-          event.nativeEvent.touches.length > 1 ||
-          (imagePreviewScaleRef.current > 1.02 && Math.abs(gesture.dx) + Math.abs(gesture.dy) > 3),
-        onPanResponderGrant: (event) => {
-          const touches = event.nativeEvent.touches as readonly TouchPoint[];
-          imagePreviewGestureStartRef.current = {
-            distance: getTouchDistance(touches),
-            scale: imagePreviewScaleRef.current,
-            panX: imagePreviewPanRef.current.x,
-            panY: imagePreviewPanRef.current.y,
-          };
-        },
-        onPanResponderMove: (event, gesture) => {
-          const touches = event.nativeEvent.touches as readonly TouchPoint[];
-          if (touches.length > 1) {
-            const distance = getTouchDistance(touches);
-            const startDistance = imagePreviewGestureStartRef.current.distance || distance;
-            if (startDistance <= 0) {
-              return;
-            }
-            const nextScale = clampNumber(
-              (imagePreviewGestureStartRef.current.scale * distance) / startDistance,
-              1,
-              4,
-            );
-            setImagePreviewTransform(nextScale);
-            return;
-          }
-
-          if (imagePreviewScaleRef.current <= 1.02) {
-            return;
-          }
-
-          setImagePreviewTransform(
-            imagePreviewScaleRef.current,
-            imagePreviewGestureStartRef.current.panX + gesture.dx,
-            imagePreviewGestureStartRef.current.panY + gesture.dy,
-          );
-        },
-        onPanResponderRelease: () => {
-          if (imagePreviewScaleRef.current <= 1.02) {
-            resetImagePreviewTransform(true);
-          }
-        },
-        onPanResponderTerminate: () => {
-          if (imagePreviewScaleRef.current <= 1.02) {
-            resetImagePreviewTransform(true);
-          }
-        },
-      }),
-    [resetImagePreviewTransform, setImagePreviewTransform],
-  );
-
-  useEffect(() => {
-    if (badgePreview?.imageUri) {
-      resetImagePreviewTransform(false);
-    }
-  }, [badgePreview?.imageUri, resetImagePreviewTransform]);
 
   const selectWorkflowView = useCallback((nextView: WorkflowView) => {
     workflowViewManualSelectionRef.current = true;
@@ -1380,14 +1236,31 @@ export function ImproverScreen({
       .slice(0, 4);
   }, [credentialSearch, requestableCredentialTypes]);
 
-  const myBadgeItems = useMemo(() => {
+  const credentialTypeByValue = useMemo(() => {
     const typeByValue = new Map<string, AppGlobalCredentialType>();
     for (const credentialType of credentialTypes) {
       typeByValue.set(credentialType.value, credentialType);
     }
+    return typeByValue;
+  }, [credentialTypes]);
+
+  const openCredentialBadgePreview = useCallback(
+    (credentialType: string, host: "credentials" | "badges" = "credentials") => {
+      const type = credentialTypeByValue.get(credentialType);
+      const badgeUri = buildCredentialBadgeUri(type);
+      if (!badgeUri) {
+        return false;
+      }
+      openImagePreview({ label: formatCredentialLabel(credentialType, labelMap), imageUri: badgeUri }, host);
+      return true;
+    },
+    [credentialTypeByValue, labelMap, openImagePreview],
+  );
+
+  const myBadgeItems = useMemo(() => {
     return activeCredentials
       .map((credential) => {
-        const type = typeByValue.get(credential);
+        const type = credentialTypeByValue.get(credential);
         return {
           credential,
           label: formatCredentialLabel(credential, labelMap),
@@ -1395,7 +1268,7 @@ export function ImproverScreen({
         };
       })
       .sort((left, right) => left.label.localeCompare(right.label));
-  }, [activeCredentials, credentialTypes, labelMap]);
+  }, [activeCredentials, credentialTypeByValue, labelMap]);
 
   const filteredBadgeItems = useMemo(() => {
     const search = badgeSearch.trim().toLowerCase();
@@ -2881,9 +2754,7 @@ export function ImproverScreen({
                 key={badge.credential}
                 disabled={!badge.badgeUri}
                 onPress={() => {
-                  if (badge.badgeUri) {
-                    openImagePreview({ label: badge.label, imageUri: badge.badgeUri }, "credentials");
-                  }
+                  openCredentialBadgePreview(badge.credential, "credentials");
                 }}
               >
                 {renderStatusChip(badge.label, "default")}
@@ -2909,63 +2780,84 @@ export function ImproverScreen({
 
         {credentialSuggestions.length > 0 ? (
           <View style={styles.stack}>
-            {credentialSuggestions.map((credentialType) => (
-              <View key={credentialType.value} style={styles.choiceRow}>
-                <View style={styles.choiceCopy}>
-                  <Text style={styles.choiceTitle}>{credentialType.label}</Text>
-                  <Text style={styles.choiceBody}>
-                    {pendingCredentialSet.has(credentialType.value) ? "Request already pending." : "Available to request."}
-                  </Text>
-                </View>
+            {credentialSuggestions.map((credentialType) => {
+              const hasBadgePreview = Boolean(buildCredentialBadgeUri(credentialType));
+              return (
                 <Pressable
-                  style={[
-                    styles.secondaryButton,
-                    pendingCredentialSet.has(credentialType.value) || Boolean(actionKey) ? styles.buttonDisabled : undefined,
-                  ]}
-                  disabled={pendingCredentialSet.has(credentialType.value) || Boolean(actionKey)}
+                  key={credentialType.value}
+                  style={styles.choiceRow}
+                  disabled={!hasBadgePreview}
                   onPress={() => {
-                    void requestCredential(credentialType.value);
+                    openCredentialBadgePreview(credentialType.value, "credentials");
                   }}
                 >
-                  <Text style={styles.secondaryButtonText}>
-                    {actionKey === `credential:${credentialType.value}` ? "Sending..." : "Request"}
-                  </Text>
+                  <View style={styles.choiceCopy}>
+                    <Text style={styles.choiceTitle}>{credentialType.label}</Text>
+                    <Text style={styles.choiceBody}>
+                      {pendingCredentialSet.has(credentialType.value) ? "Request already pending." : "Available to request."}
+                    </Text>
+                  </View>
+                  <Pressable
+                    style={[
+                      styles.secondaryButton,
+                      pendingCredentialSet.has(credentialType.value) || Boolean(actionKey) ? styles.buttonDisabled : undefined,
+                    ]}
+                    disabled={pendingCredentialSet.has(credentialType.value) || Boolean(actionKey)}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      void requestCredential(credentialType.value);
+                    }}
+                  >
+                    <Text style={styles.secondaryButtonText}>
+                      {actionKey === `credential:${credentialType.value}` ? "Sending..." : "Request"}
+                    </Text>
+                  </Pressable>
                 </Pressable>
-              </View>
-            ))}
+              );
+            })}
           </View>
         ) : null}
 
         {credentialRequests.length > 0 ? (
           <View style={styles.stack}>
             <Text style={styles.stackLabel}>Request history</Text>
-            {credentialRequests.map((request) => (
-              <View key={request.id} style={styles.subCard}>
-                <View style={styles.cardHeaderRow}>
-                  <View style={styles.cardHeaderCopy}>
-                    <Text style={styles.choiceTitle}>
-                      {formatCredentialLabel(request.credentialType, labelMap)}
-                    </Text>
-                    <Text style={styles.choiceBody}>
-                      Requested {new Date(request.requestedAt).toLocaleString()}
-                    </Text>
+            {credentialRequests.map((request) => {
+              const hasBadgePreview = Boolean(buildCredentialBadgeUri(credentialTypeByValue.get(request.credentialType)));
+              return (
+                <Pressable
+                  key={request.id}
+                  style={styles.subCard}
+                  disabled={!hasBadgePreview}
+                  onPress={() => {
+                    openCredentialBadgePreview(request.credentialType, "credentials");
+                  }}
+                >
+                  <View style={styles.cardHeaderRow}>
+                    <View style={styles.cardHeaderCopy}>
+                      <Text style={styles.choiceTitle}>
+                        {formatCredentialLabel(request.credentialType, labelMap)}
+                      </Text>
+                      <Text style={styles.choiceBody}>
+                        Requested {new Date(request.requestedAt).toLocaleString()}
+                      </Text>
+                    </View>
+                    {renderStatusChip(
+                      formatStatusLabel(request.status),
+                      request.status === "approved"
+                        ? "success"
+                        : request.status === "rejected"
+                          ? "danger"
+                          : "warning",
+                    )}
                   </View>
-                  {renderStatusChip(
-                    formatStatusLabel(request.status),
-                    request.status === "approved"
-                      ? "success"
-                      : request.status === "rejected"
-                        ? "danger"
-                        : "warning",
-                  )}
-                </View>
-                {request.resolvedAt ? (
-                  <Text style={styles.choiceBody}>
-                    Resolved {new Date(request.resolvedAt).toLocaleString()}
-                  </Text>
-                ) : null}
-              </View>
-            ))}
+                  {request.resolvedAt ? (
+                    <Text style={styles.choiceBody}>
+                      Resolved {new Date(request.resolvedAt).toLocaleString()}
+                    </Text>
+                  ) : null}
+                </Pressable>
+              );
+            })}
           </View>
         ) : credentialDataLoaded ? (
           <Text style={styles.meta}>No credential requests yet.</Text>
@@ -3364,9 +3256,9 @@ export function ImproverScreen({
   const imagePreviewBaseWidth = Math.min(windowWidth - spacing.lg * 4, 640);
   const imagePreviewBaseHeight = Math.min(windowHeight * 0.58, 520);
 
-  const renderBadgePreviewOverlay = () => (
+  const renderBadgePreviewOverlay = (inline = false) => (
     <Pressable
-      style={styles.modalOverlay}
+      style={inline ? styles.inlineImagePreviewOverlay : styles.modalOverlay}
       onPress={closeImagePreview}
     >
       <Pressable style={styles.imagePreviewCard} onPress={() => {}}>
@@ -3384,9 +3276,11 @@ export function ImproverScreen({
             <ScrollView
               style={styles.imagePreviewScroll}
               contentContainerStyle={styles.imagePreviewScrollContent}
+              scrollEnabled
               maximumZoomScale={4}
               minimumZoomScale={1}
               pinchGestureEnabled
+              nestedScrollEnabled
               bounces={false}
               bouncesZoom={false}
               alwaysBounceHorizontal={false}
@@ -3409,8 +3303,6 @@ export function ImproverScreen({
             </ScrollView>
           ) : null}
         </View>
-
-        <Text style={styles.imagePreviewHint}>Pinch to zoom and drag to pan.</Text>
 
         <Pressable style={styles.secondaryButton} onPress={closeImagePreview}>
           <Text style={styles.secondaryButtonText}>Close</Text>
@@ -3818,6 +3710,7 @@ export function ImproverScreen({
               ) : renderEmptyCard("No workflow steps", "No workflow steps were configured.")}
             </ScrollView>
           ) : null}
+          {badgePreview && imagePreviewHost === "detail" ? renderBadgePreviewOverlay(true) : null}
           </View>
         )}
       </Modal>
@@ -3826,6 +3719,7 @@ export function ImproverScreen({
         visible={badgesVisible}
         animationType="slide"
         presentationStyle="pageSheet"
+        allowSwipeDismissal={!(badgePreview && imagePreviewHost === "badges")}
         onRequestClose={closeBadges}
         onDismiss={closeBadges}
       >
@@ -3880,17 +3774,18 @@ export function ImproverScreen({
               </View>
             )}
           </ScrollView>
+          {badgePreview && imagePreviewHost === "badges" ? renderBadgePreviewOverlay(true) : null}
         </View>
       </Modal>
 
       <Modal
-        visible={Boolean(badgePreview)}
+        visible={Boolean(badgePreview) && imagePreviewHost === "credentials"}
         transparent
         presentationStyle="overFullScreen"
         animationType="fade"
         onRequestClose={closeImagePreview}
       >
-        {renderBadgePreviewOverlay()}
+        {renderBadgePreviewOverlay(false)}
       </Modal>
     </>
   );
@@ -4702,26 +4597,6 @@ function createStyles(
     imagePreviewImage: {
       maxWidth: "100%",
       maxHeight: "100%",
-    },
-    imagePreviewHint: {
-      color: palette.textMuted,
-      textAlign: "center",
-    },
-    imagePreviewControls: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: spacing.sm,
-    },
-    imagePreviewControlButton: {
-      width: 42,
-      height: 42,
-      borderRadius: radii.pill,
-      borderWidth: 1,
-      borderColor: palette.border,
-      backgroundColor: palette.surfaceStrong,
-      alignItems: "center",
-      justifyContent: "center",
     },
     choiceList: {
       gap: spacing.sm,

@@ -449,7 +449,7 @@ export function buildUniversalRequestLink(input: {
   memo?: string;
   tipToAddress?: string;
 }): string {
-  const url = new URL(`${normalizeOrigin(mobileConfig.appOrigin)}/map`);
+  const url = new URL(`${normalizeOrigin(mobileConfig.appOrigin)}/`);
   url.searchParams.set("p", "r");
   url.searchParams.set("alias", aliasHost());
   url.searchParams.set("sendto", `${ethers.utils.getAddress(input.address)}@${aliasHost()}`);
@@ -470,8 +470,18 @@ export function buildUniversalRequestLink(input: {
 
 export function buildUniversalPayLink(input: {
   address: string;
+  tipToAddress?: string;
 }): string {
-  return `${normalizeOrigin(mobileConfig.appOrigin)}/pay/${ethers.utils.getAddress(input.address)}`;
+  const recipient = ethers.utils.getAddress(input.address);
+  const url = new URL(`${normalizeOrigin(mobileConfig.appOrigin)}/`);
+  url.searchParams.set("p", "r");
+  url.searchParams.set("alias", aliasHost());
+  url.searchParams.set("sendto", `${recipient}@${aliasHost()}`);
+  const tipToAddress = input.tipToAddress?.trim();
+  if (tipToAddress && ethers.utils.isAddress(tipToAddress) && tipToAddress.toLowerCase() !== recipient.toLowerCase()) {
+    url.searchParams.set("tipTo", ethers.utils.getAddress(tipToAddress));
+  }
+  return url.toString();
 }
 
 export function buildUniversalAddContactLink(input: {
@@ -522,11 +532,28 @@ export function parseSfluvUniversalLink(rawValue: string): SfluvUniversalLink | 
     .split("/")
     .map((segment) => segment.trim())
     .filter(Boolean);
+  const action = segments[0]?.toLowerCase();
+  const contactParamSets = collectParamsFromURL(parsedURL);
+  const explicitQueryContactAddress = contactParamSets
+    .map((params) => normalizeAddressParam(getParam(params, "addcontact", "addContact", "contact")))
+    .find(Boolean);
+  const pathScopedQueryContactAddress =
+    action === "addcontact" || action === "contacts"
+      ? contactParamSets.map((params) => normalizeAddressParam(getParam(params, "address"))).find(Boolean)
+      : undefined;
+  const queryContactAddress = explicitQueryContactAddress || pathScopedQueryContactAddress;
+  if ((!action || action === "addcontact" || action === "contacts") && queryContactAddress) {
+    return {
+      type: "addcontact",
+      address: queryContactAddress,
+      href: trimmed,
+    };
+  }
+
   if (segments.length < 2) {
     return null;
   }
 
-  const action = segments[0]?.toLowerCase();
   const rawParam = decodeURIComponent(segments.slice(1).join("/")).trim();
   if (!rawParam) {
     return null;

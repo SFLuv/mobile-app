@@ -51,6 +51,7 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
   const [renderedDetails, setRenderedDetails] = useState<TransactionDetailPayload | null>(details);
   const progress = useRef(new Animated.Value(visible && details ? 1 : 0)).current;
   const dragY = useRef(new Animated.Value(0)).current;
+  const scrollYRef = useRef(0);
 
   useEffect(() => {
     if (!copiedField) {
@@ -77,6 +78,7 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
 
     if (visible && details) {
       dragY.setValue(0);
+      scrollYRef.current = 0;
       Animated.timing(progress, {
         toValue: 1,
         duration: 260,
@@ -104,13 +106,32 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
     });
   }, [details, dragY, mounted, progress, visible]);
 
-  const panResponder = useMemo(
-    () =>
+  const resetDrag = useMemo(
+    () => () => {
+      Animated.spring(dragY, {
+        toValue: 0,
+        damping: 18,
+        stiffness: 180,
+        mass: 0.9,
+        useNativeDriver: true,
+      }).start();
+    },
+    [dragY],
+  );
+
+  const createDismissPanResponder = useMemo(
+    () => (allowFromScrolledContent: boolean) =>
       PanResponder.create({
         onMoveShouldSetPanResponderCapture: (_, gestureState) =>
-          visible && gestureState.dy > 4 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+          visible &&
+          gestureState.dy > 4 &&
+          Math.abs(gestureState.dy) > Math.abs(gestureState.dx) &&
+          (allowFromScrolledContent || scrollYRef.current <= 1),
         onMoveShouldSetPanResponder: (_, gestureState) =>
-          visible && gestureState.dy > 4 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+          visible &&
+          gestureState.dy > 4 &&
+          Math.abs(gestureState.dy) > Math.abs(gestureState.dx) &&
+          (allowFromScrolledContent || scrollYRef.current <= 1),
         onPanResponderGrant: () => {
           dragY.stopAnimation();
         },
@@ -128,27 +149,16 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
             }).start(() => onClose());
             return;
           }
-          Animated.spring(dragY, {
-            toValue: 0,
-            damping: 18,
-            stiffness: 180,
-            mass: 0.9,
-            useNativeDriver: true,
-          }).start();
+          resetDrag();
         },
         onPanResponderTerminationRequest: () => false,
-        onPanResponderTerminate: () => {
-          Animated.spring(dragY, {
-            toValue: 0,
-            damping: 18,
-            stiffness: 180,
-            mass: 0.9,
-            useNativeDriver: true,
-          }).start();
-        },
+        onPanResponderTerminate: resetDrag,
       }),
-    [dragY, onClose, visible, windowHeight],
+    [dragY, onClose, resetDrag, visible, windowHeight],
   );
+
+  const headerPanResponder = useMemo(() => createDismissPanResponder(true), [createDismissPanResponder]);
+  const sheetPanResponder = useMemo(() => createDismissPanResponder(false), [createDismissPanResponder]);
 
   const backdropOpacity = progress.interpolate({
     inputRange: [0, 1],
@@ -179,8 +189,8 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
           <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]} />
         </Pressable>
 
-        <Animated.View style={[styles.sheet, { transform: [{ translateY: sheetTranslateY }] }]}>
-          <View collapsable={false} style={styles.headerGestureZone} {...panResponder.panHandlers}>
+        <Animated.View style={[styles.sheet, { transform: [{ translateY: sheetTranslateY }] }]} {...sheetPanResponder.panHandlers}>
+          <View collapsable={false} style={styles.headerGestureZone} {...headerPanResponder.panHandlers}>
             <View style={styles.dragHandle} />
             <View style={styles.headerRow}>
               <View style={styles.headerCopy}>
@@ -201,7 +211,15 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
             </View>
           </View>
 
-          <ScrollView style={styles.scrollArea} contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            style={styles.scrollArea}
+            contentContainerStyle={styles.container}
+            showsVerticalScrollIndicator={false}
+            scrollEventThrottle={16}
+            onScroll={(event) => {
+              scrollYRef.current = Math.max(0, event.nativeEvent.contentOffset.y);
+            }}
+          >
             <View style={styles.amountCard}>
               <Text style={[styles.amountText, renderedDetails.received ? styles.amountReceive : styles.amountSend]}>
                 {signedAmount(renderedDetails)}

@@ -1133,8 +1133,8 @@ function WalletAppShellContent({
   const [tab, setTab] = useState<Tab>("wallet");
   const [walletPane, setWalletPane] = useState<WalletPane>("home");
   const walletPaneSlideDistance = Dimensions.get("window").width;
-  const walletPaneTranslateX = useRef(new Animated.Value(0)).current;
-  const walletPaneTranslateXValueRef = useRef(0);
+  const walletPaneTranslateX = useRef(new Animated.Value(walletPaneSlideDistance)).current;
+  const walletPaneTranslateXValueRef = useRef(walletPaneSlideDistance);
   const previousWalletPaneRef = useRef<WalletPane>("home");
   const walletPaneAnimatingRef = useRef(false);
   const walletPaneAnimationIDRef = useRef(0);
@@ -1205,11 +1205,11 @@ function WalletAppShellContent({
   const resetWalletPanePosition = React.useCallback(() => {
     walletPaneAnimationIDRef.current += 1;
     walletPaneTranslateX.stopAnimation();
-    setWalletPaneTranslateX(0);
+    setWalletPaneTranslateX(walletPaneSlideDistance);
     walletPaneAnimatingRef.current = false;
     walletPaneGestureActiveRef.current = false;
     walletPaneGestureMaxXRef.current = 0;
-  }, [setWalletPaneTranslateX, walletPaneTranslateX]);
+  }, [setWalletPaneTranslateX, walletPaneSlideDistance, walletPaneTranslateX]);
 
   const closeWalletPaneToWallet = React.useCallback((fromValue?: number) => {
     if (walletPane === "home") {
@@ -1231,6 +1231,7 @@ function WalletAppShellContent({
       if (walletPaneAnimationIDRef.current !== animationID) {
         return;
       }
+      setWalletPaneTranslateX(walletPaneSlideDistance);
       setSendReturnTab(null);
       setWalletPane("home");
       setTab(returnTab ?? "wallet");
@@ -2368,10 +2369,7 @@ function WalletAppShellContent({
   };
 
   const finishSendFlow = () => {
-    const returnTab = sendReturnTab;
-    setSendReturnTab(null);
-    setWalletPane("home");
-    setTab(returnTab ?? "wallet");
+    closeWalletPaneToWallet();
   };
 
   const completeSendFlow = () => {
@@ -2665,18 +2663,7 @@ function WalletAppShellContent({
               <Pressable
                 style={styles.iconButton}
                 onPress={() => {
-                  if (walletPane === "receive") {
-                    closeWalletPaneToWallet();
-                    return;
-                  }
-                  if (walletPane === "send" && sendReturnTab) {
-                    setSendReturnTab(null);
-                    setWalletPane("home");
-                    setTab(sendReturnTab);
-                    return;
-                  }
-                  setSendReturnTab(null);
-                  setWalletPane("home");
+                  closeWalletPaneToWallet();
                 }}
               >
                 <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />

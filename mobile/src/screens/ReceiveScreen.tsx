@@ -39,6 +39,12 @@ function shortAddress(address: string): string {
 function shortLink(rawValue: string): string {
   try {
     const parsed = new URL(rawValue);
+    const sendToValue = parsed.searchParams.get("sendto") || parsed.searchParams.get("sendTo");
+    if (sendToValue) {
+      const [encodedAddress] = sendToValue.split("@");
+      const address = decodeURIComponent(encodedAddress || "");
+      return `${parsed.host}/?sendto=${shortAddress(address)}`;
+    }
     if (parsed.pathname.startsWith("/pay/")) {
       const encodedAddress = decodeURIComponent(parsed.pathname.slice(5));
       return `${parsed.host}/pay/${shortAddress(encodedAddress)}`;
