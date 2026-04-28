@@ -64,6 +64,7 @@ import {
   AppContact,
   AppImprover,
   AppLocation,
+  PonderSubscription,
   AppTransaction,
   AppUser,
   AppUserPolicyStatus,
@@ -129,6 +130,7 @@ type PushPermissionStatus = "unknown" | "undetermined" | "granted" | "denied" | 
 type PushRegistrationResult = {
   token: string | null;
   permissionStatus: PushPermissionStatus;
+  deviceRegistered: boolean;
   error?: string;
 };
 
@@ -214,7 +216,7 @@ function resolveExpoProjectId(): string | undefined {
   return typeof fromConstants === "string" && fromConstants.trim().length > 0 ? fromConstants.trim() : undefined;
 }
 
-async function registerForPushNotificationsAsync(): Promise<string | null> {
+async function ensurePushNotificationChannelAsync(): Promise<void> {
   if (Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync("wallet-activity", {
       name: "Wallet activity",
@@ -223,30 +225,67 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
       lightColor: "#ef6d66",
     });
   }
+}
+
+async function readPushRegistrationAsync(requestPermission: boolean): Promise<PushRegistrationResult> {
+  try {
+    await ensurePushNotificationChannelAsync();
+  } catch {
+    // Ignore Android channel errors while reading permission state.
+  }
 
   if (!Device.isDevice) {
-    console.warn("Push notifications require a physical device.");
-    return null;
+    return {
+      token: null,
+      permissionStatus: "unavailable",
+      deviceRegistered: false,
+      error: "Push notifications require a physical device.",
+    };
   }
 
   const projectId = resolveExpoProjectId();
   if (!projectId) {
-    console.warn("Expo project ID is required to register for push notifications.");
-    return null;
+    return {
+      token: null,
+      permissionStatus: "unknown",
+      deviceRegistered: false,
+      error: "Expo project ID is required to register this device for push notifications.",
+    };
   }
 
-  let { status } = await Notifications.getPermissionsAsync();
-  if (status !== "granted") {
-    const requested = await Notifications.requestPermissionsAsync();
-    status = requested.status;
-  }
-  if (status !== "granted") {
-    console.warn("Notification permissions were not granted.");
-    return null;
-  }
+  try {
+    let permissionStatus = normalizePushPermissionStatus((await Notifications.getPermissionsAsync()).status);
+    if (requestPermission && permissionStatus !== "granted") {
+      permissionStatus = normalizePushPermissionStatus((await Notifications.requestPermissionsAsync()).status);
+    }
 
-  const token = await Notifications.getExpoPushTokenAsync({ projectId });
-  return token.data;
+    if (permissionStatus !== "granted") {
+      return {
+        token: null,
+        permissionStatus,
+        deviceRegistered: false,
+        error:
+          permissionStatus === "denied"
+            ? "Push notifications are blocked for this app in system settings."
+            : "Notification permission has not been granted.",
+      };
+    }
+
+    const token = await Notifications.getExpoPushTokenAsync({ projectId });
+    return {
+      token: token.data,
+      permissionStatus,
+      deviceRegistered: Boolean(token.data),
+      error: token.data ? undefined : "Unable to register this device for push notifications right now.",
+    };
+  } catch (error) {
+    return {
+      token: null,
+      permissionStatus: await readPushPermissionStatus(),
+      deviceRegistered: false,
+      error: (error as Error)?.message || "Unable to register this device for push notifications.",
+    };
+  }
 }
 
 function normalizePushPermissionStatus(status: string | null | undefined): PushPermissionStatus {
@@ -263,17 +302,10 @@ function normalizePushPermissionStatus(status: string | null | undefined): PushP
 }
 
 async function readPushPermissionStatus(): Promise<PushPermissionStatus> {
-  if (Platform.OS === "android") {
-    try {
-      await Notifications.setNotificationChannelAsync("wallet-activity", {
-        name: "Wallet activity",
-        importance: Notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 250, 200, 250],
-        lightColor: "#ef6d66",
-      });
-    } catch {
-      // Ignore Android channel errors while checking permission state.
-    }
+  try {
+    await ensurePushNotificationChannelAsync();
+  } catch {
+    // Ignore Android channel errors while checking permission state.
   }
 
   if (!Device.isDevice) {
@@ -289,48 +321,62 @@ async function readPushPermissionStatus(): Promise<PushPermissionStatus> {
 }
 
 async function ensurePushRegistration(): Promise<PushRegistrationResult> {
-  if (!Device.isDevice) {
-    return {
-      token: null,
-      permissionStatus: "unavailable",
-      error: "Push notifications require a physical device.",
-    };
-  }
+  return readPushRegistrationAsync(true);
+}
 
-  const projectId = resolveExpoProjectId();
-  if (!projectId) {
-    return {
-      token: null,
-      permissionStatus: "unknown",
-      error: "Expo project ID is required to register this device for push notifications.",
-    };
-  }
+async function readCurrentPushRegistration(): Promise<PushRegistrationResult> {
+  return readPushRegistrationAsync(false);
+}
 
-  try {
-    const token = await registerForPushNotificationsAsync();
-    const permissionStatus = await readPushPermissionStatus();
-    if (!token) {
-      return {
-        token: null,
-        permissionStatus,
-        error:
-          permissionStatus === "denied"
-            ? "Push notifications are blocked for this app in system settings."
-            : "Unable to register this device for push notifications right now.",
-      };
+function summarizePushRegistrations(
+  registrations: PonderSubscription[],
+  token?: string | null,
+): {
+  active?: boolean;
+  preferenceEnabled?: boolean;
+  deviceRegistered?: boolean;
+} {
+  const normalizedToken = token?.trim();
+  const matches = normalizedToken
+    ? registrations.filter((registration) => registration.token === normalizedToken)
+    : registrations;
+  const readBoolean = (field: "active" | "preferenceEnabled" | "deviceRegistered") => {
+    let sawFalse = false;
+    for (const registration of matches) {
+      const value = registration[field];
+      if (value === true) {
+        return true;
+      }
+      if (value === false) {
+        sawFalse = true;
+      }
     }
+    return sawFalse ? false : undefined;
+  };
 
-    return {
-      token,
-      permissionStatus,
-    };
-  } catch (error) {
-    return {
-      token: null,
-      permissionStatus: await readPushPermissionStatus(),
-      error: (error as Error)?.message || "Unable to register this device for push notifications.",
-    };
-  }
+  return {
+    active: readBoolean("active"),
+    preferenceEnabled: readBoolean("preferenceEnabled"),
+    deviceRegistered: readBoolean("deviceRegistered"),
+  };
+}
+
+function countPushSubscriptionsForAddresses(
+  registrations: PonderSubscription[],
+  addresses: string[],
+  token?: string | null,
+): number {
+  const addressSet = new Set(addresses.map((address) => address.toLowerCase()));
+  const normalizedToken = token?.trim();
+  const subscribedAddresses = new Set(
+    registrations
+      .filter((registration) => registration.type === "push")
+      .filter((registration) => registration.active !== false)
+      .filter((registration) => !normalizedToken || registration.token === normalizedToken)
+      .map((registration) => registration.address.toLowerCase())
+      .filter((address) => addressSet.has(address)),
+  );
+  return subscribedAddresses.size;
 }
 
 function formatDisplayBalance(raw: string): string {
@@ -1151,6 +1197,8 @@ function WalletAppShellContent({
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [appImprover, setAppImprover] = useState<AppImprover | null>(null);
   const [storedPushToken, setStoredPushToken] = useState<string | null>(null);
+  const [storedPushTokenLoaded, setStoredPushTokenLoaded] = useState(false);
+  const [backendPushPreferenceEnabled, setBackendPushPreferenceEnabled] = useState<boolean | null>(null);
   const [pushSyncState, setPushSyncState] = useState<PushSyncState>({
     permissionStatus: "unknown",
     syncState: "idle",
@@ -1162,6 +1210,7 @@ function WalletAppShellContent({
   const [accountDeletionBusy, setAccountDeletionBusy] = useState(false);
   const [accountDeletionMessage, setAccountDeletionMessage] = useState<string | null>(null);
   const [pushSyncRequestVersion, setPushSyncRequestVersion] = useState(0);
+  const [pushDeviceSyncRequestVersion, setPushDeviceSyncRequestVersion] = useState(0);
   const [refreshingHome, setRefreshingHome] = useState(false);
   const [refreshingActivity, setRefreshingActivity] = useState(false);
   const [loadingMoreActivity, setLoadingMoreActivity] = useState(false);
@@ -1183,6 +1232,8 @@ function WalletAppShellContent({
   const backendAuthFailureHandledRef = useRef(false);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const runtimeServiceRef = useRef<SmartWalletService | null>(runtime.service);
+  const pendingPushPreferenceChangeRef = useRef<"enable" | "disable" | null>(null);
+  const handledPushSyncRequestVersionRef = useRef(0);
   const smartAddressRef = useRef(smartAddress);
   const handledPendingLinkIdRef = useRef<number | null>(null);
   const walletTransactionsRef = useRef<AppTransaction[]>(walletTransactions);
@@ -1528,6 +1579,11 @@ function WalletAppShellContent({
       })
       .catch((error) => {
         console.warn("Unable to load saved push token", error);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setStoredPushTokenLoaded(true);
+        }
       });
 
     return () => {
@@ -1559,6 +1615,112 @@ function WalletAppShellContent({
       addressCount: notificationAddresses.length,
     }));
   }, [notificationAddresses.length]);
+
+  useEffect(() => {
+    if (!backendClient || !appUser || !storedPushTokenLoaded) {
+      return;
+    }
+
+    let cancelled = false;
+    const applyBackendPreference = (preferenceEnabled: boolean | undefined) => {
+      setBackendPushPreferenceEnabled(preferenceEnabled ?? null);
+      const userPreferenceChangePending =
+        pendingPushPreferenceChangeRef.current !== null ||
+        pushSyncRequestVersion !== handledPushSyncRequestVersionRef.current;
+      if (
+        !userPreferenceChangePending &&
+        typeof preferenceEnabled === "boolean" &&
+        preferenceEnabled !== preferences.notificationsEnabled
+      ) {
+        onUpdatePreferences({ ...preferences, notificationsEnabled: preferenceEnabled });
+      }
+    };
+
+    const runPushDeviceStateSync = async () => {
+      try {
+        const registration = await readCurrentPushRegistration();
+        const syncToken = registration.token ?? storedPushToken;
+        const backendRegistrations = syncToken
+          ? await backendClient.getPushNotificationRegistrations(syncToken)
+          : [];
+        if (cancelled) {
+          return;
+        }
+
+        const backendState = summarizePushRegistrations(backendRegistrations, syncToken);
+        applyBackendPreference(backendState.preferenceEnabled);
+
+        if (registration.token && registration.token !== storedPushToken) {
+          if (storedPushToken) {
+            await backendClient.syncPushNotifications(storedPushToken, [], { deviceRegistered: false });
+            if (cancelled) {
+              return;
+            }
+          }
+          await AsyncStorage.setItem(PUSH_TOKEN_STORAGE_KEY, registration.token);
+          if (cancelled) {
+            return;
+          }
+          setStoredPushToken(registration.token);
+        }
+
+        let latestRegistrations = backendRegistrations;
+        let deviceStateSynced = false;
+        if (syncToken && backendState.deviceRegistered !== registration.deviceRegistered) {
+          await backendClient.syncPushNotifications(syncToken, [], {
+            deviceRegistered: registration.deviceRegistered,
+          });
+          latestRegistrations = await backendClient.getPushNotificationRegistrations(syncToken);
+          deviceStateSynced = true;
+          if (cancelled) {
+            return;
+          }
+          const latestBackendState = summarizePushRegistrations(latestRegistrations, syncToken);
+          applyBackendPreference(latestBackendState.preferenceEnabled);
+        }
+
+        const subscribedCount = countPushSubscriptionsForAddresses(
+          latestRegistrations,
+          notificationAddresses,
+          syncToken,
+        );
+        setPushSyncState((current) => ({
+          ...current,
+          permissionStatus: registration.permissionStatus,
+          addressCount: notificationAddresses.length,
+          subscribedCount,
+          token: syncToken ?? null,
+          syncState: deviceStateSynced ? "success" : current.syncState,
+          message: deviceStateSynced
+            ? registration.deviceRegistered
+              ? "Push notification device status is in sync."
+              : "Push notifications are disabled in system settings."
+            : current.message,
+          lastSyncedAt: deviceStateSynced ? Date.now() : current.lastSyncedAt,
+        }));
+      } catch (error) {
+        if (!cancelled) {
+          console.warn("Unable to sync push notification device state", error);
+        }
+      }
+    };
+
+    void runPushDeviceStateSync();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    appUser,
+    backendClient,
+    notificationAddresses,
+    onUpdatePreferences,
+    preferences,
+    pushDeviceSyncRequestVersion,
+    pushSyncRequestVersion,
+    storedPushToken,
+    storedPushTokenLoaded,
+  ]);
 
   const loadPublicLocations = async () => {
     try {
@@ -2092,9 +2254,7 @@ function WalletAppShellContent({
           void loadAppProfile();
         }
         void loadPublicLocations();
-        if (preferences.notificationsEnabled) {
-          setPushSyncRequestVersion((current) => current + 1);
-        }
+        setPushDeviceSyncRequestVersion((current) => current + 1);
       }
     });
 
@@ -2110,7 +2270,6 @@ function WalletAppShellContent({
     runtime.discovery,
     selectedCandidateKey,
     walletHistoryActive,
-    preferences.notificationsEnabled,
   ]);
 
   useEffect(() => {
@@ -2188,6 +2347,14 @@ function WalletAppShellContent({
       return;
     }
 
+    const hasPendingExplicitSync = pushSyncRequestVersion !== handledPushSyncRequestVersionRef.current;
+    const shouldSyncEnabledAddresses =
+      preferences.notificationsEnabled && (hasPendingExplicitSync || backendPushPreferenceEnabled === true);
+    const shouldSyncDisabledPreference = !preferences.notificationsEnabled && hasPendingExplicitSync;
+    if (!shouldSyncEnabledAddresses && !shouldSyncDisabledPreference) {
+      return;
+    }
+
     if (preferences.notificationsEnabled && !walletSyncReady) {
       return;
     }
@@ -2209,25 +2376,47 @@ function WalletAppShellContent({
 
       if (!preferences.notificationsEnabled) {
         try {
-          const subscriptions = await backendClient.getNotificationSubscriptions();
-          const pushSubscriptions = subscriptions.filter((subscription) => subscription.type === "push");
-          await Promise.all(pushSubscriptions.map((subscription) => backendClient.disableNotification(subscription.id)));
-          await AsyncStorage.removeItem(PUSH_TOKEN_STORAGE_KEY);
+          const registration = await readCurrentPushRegistration();
+          const syncToken = storedPushToken ?? registration.token;
           if (cancelled) {
             return;
           }
-          setStoredPushToken(null);
-          const permissionStatus = await readPushPermissionStatus();
-          if (cancelled) {
-            return;
-          }
+
           setPushSyncState((current) => ({
             ...current,
-            permissionStatus,
+            permissionStatus: registration.permissionStatus,
+            token: syncToken ?? null,
+          }));
+
+          if (!syncToken) {
+            setPushSyncState((current) => ({
+              ...current,
+              syncState: "error",
+              addressCount,
+              subscribedCount: 0,
+              token: null,
+              message: "Unable to find this device's push token to turn notifications off.",
+            }));
+            handledPushSyncRequestVersionRef.current = pushSyncRequestVersion;
+            pendingPushPreferenceChangeRef.current = null;
+            return;
+          }
+
+          await backendClient.syncPushNotifications(syncToken, [], { preferenceEnabled: false });
+          const registrations = await backendClient.getPushNotificationRegistrations(syncToken);
+          if (cancelled) {
+            return;
+          }
+          setBackendPushPreferenceEnabled(false);
+          handledPushSyncRequestVersionRef.current = pushSyncRequestVersion;
+          pendingPushPreferenceChangeRef.current = null;
+          setPushSyncState((current) => ({
+            ...current,
+            permissionStatus: registration.permissionStatus,
             syncState: "success",
-            token: null,
+            token: syncToken,
             addressCount,
-            subscribedCount: 0,
+            subscribedCount: countPushSubscriptionsForAddresses(registrations, notificationAddresses, syncToken),
             message: "Push notifications are off for this device.",
             lastSyncedAt: Date.now(),
           }));
@@ -2246,9 +2435,9 @@ function WalletAppShellContent({
         return;
       }
 
-      const registration = storedPushToken
-        ? { token: storedPushToken, permissionStatus: await readPushPermissionStatus() }
-        : await ensurePushRegistration();
+      const requestPermission = hasPendingExplicitSync;
+      const registration = requestPermission ? await ensurePushRegistration() : await readCurrentPushRegistration();
+      const syncToken = registration.token ?? storedPushToken;
 
       if (cancelled) {
         return;
@@ -2257,19 +2446,70 @@ function WalletAppShellContent({
       setPushSyncState((current) => ({
         ...current,
         permissionStatus: registration.permissionStatus,
-        token: registration.token,
+        token: syncToken ?? null,
       }));
 
       if (!registration.token) {
+        if (pendingPushPreferenceChangeRef.current === "enable" && syncToken) {
+          try {
+            await backendClient.syncPushNotifications(syncToken, [], {
+              preferenceEnabled: true,
+              deviceRegistered: false,
+            });
+            if (cancelled) {
+              return;
+            }
+            setBackendPushPreferenceEnabled(true);
+            handledPushSyncRequestVersionRef.current = pushSyncRequestVersion;
+            pendingPushPreferenceChangeRef.current = null;
+            setPushSyncState((current) => ({
+              ...current,
+              syncState: "success",
+              addressCount,
+              subscribedCount: 0,
+              token: syncToken,
+              message:
+                registration.error ||
+                "Push notifications are blocked in system settings, but your in-app preference is saved.",
+              lastSyncedAt: Date.now(),
+            }));
+          } catch (error) {
+            if (cancelled) {
+              return;
+            }
+            console.warn("Unable to preserve push notification preference", error);
+            setPushSyncState((current) => ({
+              ...current,
+              syncState: "error",
+              addressCount,
+              message: (error as Error)?.message || "Unable to save your push notification preference right now.",
+            }));
+          }
+          return;
+        }
+
         setPushSyncState((current) => ({
           ...current,
-          syncState: "error",
+          syncState: requestPermission ? "error" : current.syncState,
           addressCount,
           subscribedCount: 0,
-          token: null,
-          message: registration.error || "Unable to register this device for push notifications.",
+          token: syncToken ?? null,
+          message: requestPermission
+            ? registration.error || "Unable to register this device for push notifications."
+            : current.message,
         }));
+        if (hasPendingExplicitSync) {
+          handledPushSyncRequestVersionRef.current = pushSyncRequestVersion;
+          pendingPushPreferenceChangeRef.current = null;
+        }
         return;
+      }
+
+      if (storedPushToken && storedPushToken !== registration.token) {
+        await backendClient.syncPushNotifications(storedPushToken, [], { deviceRegistered: false });
+        if (cancelled) {
+          return;
+        }
       }
 
       await AsyncStorage.setItem(PUSH_TOKEN_STORAGE_KEY, registration.token);
@@ -2291,18 +2531,22 @@ function WalletAppShellContent({
       }
 
       try {
-        await backendClient.syncPushNotifications(registration.token, notificationAddresses);
-        const subscriptions = await backendClient.getNotificationSubscriptions();
+        await backendClient.syncPushNotifications(registration.token, notificationAddresses, {
+          preferenceEnabled: true,
+          deviceRegistered: registration.deviceRegistered,
+        });
+        const registrations = await backendClient.getPushNotificationRegistrations(registration.token);
         if (cancelled) {
           return;
         }
-        const subscribedAddresses = new Set(
-          subscriptions
-            .filter((subscription) => subscription.type === "push")
-            .map((subscription) => subscription.address.toLowerCase())
-            .filter((address) => notificationAddresses.some((candidate) => candidate.toLowerCase() === address)),
+        const subscribedCount = countPushSubscriptionsForAddresses(
+          registrations,
+          notificationAddresses,
+          registration.token,
         );
-        const subscribedCount = subscribedAddresses.size;
+        setBackendPushPreferenceEnabled(true);
+        handledPushSyncRequestVersionRef.current = pushSyncRequestVersion;
+        pendingPushPreferenceChangeRef.current = null;
         setPushSyncState((current) => ({
           ...current,
           permissionStatus: registration.permissionStatus,
@@ -2339,11 +2583,21 @@ function WalletAppShellContent({
   }, [
     appUser,
     backendClient,
+    backendPushPreferenceEnabled,
     notificationAddresses,
     preferences.notificationsEnabled,
     pushSyncRequestVersion,
+    storedPushToken,
     walletSyncReady,
   ]);
+
+  const handleUpdatePreferences = (next: AppPreferences) => {
+    if (next.notificationsEnabled !== preferences.notificationsEnabled) {
+      pendingPushPreferenceChangeRef.current = next.notificationsEnabled ? "enable" : "disable";
+      setPushSyncRequestVersion((current) => current + 1);
+    }
+    onUpdatePreferences(next);
+  };
 
   const handleSyncPushNotifications = () => {
     if (!backendClient || !appUser) {
@@ -2365,6 +2619,7 @@ function WalletAppShellContent({
       return;
     }
 
+    pendingPushPreferenceChangeRef.current = preferences.notificationsEnabled ? "enable" : "disable";
     setPushSyncRequestVersion((current) => current + 1);
   };
 
@@ -2860,9 +3115,7 @@ function WalletAppShellContent({
                 setTab("improver");
               }}
               onDeleteAccount={handleDeleteAccount}
-              onUpdatePreferences={(next) => {
-                onUpdatePreferences(next);
-              }}
+              onUpdatePreferences={handleUpdatePreferences}
             />
           )}
         </View>

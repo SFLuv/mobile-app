@@ -393,14 +393,23 @@ type ImproverWorkflowSeriesUnclaimResponse = {
   skipped_count: number;
 };
 
-type PonderResponse =
-  | Array<{
-      id: number;
-      address: string;
-      type: string;
-      data?: string;
-    }>
-  | null;
+type PonderEntryResponse = {
+  id: number;
+  address: string;
+  type?: string;
+  data?: string;
+  token?: string;
+  active?: boolean;
+  preference_enabled?: boolean;
+  device_registered?: boolean;
+};
+
+type PonderResponse = PonderEntryResponse[] | null;
+
+type PushNotificationSyncOptions = {
+  preferenceEnabled?: boolean;
+  deviceRegistered?: boolean;
+};
 
 type WalletsResponse = Array<{
   id?: number;
@@ -518,6 +527,28 @@ function asString(value: unknown, fallback = ""): string {
 
 function asNumber(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function mapPonderSubscription(
+  entry: PonderEntryResponse,
+  fallbackType: "merchant" | "push",
+  id: number,
+): PonderSubscription {
+  const type = asString(entry.type, fallbackType);
+  const data = asString(entry.data);
+  const token = asString(entry.token);
+  return {
+    id,
+    address: entry.address,
+    type,
+    email: type === "merchant" && data ? data : undefined,
+    token: type === "push" && token ? token : undefined,
+    active: typeof entry.active === "boolean" ? entry.active : undefined,
+    preferenceEnabled:
+      typeof entry.preference_enabled === "boolean" ? entry.preference_enabled : undefined,
+    deviceRegistered:
+      typeof entry.device_registered === "boolean" ? entry.device_registered : undefined,
+  };
 }
 
 function mapUser(input: GetUserResponse["user"]): AppUser {
@@ -1955,22 +1986,25 @@ export class AppBackendClient {
     const merchantEntries = Array.isArray(merchantBody) ? merchantBody : [];
     const pushEntries = Array.isArray(pushBody) ? pushBody : [];
 
-    const merchantSubscriptions = merchantEntries.map((entry) => ({
-      id: entry.id,
-      address: entry.address,
-      type: entry.type,
-      email: entry.type === "merchant" ? entry.data : undefined,
-      token: entry.type === "push" ? entry.data : undefined,
-    }));
-    const pushSubscriptions = pushEntries.map((entry) => ({
-      id: -Math.abs(entry.id),
-      address: entry.address,
-      type: entry.type,
-      email: entry.type === "merchant" ? entry.data : undefined,
-      token: entry.type === "push" ? entry.data : undefined,
-    }));
+    const merchantSubscriptions = merchantEntries.map((entry) =>
+      mapPonderSubscription(entry, "merchant", entry.id),
+    );
+    const pushSubscriptions = pushEntries.map((entry) =>
+      mapPonderSubscription(entry, "push", -Math.abs(entry.id)),
+    );
 
     return [...merchantSubscriptions, ...pushSubscriptions];
+  }
+
+  async getPushNotificationRegistrations(token?: string): Promise<PonderSubscription[]> {
+    const query = token ? `?token=${encodeURIComponent(token)}` : "";
+    const response = await this.authFetch(`/ponder/push${query}`);
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load push notification state");
+    }
+    const body = (await response.json()) as PonderResponse;
+    const entries = Array.isArray(body) ? body : [];
+    return entries.map((entry) => mapPonderSubscription(entry, "push", -Math.abs(entry.id)));
   }
 
   async enableNotification(email: string, address: string): Promise<void> {
@@ -1994,11 +2028,28 @@ export class AppBackendClient {
     }
   }
 
-  async syncPushNotifications(token: string, addresses: string[]): Promise<void> {
+  async syncPushNotifications(
+    token: string,
+    addresses: string[],
+    options: PushNotificationSyncOptions = {},
+  ): Promise<void> {
+    const body: {
+      token: string;
+      addresses: string[];
+      preference_enabled?: boolean;
+      device_registered?: boolean;
+    } = { token, addresses };
+    if (typeof options.preferenceEnabled === "boolean") {
+      body.preference_enabled = options.preferenceEnabled;
+    }
+    if (typeof options.deviceRegistered === "boolean") {
+      body.device_registered = options.deviceRegistered;
+    }
+
     const response = await this.authFetch("/ponder/push", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, addresses }),
+      body: JSON.stringify(body),
     });
     if (!response.ok) {
       throw new Error("Unable to sync push notifications.");

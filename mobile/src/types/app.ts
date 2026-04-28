@@ -437,6 +437,9 @@ export interface PonderSubscription {
   type: string;
   token?: string;
   email?: string;
+  active?: boolean;
+  preferenceEnabled?: boolean;
+  deviceRegistered?: boolean;
 }
 
 export type AppAccountDeletionStatus =
