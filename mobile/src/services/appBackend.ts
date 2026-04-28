@@ -2052,7 +2052,7 @@ export class AppBackendClient {
       body: JSON.stringify(body),
     });
     if (!response.ok) {
-      throw new Error("Unable to sync push notifications.");
+      await throwRequestError(response, "Unable to sync push notifications");
     }
   }
 

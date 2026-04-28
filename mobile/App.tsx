@@ -931,7 +931,7 @@ function mergePreferences(input: unknown): AppPreferences {
   };
 }
 
-function useStoredPreferences(): [AppPreferences, React.Dispatch<React.SetStateAction<AppPreferences>>] {
+function useStoredPreferences(): [AppPreferences, React.Dispatch<React.SetStateAction<AppPreferences>>, boolean] {
   const [preferences, setPreferences] = useState<AppPreferences>(defaultAppPreferences);
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
 
@@ -969,7 +969,7 @@ function useStoredPreferences(): [AppPreferences, React.Dispatch<React.SetStateA
     });
   }, [preferences, preferencesLoaded]);
 
-  return [preferences, setPreferences];
+  return [preferences, setPreferences, preferencesLoaded];
 }
 
 function BottomTab({
@@ -1010,6 +1010,7 @@ function WalletAppShell({
   pendingLinkIntent,
   onConsumePendingLink,
   preferences,
+  preferencesLoaded,
   onUpdatePreferences,
   appleLinked,
   appleLinkedEmail,
@@ -1044,6 +1045,7 @@ function WalletAppShell({
   pendingLinkIntent: PendingLinkIntent | null;
   onConsumePendingLink: () => void;
   preferences: AppPreferences;
+  preferencesLoaded: boolean;
   onUpdatePreferences: (next: AppPreferences) => void;
   appleLinked: boolean;
   appleLinkedEmail?: string;
@@ -1080,6 +1082,7 @@ function WalletAppShell({
       pendingLinkIntent={pendingLinkIntent}
       onConsumePendingLink={onConsumePendingLink}
       preferences={preferences}
+      preferencesLoaded={preferencesLoaded}
       onUpdatePreferences={onUpdatePreferences}
       appleLinked={appleLinked}
       appleLinkedEmail={appleLinkedEmail}
@@ -1118,6 +1121,7 @@ function WalletAppShellContent({
   pendingLinkIntent,
   onConsumePendingLink,
   preferences,
+  preferencesLoaded,
   onUpdatePreferences,
   appleLinked,
   appleLinkedEmail,
@@ -1152,6 +1156,7 @@ function WalletAppShellContent({
   pendingLinkIntent: PendingLinkIntent | null;
   onConsumePendingLink: () => void;
   preferences: AppPreferences;
+  preferencesLoaded: boolean;
   onUpdatePreferences: (next: AppPreferences) => void;
   appleLinked: boolean;
   appleLinkedEmail?: string;
@@ -1199,6 +1204,7 @@ function WalletAppShellContent({
   const [storedPushToken, setStoredPushToken] = useState<string | null>(null);
   const [storedPushTokenLoaded, setStoredPushTokenLoaded] = useState(false);
   const [backendPushPreferenceEnabled, setBackendPushPreferenceEnabled] = useState<boolean | null>(null);
+  const [pushDeviceStateChecked, setPushDeviceStateChecked] = useState(false);
   const [pushSyncState, setPushSyncState] = useState<PushSyncState>({
     permissionStatus: "unknown",
     syncState: "idle",
@@ -1234,6 +1240,7 @@ function WalletAppShellContent({
   const runtimeServiceRef = useRef<SmartWalletService | null>(runtime.service);
   const pendingPushPreferenceChangeRef = useRef<"enable" | "disable" | null>(null);
   const handledPushSyncRequestVersionRef = useRef(0);
+  const initialPushActivationRequestedRef = useRef(false);
   const smartAddressRef = useRef(smartAddress);
   const handledPendingLinkIdRef = useRef<number | null>(null);
   const walletTransactionsRef = useRef<AppTransaction[]>(walletTransactions);
@@ -1455,24 +1462,31 @@ function WalletAppShellContent({
   const notificationAddresses = useMemo(() => {
     const seen = new Set<string>();
     const addresses: string[] = [];
-    if (smartAddress) {
-      const normalized = smartAddress.toLowerCase();
-      if (!seen.has(normalized)) {
-        seen.add(normalized);
-        addresses.push(smartAddress);
-      }
-    }
+    const backendNotificationAddresses = new Map<string, string>();
     for (const wallet of backendWallets) {
       const address = wallet.smartAddress ?? wallet.eoaAddress;
       if (!address || wallet.isEoa) {
         continue;
       }
       const normalized = address.toLowerCase();
+      backendNotificationAddresses.set(normalized, address);
+    }
+    const addAddress = (address: string) => {
+      const normalized = address.toLowerCase();
       if (seen.has(normalized)) {
-        continue;
+        return;
       }
       seen.add(normalized);
       addresses.push(address);
+    };
+    const selectedBackendAddress = smartAddress
+      ? backendNotificationAddresses.get(smartAddress.toLowerCase())
+      : undefined;
+    if (selectedBackendAddress) {
+      addAddress(selectedBackendAddress);
+    }
+    for (const address of backendNotificationAddresses.values()) {
+      addAddress(address);
     }
     return addresses;
   }, [backendWallets, smartAddress]);
@@ -1617,11 +1631,50 @@ function WalletAppShellContent({
   }, [notificationAddresses.length]);
 
   useEffect(() => {
+    if (initialPushActivationRequestedRef.current) {
+      return;
+    }
+    if (
+      !preferencesLoaded ||
+      !backendClient ||
+      !appUser ||
+      !preferences.notificationsEnabled ||
+      backendPushPreferenceEnabled === false ||
+      !pushDeviceStateChecked ||
+      !walletSyncReady ||
+      notificationAddresses.length === 0
+    ) {
+      return;
+    }
+    if (
+      pushSyncState.permissionStatus !== "undetermined" &&
+      pushSyncState.permissionStatus !== "granted"
+    ) {
+      return;
+    }
+
+    initialPushActivationRequestedRef.current = true;
+    pendingPushPreferenceChangeRef.current = "enable";
+    setPushSyncRequestVersion((current) => current + 1);
+  }, [
+    appUser,
+    backendClient,
+    backendPushPreferenceEnabled,
+    notificationAddresses.length,
+    preferences.notificationsEnabled,
+    preferencesLoaded,
+    pushDeviceStateChecked,
+    pushSyncState.permissionStatus,
+    walletSyncReady,
+  ]);
+
+  useEffect(() => {
     if (!backendClient || !appUser || !storedPushTokenLoaded) {
       return;
     }
 
     let cancelled = false;
+    setPushDeviceStateChecked(false);
     const applyBackendPreference = (preferenceEnabled: boolean | undefined) => {
       setBackendPushPreferenceEnabled(preferenceEnabled ?? null);
       const userPreferenceChangePending =
@@ -1646,6 +1699,7 @@ function WalletAppShellContent({
         if (cancelled) {
           return;
         }
+        setPushDeviceStateChecked(true);
 
         const backendState = summarizePushRegistrations(backendRegistrations, syncToken);
         applyBackendPreference(backendState.preferenceEnabled);
@@ -3401,9 +3455,11 @@ function WalletAppShellContent({
 
 function PrivyWalletApp({
   preferences,
+  preferencesLoaded,
   onUpdatePreferences,
 }: {
   preferences: AppPreferences;
+  preferencesLoaded: boolean;
   onUpdatePreferences: (next: AppPreferences) => void;
 }) {
   const { palette, shadows, isDark } = useAppTheme();
@@ -4573,6 +4629,7 @@ function PrivyWalletApp({
       pendingLinkIntent={pendingLinkIntent}
       onConsumePendingLink={consumePendingLink}
       preferences={preferences}
+      preferencesLoaded={preferencesLoaded}
       onUpdatePreferences={onUpdatePreferences}
       appleLinked={appleLinked}
       appleLinkedEmail={linkedAppleAccount?.email || undefined}
@@ -4812,7 +4869,7 @@ function MissingPrivyConfigScreen() {
 }
 
 export default function App() {
-  const [preferences, setPreferences] = useStoredPreferences();
+  const [preferences, setPreferences, preferencesLoaded] = useStoredPreferences();
 
   const supportedChain = {
     id: mobileConfig.chainId,
@@ -4841,7 +4898,11 @@ export default function App() {
             },
           }}
         >
-          <PrivyWalletApp preferences={preferences} onUpdatePreferences={setPreferences} />
+          <PrivyWalletApp
+            preferences={preferences}
+            preferencesLoaded={preferencesLoaded}
+            onUpdatePreferences={setPreferences}
+          />
         </PrivyProvider>
       )}
     </AppThemeProvider>
