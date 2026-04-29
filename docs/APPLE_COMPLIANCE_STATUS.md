@@ -13,6 +13,7 @@ Implemented:
 - iOS now has an Apple sign-in path and a guarded Apple recovery flow before a new SFLUV account is created.
 - Existing users can link Apple from Settings instead of accidentally creating a second account.
 - The web app now mirrors the same Apple warning/linking behavior for parity, even though the App Store requirement applies to iOS.
+- App submission metadata now explains that SFLUV bounties are nonprofit-administered real-world task rewards, not app engagement, app install, social-media, ad-viewing, or other digital promotional rewards. See [APP_STORE_SUBMISSION_METADATA.md](APP_STORE_SUBMISSION_METADATA.md).
 
 Still intentionally deferred:
 

@@ -40,10 +40,12 @@ const googleServicesFile = resolveGoogleServicesFile();
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: "SFLuv",
-  slug: "sfluv-wallet",
-  owner: "sanchez0",
-  version: "0.1.0",
-  scheme: "sfluvwallet",
+  slug: "sfluv",
+  owner: "sfluv",
+  version: "1.0.0",
+  description:
+    "This app is a nonprofit-run community hub for managing and spending your SFLUV, redeeming perks, and coordinating verified improvers. Improvers can sign up to complete real-world tasks in San Francisco and be rewarded with SFLUV.",
+  scheme: "sfluv",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
@@ -102,6 +104,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       "expo-location",
       {
         locationWhenInUsePermission: "SFLuv uses your location to show nearby merchants and your position on the merchant map.",
+      },
+    ],
+    [
+      "expo-image-picker",
+      {
+        microphonePermission: false,
+        photosPermission: "SFLuv lets you choose workflow photos to submit for improver tasks.",
       },
     ],
     "expo-notifications",

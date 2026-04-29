@@ -12,8 +12,7 @@
         "EXPO_PUBLIC_PRIVY_CLIENT_ID": "client-WY6MsAXARAYUgz2i28xA5GP48PCXp5hw8eKTiD158gcx5"
       }
     },
-    "preview": {
-      "distribution": "internal",
+    "production": {
       "env": {
         "IOS_BUNDLE_IDENTIFIER": "org.sfluv.wallet",
         "EXPO_PUBLIC_CHAIN_ID": "80094",
@@ -32,9 +31,12 @@
         "EXPO_PUBLIC_MAX_SMART_ACCOUNT_SCAN": "5",
         "EXPO_PUBLIC_PRIVY_APP_ID": "cmc3nhnmc004yl10mwcmj4be3",
         "EXPO_PUBLIC_PRIVY_CLIENT_ID": "client-WY6MsAXARAYUgz2i28xA5GP48PCXp5hw8eKTiD158gcx5",
-        "EXPO_PUBLIC_EAS_PROJECT_ID": "ee7c9c8e-f237-44cf-917c-ee424401e299"
+        "EXPO_PUBLIC_EAS_PROJECT_ID": "457c71a1-29cd-4e60-9be8-04a6e0a6194a"
       }
     },
-    "production": {}
+    "preview": {
+      "extends": "production",
+      "distribution": "internal"
+    }
   }
 }
