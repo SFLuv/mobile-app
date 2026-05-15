@@ -31,6 +31,8 @@ type Props = {
   refreshing: boolean;
   onRefresh: () => Promise<void>;
   showWalletChooser?: boolean;
+  merchantMode?: boolean;
+  merchantLocationName?: string;
 };
 
 function formatTxTitle(tx: AppTransaction): string {
@@ -65,6 +67,8 @@ export function WalletHomeScreen({
   refreshing,
   onRefresh,
   showWalletChooser,
+  merchantMode,
+  merchantLocationName,
 }: Props) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
@@ -107,8 +111,8 @@ export function WalletHomeScreen({
 
           <View style={styles.heroTopRow}>
             <View style={styles.heroBadge}>
-              <Ionicons name="shield-checkmark" size={14} color={palette.primaryStrong} />
-              <Text style={styles.heroBadgeText}>Wallet ready</Text>
+              <Ionicons name={merchantMode ? "storefront" : "shield-checkmark"} size={14} color={palette.primaryStrong} />
+              <Text style={styles.heroBadgeText}>{merchantMode ? "Merchant mode" : "Wallet ready"}</Text>
             </View>
             {showWalletChooser ? (
               <Pressable style={styles.chooseWalletButton} onPress={onOpenWalletChooser}>
@@ -119,6 +123,9 @@ export function WalletHomeScreen({
           </View>
 
           <Text style={styles.heroEyebrow}>Selected wallet</Text>
+          {merchantMode && merchantLocationName ? (
+            <Text style={styles.merchantLocationText}>{merchantLocationName}</Text>
+          ) : null}
           <Text style={styles.heroBalance}>{balance}</Text>
           <Text style={styles.heroCurrency}>SFLUV available</Text>
 
@@ -137,11 +144,13 @@ export function WalletHomeScreen({
           </View>
 
           <View style={styles.heroActionRow}>
-            <Pressable style={styles.heroPrimaryAction} onPress={onOpenSend}>
-              <Ionicons name="arrow-up" size={16} color={palette.white} />
-              <Text style={styles.heroPrimaryActionText}>Send</Text>
-            </Pressable>
-            <Pressable style={styles.heroSecondaryAction} onPress={onOpenReceive}>
+            {!merchantMode ? (
+              <Pressable style={styles.heroPrimaryAction} onPress={onOpenSend}>
+                <Ionicons name="arrow-up" size={16} color={palette.white} />
+                <Text style={styles.heroPrimaryActionText}>Send</Text>
+              </Pressable>
+            ) : null}
+            <Pressable style={[styles.heroSecondaryAction, merchantMode ? styles.heroFullWidthAction : undefined]} onPress={onOpenReceive}>
               <Ionicons name="arrow-down" size={16} color={palette.primaryStrong} />
               <Text style={styles.heroSecondaryActionText}>Receive</Text>
             </Pressable>
@@ -154,9 +163,11 @@ export function WalletHomeScreen({
               <Text style={styles.sectionTitle}>Recent activity</Text>
               <Text style={styles.sectionMeta}>Your latest SFLUV movement</Text>
             </View>
-            <Pressable onPress={onOpenActivity}>
-              <Text style={styles.link}>See all</Text>
-            </Pressable>
+            {!merchantMode ? (
+              <Pressable onPress={onOpenActivity}>
+                <Text style={styles.link}>See all</Text>
+              </Pressable>
+            ) : null}
           </View>
 
           {!transactionsLoaded ? (
@@ -171,7 +182,7 @@ export function WalletHomeScreen({
               <Text style={styles.emptyBody}>Your latest sends and receives will appear here after the first transfer.</Text>
             </View>
           ) : (
-            decoratedTransactions.slice(0, 5).map((details) => {
+            decoratedTransactions.slice(0, merchantMode ? 10 : 5).map((details) => {
               const incoming = details.received;
               const reward = incoming && details.transaction.from.toLowerCase() === FAUCET_ADDRESS;
               const counterpartyAddress = incoming ? details.transaction.from : details.transaction.to;
@@ -314,6 +325,12 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       fontSize: 15,
       fontWeight: "600",
     },
+    merchantLocationText: {
+      marginTop: 4,
+      color: palette.text,
+      fontSize: 18,
+      fontWeight: "900",
+    },
     addressBar: {
       marginTop: spacing.lg,
       flexDirection: "row",
@@ -387,6 +404,9 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       backgroundColor: palette.surfaceStrong,
       borderWidth: 1,
       borderColor: palette.primary,
+    },
+    heroFullWidthAction: {
+      flex: 1,
     },
     heroSecondaryActionText: {
       color: palette.primaryStrong,

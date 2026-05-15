@@ -22,6 +22,7 @@ import { buildUniversalPayLink, parseSfluvUniversalLink } from "../utils/univers
 type Props = {
   accountAddress: string;
   onRedeemCodeScanned?: (code: string) => void;
+  showRedeemScanner?: boolean;
 };
 
 type ReceiveMode = "link" | "address";
@@ -62,7 +63,7 @@ function shortLink(rawValue: string): string {
   }
 }
 
-export function ReceiveScreen({ accountAddress, onRedeemCodeScanned }: Props) {
+export function ReceiveScreen({ accountAddress, onRedeemCodeScanned, showRedeemScanner = true }: Props) {
   const { palette, shadows } = useAppTheme();
   const windowFrame = useWindowDimensions();
   const compactLayout = windowFrame.height < 740;
@@ -176,10 +177,12 @@ export function ReceiveScreen({ accountAddress, onRedeemCodeScanned }: Props) {
           </View>
         </View>
 
-        <Pressable style={styles.redeemButton} onPress={() => void openRedeemScanner()}>
-          <Ionicons name="scan-outline" size={18} color={palette.white} />
-          <Text style={styles.redeemButtonText}>Redeem code</Text>
-        </Pressable>
+        {showRedeemScanner ? (
+          <Pressable style={styles.redeemButton} onPress={() => void openRedeemScanner()}>
+            <Ionicons name="scan-outline" size={18} color={palette.white} />
+            <Text style={styles.redeemButtonText}>Redeem code</Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
 
       <Modal

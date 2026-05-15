@@ -111,6 +111,30 @@ export interface AppOwnedLocation extends AppLocation {
   reference: string;
 }
 
+export interface AppMerchantModeDevice {
+  id: string;
+  userId: string;
+  locationId: number;
+  locationName: string;
+  walletAddress: string;
+  displayName: string;
+  platform: string;
+  appVersion: string;
+  merchantModeEnabled: boolean;
+  enabledAt?: string | null;
+  disabledAt?: string | null;
+  lastSeenAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AppMerchantModeStatus {
+  userId: string;
+  isMerchant: boolean;
+  passcodeSet: boolean;
+  device?: AppMerchantModeDevice | null;
+}
+
 export interface AppWalletOwnerLookup {
   found: boolean;
   userId?: string;

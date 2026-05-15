@@ -21,9 +21,11 @@ import { StatusBar } from "expo-status-bar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BlurView } from "expo-blur";
 import Constants from "expo-constants";
+import * as Crypto from "expo-crypto";
 import * as Device from "expo-device";
 import * as Linking from "expo-linking";
 import * as Notifications from "expo-notifications";
+import * as SecureStore from "expo-secure-store";
 import { ethers } from "ethers";
 import {
   PrivyProvider,
@@ -64,6 +66,8 @@ import {
   AppContact,
   AppImprover,
   AppLocation,
+  AppMerchantModeStatus,
+  AppOwnedLocation,
   PonderSubscription,
   AppTransaction,
   AppUser,
@@ -150,6 +154,7 @@ type OverlayWalletPane = Exclude<WalletPane, "home">;
 
 const PREFERENCES_STORAGE_KEY = "sfluv-wallet:preferences";
 const PUSH_TOKEN_STORAGE_KEY = "sfluv-wallet:push-token";
+const MERCHANT_MODE_INSTALLATION_ID_KEY = "sfluv-wallet.merchant-mode-installation-id";
 const WALLET_PREFERENCES_STORAGE_KEY_PREFIX = "sfluv-wallet:wallet-preferences";
 const BALANCE_CACHE_STORAGE_KEY_PREFIX = "sfluv-wallet:balance-cache";
 const REACTIVATED_ACCOUNT_RECOVERY_NOTICE_STORAGE_KEY =
@@ -159,12 +164,27 @@ const PRIVACY_POLICY_PATH = "/privacy-policy";
 const EMAIL_OPT_IN_POLICY_PATH = "/email-opt-in-policy";
 const TRANSFER_REFRESH_DEBOUNCE_MS = 350;
 const TRANSACTION_POLL_INTERVAL_MS = 2_000;
-const WALLET_TRANSACTION_LIMIT = 5;
+const MERCHANT_MODE_STATUS_POLL_INTERVAL_MS = 15_000;
+const WALLET_TRANSACTION_LIMIT = 10;
 const ACTIVITY_TRANSACTION_PAGE_SIZE = 10;
 const LINK_DEDUPE_WINDOW_MS = 4_000;
 const BACKEND_BOOTSTRAP_TIMEOUT_MS = 20_000;
 const WALLET_CREATE_TIMEOUT_MS = 30_000;
 const WALLET_DISCOVERY_TIMEOUT_MS = 45_000;
+
+async function getOrCreateMerchantModeInstallationID(): Promise<string> {
+  const existing = await SecureStore.getItemAsync(MERCHANT_MODE_INSTALLATION_ID_KEY);
+  if (existing) {
+    return existing;
+  }
+
+  const nextID =
+    typeof Crypto.randomUUID === "function"
+      ? Crypto.randomUUID()
+      : ethers.utils.hexlify(ethers.utils.randomBytes(16));
+  await SecureStore.setItemAsync(MERCHANT_MODE_INSTALLATION_ID_KEY, nextID);
+  return nextID;
+}
 
 async function withTimeout<T>(
   promise: Promise<T>,
@@ -1197,10 +1217,18 @@ function WalletAppShellContent({
   const [activityTransactionsLoaded, setActivityTransactionsLoaded] = useState(false);
   const [contacts, setContacts] = useState<AppContact[]>([]);
   const [locations, setLocations] = useState<AppLocation[]>([]);
+  const [ownedLocations, setOwnedLocations] = useState<AppOwnedLocation[]>([]);
   const [backendWallets, setBackendWallets] = useState<AppWallet[]>([]);
   const [merchantLabelsByAddress, setMerchantLabelsByAddress] = useState<Record<string, string>>({});
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [appImprover, setAppImprover] = useState<AppImprover | null>(null);
+  const [merchantModeInstallationID, setMerchantModeInstallationID] = useState<string | null>(null);
+  const [merchantModeStatus, setMerchantModeStatus] = useState<AppMerchantModeStatus | null>(null);
+  const [merchantModeBusy, setMerchantModeBusy] = useState(false);
+  const [merchantModeMessage, setMerchantModeMessage] = useState<string | null>(null);
+  const [merchantModeExitPin, setMerchantModeExitPin] = useState("");
+  const [merchantModeExitOpen, setMerchantModeExitOpen] = useState(false);
+  const [merchantModeExitError, setMerchantModeExitError] = useState<string | null>(null);
   const [storedPushToken, setStoredPushToken] = useState<string | null>(null);
   const [storedPushTokenLoaded, setStoredPushTokenLoaded] = useState(false);
   const [backendPushPreferenceEnabled, setBackendPushPreferenceEnabled] = useState<boolean | null>(null);
@@ -1456,9 +1484,25 @@ function WalletAppShellContent({
   const hasImproverTab = Boolean(appUser?.isImprover || appImprover?.status === "approved");
   const moreTabActive = hasImproverTab && (tab === "activity" || tab === "contacts");
   const canChooseWallet = walletChooserCandidates.length > 1;
+  const merchantModeDevice = merchantModeStatus?.device?.merchantModeEnabled ? merchantModeStatus.device : null;
+  const merchantModeActive = Boolean(merchantModeDevice);
   const walletSyncReady = backendBootstrapReady && Boolean(appUser) && Boolean(runtime.discovery);
   const walletHistoryActive = tab === "wallet" && walletPane === "home";
   const activityHistoryActive = tab === "activity";
+
+  useEffect(() => {
+    if (!merchantModeActive || !merchantModeDevice?.walletAddress || walletCandidates.length === 0) {
+      return;
+    }
+    const normalizedMerchantWallet = merchantModeDevice.walletAddress.toLowerCase();
+    const nextCandidate = walletCandidates.find(
+      (candidate) => candidate.accountAddress.toLowerCase() === normalizedMerchantWallet,
+    );
+    if (nextCandidate && nextCandidate.key !== selectedCandidateKey) {
+      onSelectCandidate(nextCandidate.key);
+    }
+  }, [merchantModeActive, merchantModeDevice?.walletAddress, onSelectCandidate, selectedCandidateKey, walletCandidates]);
+
   const notificationAddresses = useMemo(() => {
     const seen = new Set<string>();
     const addresses: string[] = [];
@@ -1785,6 +1829,22 @@ function WalletAppShellContent({
     }
   };
 
+  const refreshMerchantModeStatus = async (userOverride?: AppUser | null) => {
+    const currentUser = userOverride ?? appUser;
+    if (!backendClient || !currentUser?.isMerchant) {
+      setMerchantModeStatus(null);
+      return null;
+    }
+
+    const installationID = merchantModeInstallationID ?? (await getOrCreateMerchantModeInstallationID());
+    if (!merchantModeInstallationID) {
+      setMerchantModeInstallationID(installationID);
+    }
+    const status = await backendClient.getMerchantModeStatus(installationID);
+    setMerchantModeStatus(status);
+    return status;
+  };
+
   const loadAppProfile = async () => {
     if (!backendClient) {
       return;
@@ -1795,8 +1855,16 @@ function WalletAppShellContent({
       setAppUser(profile.user);
       setAppImprover(profile.improver);
       setBackendWallets(profile.wallets);
+      setOwnedLocations(profile.locations);
       onWalletPreferencesSync(profile.user, profile.wallets);
       setContacts(profile.contacts);
+      if (profile.user.isMerchant) {
+        void refreshMerchantModeStatus(profile.user).catch((error) => {
+          console.warn("Unable to load merchant mode status", error);
+        });
+      } else {
+        setMerchantModeStatus(null);
+      }
       setSyncNotice(null);
       backendAuthFailureHandledRef.current = false;
     } catch (error) {
@@ -1821,6 +1889,34 @@ function WalletAppShellContent({
       }
     }
   };
+
+  useEffect(() => {
+    if (!backendClient || !appUser?.isMerchant) {
+      return;
+    }
+
+    let cancelled = false;
+    const pollMerchantModeStatus = async () => {
+      if (cancelled || !appIsActiveRef.current) {
+        return;
+      }
+
+      try {
+        await refreshMerchantModeStatus();
+      } catch (error) {
+        console.warn("Unable to refresh merchant mode status", error);
+      }
+    };
+
+    const interval = setInterval(() => {
+      void pollMerchantModeStatus();
+    }, MERCHANT_MODE_STATUS_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [appUser?.isMerchant, backendClient, merchantModeInstallationID]);
 
   const ensureTransactionMerchantLabels = async (transactions: AppTransaction[]) => {
     if (!backendClient || transactions.length === 0) {
@@ -1905,6 +2001,11 @@ function WalletAppShellContent({
 
     const { link } = pendingLinkIntent;
     if (link.type === "pay") {
+      if (merchantModeActive) {
+        Alert.alert("Merchant Mode", "Sending is disabled on this device until Merchant Mode is exited.");
+        onConsumePendingLink();
+        return;
+      }
       openSendDraft({
         recipient: link.address,
         recipientKind: "payment-link",
@@ -1915,6 +2016,11 @@ function WalletAppShellContent({
     }
 
     if (link.type === "request") {
+      if (merchantModeActive) {
+        Alert.alert("Merchant Mode", "Sending is disabled on this device until Merchant Mode is exited.");
+        onConsumePendingLink();
+        return;
+      }
       openSendDraft({
         recipient: link.address,
         amount: link.amount,
@@ -1936,7 +2042,7 @@ function WalletAppShellContent({
 
     openRedeemFlowForCode(link.code);
     onConsumePendingLink();
-  }, [onConsumePendingLink, openRedeemFlowForCode, pendingLinkIntent]);
+  }, [merchantModeActive, onConsumePendingLink, openRedeemFlowForCode, pendingLinkIntent]);
 
   useEffect(() => {
     if (!redeemFlow || redeemFlow.stage !== "awaiting_wallet") {
@@ -2677,6 +2783,84 @@ function WalletAppShellContent({
     setPushSyncRequestVersion((current) => current + 1);
   };
 
+  const handleSetMerchantModePin = async (pin: string, currentPin?: string) => {
+    if (!backendClient) {
+      throw new Error("Backend not configured.");
+    }
+    setMerchantModeBusy(true);
+    setMerchantModeMessage(null);
+    try {
+      const status = await backendClient.setMerchantModePin(pin, currentPin);
+      setMerchantModeStatus(status);
+      setMerchantModeMessage("Merchant Mode PIN saved.");
+    } finally {
+      setMerchantModeBusy(false);
+    }
+  };
+
+  const handleEnableMerchantMode = async (locationID: number, walletAddress: string) => {
+    if (!backendClient) {
+      throw new Error("Backend not configured.");
+    }
+    const installationID = merchantModeInstallationID ?? (await getOrCreateMerchantModeInstallationID());
+    if (!merchantModeInstallationID) {
+      setMerchantModeInstallationID(installationID);
+    }
+
+    setMerchantModeBusy(true);
+    setMerchantModeMessage(null);
+    try {
+      const status = await backendClient.enableMerchantMode({
+        installationID,
+        locationID,
+        walletAddress,
+        displayName: Device.deviceName || Device.modelName || "Store device",
+        platform: Platform.OS,
+        appVersion: Constants.expoConfig?.version || Constants.nativeAppVersion || "",
+      });
+      setMerchantModeStatus(status);
+      setMerchantModeMessage("Merchant Mode enabled on this device.");
+      setWalletPane("home");
+      setTab("wallet");
+      await refreshEverything();
+    } finally {
+      setMerchantModeBusy(false);
+    }
+  };
+
+  const handleDisableMerchantMode = async () => {
+    if (!backendClient) {
+      setMerchantModeExitError("Backend not configured.");
+      return;
+    }
+    if (!/^\d{6}$/.test(merchantModeExitPin)) {
+      setMerchantModeExitError("Enter the 6 digit Merchant Mode PIN.");
+      return;
+    }
+
+    const installationID = merchantModeInstallationID ?? (await getOrCreateMerchantModeInstallationID());
+    if (!merchantModeInstallationID) {
+      setMerchantModeInstallationID(installationID);
+    }
+
+    setMerchantModeBusy(true);
+    setMerchantModeExitError(null);
+    try {
+      const status = await backendClient.disableMerchantMode({
+        installationID,
+        pin: merchantModeExitPin,
+      });
+      setMerchantModeStatus(status);
+      setMerchantModeExitPin("");
+      setMerchantModeExitOpen(false);
+      setMerchantModeMessage("Merchant Mode exited on this device.");
+    } catch (error) {
+      setMerchantModeExitError((error as Error)?.message || "Unable to exit Merchant Mode.");
+    } finally {
+      setMerchantModeBusy(false);
+    }
+  };
+
   const finishSendFlow = () => {
     closeWalletPaneToWallet();
   };
@@ -2828,8 +3012,22 @@ function WalletAppShellContent({
     await loadPublicLocations();
   };
 
+  useEffect(() => {
+    if (!merchantModeActive) {
+      return;
+    }
+    if (tab !== "wallet") {
+      setTab("wallet");
+    }
+    if (walletPane === "send") {
+      setWalletPane("home");
+    }
+  }, [merchantModeActive, tab, walletPane]);
+
   const activeTitle =
-    tab === "wallet"
+    merchantModeActive
+      ? "Merchant Mode"
+      : tab === "wallet"
       ? walletPane === "send"
         ? "Send"
         : walletPane === "receive"
@@ -2870,22 +3068,31 @@ function WalletAppShellContent({
         }
       }}
       onOpenSend={() => {
+        if (merchantModeActive) {
+          Alert.alert("Merchant Mode", "Sending is disabled on this device until Merchant Mode is exited.");
+          return;
+        }
         setWalletPane("send");
       }}
       onOpenReceive={() => {
         setWalletPane("receive");
       }}
       onOpenActivity={() => {
+        if (merchantModeActive) {
+          return;
+        }
         setTab("activity");
       }}
       onOpenWalletChooser={() => {
         setShowWalletChooser(true);
       }}
       showWalletChooser={canChooseWallet}
+      merchantMode={merchantModeActive}
+      merchantLocationName={merchantModeDevice?.locationName}
     />
   );
   const walletOverlayContent =
-    walletOverlayPane === "send" ? (
+    walletOverlayPane === "send" && !merchantModeActive ? (
       <SendScreen
         contacts={contacts}
         merchants={locations}
@@ -2923,6 +3130,7 @@ function WalletAppShellContent({
       <ReceiveScreen
         accountAddress={smartAddress || runtime.discovery?.ownerAddress || ethers.constants.AddressZero}
         onRedeemCodeScanned={openRedeemFlowForCode}
+        showRedeemScanner={!merchantModeActive}
       />
     ) : null;
   const walletTabContent =
@@ -2954,7 +3162,9 @@ function WalletAppShellContent({
             <Text style={styles.brandKicker}>SFLuv</Text>
             <Text style={styles.brand}>{activeTitle}</Text>
             <Text style={styles.topMeta}>
-              {tab === "settings"
+              {merchantModeActive
+                ? "Payment-only store device"
+                : tab === "settings"
                 ? "Preferences and account details"
                 : tab === "contacts"
                   ? "People and wallets you trust"
@@ -2981,10 +3191,18 @@ function WalletAppShellContent({
             <Pressable
               style={[styles.iconButton, tab === "settings" ? styles.iconButtonActive : undefined]}
               onPress={() => {
+                if (merchantModeActive) {
+                  setMerchantModeExitOpen(true);
+                  return;
+                }
                 setTab("settings");
               }}
             >
-              <Ionicons name={tab === "settings" ? "settings" : "settings-outline"} size={18} color={palette.primaryStrong} />
+              <Ionicons
+                name={merchantModeActive ? "lock-closed-outline" : tab === "settings" ? "settings" : "settings-outline"}
+                size={18}
+                color={palette.primaryStrong}
+              />
             </Pressable>
           </View>
         </View>
@@ -3018,7 +3236,7 @@ function WalletAppShellContent({
                 <Text style={styles.errorText}>{runtime.error}</Text>
               )}
             </View>
-          ) : tab === "wallet" ? (
+          ) : merchantModeActive || tab === "wallet" ? (
             walletTabContent
           ) : tab === "activity" ? (
             <ActivityScreen
@@ -3126,6 +3344,7 @@ function WalletAppShellContent({
               user={appUser}
               improver={appImprover}
               wallets={settingsWallets}
+              ownedLocations={ownedLocations}
               primaryWalletAddress={appUser?.primaryWalletAddress}
               syncNotice={syncNotice}
               preferences={preferences}
@@ -3156,6 +3375,11 @@ function WalletAppShellContent({
               onRenameWallet={handleRenameWallet}
               onSetPrimaryWallet={handleSetPrimaryWallet}
               onSetWalletVisibility={handleSetWalletVisibility}
+              merchantModeStatus={merchantModeStatus}
+              merchantModeBusy={merchantModeBusy}
+              merchantModeMessage={merchantModeMessage}
+              onSetMerchantModePin={handleSetMerchantModePin}
+              onEnableMerchantMode={handleEnableMerchantMode}
               accountDeletionBusy={accountDeletionBusy}
               accountDeletionMessage={accountDeletionMessage}
               onUpdateImproverRewardsWallet={async (address) => {
@@ -3190,7 +3414,7 @@ function WalletAppShellContent({
         ) : null}
       </View>
 
-      {showStandardChrome ? (
+      {showStandardChrome && !merchantModeActive ? (
         <View pointerEvents="box-none" style={styles.bottomDockShell}>
           <BlurView
             pointerEvents="none"
@@ -3271,6 +3495,59 @@ function WalletAppShellContent({
           </View>
         </View>
       ) : null}
+
+      <Modal
+        visible={merchantModeExitOpen}
+        transparent
+        presentationStyle="overFullScreen"
+        animationType="none"
+        onRequestClose={() => setMerchantModeExitOpen(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setMerchantModeExitOpen(false)}>
+          <Pressable style={styles.moreMenuCard} onPress={() => {}}>
+            <View style={styles.moreMenuHeader}>
+              <View style={styles.moreMenuHeaderCopy}>
+                <Text style={styles.moreMenuTitle}>Merchant Mode</Text>
+                <Text style={styles.moreMenuSubtitle}>
+                  This device is locked to receiving SFLuv for {merchantModeDevice?.locationName || "this location"}.
+                </Text>
+              </View>
+              <Pressable style={styles.walletChooserClose} onPress={() => setMerchantModeExitOpen(false)}>
+                <Ionicons name="close" size={20} color={palette.primaryStrong} />
+              </Pressable>
+            </View>
+
+            <View style={styles.merchantExitCard}>
+              <Text style={styles.merchantExitTitle}>Exit Merchant Mode</Text>
+              <Text style={styles.merchantExitBody}>
+                Enter the 6 digit merchant PIN on this device to return to the full app.
+              </Text>
+              <TextInput
+                style={styles.merchantExitInput}
+                value={merchantModeExitPin}
+                onChangeText={(value) => {
+                  setMerchantModeExitPin(value.replace(/\D/g, "").slice(0, 6));
+                  setMerchantModeExitError(null);
+                }}
+                keyboardType="number-pad"
+                secureTextEntry
+                placeholder="6 digit PIN"
+                placeholderTextColor={palette.textMuted}
+              />
+              {merchantModeExitError ? <Text style={styles.merchantExitError}>{merchantModeExitError}</Text> : null}
+              <Pressable
+                style={[styles.merchantExitButton, merchantModeBusy ? styles.buttonDisabled : undefined]}
+                disabled={merchantModeBusy}
+                onPress={() => {
+                  void handleDisableMerchantMode();
+                }}
+              >
+                <Text style={styles.merchantExitButtonText}>{merchantModeBusy ? "Checking..." : "Exit Merchant Mode"}</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal
         visible={showWalletChooser && canChooseWallet}
@@ -5513,6 +5790,55 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   moreMenuBody: {
     color: palette.textMuted,
     lineHeight: 18,
+  },
+  merchantExitCard: {
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.surfaceMuted,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  merchantExitTitle: {
+    color: palette.text,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  merchantExitBody: {
+    color: palette.textMuted,
+    lineHeight: 20,
+  },
+  merchantExitInput: {
+    minHeight: 52,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: palette.primary,
+    backgroundColor: palette.surface,
+    color: palette.text,
+    fontSize: 18,
+    fontWeight: "900",
+    letterSpacing: 4,
+    textAlign: "center",
+    paddingHorizontal: spacing.md,
+  },
+  merchantExitError: {
+    color: palette.danger,
+    lineHeight: 20,
+    fontWeight: "700",
+  },
+  merchantExitButton: {
+    minHeight: 50,
+    borderRadius: radii.md,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.danger,
+  },
+  merchantExitButtonText: {
+    color: palette.white,
+    fontWeight: "900",
+  },
+  buttonDisabled: {
+    opacity: 0.55,
   },
   walletChooserHeader: {
     flexDirection: "row",

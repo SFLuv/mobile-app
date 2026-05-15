@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { ethers } from "ethers";
 import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
-import { AppImprover, AppUser, AppWallet } from "../types/app";
+import { AppImprover, AppMerchantModeStatus, AppOwnedLocation, AppUser, AppWallet } from "../types/app";
 import { AppPreferences, SendFlowEntryMode, ThemePreference } from "../types/preferences";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 
@@ -10,6 +10,7 @@ type Props = {
   user: AppUser | null;
   improver?: AppImprover | null;
   wallets: AppWallet[];
+  ownedLocations?: AppOwnedLocation[];
   primaryWalletAddress?: string;
   syncNotice?: string | null;
   preferences: AppPreferences;
@@ -44,11 +45,16 @@ type Props = {
   onDisconnectApple?: () => void;
   onUpdateImproverRewardsWallet?: (address: string) => Promise<void>;
   onOpenImprover?: () => void;
+  merchantModeStatus?: AppMerchantModeStatus | null;
+  merchantModeBusy?: boolean;
+  merchantModeMessage?: string | null;
+  onSetMerchantModePin?: (pin: string, currentPin?: string) => Promise<void>;
+  onEnableMerchantMode?: (locationID: number, walletAddress: string) => Promise<void>;
   onDeleteAccount?: () => void;
   onLogout?: () => void;
 };
 
-type SettingsSection = "general" | "wallets" | "account" | "improver";
+type SettingsSection = "general" | "wallets" | "account" | "merchant" | "improver";
 
 function shortAddress(address: string): string {
   if (address.length <= 16) return address;
@@ -402,10 +408,265 @@ function WalletSettingsRow({
   );
 }
 
+function MerchantModeSettingsCard({
+  locations,
+  wallets,
+  status,
+  busy,
+  message,
+  onSetPin,
+  onEnable,
+}: {
+  locations: AppOwnedLocation[];
+  wallets: AppWallet[];
+  status?: AppMerchantModeStatus | null;
+  busy?: boolean;
+  message?: string | null;
+  onSetPin?: (pin: string, currentPin?: string) => Promise<void>;
+  onEnable?: (locationID: number, walletAddress: string) => Promise<void>;
+}) {
+  const { palette } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
+  const approvedLocations = useMemo(
+    () => locations.filter((location) => location.approval !== false),
+    [locations],
+  );
+  const walletOptions = useMemo(
+    () =>
+      wallets
+        .map((wallet) => ({
+          wallet,
+          address: walletAddress(wallet),
+          label: walletDisplayName(wallet),
+        }))
+        .filter((option) => ethers.utils.isAddress(option.address)),
+    [wallets],
+  );
+  const [selectedLocationID, setSelectedLocationID] = useState<number | null>(approvedLocations[0]?.id ?? null);
+  const [selectedWalletAddress, setSelectedWalletAddress] = useState(walletOptions[0]?.address ?? "");
+  const [currentPin, setCurrentPin] = useState("");
+  const [pin, setPin] = useState("");
+  const [pinConfirm, setPinConfirm] = useState("");
+  const [localMessage, setLocalMessage] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (selectedLocationID === null && approvedLocations[0]) {
+      setSelectedLocationID(approvedLocations[0].id);
+    }
+  }, [approvedLocations, selectedLocationID]);
+
+  useEffect(() => {
+    if (!selectedWalletAddress && walletOptions[0]) {
+      setSelectedWalletAddress(walletOptions[0].address);
+    }
+  }, [selectedWalletAddress, walletOptions]);
+
+  const passcodeSet = status?.passcodeSet === true;
+  const activeDevice = status?.device?.merchantModeEnabled ? status.device : null;
+  const currentPinValid = !passcodeSet || /^\d{6}$/.test(currentPin);
+  const pinValid = /^\d{6}$/.test(pin);
+  const pinConfirmValid = pin === pinConfirm;
+  const canSetPin = Boolean(onSetPin) && currentPinValid && pinValid && pinConfirmValid && !busy;
+  const canEnable = Boolean(onEnable) && passcodeSet && selectedLocationID !== null && Boolean(selectedWalletAddress) && !busy;
+
+  const submitPIN = async () => {
+    if (!onSetPin) {
+      return;
+    }
+    if (!pinValid) {
+      setLocalError("Enter a 6 digit PIN.");
+      setLocalMessage(null);
+      return;
+    }
+    if (!pinConfirmValid) {
+      setLocalError("PINs do not match.");
+      setLocalMessage(null);
+      return;
+    }
+    if (!currentPinValid) {
+      setLocalError("Enter the current 6 digit PIN before resetting it.");
+      setLocalMessage(null);
+      return;
+    }
+    setLocalError(null);
+    setLocalMessage(null);
+    try {
+      await onSetPin(pin, passcodeSet ? currentPin : undefined);
+      setCurrentPin("");
+      setPin("");
+      setPinConfirm("");
+      setLocalMessage(passcodeSet ? "Merchant mode PIN reset." : "Merchant mode PIN saved.");
+    } catch (error) {
+      setLocalError((error as Error)?.message || "Unable to save merchant mode PIN.");
+    }
+  };
+
+  const enableMerchantMode = async () => {
+    if (!onEnable || selectedLocationID === null) {
+      return;
+    }
+    setLocalError(null);
+    setLocalMessage(null);
+    try {
+      await onEnable(selectedLocationID, selectedWalletAddress);
+    } catch (error) {
+      setLocalError((error as Error)?.message || "Unable to enable merchant mode.");
+    }
+  };
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.sectionTitle}>Merchant Mode</Text>
+      <Text style={styles.body}>
+        Lock this device into a payment-only view for staff. It shows balances, incoming transaction history, and receive links, but hides sending and the rest of the app.
+      </Text>
+
+      {activeDevice ? (
+        <View style={styles.merchantModeActiveCard}>
+          <Ionicons name="lock-closed" size={18} color={palette.primaryStrong} />
+          <View style={styles.preferenceCopy}>
+            <Text style={styles.preferenceTitle}>Merchant mode is active</Text>
+            <Text style={styles.preferenceBody}>
+              {activeDevice.locationName} uses {shortAddress(activeDevice.walletAddress)} on this device.
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
+      <View style={styles.preferenceStack}>
+        <Text style={styles.preferenceTitle}>{passcodeSet ? "Reset 6 digit exit PIN" : "Create 6 digit exit PIN"}</Text>
+        <Text style={styles.preferenceBody}>
+          {passcodeSet
+            ? "Enter the current PIN before choosing a new exit PIN."
+            : "This PIN is required to exit Merchant Mode on the device."}
+        </Text>
+        {passcodeSet ? (
+          <TextInput
+            style={[styles.walletNameInput, styles.pinInputWide]}
+            value={currentPin}
+            onChangeText={(value) => {
+              setCurrentPin(value.replace(/\D/g, "").slice(0, 6));
+              setLocalError(null);
+              setLocalMessage(null);
+            }}
+            keyboardType="number-pad"
+            secureTextEntry
+            placeholder="Current PIN"
+            placeholderTextColor={palette.textMuted}
+          />
+        ) : null}
+        <View style={styles.pinRow}>
+          <TextInput
+            style={[styles.walletNameInput, styles.pinInput]}
+            value={pin}
+            onChangeText={(value) => {
+              setPin(value.replace(/\D/g, "").slice(0, 6));
+              setLocalError(null);
+              setLocalMessage(null);
+            }}
+            keyboardType="number-pad"
+            secureTextEntry
+            placeholder={passcodeSet ? "New PIN" : "6 digit PIN"}
+            placeholderTextColor={palette.textMuted}
+          />
+          <TextInput
+            style={[styles.walletNameInput, styles.pinInput]}
+            value={pinConfirm}
+            onChangeText={(value) => {
+              setPinConfirm(value.replace(/\D/g, "").slice(0, 6));
+              setLocalError(null);
+              setLocalMessage(null);
+            }}
+            keyboardType="number-pad"
+            secureTextEntry
+            placeholder="Confirm"
+            placeholderTextColor={palette.textMuted}
+          />
+        </View>
+        <Pressable
+          style={[styles.primaryActionButton, styles.settingsWideButton, !canSetPin ? styles.buttonDisabled : undefined]}
+          disabled={!canSetPin}
+          onPress={() => {
+            void submitPIN();
+          }}
+        >
+          <Text style={styles.primaryActionButtonText}>{busy ? "Saving..." : passcodeSet ? "Reset PIN" : "Save PIN"}</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.preferenceStack}>
+        <Text style={styles.preferenceTitle}>Location</Text>
+        {approvedLocations.length === 0 ? (
+          <Text style={styles.meta}>No approved merchant locations are available yet.</Text>
+        ) : (
+          <View style={styles.optionList}>
+            {approvedLocations.map((location) => {
+              const selected = selectedLocationID === location.id;
+              return (
+                <Pressable
+                  key={location.id}
+                  style={[styles.selectOption, selected ? styles.selectOptionActive : undefined]}
+                  onPress={() => setSelectedLocationID(location.id)}
+                >
+                  <Text style={[styles.selectOptionTitle, selected ? styles.selectOptionTitleActive : undefined]}>
+                    {location.name || "Merchant location"}
+                  </Text>
+                  <Text style={styles.selectOptionMeta}>{location.street || "Approved SFLuv location"}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+      </View>
+
+      <View style={styles.preferenceStack}>
+        <Text style={styles.preferenceTitle}>Default wallet</Text>
+        {walletOptions.length === 0 ? (
+          <Text style={styles.meta}>No merchant wallets are loaded yet.</Text>
+        ) : (
+          <View style={styles.optionList}>
+            {walletOptions.map((option) => {
+              const selected = option.address.toLowerCase() === selectedWalletAddress.toLowerCase();
+              return (
+                <Pressable
+                  key={option.address}
+                  style={[styles.selectOption, selected ? styles.selectOptionActive : undefined]}
+                  onPress={() => setSelectedWalletAddress(option.address)}
+                >
+                  <Text style={[styles.selectOptionTitle, selected ? styles.selectOptionTitleActive : undefined]}>
+                    {option.label}
+                  </Text>
+                  <Text style={styles.selectOptionMeta}>{shortAddress(option.address)}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+      </View>
+
+      <Pressable
+        style={[styles.primaryActionButton, styles.settingsWideButton, !canEnable ? styles.buttonDisabled : undefined]}
+        disabled={!canEnable}
+        onPress={() => {
+          void enableMerchantMode();
+        }}
+      >
+        <Text style={styles.primaryActionButtonText}>{busy ? "Enabling..." : "Enable Merchant Mode on this device"}</Text>
+      </Pressable>
+      {!passcodeSet ? <Text style={styles.meta}>Save a 6 digit exit PIN before enabling Merchant Mode.</Text> : null}
+      {message ? <Text style={styles.inlineSuccess}>{message}</Text> : null}
+      {localMessage ? <Text style={styles.inlineSuccess}>{localMessage}</Text> : null}
+      {localError ? <Text style={styles.inlineError}>{localError}</Text> : null}
+    </View>
+  );
+}
+
 export function SettingsScreen({
   user,
   improver,
   wallets,
+  ownedLocations = [],
   primaryWalletAddress,
   syncNotice,
   preferences,
@@ -440,6 +701,11 @@ export function SettingsScreen({
   onDisconnectApple,
   onUpdateImproverRewardsWallet,
   onOpenImprover,
+  merchantModeStatus,
+  merchantModeBusy,
+  merchantModeMessage,
+  onSetMerchantModePin,
+  onEnableMerchantMode,
   onDeleteAccount,
   onLogout,
 }: Props) {
@@ -455,6 +721,7 @@ export function SettingsScreen({
   const [socialHelpVisible, setSocialHelpVisible] = useState(false);
 
   const hasImproverSection = Boolean(onOpenImprover || improver || user?.isImprover);
+  const hasMerchantSection = Boolean(user?.isMerchant);
   const isApprovedImprover = Boolean(user?.isImprover || improver?.status === "approved");
 
   const applyThemePreference = (themePreference: ThemePreference) => {
@@ -469,7 +736,10 @@ export function SettingsScreen({
     if (!hasImproverSection && section === "improver") {
       setSection("account");
     }
-  }, [hasImproverSection, section]);
+    if (!hasMerchantSection && section === "merchant") {
+      setSection("general");
+    }
+  }, [hasImproverSection, hasMerchantSection, section]);
 
   useEffect(() => {
     setRewardsWalletDraft(improver?.primaryRewardsAccount?.trim() || primaryWalletAddress || "");
@@ -540,6 +810,14 @@ export function SettingsScreen({
         >
           <Text style={[styles.segmentText, section === "account" ? styles.segmentTextActive : undefined]}>Account</Text>
         </Pressable>
+        {hasMerchantSection ? (
+          <Pressable
+            style={[styles.segmentButton, section === "merchant" ? styles.segmentButtonActive : undefined]}
+            onPress={() => setSection("merchant")}
+          >
+            <Text style={[styles.segmentText, section === "merchant" ? styles.segmentTextActive : undefined]}>Merchant</Text>
+          </Pressable>
+        ) : null}
         {hasImproverSection ? (
           <Pressable
             style={[styles.segmentButton, section === "improver" ? styles.segmentButtonActive : undefined]}
@@ -726,6 +1004,18 @@ export function SettingsScreen({
             </View>
           ) : null}
         </>
+      ) : null}
+
+      {section === "merchant" ? (
+        <MerchantModeSettingsCard
+          locations={ownedLocations}
+          wallets={wallets}
+          status={merchantModeStatus}
+          busy={merchantModeBusy}
+          message={merchantModeMessage}
+          onSetPin={onSetMerchantModePin}
+          onEnable={onEnableMerchantMode}
+        />
       ) : null}
 
       {section === "improver" ? (
@@ -1048,20 +1338,67 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       color: palette.textMuted,
       lineHeight: 20,
     },
+    merchantModeActiveCard: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: spacing.md,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: palette.primary,
+      backgroundColor: palette.primarySoft,
+      padding: spacing.md,
+    },
+    pinRow: {
+      flexDirection: "row",
+      gap: spacing.sm,
+    },
+    pinInput: {
+      flex: 1,
+      textAlign: "center",
+      letterSpacing: 3,
+    },
+    pinInputWide: {
+      textAlign: "center",
+      letterSpacing: 3,
+    },
+    optionList: {
+      gap: spacing.sm,
+    },
+    selectOption: {
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surfaceStrong,
+      padding: spacing.md,
+      gap: 4,
+    },
+    selectOptionActive: {
+      borderColor: palette.primary,
+      backgroundColor: palette.primarySoft,
+    },
+    selectOptionTitle: {
+      color: palette.text,
+      fontSize: 15,
+      fontWeight: "900",
+    },
+    selectOptionTitleActive: {
+      color: palette.primaryStrong,
+    },
+    selectOptionMeta: {
+      color: palette.textMuted,
+      lineHeight: 19,
+    },
     socialRow: {
       gap: spacing.sm,
     },
     socialRowHeader: {
-      flexDirection: "row",
-      alignItems: "flex-start",
-      justifyContent: "space-between",
       gap: spacing.md,
     },
     socialIdentityWrap: {
-      flex: 1,
       flexDirection: "row",
-      alignItems: "flex-start",
+      alignItems: "center",
       gap: spacing.md,
+      width: "100%",
     },
     socialIconBadge: {
       width: 56,
@@ -1075,6 +1412,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     socialCopy: {
       flex: 1,
+      minWidth: 0,
       gap: 4,
     },
     socialProviderTitle: {
@@ -1093,15 +1431,15 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       lineHeight: 20,
     },
     socialActionButton: {
-      minHeight: 48,
-      borderRadius: radii.md,
+      minHeight: 52,
+      borderRadius: radii.lg,
       borderWidth: 1,
       borderColor: palette.border,
       backgroundColor: palette.surfaceStrong,
       alignItems: "center",
       justifyContent: "center",
       paddingHorizontal: spacing.md,
-      alignSelf: "flex-start",
+      alignSelf: "stretch",
     },
     socialActionButtonPrimary: {
       backgroundColor: palette.primary,
@@ -1110,11 +1448,15 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     socialActionContent: {
       flexDirection: "row",
       alignItems: "center",
+      justifyContent: "center",
       gap: spacing.xs,
+      width: "100%",
     },
     socialActionButtonText: {
       color: palette.text,
       fontWeight: "800",
+      flexShrink: 1,
+      textAlign: "center",
     },
     socialActionButtonTextPrimary: {
       color: palette.white,

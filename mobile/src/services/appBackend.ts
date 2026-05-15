@@ -15,6 +15,7 @@ import {
   AppImproverWorkflowListItem,
   AppImproverWorkflowSeriesUnclaimResult,
   AppLocation,
+  AppMerchantModeStatus,
   AppOwnedLocation,
   AppTransaction,
   AppUser,
@@ -409,6 +410,28 @@ type PonderResponse = PonderEntryResponse[] | null;
 type PushNotificationSyncOptions = {
   preferenceEnabled?: boolean;
   deviceRegistered?: boolean;
+};
+
+type MerchantModeStatusResponse = {
+  user_id: string;
+  is_merchant: boolean;
+  passcode_set: boolean;
+  device?: {
+    id: string;
+    user_id: string;
+    location_id: number;
+    location_name: string;
+    wallet_address: string;
+    display_name: string;
+    platform: string;
+    app_version: string;
+    merchant_mode_enabled: boolean;
+    enabled_at?: string | null;
+    disabled_at?: string | null;
+    last_seen_at: string;
+    created_at: string;
+    updated_at: string;
+  } | null;
 };
 
 type WalletsResponse = Array<{
@@ -1120,6 +1143,35 @@ function mapAccountDeletionStatus(input: AccountDeletionStatusResponse): AppAcco
   };
 }
 
+function mapMerchantModeStatus(input: MerchantModeStatusResponse): AppMerchantModeStatus {
+  const rawWalletAddress = asString(input.device?.wallet_address).trim();
+  return {
+    userId: asString(input.user_id),
+    isMerchant: input.is_merchant === true,
+    passcodeSet: input.passcode_set === true,
+    device: input.device
+      ? {
+          id: asString(input.device.id),
+          userId: asString(input.device.user_id),
+          locationId: asNumber(input.device.location_id),
+          locationName: asString(input.device.location_name),
+          walletAddress: ethers.utils.isAddress(rawWalletAddress)
+            ? ethers.utils.getAddress(rawWalletAddress)
+            : rawWalletAddress,
+          displayName: asString(input.device.display_name),
+          platform: asString(input.device.platform),
+          appVersion: asString(input.device.app_version),
+          merchantModeEnabled: input.device.merchant_mode_enabled === true,
+          enabledAt: input.device.enabled_at,
+          disabledAt: input.device.disabled_at,
+          lastSeenAt: asString(input.device.last_seen_at),
+          createdAt: asString(input.device.created_at),
+          updatedAt: asString(input.device.updated_at),
+        }
+      : null,
+  };
+}
+
 function formatTokenAmount(raw: string): string {
   try {
     const formatted = ethers.utils.formatUnits(raw, mobileConfig.tokenDecimals);
@@ -1300,6 +1352,72 @@ export class AppBackendClient {
     }
     const body = (await response.json()) as AccountDeletionStatusResponse;
     return mapAccountDeletionStatus(body);
+  }
+
+  async getMerchantModeStatus(installationID?: string): Promise<AppMerchantModeStatus> {
+    const query = installationID ? `?installation_id=${encodeURIComponent(installationID)}` : "";
+    const response = await this.authFetch(`/merchant-mode/status${query}`);
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load merchant mode status");
+    }
+    const body = (await response.json()) as MerchantModeStatusResponse;
+    return mapMerchantModeStatus(body);
+  }
+
+  async setMerchantModePin(pin: string, currentPin?: string): Promise<AppMerchantModeStatus> {
+    const response = await this.authFetch("/merchant-mode/pin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin, current_pin: currentPin || "" }),
+    });
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to set merchant mode PIN");
+    }
+    const body = (await response.json()) as MerchantModeStatusResponse;
+    return mapMerchantModeStatus(body);
+  }
+
+  async enableMerchantMode(input: {
+    installationID: string;
+    locationID: number;
+    walletAddress?: string;
+    displayName?: string;
+    platform?: string;
+    appVersion?: string;
+  }): Promise<AppMerchantModeStatus> {
+    const response = await this.authFetch("/merchant-mode/enable", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        installation_id: input.installationID,
+        location_id: input.locationID,
+        wallet_address: input.walletAddress || "",
+        display_name: input.displayName || "",
+        platform: input.platform || "",
+        app_version: input.appVersion || "",
+      }),
+    });
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to enable merchant mode");
+    }
+    const body = (await response.json()) as MerchantModeStatusResponse;
+    return mapMerchantModeStatus(body);
+  }
+
+  async disableMerchantMode(input: { installationID: string; pin: string }): Promise<AppMerchantModeStatus> {
+    const response = await this.authFetch("/merchant-mode/disable", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        installation_id: input.installationID,
+        pin: input.pin,
+      }),
+    });
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to exit merchant mode");
+    }
+    const body = (await response.json()) as MerchantModeStatusResponse;
+    return mapMerchantModeStatus(body);
   }
 
   async storeAppleOAuthCredential(input: {
