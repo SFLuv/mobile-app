@@ -1,9 +1,12 @@
 import { Buffer } from "buffer";
 import { ethers } from "ethers";
 import { mobileConfig } from "../config";
+import { clientMetadataHeaders, getClientMetadata } from "./clientMetadata";
 import {
   AppAccountDeletionPreview,
   AppAccountDeletionStatusResponse,
+  AppClientConfig,
+  AppClientVersionPolicy,
   AppContact,
   AppCredentialRequest,
   AppGlobalCredentialType,
@@ -135,6 +138,44 @@ type TransactionsResponse = {
     memo?: string;
   }>;
   total: number;
+};
+
+type ClientConfigResponse = {
+  schema_version: number;
+  config_version: string;
+  environment: string;
+  active_chain_id: number;
+  features?: {
+    migration_banner?: boolean;
+    sends_enabled?: boolean;
+    redemptions_enabled?: boolean;
+    workflow_payouts_enabled?: boolean;
+    merchant_payments_enabled?: boolean;
+  };
+  migration?: {
+    state?: string;
+    message?: string;
+    cutover_started_at?: string | null;
+  };
+};
+
+type ClientVersionResponse = {
+  schema_version: number;
+  server_time: string;
+  config_version: string;
+  platform: string;
+  status: AppClientVersionPolicy["status"];
+  minimum?: { version?: string; build?: number };
+  recommended?: { version?: string; build?: number };
+  current?: { version?: string; build?: number };
+  force_update?: boolean;
+  maintenance?: boolean;
+  update_url?: string;
+  message?: string;
+  features?: {
+    dynamic_config_required?: boolean;
+    celo_required?: boolean;
+  };
 };
 
 type VerifiedEmailResponse = Array<{
@@ -626,6 +667,58 @@ function mapUserPolicyStatus(input: UserPolicyStatusResponse): AppUserPolicyStat
         ? input.mailing_list_opt_in_at
         : undefined,
     mailingListPolicyVersion: asString(input.mailing_list_policy_version),
+  };
+}
+
+function mapClientConfig(input: ClientConfigResponse): AppClientConfig {
+  return {
+    schemaVersion: input.schema_version,
+    configVersion: asString(input.config_version),
+    environment: asString(input.environment),
+    activeChainId: asNumber(input.active_chain_id, mobileConfig.chainId),
+    features: {
+      migrationBanner: input.features?.migration_banner === true,
+      sendsEnabled: input.features?.sends_enabled !== false,
+      redemptionsEnabled: input.features?.redemptions_enabled !== false,
+      workflowPayoutsEnabled: input.features?.workflow_payouts_enabled !== false,
+      merchantPaymentsEnabled: input.features?.merchant_payments_enabled !== false,
+    },
+    migration: {
+      state: asString(input.migration?.state, "pre_cutover"),
+      message: asString(input.migration?.message),
+      cutoverStartedAt:
+        typeof input.migration?.cutover_started_at === "string" ? input.migration.cutover_started_at : null,
+    },
+  };
+}
+
+function mapClientVersion(input: ClientVersionResponse): AppClientVersionPolicy {
+  return {
+    schemaVersion: input.schema_version,
+    serverTime: asString(input.server_time),
+    configVersion: asString(input.config_version),
+    platform: asString(input.platform),
+    status: input.status || "ok",
+    minimum: {
+      version: asString(input.minimum?.version),
+      build: asNumber(input.minimum?.build),
+    },
+    recommended: {
+      version: asString(input.recommended?.version),
+      build: asNumber(input.recommended?.build),
+    },
+    current: {
+      version: asString(input.current?.version),
+      build: asNumber(input.current?.build),
+    },
+    forceUpdate: input.force_update === true,
+    maintenance: input.maintenance === true,
+    updateUrl: asString(input.update_url),
+    message: asString(input.message),
+    features: {
+      dynamicConfigRequired: input.features?.dynamic_config_required === true,
+      celoRequired: input.features?.celo_required === true,
+    },
   };
 }
 
@@ -1196,6 +1289,7 @@ export class AppBackendClient {
     }
     const extraHeaders = (options.headers || {}) as Record<string, string>;
     const headers: Record<string, string> = {
+      ...clientMetadataHeaders(),
       ...extraHeaders,
       "Access-Token": accessToken,
     };
@@ -1213,6 +1307,36 @@ export class AppBackendClient {
     }
 
     return response;
+  }
+
+  async getClientConfig(): Promise<AppClientConfig> {
+    const response = await fetchWithTimeout(
+      endpoint("/config"),
+      { headers: clientMetadataHeaders() },
+      APP_BACKEND_REQUEST_TIMEOUT_MS,
+    );
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load app configuration");
+    }
+    return mapClientConfig((await response.json()) as ClientConfigResponse);
+  }
+
+  async getClientVersion(): Promise<AppClientVersionPolicy> {
+    const metadata = getClientMetadata();
+    const query = new URLSearchParams({
+      platform: metadata.platform,
+      version: metadata.version,
+      build: metadata.buildLabel,
+    });
+    const response = await fetchWithTimeout(
+      endpoint(`/client-version?${query.toString()}`),
+      { headers: clientMetadataHeaders() },
+      APP_BACKEND_REQUEST_TIMEOUT_MS,
+    );
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to check app compatibility");
+    }
+    return mapClientVersion((await response.json()) as ClientVersionResponse);
   }
 
   private async authFetch(path: string, options: RequestInit = {}): Promise<Response> {
@@ -1962,7 +2086,11 @@ export class AppBackendClient {
   }
 
   async getPublicLocations(): Promise<AppLocation[]> {
-    const response = await fetch(endpoint("/locations"));
+    const response = await fetchWithTimeout(
+      endpoint("/locations"),
+      { headers: clientMetadataHeaders() },
+      APP_BACKEND_REQUEST_TIMEOUT_MS,
+    );
     if (!response.ok) {
       throw new Error("Unable to load merchant map.");
     }
@@ -1981,14 +2109,14 @@ export class AppBackendClient {
   }
 
   async redeemCode(code: string, address: string): Promise<void> {
-    const response = await fetch(endpoint("/redeem"), {
+    const response = await fetchWithTimeout(endpoint("/redeem"), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...clientMetadataHeaders(), "Content-Type": "application/json" },
       body: JSON.stringify({
         code,
         address,
       }),
-    });
+    }, APP_BACKEND_REQUEST_TIMEOUT_MS);
 
     if (response.ok) {
       return;

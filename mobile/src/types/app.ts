@@ -160,6 +160,44 @@ export interface AppTransaction {
   direction: "send" | "receive";
 }
 
+export interface AppClientConfig {
+  schemaVersion: number;
+  configVersion: string;
+  environment: string;
+  activeChainId: number;
+  features: {
+    migrationBanner: boolean;
+    sendsEnabled: boolean;
+    redemptionsEnabled: boolean;
+    workflowPayoutsEnabled: boolean;
+    merchantPaymentsEnabled: boolean;
+  };
+  migration: {
+    state: string;
+    message: string;
+    cutoverStartedAt?: string | null;
+  };
+}
+
+export interface AppClientVersionPolicy {
+  schemaVersion: number;
+  serverTime: string;
+  configVersion: string;
+  platform: string;
+  status: "ok" | "update_recommended" | "update_required" | "maintenance" | "unsupported_platform";
+  minimum: { version: string; build: number };
+  recommended: { version: string; build: number };
+  current: { version: string; build: number };
+  forceUpdate: boolean;
+  maintenance: boolean;
+  updateUrl: string;
+  message: string;
+  features: {
+    dynamicConfigRequired: boolean;
+    celoRequired: boolean;
+  };
+}
+
 export interface VerifiedEmail {
   id: string;
   userId: string;

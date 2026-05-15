@@ -63,6 +63,8 @@ import {
 import {
   AppAccountDeletionPreview,
   AppAccountDeletionStatusResponse,
+  AppClientConfig,
+  AppClientVersionPolicy,
   AppContact,
   AppImprover,
   AppLocation,
@@ -147,6 +149,11 @@ type PushSyncState = {
   message: string | null;
   lastSyncedAt?: number;
 };
+
+type CompatibilityState =
+  | { status: "loading" }
+  | { status: "ready"; config: AppClientConfig; version: AppClientVersionPolicy }
+  | { status: "blocked"; title: string; message: string; updateUrl?: string };
 
 type Tab = "wallet" | "activity" | "improver" | "map" | "contacts" | "settings";
 type WalletPane = "home" | "send" | "receive";
@@ -5145,8 +5152,108 @@ function MissingPrivyConfigScreen() {
   );
 }
 
+function CompatibilityGateScreen({
+  title,
+  message,
+  updateUrl,
+  loading = false,
+}: {
+  title: string;
+  message: string;
+  updateUrl?: string;
+  loading?: boolean;
+}) {
+  const { palette, shadows, isDark } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
+  return (
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.centerState}>
+        {loading ? <ThemedActivityIndicator /> : null}
+        <Text style={styles.stateTitle}>{title}</Text>
+        <Text style={styles.stateText}>{message}</Text>
+        {updateUrl ? (
+          <Pressable
+            style={styles.loginButton}
+            onPress={() => {
+              void Linking.openURL(updateUrl);
+            }}
+          >
+            <Text style={styles.loginButtonText}>Update App</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    </SafeAreaView>
+  );
+}
+
+function blockedCompatibilityState(
+  version: AppClientVersionPolicy,
+  config: AppClientConfig,
+): CompatibilityState | null {
+  if (version.status === "maintenance" || version.maintenance) {
+    return {
+      status: "blocked",
+      title: "SFLUV is temporarily unavailable",
+      message: version.message || "SFLUV is temporarily unavailable while maintenance is in progress.",
+    };
+  }
+
+  if (version.forceUpdate || version.status === "update_required" || version.status === "unsupported_platform") {
+    return {
+      status: "blocked",
+      title: version.status === "unsupported_platform" ? "Unsupported App" : "Update Required",
+      message: version.message || "An SFLUV Wallet update is required.",
+      updateUrl: version.updateUrl || undefined,
+    };
+  }
+
+  if (version.features.dynamicConfigRequired && config.activeChainId !== mobileConfig.chainId) {
+    return {
+      status: "blocked",
+      title: "Update Required",
+      message: "An SFLUV Wallet update is required to use the current network configuration.",
+      updateUrl: version.updateUrl || undefined,
+    };
+  }
+
+  return null;
+}
+
 export default function App() {
   const [preferences, setPreferences, preferencesLoaded] = useStoredPreferences();
+  const [compatibility, setCompatibility] = useState<CompatibilityState>({ status: "loading" });
+
+  useEffect(() => {
+    let cancelled = false;
+    const client = new AppBackendClient(async () => null);
+    const loadCompatibility = async () => {
+      try {
+        const [version, config] = await Promise.all([
+          client.getClientVersion(),
+          client.getClientConfig(),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        const blocked = blockedCompatibilityState(version, config);
+        setCompatibility(blocked ?? { status: "ready", version, config });
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setCompatibility({
+          status: "blocked",
+          title: "Unable to Start SFLUV",
+          message: (error as Error)?.message || "SFLUV could not load compatibility settings. Please try again.",
+        });
+      }
+    };
+
+    void loadCompatibility();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const supportedChain = {
     id: mobileConfig.chainId,
@@ -5162,6 +5269,18 @@ export default function App() {
     <AppThemeProvider preference={preferences.themePreference}>
       {!mobileConfig.privyAppId.trim().length ? (
         <MissingPrivyConfigScreen />
+      ) : compatibility.status === "loading" ? (
+        <CompatibilityGateScreen
+          loading
+          title="Starting SFLUV"
+          message="Checking app compatibility..."
+        />
+      ) : compatibility.status === "blocked" ? (
+        <CompatibilityGateScreen
+          title={compatibility.title}
+          message={compatibility.message}
+          updateUrl={compatibility.updateUrl}
+        />
       ) : (
         <PrivyProvider
           appId={mobileConfig.privyAppId}
@@ -5326,6 +5445,12 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   },
   stateText: {
     color: palette.textMuted,
+    textAlign: "center",
+  },
+  stateTitle: {
+    color: palette.primaryStrong,
+    fontSize: 22,
+    fontWeight: "900",
     textAlign: "center",
   },
   errorText: {
