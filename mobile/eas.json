@@ -1,6 +1,7 @@
 {
   "cli": {
-    "version": ">= 16.0.0"
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
@@ -40,6 +41,7 @@
       }
     },
     "production": {
+      "autoIncrement": true,
       "env": {
         "IOS_BUNDLE_IDENTIFIER": "org.sfluv.wallet",
         "EXPO_PUBLIC_CHAIN_ID": "80094",
