@@ -40,8 +40,6 @@ function resolveGoogleServicesFile(): string | undefined {
 const googleServicesFile = resolveGoogleServicesFile();
 const expoOwner = process.env.EXPO_OWNER?.trim() || DEFAULT_EXPO_OWNER;
 const expoSlug = process.env.EXPO_SLUG?.trim() || DEFAULT_EXPO_SLUG;
-const iosBuildNumber = process.env.IOS_BUILD_NUMBER?.trim() || "1";
-const androidVersionCode = Number.parseInt(process.env.ANDROID_VERSION_CODE?.trim() || "1", 10);
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
@@ -58,7 +56,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     supportsTablet: false,
     bundleIdentifier: process.env.IOS_BUNDLE_IDENTIFIER?.trim() || DEFAULT_IOS_BUNDLE_IDENTIFIER,
-    buildNumber: iosBuildNumber,
     usesAppleSignIn: true,
     config: {
       googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() || "",
@@ -71,7 +68,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   android: {
     package: process.env.ANDROID_PACKAGE?.trim() || DEFAULT_ANDROID_PACKAGE,
-    versionCode: Number.isFinite(androidVersionCode) && androidVersionCode > 0 ? androidVersionCode : 1,
     ...(googleServicesFile ? { googleServicesFile } : {}),
     config: {
       googleMaps: {
