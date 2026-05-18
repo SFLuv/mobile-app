@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { ethers } from "ethers";
-import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { Animated, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { AppImprover, AppMerchantModeStatus, AppOwnedLocation, AppUser, AppWallet } from "../types/app";
 import { AppPreferences, SendFlowEntryMode, ThemePreference } from "../types/preferences";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
@@ -49,7 +49,7 @@ type Props = {
   merchantModeBusy?: boolean;
   merchantModeMessage?: string | null;
   onSetMerchantModePin?: (pin: string, currentPin?: string) => Promise<void>;
-  onEnableMerchantMode?: (locationID: number, walletAddress: string) => Promise<void>;
+  onEnableMerchantMode?: (locationID: number) => Promise<void>;
   onDeleteAccount?: () => void;
   onLogout?: () => void;
 };
@@ -78,6 +78,168 @@ function walletDisplayName(wallet: AppWallet): string {
 
 function walletAddress(wallet: AppWallet): string {
   return wallet.smartAddress ?? wallet.eoaAddress;
+}
+
+function MerchantPinInput({
+  value,
+  placeholder,
+  visible,
+  onToggleVisible,
+}: {
+  value: string;
+  placeholder: string;
+  visible: boolean;
+  onToggleVisible: () => void;
+}) {
+  const { palette } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
+  const displayValue = value.length > 0 ? (visible ? value : "•".repeat(value.length)) : placeholder;
+  const empty = value.length === 0;
+
+  return (
+    <View style={styles.pinDisplayRow}>
+      <Text style={[styles.pinDisplayText, empty ? styles.pinDisplayPlaceholder : undefined]}>
+        {displayValue}
+      </Text>
+      <Pressable style={styles.pinVisibilityButton} onPress={onToggleVisible}>
+        <Ionicons name={visible ? "eye-off-outline" : "eye-outline"} size={20} color={palette.primaryStrong} />
+      </Pressable>
+    </View>
+  );
+}
+
+function MerchantPinPad({
+  onDigit,
+  onBackspace,
+}: {
+  onDigit: (digit: string) => void;
+  onBackspace: () => void;
+}) {
+  const { palette } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
+  const rows = [
+    ["1", "2", "3"],
+    ["4", "5", "6"],
+    ["7", "8", "9"],
+    ["blank", "0", "backspace"],
+  ];
+
+  return (
+    <View style={styles.pinKeypad}>
+      {rows.map((row, rowIndex) => (
+        <View key={`pin-row-${rowIndex}`} style={styles.pinKeypadRow}>
+          {row.map((key) =>
+            key === "blank" ? (
+              <View key={key} style={styles.pinKeypadKey} />
+            ) : (
+              <Pressable
+                key={key}
+                style={[styles.pinKeypadKey, key === "backspace" ? styles.pinKeypadAction : undefined]}
+                onPress={() => {
+                  if (key === "backspace") {
+                    onBackspace();
+                    return;
+                  }
+                  onDigit(key);
+                }}
+              >
+                {key === "backspace" ? (
+                  <Ionicons name="backspace-outline" size={22} color={palette.primaryStrong} />
+                ) : (
+                  <Text style={styles.pinKeypadText}>{key}</Text>
+                )}
+              </Pressable>
+            ),
+          )}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function MerchantPinSwipe({
+  disabled,
+  loading,
+  label,
+  loadingLabel,
+  onComplete,
+}: {
+  disabled: boolean;
+  loading?: boolean;
+  label: string;
+  loadingLabel: string;
+  onComplete: () => void;
+}) {
+  const { palette } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
+  const translateX = useRef(new Animated.Value(0)).current;
+  const [trackWidth, setTrackWidth] = useState(0);
+  const thumbWidth = 54;
+  const swipeDistance = Math.max(trackWidth - thumbWidth - 8, 0);
+
+  useEffect(() => {
+    if (!loading) {
+      Animated.spring(translateX, {
+        toValue: 0,
+        useNativeDriver: true,
+        speed: 18,
+        bounciness: 0,
+      }).start();
+    }
+  }, [loading, translateX]);
+
+  const resetSwipe = useCallback(() => {
+    Animated.spring(translateX, {
+      toValue: 0,
+      useNativeDriver: true,
+      speed: 18,
+      bounciness: 0,
+    }).start();
+  }, [translateX]);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => !disabled && !loading && swipeDistance > 0,
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          !disabled && !loading && swipeDistance > 0 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+        onPanResponderMove: (_, gesture) => {
+          translateX.setValue(Math.max(0, Math.min(gesture.dx, swipeDistance)));
+        },
+        onPanResponderRelease: (_, gesture) => {
+          if (gesture.dx >= swipeDistance * 0.72) {
+            Animated.timing(translateX, {
+              toValue: swipeDistance,
+              duration: 120,
+              useNativeDriver: true,
+            }).start(({ finished }) => {
+              if (finished) onComplete();
+            });
+            return;
+          }
+          resetSwipe();
+        },
+        onPanResponderTerminate: resetSwipe,
+      }),
+    [disabled, loading, onComplete, resetSwipe, swipeDistance, translateX],
+  );
+
+  return (
+    <View
+      style={[styles.pinSwipeTrack, disabled ? styles.pinSwipeTrackDisabled : undefined]}
+      onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
+    >
+      <Text style={[styles.pinSwipeText, disabled ? styles.pinSwipeTextDisabled : undefined]}>
+        {loading ? loadingLabel : label}
+      </Text>
+      <Animated.View
+        style={[styles.pinSwipeThumb, disabled ? styles.pinSwipeThumbDisabled : undefined, { transform: [{ translateX }] }]}
+        {...panResponder.panHandlers}
+      >
+        <Ionicons name={loading ? "hourglass-outline" : "arrow-forward"} size={18} color={palette.primaryStrong} />
+      </Animated.View>
+    </View>
+  );
 }
 
 function formatPermissionStatus(status: Props["notificationPermissionStatus"]): string {
@@ -410,7 +572,6 @@ function WalletSettingsRow({
 
 function MerchantModeSettingsCard({
   locations,
-  wallets,
   status,
   busy,
   message,
@@ -418,12 +579,11 @@ function MerchantModeSettingsCard({
   onEnable,
 }: {
   locations: AppOwnedLocation[];
-  wallets: AppWallet[];
   status?: AppMerchantModeStatus | null;
   busy?: boolean;
   message?: string | null;
   onSetPin?: (pin: string, currentPin?: string) => Promise<void>;
-  onEnable?: (locationID: number, walletAddress: string) => Promise<void>;
+  onEnable?: (locationID: number) => Promise<void>;
 }) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
@@ -431,22 +591,12 @@ function MerchantModeSettingsCard({
     () => locations.filter((location) => location.approval !== false),
     [locations],
   );
-  const walletOptions = useMemo(
-    () =>
-      wallets
-        .map((wallet) => ({
-          wallet,
-          address: walletAddress(wallet),
-          label: walletDisplayName(wallet),
-        }))
-        .filter((option) => ethers.utils.isAddress(option.address)),
-    [wallets],
-  );
   const [selectedLocationID, setSelectedLocationID] = useState<number | null>(approvedLocations[0]?.id ?? null);
-  const [selectedWalletAddress, setSelectedWalletAddress] = useState(walletOptions[0]?.address ?? "");
   const [currentPin, setCurrentPin] = useState("");
   const [pin, setPin] = useState("");
-  const [pinConfirm, setPinConfirm] = useState("");
+  const [currentPinVisible, setCurrentPinVisible] = useState(false);
+  const [newPinVisible, setNewPinVisible] = useState(false);
+  const [editingPinField, setEditingPinField] = useState<"current" | "new">(status?.passcodeSet ? "current" : "new");
   const [localMessage, setLocalMessage] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -456,19 +606,30 @@ function MerchantModeSettingsCard({
     }
   }, [approvedLocations, selectedLocationID]);
 
-  useEffect(() => {
-    if (!selectedWalletAddress && walletOptions[0]) {
-      setSelectedWalletAddress(walletOptions[0].address);
-    }
-  }, [selectedWalletAddress, walletOptions]);
-
   const passcodeSet = status?.passcodeSet === true;
   const activeDevice = status?.device?.merchantModeEnabled ? status.device : null;
   const currentPinValid = !passcodeSet || /^\d{6}$/.test(currentPin);
   const pinValid = /^\d{6}$/.test(pin);
-  const pinConfirmValid = pin === pinConfirm;
-  const canSetPin = Boolean(onSetPin) && currentPinValid && pinValid && pinConfirmValid && !busy;
-  const canEnable = Boolean(onEnable) && passcodeSet && selectedLocationID !== null && Boolean(selectedWalletAddress) && !busy;
+  const canSetPin = Boolean(onSetPin) && currentPinValid && pinValid && !busy;
+  const canEnable = Boolean(onEnable) && passcodeSet && selectedLocationID !== null && !busy;
+
+  useEffect(() => {
+    setEditingPinField(passcodeSet ? "current" : "new");
+  }, [passcodeSet]);
+
+  const appendMerchantPinDigit = (digit: string) => {
+    const update = editingPinField === "current" ? setCurrentPin : setPin;
+    update((current) => `${current}${digit}`.replace(/\D/g, "").slice(0, 6));
+    setLocalError(null);
+    setLocalMessage(null);
+  };
+
+  const removeMerchantPinDigit = () => {
+    const update = editingPinField === "current" ? setCurrentPin : setPin;
+    update((current) => current.slice(0, -1));
+    setLocalError(null);
+    setLocalMessage(null);
+  };
 
   const submitPIN = async () => {
     if (!onSetPin) {
@@ -476,11 +637,6 @@ function MerchantModeSettingsCard({
     }
     if (!pinValid) {
       setLocalError("Enter a 6 digit PIN.");
-      setLocalMessage(null);
-      return;
-    }
-    if (!pinConfirmValid) {
-      setLocalError("PINs do not match.");
       setLocalMessage(null);
       return;
     }
@@ -495,7 +651,7 @@ function MerchantModeSettingsCard({
       await onSetPin(pin, passcodeSet ? currentPin : undefined);
       setCurrentPin("");
       setPin("");
-      setPinConfirm("");
+      setEditingPinField(passcodeSet ? "current" : "new");
       setLocalMessage(passcodeSet ? "Merchant mode PIN reset." : "Merchant mode PIN saved.");
     } catch (error) {
       setLocalError((error as Error)?.message || "Unable to save merchant mode PIN.");
@@ -509,7 +665,7 @@ function MerchantModeSettingsCard({
     setLocalError(null);
     setLocalMessage(null);
     try {
-      await onEnable(selectedLocationID, selectedWalletAddress);
+      await onEnable(selectedLocationID);
     } catch (error) {
       setLocalError((error as Error)?.message || "Unable to enable merchant mode.");
     }
@@ -518,9 +674,6 @@ function MerchantModeSettingsCard({
   return (
     <View style={styles.card}>
       <Text style={styles.sectionTitle}>Merchant Mode</Text>
-      <Text style={styles.body}>
-        Lock this device into a payment-only view for staff. It shows balances, incoming transaction history, and receive links, but hides sending and the rest of the app.
-      </Text>
 
       {activeDevice ? (
         <View style={styles.merchantModeActiveCard}>
@@ -534,66 +687,16 @@ function MerchantModeSettingsCard({
         </View>
       ) : null}
 
-      <View style={styles.preferenceStack}>
-        <Text style={styles.preferenceTitle}>{passcodeSet ? "Reset 6 digit exit PIN" : "Create 6 digit exit PIN"}</Text>
-        <Text style={styles.preferenceBody}>
-          {passcodeSet
-            ? "Enter the current PIN before choosing a new exit PIN."
-            : "This PIN is required to exit Merchant Mode on the device."}
-        </Text>
-        {passcodeSet ? (
-          <TextInput
-            style={[styles.walletNameInput, styles.pinInputWide]}
-            value={currentPin}
-            onChangeText={(value) => {
-              setCurrentPin(value.replace(/\D/g, "").slice(0, 6));
-              setLocalError(null);
-              setLocalMessage(null);
-            }}
-            keyboardType="number-pad"
-            secureTextEntry
-            placeholder="Current PIN"
-            placeholderTextColor={palette.textMuted}
-          />
-        ) : null}
-        <View style={styles.pinRow}>
-          <TextInput
-            style={[styles.walletNameInput, styles.pinInput]}
-            value={pin}
-            onChangeText={(value) => {
-              setPin(value.replace(/\D/g, "").slice(0, 6));
-              setLocalError(null);
-              setLocalMessage(null);
-            }}
-            keyboardType="number-pad"
-            secureTextEntry
-            placeholder={passcodeSet ? "New PIN" : "6 digit PIN"}
-            placeholderTextColor={palette.textMuted}
-          />
-          <TextInput
-            style={[styles.walletNameInput, styles.pinInput]}
-            value={pinConfirm}
-            onChangeText={(value) => {
-              setPinConfirm(value.replace(/\D/g, "").slice(0, 6));
-              setLocalError(null);
-              setLocalMessage(null);
-            }}
-            keyboardType="number-pad"
-            secureTextEntry
-            placeholder="Confirm"
-            placeholderTextColor={palette.textMuted}
-          />
-        </View>
-        <Pressable
-          style={[styles.primaryActionButton, styles.settingsWideButton, !canSetPin ? styles.buttonDisabled : undefined]}
-          disabled={!canSetPin}
-          onPress={() => {
-            void submitPIN();
-          }}
-        >
-          <Text style={styles.primaryActionButtonText}>{busy ? "Saving..." : passcodeSet ? "Reset PIN" : "Save PIN"}</Text>
-        </Pressable>
-      </View>
+      <Pressable
+        style={[styles.primaryActionButton, styles.settingsWideButton, !canEnable ? styles.buttonDisabled : undefined]}
+        disabled={!canEnable}
+        onPress={() => {
+          void enableMerchantMode();
+        }}
+      >
+        <Text style={styles.primaryActionButtonText}>{busy ? "Enabling..." : "Enable Merchant Mode on this device"}</Text>
+      </Pressable>
+      {!passcodeSet ? <Text style={styles.meta}>Save a 6 digit exit PIN before enabling Merchant Mode.</Text> : null}
 
       <View style={styles.preferenceStack}>
         <Text style={styles.preferenceTitle}>Location</Text>
@@ -621,40 +724,50 @@ function MerchantModeSettingsCard({
       </View>
 
       <View style={styles.preferenceStack}>
-        <Text style={styles.preferenceTitle}>Default wallet</Text>
-        {walletOptions.length === 0 ? (
-          <Text style={styles.meta}>No merchant wallets are loaded yet.</Text>
-        ) : (
-          <View style={styles.optionList}>
-            {walletOptions.map((option) => {
-              const selected = option.address.toLowerCase() === selectedWalletAddress.toLowerCase();
-              return (
-                <Pressable
-                  key={option.address}
-                  style={[styles.selectOption, selected ? styles.selectOptionActive : undefined]}
-                  onPress={() => setSelectedWalletAddress(option.address)}
-                >
-                  <Text style={[styles.selectOptionTitle, selected ? styles.selectOptionTitleActive : undefined]}>
-                    {option.label}
-                  </Text>
-                  <Text style={styles.selectOptionMeta}>{shortAddress(option.address)}</Text>
-                </Pressable>
-              );
-            })}
+        <Text style={styles.preferenceTitle}>{passcodeSet ? "Reset 6 digit exit PIN" : "Create 6 digit exit PIN"}</Text>
+        <Text style={styles.preferenceBody}>
+          {passcodeSet
+            ? "Enter the current PIN before choosing a new exit PIN."
+            : "This PIN is required to exit Merchant Mode on the device."}
+        </Text>
+        {passcodeSet ? (
+          <Pressable onPress={() => setEditingPinField("current")}>
+            <Text style={styles.pinFieldLabel}>Current PIN</Text>
+            <View style={editingPinField === "current" ? styles.pinDisplayActive : undefined}>
+              <MerchantPinInput
+                value={currentPin}
+                placeholder="Enter current PIN"
+                visible={currentPinVisible}
+                onToggleVisible={() => setCurrentPinVisible((current) => !current)}
+              />
+            </View>
+          </Pressable>
+        ) : null}
+        <Pressable onPress={() => setEditingPinField("new")}>
+          <Text style={styles.pinFieldLabel}>New PIN</Text>
+          <View style={editingPinField === "new" ? styles.pinDisplayActive : undefined}>
+            <MerchantPinInput
+              value={pin}
+              placeholder="Enter new PIN"
+              visible={newPinVisible}
+              onToggleVisible={() => setNewPinVisible((current) => !current)}
+            />
           </View>
-        )}
+        </Pressable>
+        <MerchantPinPad
+          onDigit={appendMerchantPinDigit}
+          onBackspace={removeMerchantPinDigit}
+        />
+        <MerchantPinSwipe
+          disabled={!canSetPin}
+          loading={busy}
+          label={passcodeSet ? "Slide to reset PIN" : "Slide to save PIN"}
+          loadingLabel="Saving"
+          onComplete={() => {
+            void submitPIN();
+          }}
+        />
       </View>
-
-      <Pressable
-        style={[styles.primaryActionButton, styles.settingsWideButton, !canEnable ? styles.buttonDisabled : undefined]}
-        disabled={!canEnable}
-        onPress={() => {
-          void enableMerchantMode();
-        }}
-      >
-        <Text style={styles.primaryActionButtonText}>{busy ? "Enabling..." : "Enable Merchant Mode on this device"}</Text>
-      </Pressable>
-      {!passcodeSet ? <Text style={styles.meta}>Save a 6 digit exit PIN before enabling Merchant Mode.</Text> : null}
       {message ? <Text style={styles.inlineSuccess}>{message}</Text> : null}
       {localMessage ? <Text style={styles.inlineSuccess}>{localMessage}</Text> : null}
       {localError ? <Text style={styles.inlineError}>{localError}</Text> : null}
@@ -1009,7 +1122,6 @@ export function SettingsScreen({
       {section === "merchant" ? (
         <MerchantModeSettingsCard
           locations={ownedLocations}
-          wallets={wallets}
           status={merchantModeStatus}
           busy={merchantModeBusy}
           message={merchantModeMessage}
@@ -1360,6 +1472,112 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     pinInputWide: {
       textAlign: "center",
       letterSpacing: 3,
+    },
+    pinFieldLabel: {
+      color: palette.textMuted,
+      fontSize: 12,
+      fontWeight: "800",
+      marginBottom: 6,
+      textTransform: "uppercase",
+    },
+    pinDisplayRow: {
+      minHeight: 54,
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surface,
+      flexDirection: "row",
+      alignItems: "center",
+      paddingLeft: spacing.md,
+      ...shadows.soft,
+    },
+    pinDisplayActive: {
+      borderRadius: radii.lg,
+      borderWidth: 2,
+      borderColor: palette.primary,
+    },
+    pinDisplayText: {
+      flex: 1,
+      color: palette.text,
+      fontSize: 20,
+      fontWeight: "900",
+      letterSpacing: 4,
+      textAlign: "center",
+    },
+    pinDisplayPlaceholder: {
+      color: palette.textMuted,
+      fontSize: 15,
+      letterSpacing: 0,
+      textAlign: "left",
+    },
+    pinVisibilityButton: {
+      width: 48,
+      minHeight: 52,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    pinKeypad: {
+      gap: spacing.xs,
+    },
+    pinKeypadRow: {
+      flexDirection: "row",
+      gap: spacing.xs,
+    },
+    pinKeypadKey: {
+      flex: 1,
+      minHeight: 48,
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surface,
+      alignItems: "center",
+      justifyContent: "center",
+      ...shadows.soft,
+    },
+    pinKeypadAction: {
+      backgroundColor: palette.primarySoft,
+    },
+    pinKeypadText: {
+      color: palette.text,
+      fontSize: 22,
+      fontWeight: "900",
+    },
+    pinSwipeTrack: {
+      minHeight: 58,
+      borderRadius: radii.pill,
+      backgroundColor: palette.primaryStrong,
+      justifyContent: "center",
+      paddingHorizontal: 8,
+      position: "relative",
+      overflow: "hidden",
+      ...shadows.card,
+    },
+    pinSwipeTrackDisabled: {
+      backgroundColor: palette.borderStrong,
+    },
+    pinSwipeText: {
+      color: palette.white,
+      textAlign: "center",
+      fontSize: 15,
+      fontWeight: "900",
+      paddingHorizontal: 72,
+    },
+    pinSwipeTextDisabled: {
+      color: palette.surface,
+    },
+    pinSwipeThumb: {
+      position: "absolute",
+      left: 4,
+      top: 4,
+      bottom: 4,
+      width: 54,
+      borderRadius: radii.pill,
+      backgroundColor: palette.surface,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    pinSwipeThumbDisabled: {
+      backgroundColor: palette.surfaceStrong,
     },
     optionList: {
       gap: spacing.sm,

@@ -438,6 +438,159 @@ function shortAddress(value: string | undefined): string {
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
 }
 
+function MerchantExitPinInput({
+  value,
+  visible,
+  onToggleVisible,
+}: {
+  value: string;
+  visible: boolean;
+  onToggleVisible: () => void;
+}) {
+  const { palette, shadows, isDark } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, shadows, isDark), [isDark, palette, shadows]);
+  const empty = value.length === 0;
+  return (
+    <View style={styles.merchantExitPinDisplay}>
+      <Text style={[styles.merchantExitPinDisplayText, empty ? styles.merchantExitPinPlaceholder : undefined]}>
+        {empty ? "Enter PIN" : visible ? value : "•".repeat(value.length)}
+      </Text>
+      <Pressable style={styles.merchantExitPinEye} onPress={onToggleVisible}>
+        <Ionicons name={visible ? "eye-off-outline" : "eye-outline"} size={20} color={palette.primaryStrong} />
+      </Pressable>
+    </View>
+  );
+}
+
+function MerchantExitPinPad({
+  onDigit,
+  onBackspace,
+}: {
+  onDigit: (digit: string) => void;
+  onBackspace: () => void;
+}) {
+  const { palette, shadows, isDark } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, shadows, isDark), [isDark, palette, shadows]);
+  const rows = [
+    ["1", "2", "3"],
+    ["4", "5", "6"],
+    ["7", "8", "9"],
+    ["blank", "0", "backspace"],
+  ];
+  return (
+    <View style={styles.merchantExitKeypad}>
+      {rows.map((row, rowIndex) => (
+        <View key={`merchant-exit-row-${rowIndex}`} style={styles.merchantExitKeypadRow}>
+          {row.map((key) =>
+            key === "blank" ? (
+              <View key={key} style={styles.merchantExitKeypadKey} />
+            ) : (
+              <Pressable
+                key={key}
+                style={[styles.merchantExitKeypadKey, key === "backspace" ? styles.merchantExitKeypadAction : undefined]}
+                onPress={() => {
+                  if (key === "backspace") {
+                    onBackspace();
+                    return;
+                  }
+                  onDigit(key);
+                }}
+              >
+                {key === "backspace" ? (
+                  <Ionicons name="backspace-outline" size={22} color={palette.primaryStrong} />
+                ) : (
+                  <Text style={styles.merchantExitKeypadText}>{key}</Text>
+                )}
+              </Pressable>
+            ),
+          )}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function MerchantExitSwipe({
+  disabled,
+  loading,
+  onComplete,
+}: {
+  disabled: boolean;
+  loading: boolean;
+  onComplete: () => void;
+}) {
+  const { palette, shadows, isDark } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, shadows, isDark), [isDark, palette, shadows]);
+  const translateX = useRef(new Animated.Value(0)).current;
+  const [trackWidth, setTrackWidth] = useState(0);
+  const thumbWidth = 54;
+  const swipeDistance = Math.max(trackWidth - thumbWidth - 8, 0);
+
+  useEffect(() => {
+    if (!loading) {
+      Animated.spring(translateX, {
+        toValue: 0,
+        useNativeDriver: true,
+        speed: 18,
+        bounciness: 0,
+      }).start();
+    }
+  }, [loading, translateX]);
+
+  const resetSwipe = React.useCallback(() => {
+    Animated.spring(translateX, {
+      toValue: 0,
+      useNativeDriver: true,
+      speed: 18,
+      bounciness: 0,
+    }).start();
+  }, [translateX]);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => !disabled && !loading && swipeDistance > 0,
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          !disabled && !loading && swipeDistance > 0 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+        onPanResponderMove: (_, gesture) => {
+          translateX.setValue(Math.max(0, Math.min(gesture.dx, swipeDistance)));
+        },
+        onPanResponderRelease: (_, gesture) => {
+          if (gesture.dx >= swipeDistance * 0.72) {
+            Animated.timing(translateX, {
+              toValue: swipeDistance,
+              duration: 120,
+              useNativeDriver: true,
+            }).start(({ finished }) => {
+              if (finished) onComplete();
+            });
+            return;
+          }
+          resetSwipe();
+        },
+        onPanResponderTerminate: resetSwipe,
+      }),
+    [disabled, loading, onComplete, resetSwipe, swipeDistance, translateX],
+  );
+
+  return (
+    <View
+      style={[styles.merchantExitSwipeTrack, disabled ? styles.merchantExitSwipeTrackDisabled : undefined]}
+      onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
+    >
+      <Text style={[styles.merchantExitSwipeText, disabled ? styles.merchantExitSwipeTextDisabled : undefined]}>
+        {loading ? "Checking" : "Slide to exit"}
+      </Text>
+      <Animated.View
+        style={[styles.merchantExitSwipeThumb, disabled ? styles.merchantExitSwipeThumbDisabled : undefined, { transform: [{ translateX }] }]}
+        {...panResponder.panHandlers}
+      >
+        <Ionicons name={loading ? "hourglass-outline" : "arrow-forward"} size={18} color={palette.primaryStrong} />
+      </Animated.View>
+    </View>
+  );
+}
+
 function walletBalanceCacheKey(address: string): string {
   return `${BALANCE_CACHE_STORAGE_KEY_PREFIX}:${address.trim().toLowerCase()}`;
 }
@@ -1234,6 +1387,7 @@ function WalletAppShellContent({
   const [merchantModeBusy, setMerchantModeBusy] = useState(false);
   const [merchantModeMessage, setMerchantModeMessage] = useState<string | null>(null);
   const [merchantModeExitPin, setMerchantModeExitPin] = useState("");
+  const [merchantModeExitPinVisible, setMerchantModeExitPinVisible] = useState(false);
   const [merchantModeExitOpen, setMerchantModeExitOpen] = useState(false);
   const [merchantModeExitError, setMerchantModeExitError] = useState<string | null>(null);
   const [storedPushToken, setStoredPushToken] = useState<string | null>(null);
@@ -2805,7 +2959,7 @@ function WalletAppShellContent({
     }
   };
 
-  const handleEnableMerchantMode = async (locationID: number, walletAddress: string) => {
+  const handleEnableMerchantMode = async (locationID: number) => {
     if (!backendClient) {
       throw new Error("Backend not configured.");
     }
@@ -2820,7 +2974,6 @@ function WalletAppShellContent({
       const status = await backendClient.enableMerchantMode({
         installationID,
         locationID,
-        walletAddress,
         displayName: Device.deviceName || Device.modelName || "Store device",
         platform: Platform.OS,
         appVersion: Constants.expoConfig?.version || Constants.nativeAppVersion || "",
@@ -3529,28 +3682,29 @@ function WalletAppShellContent({
               <Text style={styles.merchantExitBody}>
                 Enter the 6 digit merchant PIN on this device to return to the full app.
               </Text>
-              <TextInput
-                style={styles.merchantExitInput}
+              <MerchantExitPinInput
                 value={merchantModeExitPin}
-                onChangeText={(value) => {
-                  setMerchantModeExitPin(value.replace(/\D/g, "").slice(0, 6));
+                visible={merchantModeExitPinVisible}
+                onToggleVisible={() => setMerchantModeExitPinVisible((current) => !current)}
+              />
+              <MerchantExitPinPad
+                onDigit={(digit) => {
+                  setMerchantModeExitPin((value) => `${value}${digit}`.replace(/\D/g, "").slice(0, 6));
                   setMerchantModeExitError(null);
                 }}
-                keyboardType="number-pad"
-                secureTextEntry
-                placeholder="6 digit PIN"
-                placeholderTextColor={palette.textMuted}
+                onBackspace={() => {
+                  setMerchantModeExitPin((value) => value.slice(0, -1));
+                  setMerchantModeExitError(null);
+                }}
               />
               {merchantModeExitError ? <Text style={styles.merchantExitError}>{merchantModeExitError}</Text> : null}
-              <Pressable
-                style={[styles.merchantExitButton, merchantModeBusy ? styles.buttonDisabled : undefined]}
-                disabled={merchantModeBusy}
-                onPress={() => {
+              <MerchantExitSwipe
+                disabled={merchantModeBusy || !/^\d{6}$/.test(merchantModeExitPin)}
+                loading={merchantModeBusy}
+                onComplete={() => {
                   void handleDisableMerchantMode();
                 }}
-              >
-                <Text style={styles.merchantExitButtonText}>{merchantModeBusy ? "Checking..." : "Exit Merchant Mode"}</Text>
-              </Pressable>
+              />
             </View>
           </Pressable>
         </Pressable>
@@ -5946,6 +6100,61 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     textAlign: "center",
     paddingHorizontal: spacing.md,
   },
+  merchantExitPinDisplay: {
+    minHeight: 54,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: palette.primary,
+    backgroundColor: palette.surface,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingLeft: spacing.md,
+  },
+  merchantExitPinDisplayText: {
+    flex: 1,
+    color: palette.text,
+    fontSize: 20,
+    fontWeight: "900",
+    letterSpacing: 4,
+    textAlign: "center",
+  },
+  merchantExitPinPlaceholder: {
+    color: palette.textMuted,
+    fontSize: 15,
+    letterSpacing: 0,
+    textAlign: "left",
+  },
+  merchantExitPinEye: {
+    width: 48,
+    minHeight: 52,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  merchantExitKeypad: {
+    gap: spacing.xs,
+  },
+  merchantExitKeypadRow: {
+    flexDirection: "row",
+    gap: spacing.xs,
+  },
+  merchantExitKeypadKey: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  merchantExitKeypadAction: {
+    backgroundColor: palette.primarySoft,
+  },
+  merchantExitKeypadText: {
+    color: palette.text,
+    fontSize: 22,
+    fontWeight: "900",
+  },
   merchantExitError: {
     color: palette.danger,
     lineHeight: 20,
@@ -5961,6 +6170,42 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   merchantExitButtonText: {
     color: palette.white,
     fontWeight: "900",
+  },
+  merchantExitSwipeTrack: {
+    minHeight: 58,
+    borderRadius: radii.pill,
+    backgroundColor: palette.primaryStrong,
+    justifyContent: "center",
+    paddingHorizontal: 8,
+    position: "relative",
+    overflow: "hidden",
+  },
+  merchantExitSwipeTrackDisabled: {
+    backgroundColor: palette.borderStrong,
+  },
+  merchantExitSwipeText: {
+    color: palette.white,
+    textAlign: "center",
+    fontSize: 15,
+    fontWeight: "900",
+    paddingHorizontal: 72,
+  },
+  merchantExitSwipeTextDisabled: {
+    color: palette.surface,
+  },
+  merchantExitSwipeThumb: {
+    position: "absolute",
+    left: 4,
+    top: 4,
+    bottom: 4,
+    width: 54,
+    borderRadius: radii.pill,
+    backgroundColor: palette.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  merchantExitSwipeThumbDisabled: {
+    backgroundColor: palette.surfaceStrong,
   },
   buttonDisabled: {
     opacity: 0.55,
