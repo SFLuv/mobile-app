@@ -1,7 +1,16 @@
 {
   "cli": {
     "version": ">= 16.0.0",
+    "appVersionSource": "remote",
     "appVersionSource": "remote"
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "serviceAccountKeyPath": "/Users/coding/Downloads/sfluv-mobile-app-530d74a24ce1.json",
+        "track": "production"
+      }
+    }
   },
   "build": {
     "development": {
@@ -42,6 +51,7 @@
     },
     "production": {
       "autoIncrement": true,
+      "autoIncrement": "true",
       "env": {
         "IOS_BUNDLE_IDENTIFIER": "org.sfluv.wallet",
         "EXPO_PUBLIC_CHAIN_ID": "80094",
