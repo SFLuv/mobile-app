@@ -45,6 +45,13 @@ type Props = {
   backendClient?: AppBackendClient | null;
   hapticsEnabled?: boolean;
   onRefreshProfile: () => Promise<void>;
+  onImproverUpdated?: (improver: AppImprover) => void;
+  requestedSection?: ImproverSection;
+  requestedSectionNonce?: number;
+  onCredentialDataUpdated?: (payload: {
+    credentialTypes: AppGlobalCredentialType[];
+    credentialRequests: AppCredentialRequest[];
+  }) => void;
 };
 
 type ImproverSection = "workflows" | "credentials";
@@ -203,6 +210,11 @@ function formatStatusLabel(value?: string | null): string {
     .filter(Boolean)
     .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
     .join(" ");
+}
+
+function looksLikeEmail(value: string): boolean {
+  const trimmed = value.trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
 }
 
 function getWorkflowDisplayStatus(workflow: Pick<AppWorkflow, "status" | "startAt">, nowUnix = Date.now() / 1000): string {
@@ -436,6 +448,10 @@ export function ImproverScreen({
   backendClient,
   hapticsEnabled = true,
   onRefreshProfile,
+  onImproverUpdated,
+  requestedSection,
+  requestedSectionNonce,
+  onCredentialDataUpdated,
 }: Props) {
   const { palette, shadows, isDark } = useAppTheme();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -445,7 +461,11 @@ export function ImproverScreen({
   const topInset = Math.max(Constants.statusBarHeight, Platform.OS === "ios" ? spacing.md : 0);
   const userId = user?.id ?? null;
   const initialCache = getImproverScreenCache(userId);
-  const [section, setSection] = useState<ImproverSection>(initialCache.section);
+  const initialSection =
+    requestedSection && typeof requestedSectionNonce === "number" && requestedSectionNonce > 0
+      ? requestedSection
+      : initialCache.section;
+  const [section, setSection] = useState<ImproverSection>(initialSection);
   const [workflowView, setWorkflowView] = useState<WorkflowView>(initialCache.workflowView);
   const [includePastWorkflows, setIncludePastWorkflows] = useState(initialCache.includePastWorkflows);
   const [workflowSelectorVisible, setWorkflowSelectorVisible] = useState(false);
@@ -528,6 +548,16 @@ export function ImproverScreen({
       ),
     [credentialRequests],
   );
+
+  useEffect(() => {
+    if (!requestedSection || typeof requestedSectionNonce !== "number" || requestedSectionNonce <= 0) {
+      return;
+    }
+    setSection(requestedSection);
+    if (requestedSection === "credentials") {
+      setBadgesVisible(false);
+    }
+  }, [requestedSection, requestedSectionNonce]);
 
   const closeImagePreview = useCallback(() => {
     setBadgePreview(null);
@@ -861,6 +891,10 @@ export function ImproverScreen({
           ]);
           setCredentialTypes(loadedCredentialTypes);
           setCredentialRequests(loadedCredentialRequests);
+          onCredentialDataUpdated?.({
+            credentialTypes: loadedCredentialTypes,
+            credentialRequests: loadedCredentialRequests,
+          });
           if (workflowFeed) {
             setWorkflows(workflowFeed.workflows);
             setActiveCredentials(workflowFeed.activeCredentials);
@@ -885,7 +919,7 @@ export function ImproverScreen({
       credentialDataRequestRef.current = request;
       return request;
     },
-    [activeCredentials.length, backendClient, workflowDataLoaded],
+    [activeCredentials.length, backendClient, onCredentialDataUpdated, workflowDataLoaded],
   );
 
   useEffect(() => {
@@ -1287,8 +1321,22 @@ export function ImproverScreen({
   );
 
   useEffect(() => {
-    if (!selectedVerifiedEmailId && verifiedEmailsByStatus.verified[0]) {
+    if (selectedVerifiedEmailId) {
+      const selectedStillVerified = verifiedEmailsByStatus.verified.some(
+        (email) => email.id === selectedVerifiedEmailId,
+      );
+      if (selectedStillVerified) {
+        return;
+      }
+    }
+
+    if (verifiedEmailsByStatus.verified[0]) {
       setSelectedVerifiedEmailId(verifiedEmailsByStatus.verified[0].id);
+      return;
+    }
+
+    if (selectedVerifiedEmailId) {
+      setSelectedVerifiedEmailId(null);
     }
   }, [selectedVerifiedEmailId, verifiedEmailsByStatus.verified]);
 
@@ -1986,6 +2034,8 @@ export function ImproverScreen({
 
   const requestImproverAccess = useCallback(async () => {
     if (!backendClient) {
+      setError("The shared app backend is not ready. Please try again in a moment.");
+      setNotice(null);
       return;
     }
     const selectedEmail =
@@ -1996,24 +2046,29 @@ export function ImproverScreen({
       return;
     }
     if (!selectedEmail) {
-      setError("Select a verified email before requesting improver status.");
+      setError(
+        verifiedEmailsByStatus.verified.length > 0
+          ? "Select a verified email before requesting improver status."
+          : "Verify an email before requesting improver status.",
+      );
       setNotice(null);
       return;
     }
     setActionKey("request-improver");
     try {
-      await backendClient.updateUserInfo({
-        name: `${requestFirstName.trim()} ${requestLastName.trim()}`.trim(),
-        email: selectedEmail,
-      });
-      await backendClient.requestImproverStatus({
+      const nextImprover = await backendClient.requestImproverStatus({
         firstName: requestFirstName.trim(),
         lastName: requestLastName.trim(),
         email: selectedEmail,
       });
+      onImproverUpdated?.(nextImprover);
       await onRefreshProfile();
       await loadRequestData(true);
-      setNotice("Improver status requested.");
+      setNotice(
+        nextImprover.status === "approved"
+          ? "Improver access is active."
+          : "Improver request submitted. Status: Pending.",
+      );
       setError(null);
     } catch (nextError) {
       setError((nextError as Error)?.message || "Unable to request improver status.");
@@ -2024,6 +2079,7 @@ export function ImproverScreen({
   }, [
     backendClient,
     loadRequestData,
+    onImproverUpdated,
     onRefreshProfile,
     requestFirstName,
     requestLastName,
@@ -2033,16 +2089,24 @@ export function ImproverScreen({
 
   const requestEmailVerification = useCallback(async () => {
     if (!backendClient) {
+      setError("The shared app backend is not ready. Please try again in a moment.");
+      setNotice(null);
       return;
     }
-    if (!requestEmailInput.trim()) {
+    const trimmedEmail = requestEmailInput.trim();
+    if (!trimmedEmail) {
       setError("Enter an email address to verify.");
+      setNotice(null);
+      return;
+    }
+    if (!looksLikeEmail(trimmedEmail)) {
+      setError("Enter a valid email address.");
       setNotice(null);
       return;
     }
     setActionKey("request-email");
     try {
-      await backendClient.requestVerifiedEmail(requestEmailInput.trim());
+      await backendClient.requestVerifiedEmail(trimmedEmail);
       await loadRequestData(true);
       setRequestEmailInput("");
       setNotice("Verification email sent.");
@@ -2364,6 +2428,25 @@ export function ImproverScreen({
         : improver?.status === "rejected"
           ? "danger"
           : "warning";
+    const requestFormBusy = actionKey === "request-improver";
+    const requestFormLoading = requestDataLoading && !requestDataLoaded;
+    const selectedVerifiedEmail = verifiedEmailsByStatus.verified.find(
+      (email) => email.id === selectedVerifiedEmailId,
+    );
+    const requestButtonLabel = requestFormBusy
+      ? "Submitting..."
+      : improver?.status === "pending"
+        ? "Update request"
+        : improver?.status === "rejected"
+          ? "Resubmit request"
+          : "Become an improver";
+    const requestHelpText = requestFormLoading
+      ? "Loading verified email options..."
+      : verifiedEmailsByStatus.verified.length === 0
+        ? "Verify an email above before submitting the request."
+        : selectedVerifiedEmail
+          ? `Request will use ${selectedVerifiedEmail.email}.`
+          : "Select a verified email above before submitting the request.";
 
     return (
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
@@ -2389,7 +2472,13 @@ export function ImproverScreen({
               <Pressable
                 key={email.id}
                 style={[styles.choiceRow, selected ? styles.choiceRowActive : undefined]}
-                onPress={() => setSelectedVerifiedEmailId(email.id)}
+                onPress={() => {
+                  setSelectedVerifiedEmailId(email.id);
+                  if (error || notice) {
+                    setError(null);
+                    setNotice(null);
+                  }
+                }}
               >
                 <View style={styles.choiceCopy}>
                   <Text style={styles.choiceTitle}>{email.email}</Text>
@@ -2414,7 +2503,13 @@ export function ImproverScreen({
               placeholder="name@example.com"
               placeholderTextColor={palette.textMuted}
               value={requestEmailInput}
-              onChangeText={setRequestEmailInput}
+              onChangeText={(value) => {
+                setRequestEmailInput(value);
+                if (error || notice) {
+                  setError(null);
+                  setNotice(null);
+                }
+              }}
             />
             <Pressable
               style={[styles.primaryButton, actionKey === "request-email" ? styles.buttonDisabled : undefined]}
@@ -2461,35 +2556,51 @@ export function ImproverScreen({
 
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Request improver status</Text>
+          {improver?.status === "pending" ? (
+            <Text style={styles.body}>Your request is pending review. You can update the name or verified email here.</Text>
+          ) : improver?.status === "rejected" ? (
+            <Text style={styles.body}>Your previous request was not approved. You can update the details and resubmit.</Text>
+          ) : (
+            <Text style={styles.body}>Submit your name and verified email for improver review.</Text>
+          )}
           <TextInput
             style={styles.input}
             placeholder="First name"
             placeholderTextColor={palette.textMuted}
             value={requestFirstName}
-            onChangeText={setRequestFirstName}
+            onChangeText={(value) => {
+              setRequestFirstName(value);
+              if (error || notice) {
+                setError(null);
+                setNotice(null);
+              }
+            }}
           />
           <TextInput
             style={styles.input}
             placeholder="Last name"
             placeholderTextColor={palette.textMuted}
             value={requestLastName}
-            onChangeText={setRequestLastName}
+            onChangeText={(value) => {
+              setRequestLastName(value);
+              if (error || notice) {
+                setError(null);
+                setNotice(null);
+              }
+            }}
           />
+          <Text style={styles.meta}>{requestHelpText}</Text>
           <Pressable
-            style={[styles.primaryButton, actionKey === "request-improver" ? styles.buttonDisabled : undefined]}
-            disabled={
-              actionKey === "request-improver" ||
-              !requestFirstName.trim() ||
-              !requestLastName.trim() ||
-              !selectedVerifiedEmailId
-            }
+            style={[
+              styles.primaryButton,
+              requestFormBusy || requestFormLoading ? styles.buttonDisabled : undefined,
+            ]}
+            disabled={requestFormBusy || requestFormLoading}
             onPress={() => {
               void requestImproverAccess();
             }}
           >
-            <Text style={styles.primaryButtonText}>
-              {actionKey === "request-improver" ? "Submitting..." : "Request improver status"}
-            </Text>
+            <Text style={styles.primaryButtonText}>{requestFormLoading ? "Loading..." : requestButtonLabel}</Text>
           </Pressable>
         </View>
       </ScrollView>

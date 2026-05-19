@@ -1,10 +1,12 @@
 import "./src/polyfills";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   AppState,
   Alert,
   Dimensions,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
   PanResponder,
   Platform,
@@ -14,6 +16,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -66,6 +69,8 @@ import {
   AppClientConfig,
   AppClientVersionPolicy,
   AppContact,
+  AppCredentialRequest,
+  AppGlobalCredentialType,
   AppImprover,
   AppLocation,
   AppMerchantModeStatus,
@@ -178,6 +183,7 @@ const LINK_DEDUPE_WINDOW_MS = 4_000;
 const BACKEND_BOOTSTRAP_TIMEOUT_MS = 20_000;
 const WALLET_CREATE_TIMEOUT_MS = 30_000;
 const WALLET_DISCOVERY_TIMEOUT_MS = 45_000;
+const EMAIL_LOGIN_CODE_LENGTH = 6;
 
 async function getOrCreateMerchantModeInstallationID(): Promise<string> {
   const existing = await SecureStore.getItemAsync(MERCHANT_MODE_INSTALLATION_ID_KEY);
@@ -1108,6 +1114,10 @@ function mergePreferences(input: unknown): AppPreferences {
       candidate.defaultSendEntryMode === "manual" || candidate.defaultSendEntryMode === "scan"
         ? candidate.defaultSendEntryMode
         : defaultAppPreferences.defaultSendEntryMode,
+    showImproverPanel:
+      typeof candidate.showImproverPanel === "boolean"
+        ? candidate.showImproverPanel
+        : defaultAppPreferences.showImproverPanel,
   };
 }
 
@@ -1382,6 +1392,13 @@ function WalletAppShellContent({
   const [merchantLabelsByAddress, setMerchantLabelsByAddress] = useState<Record<string, string>>({});
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [appImprover, setAppImprover] = useState<AppImprover | null>(null);
+  const [improverRouteRequest, setImproverRouteRequest] = useState<{
+    section: "workflows" | "credentials";
+    nonce: number;
+  }>({ section: "workflows", nonce: 0 });
+  const [improverCredentialTypes, setImproverCredentialTypes] = useState<AppGlobalCredentialType[]>([]);
+  const [improverCredentialRequests, setImproverCredentialRequests] = useState<AppCredentialRequest[]>([]);
+  const [improverCredentialRequestsLoading, setImproverCredentialRequestsLoading] = useState(false);
   const [merchantModeInstallationID, setMerchantModeInstallationID] = useState<string | null>(null);
   const [merchantModeStatus, setMerchantModeStatus] = useState<AppMerchantModeStatus | null>(null);
   const [merchantModeBusy, setMerchantModeBusy] = useState(false);
@@ -1642,8 +1659,9 @@ function WalletAppShellContent({
         : undefined,
     [backendWallets, selectedCandidate],
   );
-  const hasImproverTab = Boolean(appUser?.isImprover || appImprover?.status === "approved");
-  const moreTabActive = hasImproverTab && (tab === "activity" || tab === "contacts");
+  const canAccessImproverPanel = Boolean(appUser?.isImprover || appImprover?.status === "approved");
+  const showImproverNav = canAccessImproverPanel && preferences.showImproverPanel;
+  const moreTabActive = showImproverNav && (tab === "activity" || tab === "contacts");
   const canChooseWallet = walletChooserCandidates.length > 1;
   const merchantModeDevice = merchantModeStatus?.device?.merchantModeEnabled ? merchantModeStatus.device : null;
   const merchantModeActive = Boolean(merchantModeDevice);
@@ -1722,16 +1740,16 @@ function WalletAppShellContent({
   }, [merchantLabelsByAddress]);
 
   useEffect(() => {
-    if (!hasImproverTab && tab === "improver") {
+    if (!appUser && tab === "improver") {
       setTab("wallet");
     }
-  }, [hasImproverTab, tab]);
+  }, [appUser, tab]);
 
   useEffect(() => {
-    if (!hasImproverTab && showMoreMenu) {
+    if (!showImproverNav && showMoreMenu) {
       setShowMoreMenu(false);
     }
-  }, [hasImproverTab, showMoreMenu]);
+  }, [showImproverNav, showMoreMenu]);
 
   useEffect(() => {
     if (!toast) {
@@ -2050,6 +2068,53 @@ function WalletAppShellContent({
       }
     }
   };
+
+  const openImproverPanel = useCallback((section: "workflows" | "credentials" = "workflows") => {
+    setImproverRouteRequest((current) => ({ section, nonce: current.nonce + 1 }));
+    setTab("improver");
+  }, []);
+
+  const handleImproverUpdated = useCallback((nextImprover: AppImprover) => {
+    setAppImprover(nextImprover);
+    if (nextImprover.status === "approved") {
+      setAppUser((current) => (current ? { ...current, isImprover: true } : current));
+    }
+  }, []);
+
+  const handleImproverCredentialDataUpdated = useCallback(
+    (payload: { credentialTypes: AppGlobalCredentialType[]; credentialRequests: AppCredentialRequest[] }) => {
+      setImproverCredentialTypes(payload.credentialTypes);
+      setImproverCredentialRequests(payload.credentialRequests);
+    },
+    [],
+  );
+
+  const refreshImproverCredentialRequests = useCallback(async () => {
+    if (!backendClient || !canAccessImproverPanel) {
+      setImproverCredentialTypes([]);
+      setImproverCredentialRequests([]);
+      setImproverCredentialRequestsLoading(false);
+      return;
+    }
+
+    setImproverCredentialRequestsLoading(true);
+    try {
+      const [nextCredentialTypes, nextCredentialRequests] = await Promise.all([
+        backendClient.getCredentialTypes(),
+        backendClient.getImproverCredentialRequests(),
+      ]);
+      setImproverCredentialTypes(nextCredentialTypes);
+      setImproverCredentialRequests(nextCredentialRequests);
+    } catch (error) {
+      console.warn("Unable to load pending improver credential requests", error);
+    } finally {
+      setImproverCredentialRequestsLoading(false);
+    }
+  }, [backendClient, canAccessImproverPanel]);
+
+  useEffect(() => {
+    void refreshImproverCredentialRequests();
+  }, [refreshImproverCredentialRequests]);
 
   useEffect(() => {
     if (!backendClient || !appUser?.isMerchant) {
@@ -3434,6 +3499,10 @@ function WalletAppShellContent({
               backendClient={backendClient}
               hapticsEnabled={preferences.hapticsEnabled}
               onRefreshProfile={loadAppProfile}
+              onImproverUpdated={handleImproverUpdated}
+              requestedSection={improverRouteRequest.section}
+              requestedSectionNonce={improverRouteRequest.nonce}
+              onCredentialDataUpdated={handleImproverCredentialDataUpdated}
             />
           ) : tab === "map" ? (
             <MapScreen
@@ -3538,6 +3607,9 @@ function WalletAppShellContent({
               merchantModeStatus={merchantModeStatus}
               merchantModeBusy={merchantModeBusy}
               merchantModeMessage={merchantModeMessage}
+              credentialRequests={improverCredentialRequests}
+              credentialTypes={improverCredentialTypes}
+              credentialRequestsLoading={improverCredentialRequestsLoading}
               onSetMerchantModePin={handleSetMerchantModePin}
               onEnableMerchantMode={handleEnableMerchantMode}
               accountDeletionBusy={accountDeletionBusy}
@@ -3550,7 +3622,10 @@ function WalletAppShellContent({
                 await loadAppProfile();
               }}
               onOpenImprover={() => {
-                setTab("improver");
+                openImproverPanel("workflows");
+              }}
+              onOpenImproverCredentials={() => {
+                openImproverPanel("credentials");
               }}
               onDeleteAccount={handleDeleteAccount}
               onUpdatePreferences={handleUpdatePreferences}
@@ -3595,7 +3670,7 @@ function WalletAppShellContent({
                 setWalletPane("home");
               }}
             />
-            {hasImproverTab ? (
+            {showImproverNav ? (
               <>
                 <BottomTab
                   label="Improver"
@@ -3769,7 +3844,7 @@ function WalletAppShellContent({
       </Modal>
 
       <Modal
-        visible={showMoreMenu && hasImproverTab}
+        visible={showMoreMenu && showImproverNav}
         transparent
         presentationStyle="overFullScreen"
         animationType="none"
@@ -3908,6 +3983,7 @@ function PrivyWalletApp({
   const { unlinkOAuth } = useUnlinkOAuth();
   const { sendCode, loginWithCode } = useLoginWithEmail();
   const { wallets, create } = useEmbeddedEthereumWallet();
+  const emailCodeInputRef = useRef<TextInput | null>(null);
 
   const [runtime, setRuntime] = useState<RuntimeState>(blankRuntime(true));
   const [preferredCandidateKey, setPreferredCandidateKey] = useState<string | undefined>(undefined);
@@ -4546,6 +4622,8 @@ function PrivyWalletApp({
   const oauthLoading =
     oauthState.status === "loading" || linkOauthState.status === "loading";
   const authLoading = oauthLoading || emailLoading;
+  const normalizedEmailCode = emailCode.replace(/\D/g, "").slice(0, EMAIL_LOGIN_CODE_LENGTH);
+  const emailCodeDigits = Array.from({ length: EMAIL_LOGIN_CODE_LENGTH }, (_, index) => normalizedEmailCode[index] || "");
   const selectedCandidateKey = runtime.discovery?.selectedCandidateKey;
   const walletInitializingMessage =
     !walletPreferencesReady
@@ -4607,8 +4685,12 @@ function PrivyWalletApp({
     setEmailLoading(true);
     try {
       await sendCode({ email: normalizedEmail });
+      setEmailCode("");
       setEmailCodeSent(true);
       setRuntime((state) => ({ ...state, error: null }));
+      setTimeout(() => {
+        emailCodeInputRef.current?.focus();
+      }, 120);
     } catch (error) {
       presentLoginError(error);
     } finally {
@@ -4616,18 +4698,23 @@ function PrivyWalletApp({
     }
   };
 
+  const handleEmailCodeChange = (value: string) => {
+    setEmailCode(value.replace(/\D/g, "").slice(0, EMAIL_LOGIN_CODE_LENGTH));
+  };
+
   const handleEmailLogin = async () => {
     const normalizedEmail = emailAddress.trim();
-    const normalizedCode = emailCode.trim();
+    const normalizedCode = normalizedEmailCode;
     if (!normalizedEmail) {
       presentLoginError(new Error("Enter your email address to continue."));
       return;
     }
-    if (!normalizedCode) {
-      presentLoginError(new Error("Enter the verification code from your email."));
+    if (normalizedCode.length !== EMAIL_LOGIN_CODE_LENGTH) {
+      presentLoginError(new Error("Enter the 6 digit code sent to your email."));
       return;
     }
 
+    Keyboard.dismiss();
     setEmailLoading(true);
     try {
       setPolicyStatus(null);
@@ -4861,181 +4948,228 @@ function PrivyWalletApp({
   if (!user) {
     return (
       <SafeAreaView style={styles.safe}>
-        <View style={styles.loginWrap}>
-          <Text style={styles.loginBrand}>SFLUV</Text>
-          <Text style={styles.loginTitle}>A community currency for San Francisco</Text>
-          <Text style={styles.loginBody}>Sign in to send, receive, and redeem SFLUV.</Text>
-          {loginNotice ? <Text style={styles.loginNotice}>{loginNotice}</Text> : null}
-          {loginMode === "email" ? (
-            <>
-              <TextInput
-                style={styles.loginInput}
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!authLoading}
-                inputMode="email"
-                keyboardType="email-address"
-                onChangeText={setEmailAddress}
-                placeholder="Email address"
-                placeholderTextColor={palette.textMuted}
-                textContentType="emailAddress"
-                value={emailAddress}
-              />
-              {emailCodeSent ? (
-                <TextInput
-                  style={styles.loginInput}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  editable={!authLoading}
-                  keyboardType="number-pad"
-                  onChangeText={setEmailCode}
-                  placeholder="Verification code"
-                  placeholderTextColor={palette.textMuted}
-                  textContentType="oneTimeCode"
-                  value={emailCode}
-                />
-              ) : null}
-              <Pressable
-                style={[styles.loginButton, authLoading ? styles.loginButtonDisabled : undefined]}
-                disabled={authLoading}
-                onPress={() => {
-                  void (emailCodeSent ? handleEmailLogin() : handleSendEmailCode());
-                }}
-              >
-                <Text style={styles.loginButtonText}>
-                  {emailLoading
-                    ? emailCodeSent
-                      ? "Verifying..."
-                      : "Sending code..."
-                    : emailCodeSent
-                      ? "Continue with Email"
-                      : "Email me a code"}
-                </Text>
-              </Pressable>
-              {emailCodeSent ? (
-                <Pressable
-                  style={[styles.loginSecondaryButton, authLoading ? styles.loginButtonDisabled : undefined]}
-                  disabled={authLoading}
-                  onPress={() => {
-                    void handleSendEmailCode();
-                  }}
-                >
-                  <Text style={styles.loginSecondaryButtonText}>Send a new code</Text>
-                </Pressable>
-              ) : null}
-              <Pressable
-                style={styles.loginTertiaryButton}
-                disabled={authLoading}
-                onPress={() => {
-                  setLoginMode("choice");
-                  setEmailCode("");
-                  setEmailCodeSent(false);
-                  setLoginNotice(null);
-                  setRuntime((state) => ({ ...state, error: null }));
-                }}
-              >
-                <Text style={styles.loginTertiaryButtonText}>Other sign-in options</Text>
-              </Pressable>
-            </>
-          ) : (
-            <>
-              <Pressable
-                style={[
-                  styles.loginOptionButton,
-                  styles.loginOptionButtonLight,
-                  authLoading ? styles.loginButtonDisabled : undefined,
-                ]}
-                disabled={authLoading}
-                onPress={() => {
-                  void handleGoogleLogin();
-                }}
-              >
-                <View style={styles.loginOptionContent}>
-                  <View style={styles.loginOptionIconSlot}>
-                    <Ionicons name="logo-google" size={20} color={palette.text} />
-                  </View>
-                  <Text style={styles.loginOptionButtonText}>
-                    {oauthLoading ? "Connecting..." : "Continue with Google"}
-                  </Text>
-                  <View style={styles.loginOptionIconSlot} />
-                </View>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.loginOptionButton,
-                  styles.loginOptionButtonOutline,
-                  authLoading ? styles.loginButtonDisabled : undefined,
-                ]}
-                disabled={authLoading}
-                onPress={() => {
-                  setLoginMode("email");
-                  setLoginNotice(null);
-                  setRuntime((state) => ({ ...state, error: null }));
-                }}
-              >
-                <View style={styles.loginOptionContent}>
-                  <View style={styles.loginOptionIconSlot}>
-                    <Ionicons name="mail-outline" size={20} color={palette.primaryStrong} />
-                  </View>
-                  <Text style={styles.loginOptionOutlineText}>Continue with Email</Text>
-                  <View style={styles.loginOptionIconSlot} />
-                </View>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.loginOptionButton,
-                  styles.loginOptionButtonDark,
-                  authLoading ? styles.loginButtonDisabled : undefined,
-                ]}
-                disabled={authLoading}
-                onPress={() => {
-                  handleAppleLogin();
-                }}
-              >
-                <View style={styles.loginOptionContent}>
-                  <View style={styles.loginOptionIconSlot}>
-                    <Ionicons name="logo-apple" size={20} color={palette.white} />
-                  </View>
-                  <Text style={styles.loginOptionButtonTextDark}>
-                    {oauthLoading ? "Connecting..." : "Continue with Apple"}
-                  </Text>
-                  <View style={styles.loginOptionIconSlot} />
-                </View>
-              </Pressable>
-            </>
-          )}
-          <View style={styles.loginPolicyLinks}>
-            <Pressable
-              disabled={authLoading}
-              onPress={() => {
-                void Linking.openURL(buildPublicPolicyURL(PRIVACY_POLICY_PATH));
-              }}
+        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+          <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
+            <ScrollView
+              contentContainerStyle={styles.loginScrollContent}
+              keyboardDismissMode="on-drag"
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
             >
-              <Text style={styles.loginPolicyLinkText}>Privacy Policy</Text>
-            </Pressable>
-            <Text style={styles.loginPolicyLinkDivider}>•</Text>
-            <Pressable
-              disabled={authLoading}
-              onPress={() => {
-                void Linking.openURL(buildPublicPolicyURL(EMAIL_OPT_IN_POLICY_PATH));
-              }}
-            >
-              <Text style={styles.loginPolicyLinkText}>Email Opt-In Policy</Text>
-            </Pressable>
-          </View>
-          {runtime.error ? (
-            runtimeOffline ? (
-              <View style={styles.loginConnectionStateCard}>
-                <Text style={styles.connectionStateTitle}>No Connection</Text>
-                <Text style={styles.connectionStateBody}>
-                  The app needs an internet connection before we can finish loading your account.
-                </Text>
+              <View style={styles.loginWrap}>
+                <Text style={styles.loginBrand}>SFLUV</Text>
+                <Text style={styles.loginTitle}>A community currency for San Francisco</Text>
+                <Text style={styles.loginBody}>Sign in to send, receive, and redeem SFLUV.</Text>
+                {loginNotice ? <Text style={styles.loginNotice}>{loginNotice}</Text> : null}
+                {loginMode === "email" ? (
+                  <>
+                    {!emailCodeSent ? (
+                      <TextInput
+                        style={styles.loginInput}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        editable={!authLoading}
+                        inputMode="email"
+                        keyboardType="email-address"
+                        onChangeText={setEmailAddress}
+                        placeholder="Email address"
+                        placeholderTextColor={palette.textMuted}
+                        textContentType="emailAddress"
+                        value={emailAddress}
+                      />
+                    ) : null}
+                    {emailCodeSent ? (
+                      <>
+                        <Text style={styles.loginCodePrompt}>
+                          Input the 6 digit code sent to your email at {emailAddress.trim()}.
+                        </Text>
+                        <Pressable
+                          style={styles.loginCodeInputWrap}
+                          disabled={authLoading}
+                          onPress={() => {
+                            emailCodeInputRef.current?.focus();
+                          }}
+                        >
+                          {emailCodeDigits.map((digit, index) => {
+                            const active =
+                              !authLoading &&
+                              (normalizedEmailCode.length === index ||
+                                (index === EMAIL_LOGIN_CODE_LENGTH - 1 &&
+                                  normalizedEmailCode.length === EMAIL_LOGIN_CODE_LENGTH));
+                            return (
+                              <View
+                                key={index}
+                                style={[styles.loginCodeCell, active ? styles.loginCodeCellActive : undefined]}
+                              >
+                                <Text style={styles.loginCodeCellText}>{digit}</Text>
+                              </View>
+                            );
+                          })}
+                          <TextInput
+                            ref={emailCodeInputRef}
+                            style={styles.loginCodeHiddenInput}
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                            caretHidden
+                            editable={!authLoading}
+                            inputMode="numeric"
+                            keyboardType="number-pad"
+                            onChangeText={handleEmailCodeChange}
+                            onSubmitEditing={() => {
+                              void handleEmailLogin();
+                            }}
+                            textContentType="oneTimeCode"
+                            value={normalizedEmailCode}
+                          />
+                        </Pressable>
+                      </>
+                    ) : null}
+                    <Pressable
+                      style={[styles.loginButton, authLoading ? styles.loginButtonDisabled : undefined]}
+                      disabled={authLoading}
+                      onPress={() => {
+                        void (emailCodeSent ? handleEmailLogin() : handleSendEmailCode());
+                      }}
+                    >
+                      <Text style={styles.loginButtonText}>
+                        {emailLoading
+                          ? emailCodeSent
+                            ? "Verifying..."
+                            : "Sending code..."
+                          : emailCodeSent
+                            ? "Continue with Email"
+                            : "Email me a code"}
+                      </Text>
+                    </Pressable>
+                    {emailCodeSent ? (
+                      <Pressable
+                        style={[styles.loginSecondaryButton, authLoading ? styles.loginButtonDisabled : undefined]}
+                        disabled={authLoading}
+                        onPress={() => {
+                          void handleSendEmailCode();
+                        }}
+                      >
+                        <Text style={styles.loginSecondaryButtonText}>Send a new code</Text>
+                      </Pressable>
+                    ) : null}
+                    <Pressable
+                      style={styles.loginTertiaryButton}
+                      disabled={authLoading}
+                      onPress={() => {
+                        setLoginMode("choice");
+                        setEmailCode("");
+                        setEmailCodeSent(false);
+                        setLoginNotice(null);
+                        setRuntime((state) => ({ ...state, error: null }));
+                      }}
+                    >
+                      <Text style={styles.loginTertiaryButtonText}>
+                        {emailCodeSent ? "Use a different email or sign-in option" : "Other sign-in options"}
+                      </Text>
+                    </Pressable>
+                  </>
+                ) : (
+                  <>
+                    <Pressable
+                      style={[
+                        styles.loginOptionButton,
+                        styles.loginOptionButtonLight,
+                        authLoading ? styles.loginButtonDisabled : undefined,
+                      ]}
+                      disabled={authLoading}
+                      onPress={() => {
+                        void handleGoogleLogin();
+                      }}
+                    >
+                      <View style={styles.loginOptionContent}>
+                        <View style={styles.loginOptionIconSlot}>
+                          <Ionicons name="logo-google" size={20} color={palette.text} />
+                        </View>
+                        <Text style={styles.loginOptionButtonText}>
+                          {oauthLoading ? "Connecting..." : "Continue with Google"}
+                        </Text>
+                        <View style={styles.loginOptionIconSlot} />
+                      </View>
+                    </Pressable>
+                    <Pressable
+                      style={[
+                        styles.loginOptionButton,
+                        styles.loginOptionButtonOutline,
+                        authLoading ? styles.loginButtonDisabled : undefined,
+                      ]}
+                      disabled={authLoading}
+                      onPress={() => {
+                        setLoginMode("email");
+                        setLoginNotice(null);
+                        setRuntime((state) => ({ ...state, error: null }));
+                      }}
+                    >
+                      <View style={styles.loginOptionContent}>
+                        <View style={styles.loginOptionIconSlot}>
+                          <Ionicons name="mail-outline" size={20} color={palette.primaryStrong} />
+                        </View>
+                        <Text style={styles.loginOptionOutlineText}>Continue with Email</Text>
+                        <View style={styles.loginOptionIconSlot} />
+                      </View>
+                    </Pressable>
+                    <Pressable
+                      style={[
+                        styles.loginOptionButton,
+                        styles.loginOptionButtonDark,
+                        authLoading ? styles.loginButtonDisabled : undefined,
+                      ]}
+                      disabled={authLoading}
+                      onPress={() => {
+                        handleAppleLogin();
+                      }}
+                    >
+                      <View style={styles.loginOptionContent}>
+                        <View style={styles.loginOptionIconSlot}>
+                          <Ionicons name="logo-apple" size={20} color={palette.white} />
+                        </View>
+                        <Text style={styles.loginOptionButtonTextDark}>
+                          {oauthLoading ? "Connecting..." : "Continue with Apple"}
+                        </Text>
+                        <View style={styles.loginOptionIconSlot} />
+                      </View>
+                    </Pressable>
+                  </>
+                )}
+                <View style={styles.loginPolicyLinks}>
+                  <Pressable
+                    disabled={authLoading}
+                    onPress={() => {
+                      void Linking.openURL(buildPublicPolicyURL(PRIVACY_POLICY_PATH));
+                    }}
+                  >
+                    <Text style={styles.loginPolicyLinkText}>Privacy Policy</Text>
+                  </Pressable>
+                  <Text style={styles.loginPolicyLinkDivider}>•</Text>
+                  <Pressable
+                    disabled={authLoading}
+                    onPress={() => {
+                      void Linking.openURL(buildPublicPolicyURL(EMAIL_OPT_IN_POLICY_PATH));
+                    }}
+                  >
+                    <Text style={styles.loginPolicyLinkText}>Email Opt-In Policy</Text>
+                  </Pressable>
+                </View>
+                {runtime.error ? (
+                  runtimeOffline ? (
+                    <View style={styles.loginConnectionStateCard}>
+                      <Text style={styles.connectionStateTitle}>No Connection</Text>
+                      <Text style={styles.connectionStateBody}>
+                        The app needs an internet connection before we can finish loading your account.
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.errorText}>{runtime.error}</Text>
+                  )
+                ) : null}
               </View>
-            ) : (
-              <Text style={styles.errorText}>{runtime.error}</Text>
-            )
-          ) : null}
-        </View>
+            </ScrollView>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     );
   }
@@ -5469,6 +5603,9 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   safeFullscreen: {
     paddingBottom: 0,
   },
+  flex: {
+    flex: 1,
+  },
   topBackdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: palette.background,
@@ -5742,7 +5879,11 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     flex: 1,
     justifyContent: "center",
     paddingHorizontal: 28,
+    paddingVertical: spacing.xl,
     gap: spacing.md,
+  },
+  loginScrollContent: {
+    flexGrow: 1,
   },
   loginBrand: {
     color: palette.primaryStrong,
@@ -5806,6 +5947,46 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     borderColor: palette.border,
     color: palette.text,
     fontSize: 16,
+  },
+  loginCodePrompt: {
+    color: palette.textMuted,
+    lineHeight: 21,
+    maxWidth: 360,
+  },
+  loginCodeInputWrap: {
+    width: "100%",
+    maxWidth: 360,
+    minHeight: 54,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    position: "relative",
+  },
+  loginCodeCell: {
+    flex: 1,
+    maxWidth: 48,
+    aspectRatio: 1,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loginCodeCellActive: {
+    borderColor: palette.primary,
+    backgroundColor: palette.primarySoft,
+  },
+  loginCodeCellText: {
+    color: palette.text,
+    fontSize: 22,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  loginCodeHiddenInput: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0,
+    color: "transparent",
   },
   loginOptionButton: {
     marginTop: spacing.sm,

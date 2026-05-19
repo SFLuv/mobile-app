@@ -6,6 +6,7 @@ export type AppPreferences = {
   notificationsEnabled: boolean;
   hapticsEnabled: boolean;
   defaultSendEntryMode: SendFlowEntryMode;
+  showImproverPanel: boolean;
 };
 
 export const defaultAppPreferences: AppPreferences = {
@@ -13,4 +14,5 @@ export const defaultAppPreferences: AppPreferences = {
   notificationsEnabled: true,
   hapticsEnabled: true,
   defaultSendEntryMode: "manual",
+  showImproverPanel: true,
 };

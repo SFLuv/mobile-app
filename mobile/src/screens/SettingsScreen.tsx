@@ -2,7 +2,15 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Ionicons } from "@expo/vector-icons";
 import { ethers } from "ethers";
 import { Animated, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
-import { AppImprover, AppMerchantModeStatus, AppOwnedLocation, AppUser, AppWallet } from "../types/app";
+import {
+  AppCredentialRequest,
+  AppGlobalCredentialType,
+  AppImprover,
+  AppMerchantModeStatus,
+  AppOwnedLocation,
+  AppUser,
+  AppWallet,
+} from "../types/app";
 import { AppPreferences, SendFlowEntryMode, ThemePreference } from "../types/preferences";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 
@@ -45,6 +53,10 @@ type Props = {
   onDisconnectApple?: () => void;
   onUpdateImproverRewardsWallet?: (address: string) => Promise<void>;
   onOpenImprover?: () => void;
+  onOpenImproverCredentials?: () => void;
+  credentialRequests?: AppCredentialRequest[];
+  credentialTypes?: AppGlobalCredentialType[];
+  credentialRequestsLoading?: boolean;
   merchantModeStatus?: AppMerchantModeStatus | null;
   merchantModeBusy?: boolean;
   merchantModeMessage?: string | null;
@@ -272,6 +284,11 @@ function formatStatusLabel(value?: string | null): string {
     .filter(Boolean)
     .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
     .join(" ");
+}
+
+function formatCredentialLabel(value: string, credentialTypes: AppGlobalCredentialType[]): string {
+  const match = credentialTypes.find((credentialType) => credentialType.value === value);
+  return match?.label?.trim() || formatStatusLabel(value) || value;
 }
 
 function ThemeOption({
@@ -814,6 +831,10 @@ export function SettingsScreen({
   onDisconnectApple,
   onUpdateImproverRewardsWallet,
   onOpenImprover,
+  onOpenImproverCredentials,
+  credentialRequests = [],
+  credentialTypes = [],
+  credentialRequestsLoading = false,
   merchantModeStatus,
   merchantModeBusy,
   merchantModeMessage,
@@ -836,6 +857,10 @@ export function SettingsScreen({
   const hasImproverSection = Boolean(onOpenImprover || improver || user?.isImprover);
   const hasMerchantSection = Boolean(user?.isMerchant);
   const isApprovedImprover = Boolean(user?.isImprover || improver?.status === "approved");
+  const pendingCredentialRequests = useMemo(
+    () => credentialRequests.filter((request) => request.status === "pending"),
+    [credentialRequests],
+  );
 
   const applyThemePreference = (themePreference: ThemePreference) => {
     onUpdatePreferences({ ...preferences, themePreference });
@@ -1144,7 +1169,7 @@ export function SettingsScreen({
               {improver?.email ? <Text style={styles.meta}>Improver email: {improver.email}</Text> : null}
               <Pressable style={[styles.primaryActionButton, styles.settingsWideButton]} onPress={onOpenImprover}>
                 <Text style={styles.primaryActionButtonText}>
-                  {improver ? "View improver request" : "Request improver status"}
+                  {improver ? "View improver request" : "Become an improver"}
                 </Text>
               </Pressable>
             </View>
@@ -1154,6 +1179,14 @@ export function SettingsScreen({
             <View style={styles.card}>
               <Text style={styles.sectionTitle}>Improver Profile</Text>
               <Text style={styles.body}>Manage the wallet used for improver payouts and review the improver profile tied to this account.</Text>
+              {isApprovedImprover ? (
+                <PreferenceRow
+                  title="Show improver panel"
+                  body="Keep the improver panel in the bottom navigation."
+                  value={preferences.showImproverPanel}
+                  onValueChange={(showImproverPanel) => onUpdatePreferences({ ...preferences, showImproverPanel })}
+                />
+              ) : null}
               {improver ? <Text style={styles.meta}>Status: {formatStatusLabel(improver.status)}</Text> : null}
               {improver?.email ? <Text style={styles.meta}>Improver email: {improver.email}</Text> : null}
               <Text style={styles.meta}>Rewards wallet: {shortAddress(improver?.primaryRewardsAccount || rewardsWalletDraft || "Not set")}</Text>
@@ -1204,6 +1237,38 @@ export function SettingsScreen({
               </View>
               {improverError ? <Text style={styles.inlineError}>{improverError}</Text> : null}
               {improverMessage ? <Text style={styles.inlineSuccess}>{improverMessage}</Text> : null}
+            </View>
+          ) : null}
+
+          {isApprovedImprover ? (
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>Credentials</Text>
+              {onOpenImproverCredentials ? (
+                <Pressable
+                  style={[styles.primaryActionButton, styles.settingsWideButton]}
+                  onPress={onOpenImproverCredentials}
+                >
+                  <Text style={styles.primaryActionButtonText}>View credentials</Text>
+                </Pressable>
+              ) : null}
+              {credentialRequestsLoading ? (
+                <Text style={styles.meta}>Loading pending credential requests...</Text>
+              ) : pendingCredentialRequests.length > 0 ? (
+                <View style={styles.optionList}>
+                  {pendingCredentialRequests.map((request) => (
+                    <View key={request.id} style={styles.selectOption}>
+                      <Text style={styles.selectOptionTitle}>
+                        {formatCredentialLabel(request.credentialType, credentialTypes)}
+                      </Text>
+                      <Text style={styles.selectOptionMeta}>
+                        Pending since {new Date(request.requestedAt).toLocaleString()}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.meta}>No pending credential requests.</Text>
+              )}
             </View>
           ) : null}
         </>
