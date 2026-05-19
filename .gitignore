@@ -17,3 +17,4 @@ backend/data/*.db-*
 mobile/node_modules
 mobile/.expo
 mobile/.next
+mobile/assets/adi-registration.properties

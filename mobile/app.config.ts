@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
-const DEFAULT_EAS_PROJECT_ID = "ee7c9c8e-f237-44cf-917c-ee424401e299";
+const DEFAULT_EAS_PROJECT_ID = "457c71a1-29cd-4e60-9be8-04a6e0a6194a";
 const DEFAULT_IOS_BUNDLE_IDENTIFIER = "org.sfluv.wallet";
 const DEFAULT_ANDROID_PACKAGE = "org.sfluv.wallet";
 
