@@ -7,7 +7,7 @@
   "submit": {
     "production": {
       "android": {
-        "serviceAccountKeyPath": "/Users/coding/Downloads/sfluv-mobile-app-530d74a24ce1.json",
+        "serviceAccountKeyPath": "sfluv-mobile-app-530d74a24ce1.json",
         "track": "production"
       }
     }
