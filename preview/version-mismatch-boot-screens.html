@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SFLUV Version Gate Preview</title>
+    <style>
+      :root {
+        --bg: #f3efea;
+        --surface: #ffffff;
+        --surface-soft: #f8f3ef;
+        --border: #ded5cf;
+        --primary: #ef6d66;
+        --primary-strong: #d95a53;
+        --primary-soft: #fde7e2;
+        --navy: #3a2c2f;
+        --text: #201f24;
+        --muted: #6e6974;
+        --shadow: rgba(36, 24, 24, 0.16);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "SF Pro Display", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 10% 14%, rgba(239, 109, 102, 0.14), transparent 22%),
+          radial-gradient(circle at 90% 8%, rgba(255, 255, 255, 0.75), transparent 24%),
+          linear-gradient(180deg, #f8f4ef 0%, #efe7de 100%);
+      }
+
+      .page {
+        max-width: 1240px;
+        margin: 0 auto;
+        padding: 32px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(260px, 420px) 1fr;
+        gap: 28px;
+        align-items: end;
+        margin-bottom: 28px;
+      }
+
+      .kicker {
+        margin: 0 0 10px;
+        color: var(--primary-strong);
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        color: var(--navy);
+        font-size: clamp(34px, 5vw, 58px);
+        line-height: 0.95;
+      }
+
+      .hero p,
+      .note p,
+      .caption p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      .note {
+        border: 1px solid rgba(255, 255, 255, 0.58);
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.62);
+        box-shadow: 0 18px 50px rgba(36, 24, 24, 0.08);
+        padding: 18px 20px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(230px, 1fr));
+        gap: 22px;
+      }
+
+      .case {
+        display: grid;
+        gap: 14px;
+      }
+
+      .phone-frame {
+        position: relative;
+        width: 100%;
+        max-width: 310px;
+        justify-self: center;
+        aspect-ratio: 390 / 844;
+        border-radius: 36px;
+        padding: 11px;
+        background: #141414;
+        box-shadow: 0 28px 70px var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+      }
+
+      .phone-notch {
+        position: absolute;
+        z-index: 5;
+        top: 12px;
+        left: 50%;
+        width: 112px;
+        height: 24px;
+        transform: translateX(-50%);
+        border-radius: 0 0 16px 16px;
+        background: #0d0d0d;
+      }
+
+      .phone {
+        position: relative;
+        height: 100%;
+        overflow: hidden;
+        border-radius: 28px;
+        background:
+          radial-gradient(circle at 92% 8%, rgba(239, 109, 102, 0.13), transparent 24%),
+          radial-gradient(circle at 12% 26%, rgba(255, 255, 255, 0.62), transparent 18%),
+          linear-gradient(180deg, #f3efea 0%, #eee6de 100%);
+      }
+
+      .status-bar {
+        position: absolute;
+        z-index: 2;
+        top: 18px;
+        left: 22px;
+        right: 22px;
+        display: flex;
+        justify-content: space-between;
+        color: var(--navy);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .screen-center {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 28px;
+        gap: 12px;
+        text-align: center;
+      }
+
+      .spinner {
+        width: 30px;
+        height: 30px;
+        border-radius: 999px;
+        border: 3px solid rgba(217, 90, 83, 0.18);
+        border-top-color: var(--primary-strong);
+      }
+
+      .state-title {
+        margin: 0;
+        color: var(--primary-strong);
+        font-size: 22px;
+        line-height: 1.15;
+        font-weight: 900;
+      }
+
+      .state-text {
+        margin: 0;
+        max-width: 260px;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+
+      .update-button {
+        min-width: 220px;
+        margin-top: 8px;
+        border-radius: 999px;
+        background: var(--surface);
+        border: 0;
+        padding: 16px 22px;
+        color: var(--text);
+        font-size: 16px;
+        font-weight: 900;
+      }
+
+      .login {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 14px;
+        padding: 28px;
+      }
+
+      .login-brand {
+        color: var(--primary-strong);
+        font-size: 13px;
+        font-weight: 900;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .login-title {
+        margin: 0;
+        color: var(--primary-strong);
+        font-size: 34px;
+        line-height: 0.98;
+        font-weight: 900;
+      }
+
+      .login-body {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+
+      .login-option {
+        min-height: 54px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 900;
+      }
+
+      .login-option.outline {
+        background: transparent;
+        color: var(--primary-strong);
+      }
+
+      .caption {
+        border: 1px solid rgba(255, 255, 255, 0.62);
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.62);
+        padding: 14px;
+        min-height: 170px;
+      }
+
+      .caption h2 {
+        margin: 0 0 8px;
+        color: var(--navy);
+        font-size: 18px;
+        line-height: 1.15;
+      }
+
+      .caption code {
+        display: inline-block;
+        margin-top: 8px;
+        border-radius: 999px;
+        background: var(--primary-soft);
+        color: var(--primary-strong);
+        padding: 5px 8px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      @media (max-width: 1080px) {
+        .grid {
+          grid-template-columns: repeat(2, minmax(240px, 1fr));
+        }
+      }
+
+      @media (max-width: 760px) {
+        .page {
+          padding: 20px;
+        }
+
+        .hero,
+        .grid {
+          grid-template-columns: 1fr;
+        }
+
+        .caption {
+          min-height: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <div>
+          <p class="kicker">Boot Compatibility Gate</p>
+          <h1>Version mismatch renderings</h1>
+        </div>
+        <div class="note">
+          <p>
+            These previews mirror the current mobile boot path: the app fetches
+            <code>/client-version</code> and <code>/config</code> before Privy or the wallet UI renders. Only required
+            updates block startup today.
+          </p>
+        </div>
+      </section>
+
+      <section class="grid" aria-label="Version mismatch boot state previews">
+        <article class="case">
+          <div class="phone-frame">
+            <div class="phone-notch"></div>
+            <div class="phone">
+              <div class="status-bar"><span>9:41</span><span>5G 100%</span></div>
+              <div class="screen-center">
+                <div class="spinner" aria-hidden="true"></div>
+                <h2 class="state-title">Starting SFLUV</h2>
+                <p class="state-text">Checking app compatibility...</p>
+              </div>
+            </div>
+          </div>
+          <div class="caption">
+            <h2>Initial compatibility check</h2>
+            <p>Shown while both boot requests are in flight. The app should not render auth, wallet, or map surfaces until the version and config responses return.</p>
+            <code>compatibility.status = loading</code>
+          </div>
+        </article>
+
+        <article class="case">
+          <div class="phone-frame">
+            <div class="phone-notch"></div>
+            <div class="phone">
+              <div class="status-bar"><span>9:41</span><span>5G 100%</span></div>
+              <div class="login">
+                <div class="login-brand">SFLUV</div>
+                <h2 class="login-title">A community currency for San Francisco</h2>
+                <p class="login-body">Sign in to send, receive, and redeem SFLUV.</p>
+                <div class="login-option">Continue with Google</div>
+                <div class="login-option outline">Continue with Email</div>
+                <div class="login-option" style="background:#111;color:#fff;border-color:#111;">Continue with Apple</div>
+              </div>
+            </div>
+          </div>
+          <div class="caption">
+            <h2>Below recommended version</h2>
+            <p>If the build is below the recommended build but still meets the minimum build, the backend returns an advisory status. Current mobile behavior continues normal boot and does not show a blocking update screen.</p>
+            <code>status = update_recommended</code>
+          </div>
+        </article>
+
+        <article class="case">
+          <div class="phone-frame">
+            <div class="phone-notch"></div>
+            <div class="phone">
+              <div class="status-bar"><span>9:41</span><span>5G 100%</span></div>
+              <div class="screen-center">
+                <h2 class="state-title">Update Required</h2>
+                <p class="state-text">An SFLUV Wallet update is required.</p>
+                <button class="update-button">Update App</button>
+              </div>
+            </div>
+          </div>
+          <div class="caption">
+            <h2>Below minimum version</h2>
+            <p>If the build is below the minimum build, startup is blocked. The app should show only this centered gate and an Update App button when the backend provides an update URL.</p>
+            <code>status = update_required</code>
+          </div>
+        </article>
+
+        <article class="case">
+          <div class="phone-frame">
+            <div class="phone-notch"></div>
+            <div class="phone">
+              <div class="status-bar"><span>9:41</span><span>5G 100%</span></div>
+              <div class="screen-center">
+                <h2 class="state-title">Update Required</h2>
+                <p class="state-text">An SFLUV Wallet update is required to use the current network configuration.</p>
+              </div>
+            </div>
+          </div>
+          <div class="caption">
+            <h2>Required but no update URL</h2>
+            <p>The same blocking gate appears without a button if the response has no update URL. This also represents the current dynamic-config-required network mismatch path.</p>
+            <code>force_update = true</code>
+          </div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

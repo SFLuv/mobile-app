@@ -853,6 +853,9 @@ export function SettingsScreen({
   const [improverMessage, setImproverMessage] = useState<string | null>(null);
   const [improverError, setImproverError] = useState<string | null>(null);
   const [socialHelpVisible, setSocialHelpVisible] = useState(false);
+  const [dangerZoneOpen, setDangerZoneOpen] = useState(false);
+  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   const hasImproverSection = Boolean(onOpenImprover || improver || user?.isImprover);
   const hasMerchantSection = Boolean(user?.isMerchant);
@@ -917,6 +920,24 @@ export function SettingsScreen({
     } finally {
       setImproverBusy(false);
     }
+  };
+
+  const closeDeleteConfirm = () => {
+    setDeleteConfirmVisible(false);
+    setDeleteConfirmText("");
+  };
+
+  const openDeleteConfirm = () => {
+    setDeleteConfirmText("");
+    setDeleteConfirmVisible(true);
+  };
+
+  const confirmDeleteAccount = () => {
+    if (deleteConfirmText !== "DELETE" || accountDeletionBusy || !onDeleteAccount) {
+      return;
+    }
+    closeDeleteConfirm();
+    onDeleteAccount();
   };
 
   return (
@@ -1121,24 +1142,40 @@ export function SettingsScreen({
 
           {onDeleteAccount ? (
             <View style={[styles.card, styles.deleteAccountCard]}>
-              <View style={styles.dangerZoneHeader}>
-                <Ionicons name="warning-outline" size={18} color={palette.danger} />
-                <Text style={styles.dangerZoneTitle}>Danger Zone</Text>
-              </View>
-              <Text style={styles.body}>
-                Delete your account and log out. Your account stays recoverable for 30 days, but any SFLUV in your accessible wallets will be transferred out before the deletion request is submitted.
-              </Text>
-              <Text style={styles.dangerZoneNote}>Only use this if you really want to remove this account.</Text>
-              {accountDeletionMessage ? <Text style={styles.inlineError}>{accountDeletionMessage}</Text> : null}
               <Pressable
-                style={[styles.deleteAccountButton, accountDeletionBusy ? styles.buttonDisabled : undefined]}
-                disabled={accountDeletionBusy}
-                onPress={onDeleteAccount}
+                style={styles.dangerZoneDisclosure}
+                onPress={() => setDangerZoneOpen((current) => !current)}
               >
-                <Text style={styles.deleteAccountButtonText}>
-                  {accountDeletionBusy ? "Preparing..." : "Delete account"}
-                </Text>
+                <View style={styles.dangerZoneHeader}>
+                  <Ionicons name="warning-outline" size={18} color="#b91c1c" />
+                  <Text style={styles.dangerZoneTitle}>Danger Zone</Text>
+                </View>
+                <Ionicons
+                  name={dangerZoneOpen ? "chevron-up" : "chevron-down"}
+                  size={18}
+                  color="#b91c1c"
+                />
               </Pressable>
+              {dangerZoneOpen ? (
+                <View style={styles.dangerZoneContent}>
+                  <Text style={styles.body}>
+                    Delete your account and log out. Your account stays recoverable for 30 days, but any SFLUV in your accessible wallets will be transferred out before the deletion request is submitted.
+                  </Text>
+                  <Text style={styles.dangerZoneNote}>Only use this if you really want to remove this account.</Text>
+                  {accountDeletionMessage ? <Text style={styles.inlineError}>{accountDeletionMessage}</Text> : null}
+                  <Pressable
+                    style={[styles.deleteAccountButton, accountDeletionBusy ? styles.buttonDisabled : undefined]}
+                    disabled={accountDeletionBusy}
+                    onPress={openDeleteConfirm}
+                  >
+                    <Text style={styles.deleteAccountButtonText}>
+                      {accountDeletionBusy ? "Preparing..." : "Delete account"}
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : accountDeletionMessage ? (
+                <Text style={styles.inlineError}>{accountDeletionMessage}</Text>
+              ) : null}
             </View>
           ) : null}
         </>
@@ -1163,7 +1200,7 @@ export function SettingsScreen({
               <Text style={styles.body}>
                 {improver
                   ? "View your improver request and finish any remaining setup steps."
-                  : "Request improver status and manage the verified email used for approval."}
+                  : "Become an improver using the email attached to your account."}
               </Text>
               {improver ? <Text style={styles.meta}>Status: {formatStatusLabel(improver.status)}</Text> : null}
               {improver?.email ? <Text style={styles.meta}>Improver email: {improver.email}</Text> : null}
@@ -1274,6 +1311,59 @@ export function SettingsScreen({
         </>
       ) : null}
       </ScrollView>
+      <Modal
+        visible={deleteConfirmVisible}
+        transparent
+        presentationStyle="overFullScreen"
+        animationType="fade"
+        onRequestClose={closeDeleteConfirm}
+      >
+        <Pressable style={styles.modalOverlay} onPress={closeDeleteConfirm}>
+          <Pressable style={styles.deleteConfirmCard} onPress={() => {}}>
+            <View style={styles.deleteConfirmHeader}>
+              <Ionicons name="warning-outline" size={22} color="#b91c1c" />
+              <Text style={styles.deleteConfirmTitle}>Confirm account deletion</Text>
+            </View>
+            <Text style={styles.body}>
+              This starts the account deletion flow and may transfer SFLUV out of accessible wallets before the deletion request is submitted.
+            </Text>
+            <Text style={styles.dangerZoneNote}>Type DELETE to continue.</Text>
+            <TextInput
+              style={styles.deleteConfirmInput}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              contextMenuHidden
+              editable={!accountDeletionBusy}
+              placeholder="DELETE"
+              placeholderTextColor={palette.textMuted}
+              value={deleteConfirmText}
+              onChangeText={setDeleteConfirmText}
+            />
+            <View style={styles.deleteConfirmActions}>
+              <Pressable
+                style={[styles.secondaryButton, styles.deleteConfirmActionButton]}
+                disabled={accountDeletionBusy}
+                onPress={closeDeleteConfirm}
+              >
+                <Text style={styles.secondaryButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.deleteAccountButton,
+                  styles.deleteConfirmActionButton,
+                  deleteConfirmText !== "DELETE" || accountDeletionBusy ? styles.buttonDisabled : undefined,
+                ]}
+                disabled={deleteConfirmText !== "DELETE" || accountDeletionBusy}
+                onPress={confirmDeleteAccount}
+              >
+                <Text style={styles.deleteAccountButtonText}>
+                  {accountDeletionBusy ? "Preparing..." : "Delete account"}
+                </Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
       <Modal
         visible={socialHelpVisible}
         transparent
@@ -1944,24 +2034,37 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       alignItems: "center",
       gap: spacing.xs,
     },
+    dangerZoneDisclosure: {
+      minHeight: 48,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: spacing.md,
+    },
+    dangerZoneContent: {
+      gap: spacing.md,
+      paddingTop: spacing.sm,
+      borderTopWidth: 1,
+      borderTopColor: "rgba(185, 28, 28, 0.18)",
+    },
     dangerZoneTitle: {
-      color: palette.danger,
+      color: "#b91c1c",
       fontSize: 18,
       fontWeight: "900",
     },
     dangerZoneNote: {
-      color: palette.danger,
+      color: "#b91c1c",
       lineHeight: 20,
       fontWeight: "700",
     },
     deleteAccountCard: {
-      borderColor: palette.danger,
-      backgroundColor: palette.surface,
+      borderColor: "rgba(185, 28, 28, 0.26)",
+      backgroundColor: "rgba(185, 28, 28, 0.05)",
     },
     deleteAccountButton: {
       minHeight: 48,
       borderRadius: radii.md,
-      backgroundColor: palette.danger,
+      backgroundColor: "#b91c1c",
       alignItems: "center",
       justifyContent: "center",
       paddingHorizontal: spacing.md,
@@ -1970,6 +2073,47 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       color: palette.white,
       fontWeight: "900",
       fontSize: 15,
+    },
+    deleteConfirmCard: {
+      width: "100%",
+      maxWidth: 390,
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      borderColor: "rgba(185, 28, 28, 0.28)",
+      backgroundColor: palette.surface,
+      padding: spacing.lg,
+      gap: spacing.md,
+      ...shadows.card,
+    },
+    deleteConfirmHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    deleteConfirmTitle: {
+      flex: 1,
+      color: "#b91c1c",
+      fontSize: 18,
+      fontWeight: "900",
+    },
+    deleteConfirmInput: {
+      borderWidth: 1,
+      borderColor: "rgba(185, 28, 28, 0.38)",
+      borderRadius: radii.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: 12,
+      backgroundColor: "rgba(185, 28, 28, 0.06)",
+      color: palette.text,
+      fontSize: 18,
+      fontWeight: "900",
+      letterSpacing: 1,
+    },
+    deleteConfirmActions: {
+      flexDirection: "row",
+      gap: spacing.sm,
+    },
+    deleteConfirmActionButton: {
+      flex: 1,
     },
   });
 }

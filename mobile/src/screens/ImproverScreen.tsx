@@ -34,7 +34,6 @@ import {
   AppWorkflowWorkItem,
   AppWorkflowStep,
   AppWorkflowStepCompletionInput,
-  VerifiedEmail,
 } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
@@ -140,16 +139,12 @@ type ImproverScreenCache = {
   credentialSearch: string;
   requestFirstName: string;
   requestLastName: string;
-  requestEmailInput: string;
-  selectedVerifiedEmailId: string | null;
   workflows: AppImproverWorkflowListItem[];
   unpaidWorkflows: AppWorkflow[];
   activeCredentials: AppCredentialType[];
   credentialTypes: AppGlobalCredentialType[];
   credentialRequests: AppCredentialRequest[];
   absencePeriods: AppImproverAbsencePeriod[];
-  verifiedEmails: VerifiedEmail[];
-  requestDataLoaded: boolean;
   workflowDataLoaded: boolean;
   unpaidDataLoaded: boolean;
   credentialDataLoaded: boolean;
@@ -169,16 +164,12 @@ function createEmptyImproverScreenCache(userId: string | null): ImproverScreenCa
     credentialSearch: "",
     requestFirstName: "",
     requestLastName: "",
-    requestEmailInput: "",
-    selectedVerifiedEmailId: null,
     workflows: [],
     unpaidWorkflows: [],
     activeCredentials: [],
     credentialTypes: [],
     credentialRequests: [],
     absencePeriods: [],
-    verifiedEmails: [],
-    requestDataLoaded: false,
     workflowDataLoaded: false,
     unpaidDataLoaded: false,
     credentialDataLoaded: false,
@@ -210,11 +201,6 @@ function formatStatusLabel(value?: string | null): string {
     .filter(Boolean)
     .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
     .join(" ");
-}
-
-function looksLikeEmail(value: string): boolean {
-  const trimmed = value.trim();
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
 }
 
 function getWorkflowDisplayStatus(workflow: Pick<AppWorkflow, "status" | "startAt">, nowUnix = Date.now() / 1000): string {
@@ -414,8 +400,11 @@ function estimateBase64Bytes(value: string): number {
 }
 
 function splitName(input?: string | null): { firstName: string; lastName: string } {
-  const parts = (input || "")
-    .trim()
+  const trimmed = (input || "").trim();
+  if (!trimmed || trimmed === "SFLUV User") {
+    return { firstName: "", lastName: "" };
+  }
+  const parts = trimmed
     .split(/\s+/)
     .filter(Boolean);
   if (parts.length === 0) {
@@ -480,8 +469,6 @@ export function ImproverScreen({
   const [credentialSearch, setCredentialSearch] = useState(initialCache.credentialSearch);
   const [requestFirstName, setRequestFirstName] = useState(initialCache.requestFirstName);
   const [requestLastName, setRequestLastName] = useState(initialCache.requestLastName);
-  const [requestEmailInput, setRequestEmailInput] = useState(initialCache.requestEmailInput);
-  const [selectedVerifiedEmailId, setSelectedVerifiedEmailId] = useState<string | null>(initialCache.selectedVerifiedEmailId);
   const [absenceFrom, setAbsenceFrom] = useState("");
   const [absenceUntil, setAbsenceUntil] = useState("");
   const [workflows, setWorkflows] = useState<AppImproverWorkflowListItem[]>(initialCache.workflows);
@@ -490,9 +477,6 @@ export function ImproverScreen({
   const [credentialTypes, setCredentialTypes] = useState<AppGlobalCredentialType[]>(initialCache.credentialTypes);
   const [credentialRequests, setCredentialRequests] = useState<AppCredentialRequest[]>(initialCache.credentialRequests);
   const [absencePeriods, setAbsencePeriods] = useState<AppImproverAbsencePeriod[]>(initialCache.absencePeriods);
-  const [verifiedEmails, setVerifiedEmails] = useState<VerifiedEmail[]>(initialCache.verifiedEmails);
-  const [requestDataLoaded, setRequestDataLoaded] = useState(initialCache.requestDataLoaded);
-  const [requestDataLoading, setRequestDataLoading] = useState(false);
   const [workflowDataLoaded, setWorkflowDataLoaded] = useState(initialCache.workflowDataLoaded);
   const [workflowDataLoading, setWorkflowDataLoading] = useState(false);
   const [unpaidDataLoaded, setUnpaidDataLoaded] = useState(initialCache.unpaidDataLoaded);
@@ -525,7 +509,6 @@ export function ImproverScreen({
   const detailScrollRef = useRef<ScrollView | null>(null);
   const detailScrollYRef = useRef(0);
   const pendingDetailScrollYRef = useRef<number | null>(null);
-  const requestDataRequestRef = useRef<Promise<void> | null>(null);
   const workflowDataRequestRef = useRef<Promise<void> | null>(null);
   const unpaidDataRequestRef = useRef<Promise<void> | null>(null);
   const credentialDataRequestRef = useRef<Promise<void> | null>(null);
@@ -606,21 +589,16 @@ export function ImproverScreen({
     setCredentialSearch(nextCache.credentialSearch);
     setRequestFirstName(nextCache.requestFirstName);
     setRequestLastName(nextCache.requestLastName);
-    setRequestEmailInput(nextCache.requestEmailInput);
-    setSelectedVerifiedEmailId(nextCache.selectedVerifiedEmailId);
     setWorkflows(nextCache.workflows);
     setUnpaidWorkflows(nextCache.unpaidWorkflows);
     setActiveCredentials(nextCache.activeCredentials);
     setCredentialTypes(nextCache.credentialTypes);
     setCredentialRequests(nextCache.credentialRequests);
     setAbsencePeriods(nextCache.absencePeriods);
-    setVerifiedEmails(nextCache.verifiedEmails);
-    setRequestDataLoaded(nextCache.requestDataLoaded);
     setWorkflowDataLoaded(nextCache.workflowDataLoaded);
     setUnpaidDataLoaded(nextCache.unpaidDataLoaded);
     setCredentialDataLoaded(nextCache.credentialDataLoaded);
     setAbsenceDataLoaded(nextCache.absenceDataLoaded);
-    setRequestDataLoading(false);
     setWorkflowDataLoading(false);
     setUnpaidDataLoading(false);
     setCredentialDataLoading(false);
@@ -664,16 +642,12 @@ export function ImproverScreen({
       credentialSearch,
       requestFirstName,
       requestLastName,
-      requestEmailInput,
-      selectedVerifiedEmailId,
       workflows,
       unpaidWorkflows,
       activeCredentials,
       credentialTypes,
       credentialRequests,
       absencePeriods,
-      verifiedEmails,
-      requestDataLoaded,
       workflowDataLoaded,
       unpaidDataLoaded,
       credentialDataLoaded,
@@ -691,64 +665,17 @@ export function ImproverScreen({
     credentialTypes,
     includePastWorkflows,
     myWorkflowsSearch,
-    requestDataLoaded,
-    requestEmailInput,
     requestFirstName,
     requestLastName,
     section,
-    selectedVerifiedEmailId,
     unpaidDataLoaded,
     unpaidSearch,
     unpaidWorkflows,
     userId,
-    verifiedEmails,
     workflowDataLoaded,
     workflows,
     workflowView,
   ]);
-
-  const loadRequestData = useCallback(
-    async (force = false, options?: LoadOptions) => {
-      if (!backendClient) {
-        return;
-      }
-      const silent = options?.silent === true;
-      if (requestDataRequestRef.current && (!force || silent)) {
-        return requestDataRequestRef.current;
-      }
-
-      const request = (async () => {
-        if (!silent) {
-          setRequestDataLoading(true);
-        }
-        try {
-          const [emails, loadedCredentialTypes] = await Promise.all([
-            backendClient.getVerifiedEmails(),
-            backendClient.getCredentialTypes(),
-          ]);
-          setVerifiedEmails(emails);
-          setCredentialTypes(loadedCredentialTypes);
-          if (!silent) {
-            setError(null);
-          }
-        } catch (nextError) {
-          if (!silent) {
-            setError((nextError as Error)?.message || "Unable to load improver request details.");
-          }
-        } finally {
-          setRequestDataLoaded(true);
-          if (!silent) {
-            setRequestDataLoading(false);
-          }
-          requestDataRequestRef.current = null;
-        }
-      })();
-
-      requestDataRequestRef.current = request;
-      return request;
-    },
-    [backendClient],
-  );
 
   const loadWorkflowData = useCallback(
     async (force = false, options?: LoadOptions) => {
@@ -923,15 +850,11 @@ export function ImproverScreen({
   );
 
   useEffect(() => {
-    if (!backendClient) {
-      return;
-    }
-    if (!canUsePanel) {
-      void loadRequestData(requestDataLoaded, { silent: requestDataLoaded });
+    if (!backendClient || !canUsePanel) {
       return;
     }
     void loadWorkflowData(workflowDataLoaded, { silent: workflowDataLoaded });
-  }, [backendClient, canUsePanel, loadRequestData, loadWorkflowData, userId]);
+  }, [backendClient, canUsePanel, loadWorkflowData, userId]);
 
   useEffect(() => {
     if (!canUsePanel) {
@@ -1311,34 +1234,6 @@ export function ImproverScreen({
     }
     return myBadgeItems.filter((badge) => badge.label.toLowerCase().includes(search));
   }, [badgeSearch, myBadgeItems]);
-
-  const verifiedEmailsByStatus = useMemo(
-    () => ({
-      verified: verifiedEmails.filter((email) => email.status === "verified"),
-      pending: verifiedEmails.filter((email) => email.status !== "verified"),
-    }),
-    [verifiedEmails],
-  );
-
-  useEffect(() => {
-    if (selectedVerifiedEmailId) {
-      const selectedStillVerified = verifiedEmailsByStatus.verified.some(
-        (email) => email.id === selectedVerifiedEmailId,
-      );
-      if (selectedStillVerified) {
-        return;
-      }
-    }
-
-    if (verifiedEmailsByStatus.verified[0]) {
-      setSelectedVerifiedEmailId(verifiedEmailsByStatus.verified[0].id);
-      return;
-    }
-
-    if (selectedVerifiedEmailId) {
-      setSelectedVerifiedEmailId(null);
-    }
-  }, [selectedVerifiedEmailId, verifiedEmailsByStatus.verified]);
 
   const summarizeWorkflowForFeed = useCallback(
     (workflow: AppWorkflow): AppImproverWorkflowListItem => {
@@ -2038,19 +1933,14 @@ export function ImproverScreen({
       setNotice(null);
       return;
     }
-    const selectedEmail =
-      verifiedEmailsByStatus.verified.find((email) => email.id === selectedVerifiedEmailId)?.email || "";
+    const accountEmail = user?.contactEmail?.trim() || "";
     if (!requestFirstName.trim() || !requestLastName.trim()) {
       setError("First and last name are required.");
       setNotice(null);
       return;
     }
-    if (!selectedEmail) {
-      setError(
-        verifiedEmailsByStatus.verified.length > 0
-          ? "Select a verified email before requesting improver status."
-          : "Verify an email before requesting improver status.",
-      );
+    if (!accountEmail) {
+      setError("Add an email to your account before becoming an improver.");
       setNotice(null);
       return;
     }
@@ -2059,86 +1949,30 @@ export function ImproverScreen({
       const nextImprover = await backendClient.requestImproverStatus({
         firstName: requestFirstName.trim(),
         lastName: requestLastName.trim(),
-        email: selectedEmail,
+        email: accountEmail,
       });
       onImproverUpdated?.(nextImprover);
       await onRefreshProfile();
-      await loadRequestData(true);
       setNotice(
         nextImprover.status === "approved"
           ? "Improver access is active."
-          : "Improver request submitted. Status: Pending.",
+          : "Improver request submitted.",
       );
       setError(null);
     } catch (nextError) {
-      setError((nextError as Error)?.message || "Unable to request improver status.");
+      setError((nextError as Error)?.message || "Unable to submit improver request.");
       setNotice(null);
     } finally {
       setActionKey("");
     }
   }, [
     backendClient,
-    loadRequestData,
     onImproverUpdated,
     onRefreshProfile,
     requestFirstName,
     requestLastName,
-    selectedVerifiedEmailId,
-    verifiedEmailsByStatus.verified,
+    user?.contactEmail,
   ]);
-
-  const requestEmailVerification = useCallback(async () => {
-    if (!backendClient) {
-      setError("The shared app backend is not ready. Please try again in a moment.");
-      setNotice(null);
-      return;
-    }
-    const trimmedEmail = requestEmailInput.trim();
-    if (!trimmedEmail) {
-      setError("Enter an email address to verify.");
-      setNotice(null);
-      return;
-    }
-    if (!looksLikeEmail(trimmedEmail)) {
-      setError("Enter a valid email address.");
-      setNotice(null);
-      return;
-    }
-    setActionKey("request-email");
-    try {
-      await backendClient.requestVerifiedEmail(trimmedEmail);
-      await loadRequestData(true);
-      setRequestEmailInput("");
-      setNotice("Verification email sent.");
-      setError(null);
-    } catch (nextError) {
-      setError((nextError as Error)?.message || "Unable to send a verification email.");
-      setNotice(null);
-    } finally {
-      setActionKey("");
-    }
-  }, [backendClient, loadRequestData, requestEmailInput]);
-
-  const resendEmailVerification = useCallback(
-    async (emailId: string) => {
-      if (!backendClient) {
-        return;
-      }
-      setActionKey(`resend-email:${emailId}`);
-      try {
-        await backendClient.resendVerifiedEmail(emailId);
-        await loadRequestData(true);
-        setNotice("Verification email resent.");
-        setError(null);
-      } catch (nextError) {
-        setError((nextError as Error)?.message || "Unable to resend verification.");
-        setNotice(null);
-      } finally {
-        setActionKey("");
-      }
-    },
-    [backendClient, loadRequestData],
-  );
 
   const revokeAbsence = useCallback(
     async (absenceId: string) => {
@@ -2429,24 +2263,17 @@ export function ImproverScreen({
           ? "danger"
           : "warning";
     const requestFormBusy = actionKey === "request-improver";
-    const requestFormLoading = requestDataLoading && !requestDataLoaded;
-    const selectedVerifiedEmail = verifiedEmailsByStatus.verified.find(
-      (email) => email.id === selectedVerifiedEmailId,
-    );
+    const accountEmail = user?.contactEmail?.trim() || "";
     const requestButtonLabel = requestFormBusy
       ? "Submitting..."
       : improver?.status === "pending"
         ? "Update request"
         : improver?.status === "rejected"
           ? "Resubmit request"
-          : "Become an improver";
-    const requestHelpText = requestFormLoading
-      ? "Loading verified email options..."
-      : verifiedEmailsByStatus.verified.length === 0
-        ? "Verify an email above before submitting the request."
-        : selectedVerifiedEmail
-          ? `Request will use ${selectedVerifiedEmail.email}.`
-          : "Select a verified email above before submitting the request.";
+          : "Submit";
+    const requestHelpText = accountEmail
+      ? `This request will use the email on your account: ${accountEmail}.`
+      : "Add an email to your account before submitting.";
 
     return (
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
@@ -2464,104 +2291,13 @@ export function ImproverScreen({
         ) : null}
 
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Verified email</Text>
-          {requestDataLoading && !requestDataLoaded ? renderLoadingCard("Loading verified emails...") : null}
-          {verifiedEmailsByStatus.verified.map((email) => {
-            const selected = selectedVerifiedEmailId === email.id;
-            return (
-              <Pressable
-                key={email.id}
-                style={[styles.choiceRow, selected ? styles.choiceRowActive : undefined]}
-                onPress={() => {
-                  setSelectedVerifiedEmailId(email.id);
-                  if (error || notice) {
-                    setError(null);
-                    setNotice(null);
-                  }
-                }}
-              >
-                <View style={styles.choiceCopy}>
-                  <Text style={styles.choiceTitle}>{email.email}</Text>
-                  <Text style={styles.choiceBody}>
-                    Verified {email.verifiedAt ? new Date(email.verifiedAt).toLocaleDateString() : "recently"}
-                  </Text>
-                </View>
-                {selected ? <Ionicons name="checkmark-circle" size={20} color={palette.primaryStrong} /> : null}
-              </Pressable>
-            );
-          })}
-          {verifiedEmailsByStatus.verified.length === 0 && requestDataLoaded ? (
-            <Text style={styles.meta}>No verified emails yet.</Text>
-          ) : null}
-
-          <View style={styles.inlineForm}>
-            <TextInput
-              style={styles.input}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-              placeholder="name@example.com"
-              placeholderTextColor={palette.textMuted}
-              value={requestEmailInput}
-              onChangeText={(value) => {
-                setRequestEmailInput(value);
-                if (error || notice) {
-                  setError(null);
-                  setNotice(null);
-                }
-              }}
-            />
-            <Pressable
-              style={[styles.primaryButton, actionKey === "request-email" ? styles.buttonDisabled : undefined]}
-              disabled={actionKey === "request-email"}
-              onPress={() => {
-                void requestEmailVerification();
-              }}
-            >
-              <Text style={styles.primaryButtonText}>
-                {actionKey === "request-email" ? "Sending..." : "Send verification"}
-              </Text>
-            </Pressable>
-          </View>
-
-          {verifiedEmailsByStatus.pending.length > 0 ? (
-            <View style={styles.stack}>
-              {verifiedEmailsByStatus.pending.map((email) => (
-                <View key={email.id} style={styles.pendingEmailRow}>
-                  <View style={styles.choiceCopy}>
-                    <Text style={styles.choiceTitle}>{email.email}</Text>
-                    <Text style={styles.choiceBody}>
-                      {email.status === "expired" ? "Expired" : "Waiting for verification"}
-                    </Text>
-                  </View>
-                  <Pressable
-                    style={[
-                      styles.secondaryButton,
-                      actionKey === `resend-email:${email.id}` ? styles.buttonDisabled : undefined,
-                    ]}
-                    disabled={actionKey === `resend-email:${email.id}`}
-                    onPress={() => {
-                      void resendEmailVerification(email.id);
-                    }}
-                  >
-                    <Text style={styles.secondaryButtonText}>
-                      {actionKey === `resend-email:${email.id}` ? "Sending..." : "Resend"}
-                    </Text>
-                  </Pressable>
-                </View>
-              ))}
-            </View>
-          ) : null}
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Request improver status</Text>
+          <Text style={styles.sectionTitle}>Become an improver</Text>
           {improver?.status === "pending" ? (
-            <Text style={styles.body}>Your request is pending review. You can update the name or verified email here.</Text>
+            <Text style={styles.body}>Your request is pending. You can update the name on this request.</Text>
           ) : improver?.status === "rejected" ? (
-            <Text style={styles.body}>Your previous request was not approved. You can update the details and resubmit.</Text>
+            <Text style={styles.body}>Your previous request was not approved. You can update your name and resubmit.</Text>
           ) : (
-            <Text style={styles.body}>Submit your name and verified email for improver review.</Text>
+            <Text style={styles.body}>Submit your name to enable improver access for this account.</Text>
           )}
           <TextInput
             style={styles.input}
@@ -2593,14 +2329,14 @@ export function ImproverScreen({
           <Pressable
             style={[
               styles.primaryButton,
-              requestFormBusy || requestFormLoading ? styles.buttonDisabled : undefined,
+              requestFormBusy ? styles.buttonDisabled : undefined,
             ]}
-            disabled={requestFormBusy || requestFormLoading}
+            disabled={requestFormBusy}
             onPress={() => {
               void requestImproverAccess();
             }}
           >
-            <Text style={styles.primaryButtonText}>{requestFormLoading ? "Loading..." : requestButtonLabel}</Text>
+            <Text style={styles.primaryButtonText}>{requestButtonLabel}</Text>
           </Pressable>
         </View>
       </ScrollView>

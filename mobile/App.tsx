@@ -4698,13 +4698,9 @@ function PrivyWalletApp({
     }
   };
 
-  const handleEmailCodeChange = (value: string) => {
-    setEmailCode(value.replace(/\D/g, "").slice(0, EMAIL_LOGIN_CODE_LENGTH));
-  };
-
-  const handleEmailLogin = async () => {
+  const handleEmailLogin = async (codeOverride?: string) => {
     const normalizedEmail = emailAddress.trim();
-    const normalizedCode = normalizedEmailCode;
+    const normalizedCode = (codeOverride ?? normalizedEmailCode).replace(/\D/g, "").slice(0, EMAIL_LOGIN_CODE_LENGTH);
     if (!normalizedEmail) {
       presentLoginError(new Error("Enter your email address to continue."));
       return;
@@ -4725,6 +4721,19 @@ function PrivyWalletApp({
       presentLoginError(error);
     } finally {
       setEmailLoading(false);
+    }
+  };
+
+  const handleEmailCodeChange = (value: string) => {
+    const nextCode = value.replace(/\D/g, "").slice(0, EMAIL_LOGIN_CODE_LENGTH);
+    const inputJumpedToFullCode =
+      nextCode.length === EMAIL_LOGIN_CODE_LENGTH &&
+      nextCode.length - normalizedEmailCode.length > 1;
+
+    setEmailCode(nextCode);
+
+    if (inputJumpedToFullCode && !authLoading) {
+      void handleEmailLogin(nextCode);
     }
   };
 
@@ -5037,7 +5046,7 @@ function PrivyWalletApp({
                             ? "Verifying..."
                             : "Sending code..."
                           : emailCodeSent
-                            ? "Continue with Email"
+                            ? "Continue"
                             : "Email me a code"}
                       </Text>
                     </Pressable>

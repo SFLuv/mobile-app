@@ -1608,7 +1608,7 @@ export class AppBackendClient {
       }),
     });
     if (!response.ok) {
-      await throwRequestError(response, "Unable to request improver status");
+      await throwRequestError(response, "Unable to submit improver request");
     }
     const body = (await response.json()) as ImproverResponse;
     return mapImprover(body);
