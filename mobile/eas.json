@@ -5,6 +5,9 @@
   },
   "submit": {
     "production": {
+      "ios": {
+        "ascAppId": "6762672190"
+      },
       "android": {
         "serviceAccountKeyPath": "sfluv-mobile-app-530d74a24ce1.json",
         "track": "production"
