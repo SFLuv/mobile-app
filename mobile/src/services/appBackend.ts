@@ -130,6 +130,7 @@ type PublicLocationsResponse = {
 type TransactionsResponse = {
   transactions: Array<{
     id: string;
+    chain_id?: number;
     hash: string;
     amount: string;
     timestamp: number;
@@ -140,11 +141,74 @@ type TransactionsResponse = {
   total: number;
 };
 
+type ClientConfigAddressRef = {
+  address: string;
+  chain_id: number;
+};
+
+type ClientConfigToken = {
+  standard?: string;
+  name?: string;
+  address: string;
+  symbol?: string;
+  decimals?: number;
+  chain_id: number;
+};
+
+type ClientConfigAccount = {
+  chain_id: number;
+  entrypoint_address: string;
+  paymaster_address: string;
+  account_factory_address: string;
+  paymaster_type?: string;
+};
+
 type ClientConfigResponse = {
-  schema_version: number;
-  config_version: string;
-  environment: string;
-  active_chain_id: number;
+  community: {
+    name?: string;
+    alias: string;
+    primary_token: ClientConfigAddressRef;
+    primary_account_factory: ClientConfigAddressRef;
+  };
+  tokens: Record<string, ClientConfigToken>;
+  accounts: Record<string, ClientConfigAccount>;
+  chains: Record<string, {
+    id: number;
+    node: {
+      url: string;
+      ws_url?: string;
+    };
+  }>;
+  plugins?: Array<{
+    url?: string;
+  }>;
+  scan?: {
+    url?: string;
+    name?: string;
+  };
+  extras?: {
+    honey_token_address?: unknown;
+    honeyTokenAddress?: unknown;
+    honey_address?: unknown;
+    honeyAddress?: unknown;
+    honey_decimals?: unknown;
+    honeyDecimals?: unknown;
+    byusd_token_address?: unknown;
+    byusdTokenAddress?: unknown;
+    byusd_address?: unknown;
+    byusdAddress?: unknown;
+    byusd_decimals?: unknown;
+    byusdDecimals?: unknown;
+    zapper_address?: unknown;
+    zapperAddress?: unknown;
+    zapper_contract_address?: unknown;
+    zapperContractAddress?: unknown;
+    faucet_address?: unknown;
+    faucetAddress?: unknown;
+    backing_assets?: unknown;
+    backingAssets?: unknown;
+  };
+  version?: number | string;
   features?: {
     migration_banner?: boolean;
     sends_enabled?: boolean;
@@ -670,12 +734,182 @@ function mapUserPolicyStatus(input: UserPolicyStatusResponse): AppUserPolicyStat
   };
 }
 
+function configKey(ref: ClientConfigAddressRef): string {
+  return `${ref.chain_id}:${ref.address.trim().toLowerCase()}`;
+}
+
+function sameAddress(left?: string, right?: string): boolean {
+  if (!left || !right) {
+    return false;
+  }
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
+}
+
+function findConfigToken(input: ClientConfigResponse, ref: ClientConfigAddressRef): ClientConfigToken {
+  const exact = input.tokens?.[configKey(ref)];
+  if (exact) {
+    return exact;
+  }
+  const token = Object.values(input.tokens ?? {}).find(
+    (candidate) => candidate.chain_id === ref.chain_id && sameAddress(candidate.address, ref.address),
+  );
+  if (!token) {
+    throw new AppBackendRequestError(`App configuration is missing token ${configKey(ref)}.`);
+  }
+  return token;
+}
+
+function findConfigTokenBySymbol(input: ClientConfigResponse, symbol: string): ClientConfigToken | undefined {
+  const normalizedSymbol = symbol.trim().toLowerCase();
+  return Object.values(input.tokens ?? {}).find(
+    (candidate) => candidate.symbol?.trim().toLowerCase() === normalizedSymbol,
+  );
+}
+
+function findConfigAccount(input: ClientConfigResponse, ref: ClientConfigAddressRef): ClientConfigAccount {
+  const exact = input.accounts?.[configKey(ref)];
+  if (exact) {
+    return exact;
+  }
+  const account = Object.values(input.accounts ?? {}).find(
+    (candidate) => candidate.chain_id === ref.chain_id && sameAddress(candidate.account_factory_address, ref.address),
+  );
+  if (!account) {
+    throw new AppBackendRequestError(`App configuration is missing account factory ${configKey(ref)}.`);
+  }
+  return account;
+}
+
+function firstPluginURL(input: ClientConfigResponse): string {
+  const plugin = input.plugins?.find((entry) => typeof entry?.url === "string" && entry.url.startsWith("http"));
+  return plugin?.url || mobileConfig.appOrigin;
+}
+
+function readConfigAddress(value: unknown, label: string): string | undefined {
+  let raw = "";
+  if (typeof value === "string") {
+    raw = value.trim();
+  } else if (value && typeof value === "object") {
+    const address = (value as { address?: unknown }).address;
+    raw = typeof address === "string" ? address.trim() : "";
+  }
+  if (!raw) {
+    return undefined;
+  }
+  if (!ethers.utils.isAddress(raw)) {
+    throw new AppBackendRequestError(`Invalid ${label} address in app configuration.`);
+  }
+  return ethers.utils.getAddress(raw);
+}
+
+function findExtraAddress(input: ClientConfigResponse, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const address = readConfigAddress(input.extras?.[key as keyof NonNullable<ClientConfigResponse["extras"]>], `extras.${key}`);
+    if (address) {
+      return address;
+    }
+  }
+  return undefined;
+}
+
+function findExtraNumber(input: ClientConfigResponse, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = input.extras?.[key as keyof NonNullable<ClientConfigResponse["extras"]>];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return undefined;
+}
+
+function findExtraAddressList(input: ClientConfigResponse, ...keys: string[]): string[] {
+  for (const key of keys) {
+    const value = input.extras?.[key as keyof NonNullable<ClientConfigResponse["extras"]>];
+    if (Array.isArray(value)) {
+      return value
+        .map((entry) => readConfigAddress(entry, `extras.${key}`))
+        .filter((entry): entry is string => Boolean(entry));
+    }
+    if (typeof value === "string" && value.trim()) {
+      return value
+        .split(/[,\s;]+/)
+        .map((entry) => readConfigAddress(entry, `extras.${key}`))
+        .filter((entry): entry is string => Boolean(entry));
+    }
+  }
+  return [];
+}
+
+function normalizePaymasterType(value?: string): "cw-safe" {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized || normalized === "cw-safe" || normalized === "cwsafe") {
+    return "cw-safe";
+  }
+  throw new AppBackendRequestError(`Unsupported paymaster type "${value}" in app configuration.`);
+}
+
 function mapClientConfig(input: ClientConfigResponse): AppClientConfig {
+  const primaryToken = input.community?.primary_token;
+  const primaryFactory = input.community?.primary_account_factory;
+  if (!primaryToken?.address || !primaryToken.chain_id) {
+    throw new AppBackendRequestError("App configuration is missing community.primary_token.");
+  }
+  if (!primaryFactory?.address || !primaryFactory.chain_id) {
+    throw new AppBackendRequestError("App configuration is missing community.primary_account_factory.");
+  }
+
+  const token = findConfigToken(input, primaryToken);
+  const account = findConfigAccount(input, primaryFactory);
+  const chain = input.chains?.[String(primaryToken.chain_id)];
+  const rpcURL = chain?.node?.url?.trim();
+  if (!rpcURL) {
+    throw new AppBackendRequestError(`App configuration is missing chains.${primaryToken.chain_id}.node.url.`);
+  }
+  if (typeof token.decimals !== "number" || !Number.isFinite(token.decimals)) {
+    throw new AppBackendRequestError(`App configuration is missing decimals for token ${configKey(primaryToken)}.`);
+  }
+  const byusd = findConfigTokenBySymbol(input, "BYUSD");
+  const honey = findConfigTokenBySymbol(input, "HONEY");
+  const byusdTokenAddress = byusd ? ethers.utils.getAddress(byusd.address) :
+    findExtraAddress(input, "byusd_token_address", "byusdTokenAddress", "byusd_address", "byusdAddress");
+  const honeyTokenAddress = honey ? ethers.utils.getAddress(honey.address) :
+    findExtraAddress(input, "honey_token_address", "honeyTokenAddress", "honey_address", "honeyAddress");
+
   return {
-    schemaVersion: input.schema_version,
-    configVersion: asString(input.config_version),
-    environment: asString(input.environment),
-    activeChainId: asNumber(input.active_chain_id, mobileConfig.chainId),
+    schemaVersion: 1,
+    configVersion: input.version === undefined ? "unknown" : String(input.version),
+    environment: asString(input.community?.alias, "citizenwallet"),
+    activeChainId: primaryToken.chain_id,
+    chainName: asString(input.community?.name, `Chain ${primaryToken.chain_id}`),
+    rpcURL,
+    tokenAddress: ethers.utils.getAddress(token.address),
+    tokenDecimals: token.decimals,
+    tokenSymbol: asString(token.symbol, asString(token.name, "Token")),
+    explorerURL: typeof input.scan?.url === "string" && input.scan.url.trim() ? input.scan.url.trim() : undefined,
+    appOrigin: firstPluginURL(input),
+    alias: asString(input.community?.alias),
+    byusdTokenAddress,
+    byusdDecimals: byusd?.decimals ?? findExtraNumber(input, "byusd_decimals", "byusdDecimals"),
+    honeyTokenAddress,
+    honeyDecimals: honey?.decimals ?? findExtraNumber(input, "honey_decimals", "honeyDecimals"),
+    zapperAddress: findExtraAddress(input, "zapper_address", "zapperAddress", "zapper_contract_address", "zapperContractAddress"),
+    faucetAddress: findExtraAddress(input, "faucet_address", "faucetAddress"),
+    backingAssets: findExtraAddressList(input, "backing_assets", "backingAssets"),
+    maxSmartAccountScan: mobileConfig.maxSmartAccountScan,
+    wallet: {
+      entryPoint: ethers.utils.getAddress(account.entrypoint_address),
+      accountFactory: ethers.utils.getAddress(account.account_factory_address),
+      paymasterAddress: ethers.utils.getAddress(account.paymaster_address),
+      paymasterType: normalizePaymasterType(account.paymaster_type),
+      backendURL: rpcURL,
+      backendKind: "cw-engine",
+    },
     features: {
       migrationBanner: input.features?.migration_banner === true,
       sendsEnabled: input.features?.sends_enabled !== false,
@@ -1265,9 +1499,9 @@ function mapMerchantModeStatus(input: MerchantModeStatusResponse): AppMerchantMo
   };
 }
 
-function formatTokenAmount(raw: string): string {
+function formatTokenAmount(raw: string, tokenDecimals: number): string {
   try {
-    const formatted = ethers.utils.formatUnits(raw, mobileConfig.tokenDecimals);
+    const formatted = ethers.utils.formatUnits(raw, tokenDecimals);
     const [whole, fraction = ""] = formatted.split(".");
     const trimmed = fraction.replace(/0+$/, "");
     if (!trimmed) {
@@ -1280,7 +1514,10 @@ function formatTokenAmount(raw: string): string {
 }
 
 export class AppBackendClient {
-  constructor(private readonly getAccessToken: () => Promise<string | null>) {}
+  constructor(
+    private readonly getAccessToken: () => Promise<string | null>,
+    private readonly clientConfig?: AppClientConfig,
+  ) {}
 
   private async rawAuthFetch(path: string, options: RequestInit = {}): Promise<Response> {
     const accessToken = await this.getAccessToken();
@@ -2303,8 +2540,10 @@ export class AppBackendClient {
   }
 
   async getTransactions(address: string, page = 0, count = 30): Promise<AppTransaction[]> {
+    const chainID = this.clientConfig?.activeChainId;
+    const chainQuery = chainID ? `&chain_id=${chainID}` : "";
     const response = await this.authFetch(
-      `/transactions?address=${encodeURIComponent(address)}&page=${page}&count=${count}&desc=true`,
+      `/transactions?address=${encodeURIComponent(address)}&page=${page}&count=${count}&desc=true${chainQuery}`,
     );
     if (!response.ok) {
       throw new Error("Unable to load transaction history.");
@@ -2312,9 +2551,10 @@ export class AppBackendClient {
     const body = (await response.json()) as TransactionsResponse;
     return (body.transactions || []).map((tx) => ({
       id: tx.id,
+      chainId: tx.chain_id,
       hash: tx.hash,
       amount: tx.amount,
-      amountFormatted: formatTokenAmount(tx.amount),
+      amountFormatted: formatTokenAmount(tx.amount, this.clientConfig?.tokenDecimals ?? 18),
       timestamp: tx.timestamp,
       from: tx.from,
       to: tx.to,
@@ -2342,10 +2582,14 @@ export class AppBackendClient {
     if (!trimmed) {
       return;
     }
+    const body: { tx_hash: string; chain_id?: number; memo: string } = { tx_hash: txHash, memo: trimmed };
+    if (this.clientConfig?.activeChainId) {
+      body.chain_id = this.clientConfig.activeChainId;
+    }
     const response = await this.authFetch("/transactions/memo", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tx_hash: txHash, memo: trimmed }),
+      body: JSON.stringify(body),
     });
     if (!response.ok) {
       throw new Error("Unable to save transaction memo.");

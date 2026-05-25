@@ -233,8 +233,8 @@ function blankRuntime(loading = false): RuntimeState {
   return { loading, service: null, discovery: null, error: null, loadingMessage: null };
 }
 
-function buildPublicPolicyURL(path: string): string {
-  return `${mobileConfig.appOrigin.replace(/\/+$/, "")}${path}`;
+function buildPublicPolicyURL(path: string, config: AppClientConfig): string {
+  return `${config.appOrigin.replace(/\/+$/, "")}${path}`;
 }
 
 function resolveExpoProjectId(): string | undefined {
@@ -412,22 +412,22 @@ function countPushSubscriptionsForAddresses(
   return subscribedAddresses.size;
 }
 
-function formatDisplayBalance(raw: string): string {
+function formatDisplayBalance(raw: string, tokenDecimals: number): string {
   try {
     const normalized = raw.trim();
     if (!normalized) {
       return "0.00";
     }
 
-    const parsed = ethers.utils.parseUnits(normalized, mobileConfig.tokenDecimals);
+    const parsed = ethers.utils.parseUnits(normalized, tokenDecimals);
     let roundedCents: ethers.BigNumber;
-    if (mobileConfig.tokenDecimals > 2) {
-      const centsDivisor = ethers.BigNumber.from(10).pow(mobileConfig.tokenDecimals - 2);
+    if (tokenDecimals > 2) {
+      const centsDivisor = ethers.BigNumber.from(10).pow(tokenDecimals - 2);
       roundedCents = parsed.add(centsDivisor.div(2)).div(centsDivisor);
-    } else if (mobileConfig.tokenDecimals === 2) {
+    } else if (tokenDecimals === 2) {
       roundedCents = parsed;
     } else {
-      const centsMultiplier = ethers.BigNumber.from(10).pow(2 - mobileConfig.tokenDecimals);
+      const centsMultiplier = ethers.BigNumber.from(10).pow(2 - tokenDecimals);
       roundedCents = parsed.mul(centsMultiplier);
     }
     const whole = roundedCents.div(100).toString();
@@ -1188,6 +1188,7 @@ function BottomTab({
 }
 
 function WalletAppShell({
+  clientConfig,
   runtime,
   selectedCandidateKey,
   onSelectCandidate,
@@ -1223,6 +1224,7 @@ function WalletAppShell({
   onDismissRecoveryFundsNotice,
   onPolicyRequired,
 }: {
+  clientConfig: AppClientConfig;
   runtime: RuntimeState;
   selectedCandidateKey?: string;
   onSelectCandidate: (key: string) => void;
@@ -1260,6 +1262,7 @@ function WalletAppShell({
 }) {
   return (
     <WalletAppShellContent
+      clientConfig={clientConfig}
       runtime={runtime}
       selectedCandidateKey={selectedCandidateKey}
       onSelectCandidate={onSelectCandidate}
@@ -1299,6 +1302,7 @@ function WalletAppShell({
 }
 
 function WalletAppShellContent({
+  clientConfig,
   runtime,
   selectedCandidateKey,
   onSelectCandidate,
@@ -1334,6 +1338,7 @@ function WalletAppShellContent({
   onDismissRecoveryFundsNotice,
   onPolicyRequired,
 }: {
+  clientConfig: AppClientConfig;
   runtime: RuntimeState;
   selectedCandidateKey?: string;
   onSelectCandidate: (key: string) => void;
@@ -2347,7 +2352,7 @@ function WalletAppShellContent({
                 code,
                 stage: "success",
                 walletAddress: payoutAddress,
-                message: "Your SFLUV perk was sent to this wallet.",
+                message: `Your ${clientConfig.tokenSymbol} perk was sent to this wallet.`,
               }
             : current,
         );
@@ -3143,7 +3148,7 @@ function WalletAppShellContent({
       const preview = await backendClient.getDeleteAccountPreview();
       Alert.alert(
         "Delete account",
-        `${buildDeleteAccountPreviewMessage(preview)} Before the delete request is sent, any SFLUV in your accessible wallets will be transferred out of your account. If you later reactivate during the grace period, contact ${ACCOUNT_RECOVERY_SUPPORT_EMAIL} to recover those funds.`,
+        `${buildDeleteAccountPreviewMessage(preview)} Before the delete request is sent, any ${clientConfig.tokenSymbol} in your accessible wallets will be transferred out of your account. If you later reactivate during the grace period, contact ${ACCOUNT_RECOVERY_SUPPORT_EMAIL} to recover those funds.`,
         [
           {
             text: "Keep account",
@@ -3159,7 +3164,7 @@ function WalletAppShellContent({
               void (async () => {
                 try {
                   setAccountDeletionMessage(
-                    "Transferring SFLUV out of your accessible wallets before submitting the deletion request...",
+                    `Transferring ${clientConfig.tokenSymbol} out of your accessible wallets before submitting the deletion request...`,
                   );
                   await sweepAccessibleSFLUVToAdmin({
                     service,
@@ -3175,7 +3180,7 @@ function WalletAppShellContent({
                     getDeletionFallbackDateLabel();
                   Alert.alert(
                     "Account scheduled for deletion",
-                    `This account is inactive and scheduled for deletion on ${deleteDateLabel}. Sign in again during that window if you want to reactivate it. If you reactivate later, contact ${ACCOUNT_RECOVERY_SUPPORT_EMAIL} to recover any SFLUV transferred out during the deletion request.`,
+                    `This account is inactive and scheduled for deletion on ${deleteDateLabel}. Sign in again during that window if you want to reactivate it. If you reactivate later, contact ${ACCOUNT_RECOVERY_SUPPORT_EMAIL} to recover any ${clientConfig.tokenSymbol} transferred out during the deletion request.`,
                     [
                       {
                         text: "OK",
@@ -3273,7 +3278,10 @@ function WalletAppShellContent({
   const RootContainer = showStandardChrome ? SafeAreaView : View;
   const walletHomeContent = (
     <WalletHomeScreen
-      balance={smartBalance === "..." ? smartBalance : formatDisplayBalance(smartBalance)}
+      balance={smartBalance === "..." ? smartBalance : formatDisplayBalance(smartBalance, clientConfig.tokenDecimals)}
+      tokenSymbol={clientConfig.tokenSymbol}
+      explorerURL={clientConfig.explorerURL}
+      faucetAddress={clientConfig.faucetAddress}
       smartAddress={smartAddress}
       ownerBadge={ownerBadge}
       selectedWalletLabel={selectedWalletLabel}
@@ -3319,6 +3327,7 @@ function WalletAppShellContent({
   const walletOverlayContent =
     walletOverlayPane === "send" && !merchantModeActive ? (
       <SendScreen
+        clientConfig={clientConfig}
         contacts={contacts}
         merchants={locations}
         availableBalance={smartBalance}
@@ -3353,6 +3362,7 @@ function WalletAppShellContent({
       />
     ) : walletOverlayPane === "receive" ? (
       <ReceiveScreen
+        clientConfig={clientConfig}
         accountAddress={smartAddress || runtime.discovery?.ownerAddress || ethers.constants.AddressZero}
         onRedeemCodeScanned={openRedeemFlowForCode}
         showRedeemScanner={!merchantModeActive}
@@ -3466,6 +3476,9 @@ function WalletAppShellContent({
           ) : tab === "activity" ? (
             <ActivityScreen
               transactions={activityTransactions}
+              tokenSymbol={clientConfig.tokenSymbol}
+              explorerURL={clientConfig.explorerURL}
+              faucetAddress={clientConfig.faucetAddress}
               transactionsLoaded={activityTransactionsLoaded}
               contacts={contacts}
               merchants={locations}
@@ -3496,6 +3509,7 @@ function WalletAppShellContent({
             <ImproverScreen
               user={appUser}
               improver={appImprover}
+              tokenSymbol={clientConfig.tokenSymbol}
               backendClient={backendClient}
               hapticsEnabled={preferences.hapticsEnabled}
               onRefreshProfile={loadAppProfile}
@@ -3528,6 +3542,7 @@ function WalletAppShellContent({
             />
           ) : tab === "contacts" ? (
             <ContactsScreen
+              clientConfig={clientConfig}
               contacts={contacts}
               shareAddress={smartAddress}
               syncNotice={syncNotice}
@@ -3571,6 +3586,7 @@ function WalletAppShellContent({
           ) : (
             <SettingsScreen
               user={appUser}
+              tokenSymbol={clientConfig.tokenSymbol}
               improver={appImprover}
               wallets={settingsWallets}
               ownedLocations={ownedLocations}
@@ -3833,7 +3849,7 @@ function WalletAppShellContent({
                         </View>
                       ) : null}
                     </View>
-                    <Text style={styles.walletChooserBalance}>{candidate.tokenBalance} SFLUV</Text>
+                    <Text style={styles.walletChooserBalance}>{candidate.tokenBalance} {clientConfig.tokenSymbol}</Text>
                     <Text style={styles.walletChooserAddress}>{shortAddress(candidate.accountAddress)}</Text>
                   </Pressable>
                 );
@@ -3927,7 +3943,7 @@ function WalletAppShellContent({
                 (redeemFlow?.stage === "awaiting_wallet"
                   ? "Finishing wallet setup before the reward is claimed."
                   : redeemFlow?.stage === "redeeming"
-                    ? "Requesting your SFLUV reward from the event faucet."
+                    ? `Requesting your ${clientConfig.tokenSymbol} reward from the event faucet.`
                     : "Close this modal and try again.")}
             </Text>
             {redeemFlow?.stage === "success" || redeemFlow?.stage === "error" ? (
@@ -3950,7 +3966,7 @@ function WalletAppShellContent({
             <Ionicons name="information-circle" size={42} color={palette.primaryStrong} />
             <Text style={styles.sendingTitle}>Funds recovery</Text>
             <Text style={styles.sendingText}>
-              This account is active again, but any SFLUV transferred out during the deletion
+              This account is active again, but any {clientConfig.tokenSymbol} transferred out during the deletion
               request will not return automatically.
             </Text>
             <Text style={styles.sendingText}>
@@ -3967,10 +3983,12 @@ function WalletAppShellContent({
 }
 
 function PrivyWalletApp({
+  clientConfig,
   preferences,
   preferencesLoaded,
   onUpdatePreferences,
 }: {
+  clientConfig: AppClientConfig;
   preferences: AppPreferences;
   preferencesLoaded: boolean;
   onUpdatePreferences: (next: AppPreferences) => void;
@@ -4044,8 +4062,8 @@ function PrivyWalletApp({
     getAccessTokenRef.current = getAccessToken;
   }, [getAccessToken]);
   const backendClient = useMemo(
-    () => new AppBackendClient(async () => (await getAccessTokenRef.current()) ?? null),
-    [],
+    () => new AppBackendClient(async () => (await getAccessTokenRef.current()) ?? null, clientConfig),
+    [clientConfig],
   );
   const linkedAppleAccount = useMemo(() => getLinkedAppleAccount(user), [user]);
   const linkedGoogleAccount = useMemo(() => getLinkedGoogleAccount(user), [user]);
@@ -4145,7 +4163,7 @@ function PrivyWalletApp({
     if (!rawURL) {
       return;
     }
-    const parsedLink = parseSfluvUniversalLink(rawURL);
+    const parsedLink = parseSfluvUniversalLink(rawURL, clientConfig);
     if (!parsedLink) {
       return;
     }
@@ -4458,6 +4476,7 @@ function PrivyWalletApp({
         let { service, discovery } = await withTimeout(
           createSmartWalletServiceFromSigner(
             signer,
+            clientConfig,
             preferredCandidateKey,
             accessTokenProvider,
           ),
@@ -4475,6 +4494,7 @@ function PrivyWalletApp({
           ({ service, discovery } = await withTimeout(
             createSmartWalletServiceFromSigner(
               signer,
+              clientConfig,
               initialPreferredCandidateKey,
               accessTokenProvider,
             ),
@@ -4525,12 +4545,13 @@ function PrivyWalletApp({
             hiddenWalletAddresses: syncedWalletPreferences.hiddenWalletAddresses,
           });
           if (deployedPrimarySmartWallet) {
-            clearCachedRouteDiscovery(discovery.ownerAddress);
+            clearCachedRouteDiscovery(discovery.ownerAddress, clientConfig);
           }
           if (deployedPrimarySmartWallet || (syncedPreferredCandidateKey && syncedPreferredCandidateKey !== discovery.selectedCandidateKey)) {
             ({ service, discovery } = await withTimeout(
               createSmartWalletServiceFromSigner(
                 signer,
+                clientConfig,
                 syncedPreferredCandidateKey,
                 accessTokenProvider,
                 deployedPrimarySmartWallet ? { forceRefresh: true } : undefined,
@@ -4940,6 +4961,7 @@ function PrivyWalletApp({
   if (user && policyStatus) {
     return (
       <PolicyAcceptanceScreen
+        clientConfig={clientConfig}
         action={policyAction}
         error={policyError}
         onAccept={(mailingListOptIn) => {
@@ -5148,7 +5170,7 @@ function PrivyWalletApp({
                   <Pressable
                     disabled={authLoading}
                     onPress={() => {
-                      void Linking.openURL(buildPublicPolicyURL(PRIVACY_POLICY_PATH));
+                      void Linking.openURL(buildPublicPolicyURL(PRIVACY_POLICY_PATH, clientConfig));
                     }}
                   >
                     <Text style={styles.loginPolicyLinkText}>Privacy Policy</Text>
@@ -5157,7 +5179,7 @@ function PrivyWalletApp({
                   <Pressable
                     disabled={authLoading}
                     onPress={() => {
-                      void Linking.openURL(buildPublicPolicyURL(EMAIL_OPT_IN_POLICY_PATH));
+                      void Linking.openURL(buildPublicPolicyURL(EMAIL_OPT_IN_POLICY_PATH, clientConfig));
                     }}
                   >
                     <Text style={styles.loginPolicyLinkText}>Email Opt-In Policy</Text>
@@ -5189,6 +5211,7 @@ function PrivyWalletApp({
 
   return (
     <WalletAppShell
+      clientConfig={clientConfig}
       runtime={{
         ...runtime,
         loading: walletInitializing,
@@ -5303,11 +5326,13 @@ function DeletedAccountScreen({
 }
 
 function PolicyAcceptanceScreen({
+  clientConfig,
   action,
   error,
   onAccept,
   onReturnToLogin,
 }: {
+  clientConfig: AppClientConfig;
   action: "idle" | "submitting" | "returning";
   error: string | null;
   onAccept: (mailingListOptIn: boolean) => void;
@@ -5363,7 +5388,7 @@ function PolicyAcceptanceScreen({
               <Pressable
                 disabled={busy}
                 onPress={() => {
-                  void Linking.openURL(buildPublicPolicyURL(PRIVACY_POLICY_PATH));
+                  void Linking.openURL(buildPublicPolicyURL(PRIVACY_POLICY_PATH, clientConfig));
                 }}
               >
                 <Text style={styles.policyInlineLink}>Open Privacy Policy</Text>
@@ -5396,7 +5421,7 @@ function PolicyAcceptanceScreen({
               <Pressable
                 disabled={busy}
                 onPress={() => {
-                  void Linking.openURL(buildPublicPolicyURL(EMAIL_OPT_IN_POLICY_PATH));
+                  void Linking.openURL(buildPublicPolicyURL(EMAIL_OPT_IN_POLICY_PATH, clientConfig));
                 }}
               >
                 <Text style={styles.policyInlineLink}>Open Email Opt-In Policy</Text>
@@ -5504,14 +5529,7 @@ function blockedCompatibilityState(
     };
   }
 
-  if (version.features.dynamicConfigRequired && config.activeChainId !== mobileConfig.chainId) {
-    return {
-      status: "blocked",
-      title: "Update Required",
-      message: "An SFLUV Wallet update is required to use the current network configuration.",
-      updateUrl: version.updateUrl || undefined,
-    };
-  }
+  void config;
 
   return null;
 }
@@ -5552,15 +5570,16 @@ export default function App() {
     };
   }, []);
 
-  const supportedChain = {
-    id: mobileConfig.chainId,
-    name: `Berachain ${mobileConfig.chainId}`,
+  const readyConfig = compatibility.status === "ready" ? compatibility.config : null;
+  const supportedChain = readyConfig ? {
+    id: readyConfig.activeChainId,
+    name: readyConfig.chainName,
     nativeCurrency: { name: "BERA", symbol: "BERA", decimals: 18 },
     rpcUrls: {
-      default: { http: [mobileConfig.rpcURL] },
-      public: { http: [mobileConfig.rpcURL] },
+      default: { http: [readyConfig.rpcURL] },
+      public: { http: [readyConfig.rpcURL] },
     },
-  } as any;
+  } as any : null;
 
   return (
     <AppThemeProvider preference={preferences.themePreference}>
@@ -5578,7 +5597,7 @@ export default function App() {
           message={compatibility.message}
           updateUrl={compatibility.updateUrl}
         />
-      ) : (
+      ) : readyConfig && supportedChain ? (
         <PrivyProvider
           appId={mobileConfig.privyAppId}
           clientId={mobileConfig.privyClientId || undefined}
@@ -5592,12 +5611,13 @@ export default function App() {
           }}
         >
           <PrivyWalletApp
+            clientConfig={readyConfig}
             preferences={preferences}
             preferencesLoaded={preferencesLoaded}
             onUpdatePreferences={setPreferences}
           />
         </PrivyProvider>
-      )}
+      ) : null}
     </AppThemeProvider>
   );
 }

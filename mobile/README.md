@@ -46,7 +46,6 @@ cp .env.example .env
 - `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY`
 - `EXPO_PUBLIC_MAP_ID`
 - `EXPO_PUBLIC_APP_BACKEND_URL`
-- `EXPO_PUBLIC_LEGACY_BACKEND_URL` only if you need to override the hosted Citizen Wallet engine
 
 3. If you are testing from Expo Go on a real phone, do not leave `EXPO_PUBLIC_APP_BACKEND_URL` on `localhost`.
 Use a host the phone can reach, usually your laptop LAN IP:
@@ -60,9 +59,7 @@ npx expo start --host tunnel --clear
 
 5. Open the generated `exp://...` URL in Expo Go.
 
-The app needs:
-- the hosted Citizen Wallet engine by default, or a reachable override in `EXPO_PUBLIC_LEGACY_BACKEND_URL`
-- the shared SFLUV app backend running on `:8080` if you want synced profile, contacts, merchant status, and activity data
+The app needs the shared SFLUV app backend running on `:8080` if you want synced profile, contacts, merchant status, activity data, and dynamic chain config.
 
 These values are required for testing, but they are intentionally not committed to this repo.
 
@@ -97,33 +94,21 @@ Still required before the first iPhone dev build:
 
 ## Required env
 
-Shared chain + token:
-
-- `EXPO_PUBLIC_CHAIN_ID=80094`
-- `EXPO_PUBLIC_RPC_URL=https://rpc.berachain.com`
-- `EXPO_PUBLIC_TOKEN_ADDRESS=0x881cad4f885c6701d8481c0ed347f6d35444ea7e`
-- `EXPO_PUBLIC_TOKEN_DECIMALS=18`
-
 Shared SFLUV app backend:
 
 - `EXPO_PUBLIC_APP_BACKEND_URL=http://localhost:8080`
   - replace `localhost` with a LAN IP or public host when testing on a real phone
+  - the mobile app fetches chain, token, and smart-wallet config from this backend at startup
 
 Merchant application / map search:
 
 - `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=<google maps api key>`
 - `EXPO_PUBLIC_MAP_ID=<google map id>` (optional for future native map styling support)
 
-Legacy Citizen Wallet route:
+Citizen Wallet route discovery:
 
-- `EXPO_PUBLIC_LEGACY_ENTRYPOINT_ADDRESS=0x7079253c0358eF9Fd87E16488299Ef6e06F403B6`
-- `EXPO_PUBLIC_LEGACY_ACCOUNT_FACTORY_ADDRESS=0x7cC54D54bBFc65d1f0af7ACee5e4042654AF8185`
-- `EXPO_PUBLIC_LEGACY_PAYMASTER_ADDRESS=0x9A5be02B65f9Aa00060cB8c951dAFaBAB9B860cd`
-- `EXPO_PUBLIC_LEGACY_PAYMASTER_TYPE=cw-safe`
-- `EXPO_PUBLIC_LEGACY_BACKEND_URL=https://80094.engine.citizenwallet.xyz`
-  - replace with your own reachable host only if you are intentionally overriding the hosted engine
 - `EXPO_PUBLIC_MAX_SMART_ACCOUNT_SCAN=5`
-  - controls how many sequential legacy smart-account indexes are scanned for a signed-in owner
+  - controls how many sequential smart-account indexes are scanned for a signed-in owner
 
 Privy:
 

@@ -92,7 +92,8 @@ export async function sweepAccessibleSFLUVToAdmin(params: {
   const adminAddress = ethers.utils.getAddress(configuredAdminAddress);
   const ownerAddress = ethers.utils.getAddress(params.service.ownerAddress());
   const ownerSigner = params.service.signer();
-  const token = new ethers.Contract(mobileConfig.tokenAddress, ERC20_ABI, ownerSigner);
+  const clientConfig = params.service.clientConfig();
+  const token = new ethers.Contract(clientConfig.tokenAddress, ERC20_ABI, ownerSigner);
   const smartTargets = collectSmartWalletTargets(
     ownerAddress,
     params.backendWallets,
@@ -133,6 +134,7 @@ export async function sweepAccessibleSFLUVToAdmin(params: {
         ? params.service
         : await createSmartWalletServiceForIndex(
             ownerSigner,
+            clientConfig,
             target.smartIndex,
             params.service.accessTokenProvider(),
             target.address,

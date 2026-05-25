@@ -8,13 +8,16 @@ import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import {
   buildAddressNameMaps,
   buildTransactionDetailPayload,
-  FAUCET_ADDRESS,
+  isRewardTransaction,
   shortAddress,
   TransactionDetailPayload,
 } from "../utils/transactions";
 
 type Props = {
   transactions: AppTransaction[];
+  tokenSymbol: string;
+  explorerURL?: string;
+  faucetAddress?: string;
   transactionsLoaded: boolean;
   contacts: AppContact[];
   merchants: AppLocation[];
@@ -42,6 +45,9 @@ function formatDate(timestamp: number): string {
 
 export function ActivityScreen({
   transactions,
+  tokenSymbol,
+  explorerURL,
+  faucetAddress,
   transactionsLoaded,
   contacts,
   merchants,
@@ -69,9 +75,9 @@ export function ActivityScreen({
 
   const decoratedTransactions = useMemo<TransactionDetailPayload[]>(() => {
     return transactions.map((transaction) =>
-      buildTransactionDetailPayload(transaction, activeAddress, contactNameByAddress, merchantNameByAddress),
+      buildTransactionDetailPayload(transaction, activeAddress, contactNameByAddress, merchantNameByAddress, faucetAddress),
     );
-  }, [activeAddress, contactNameByAddress, merchantNameByAddress, transactions]);
+  }, [activeAddress, contactNameByAddress, faucetAddress, merchantNameByAddress, transactions]);
 
   return (
     <>
@@ -119,7 +125,7 @@ export function ActivityScreen({
         ) : (
           decoratedTransactions.map((details) => {
             const incoming = details.received;
-            const reward = incoming && details.transaction.from.toLowerCase() === FAUCET_ADDRESS;
+            const reward = incoming && isRewardTransaction(details.transaction, faucetAddress);
             const title = reward ? "Received Reward" : incoming ? `Received from ${details.fromLabel}` : `Sent to ${details.toLabel}`;
 
             return (
@@ -141,7 +147,7 @@ export function ActivityScreen({
                     {incoming ? "+" : "-"}
                     {details.transaction.amountFormatted}
                   </Text>
-                  <Text style={styles.currency}>SFLUV</Text>
+                  <Text style={styles.currency}>{tokenSymbol}</Text>
                 </View>
               </Pressable>
             );
@@ -163,6 +169,8 @@ export function ActivityScreen({
       <TransactionDetailsModal
         visible={Boolean(selectedTransaction)}
         details={selectedTransaction}
+        tokenSymbol={tokenSymbol}
+        explorerURL={explorerURL}
         onClose={() => setSelectedTransaction(null)}
       />
     </>

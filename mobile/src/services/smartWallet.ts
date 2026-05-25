@@ -1,7 +1,6 @@
 import { ethers } from "ethers";
 import { BackendClient } from "../api/client";
-import { mobileConfig, WalletConfig } from "../config";
-import { AppTransaction } from "../types/app";
+import { AppClientConfig, AppTransaction } from "../types/app";
 
 export type UserOpRPC = {
   sender: string;
@@ -31,6 +30,7 @@ export type SendResult = {
 };
 
 export type AmountUnit = "wei" | "token";
+type RuntimeWalletConfig = AppClientConfig["wallet"];
 
 export type RouteCandidate = {
   key: string;
@@ -101,9 +101,9 @@ function candidateKey(smartIndex: number): string {
   return `wallet:${smartIndex}`;
 }
 
-function formatTokenAmount(raw: string): string {
+function formatTokenAmount(raw: string, config: AppClientConfig): string {
   try {
-    const formatted = ethers.utils.formatUnits(raw, mobileConfig.tokenDecimals);
+    const formatted = ethers.utils.formatUnits(raw, config.tokenDecimals);
     const [whole, fraction = ""] = formatted.split(".");
     const trimmed = fraction.replace(/0+$/, "");
     if (!trimmed) {
@@ -137,30 +137,44 @@ function resolveSelectedCandidate(candidates: RouteCandidate[]): string {
   return candidates[0].key;
 }
 
-function routeDiscoveryCacheKey(ownerAddress: string): string {
-  return ownerAddress.trim().toLowerCase();
+function routeDiscoveryCacheKey(ownerAddress: string, config: AppClientConfig): string {
+  return [
+    config.activeChainId,
+    config.wallet.accountFactory.trim().toLowerCase(),
+    ownerAddress.trim().toLowerCase(),
+  ].join(":");
 }
 
-function storeRouteDiscovery(discovery: RouteDiscovery): RouteDiscovery {
-  routeDiscoveryCache.set(routeDiscoveryCacheKey(discovery.ownerAddress), discovery);
+function storeRouteDiscovery(discovery: RouteDiscovery, config: AppClientConfig): RouteDiscovery {
+  routeDiscoveryCache.set(routeDiscoveryCacheKey(discovery.ownerAddress, config), discovery);
   return discovery;
 }
 
-export function getCachedRouteDiscovery(ownerAddress: string): RouteDiscovery | undefined {
-  return routeDiscoveryCache.get(routeDiscoveryCacheKey(ownerAddress));
+export function getCachedRouteDiscovery(ownerAddress: string, config: AppClientConfig): RouteDiscovery | undefined {
+  return routeDiscoveryCache.get(routeDiscoveryCacheKey(ownerAddress, config));
 }
 
-export function clearCachedRouteDiscovery(ownerAddress?: string): void {
+export function clearCachedRouteDiscovery(ownerAddress?: string, config?: AppClientConfig): void {
   if (!ownerAddress) {
     routeDiscoveryCache.clear();
     return;
   }
-  routeDiscoveryCache.delete(routeDiscoveryCacheKey(ownerAddress));
+  if (config) {
+    routeDiscoveryCache.delete(routeDiscoveryCacheKey(ownerAddress, config));
+    return;
+  }
+  const normalizedOwner = ownerAddress.trim().toLowerCase();
+  for (const key of routeDiscoveryCache.keys()) {
+    if (key.endsWith(`:${normalizedOwner}`)) {
+      routeDiscoveryCache.delete(key);
+    }
+  }
 }
 
 async function collectRouteCandidate(
   ownerAddress: string,
   smartIndex: number,
+  config: AppClientConfig,
   provider: ethers.providers.JsonRpcProvider,
   token: ethers.Contract,
   factory: ethers.Contract,
@@ -182,31 +196,32 @@ async function collectRouteCandidate(
     accountAddress,
     deployed,
     tokenBalanceRaw,
-    tokenBalance: ethers.utils.formatUnits(tokenBalanceRaw, mobileConfig.tokenDecimals),
+    tokenBalance: ethers.utils.formatUnits(tokenBalanceRaw, config.tokenDecimals),
   };
 }
 
 export async function discoverRoutesForOwner(
   ownerAddress: string,
+  config: AppClientConfig,
   provider: ethers.providers.JsonRpcProvider,
   options?: { forceRefresh?: boolean },
 ): Promise<RouteDiscovery> {
-  const cached = options?.forceRefresh ? undefined : getCachedRouteDiscovery(ownerAddress);
+  const cached = options?.forceRefresh ? undefined : getCachedRouteDiscovery(ownerAddress, config);
   if (cached) {
     return cached;
   }
 
-  const token = new ethers.Contract(mobileConfig.tokenAddress, ERC20_ABI, provider);
-  const factory = new ethers.Contract(mobileConfig.wallet.accountFactory, ACCOUNT_FACTORY_ABI, provider);
+  const token = new ethers.Contract(config.tokenAddress, ERC20_ABI, provider);
+  const factory = new ethers.Contract(config.wallet.accountFactory, ACCOUNT_FACTORY_ABI, provider);
   const candidates: RouteCandidate[] = [];
 
-  for (let smartIndex = 0; smartIndex < mobileConfig.maxSmartAccountScan; smartIndex += DISCOVERY_BATCH_SIZE) {
+  for (let smartIndex = 0; smartIndex < config.maxSmartAccountScan; smartIndex += DISCOVERY_BATCH_SIZE) {
     const batch = Array.from(
-      { length: Math.min(DISCOVERY_BATCH_SIZE, mobileConfig.maxSmartAccountScan - smartIndex) },
+      { length: Math.min(DISCOVERY_BATCH_SIZE, config.maxSmartAccountScan - smartIndex) },
       (_, offset) => smartIndex + offset,
     );
     const batchResults = await Promise.all(
-      batch.map((index) => collectRouteCandidate(ownerAddress, index, provider, token, factory)),
+      batch.map((index) => collectRouteCandidate(ownerAddress, index, config, provider, token, factory)),
     );
     for (const candidate of batchResults) {
       if (candidate) {
@@ -216,7 +231,7 @@ export async function discoverRoutesForOwner(
   }
 
   const selectedCandidateKey = resolveSelectedCandidate(candidates);
-  return storeRouteDiscovery({ ownerAddress, selectedCandidateKey, candidates });
+  return storeRouteDiscovery({ ownerAddress, selectedCandidateKey, candidates }, config);
 }
 
 export class SmartWalletService {
@@ -233,19 +248,20 @@ export class SmartWalletService {
   constructor(
     private readonly ownerSigner: ethers.Signer,
     private readonly owner: string,
-    private readonly walletConfig: WalletConfig,
+    private readonly runtimeConfig: AppClientConfig,
+    private readonly walletConfig: RuntimeWalletConfig,
     private readonly smartIndex: number,
     private readonly getAccessToken?: () => Promise<string | null>,
     smartAccountAddress?: string,
   ) {
-    this.provider = new ethers.providers.JsonRpcProvider(mobileConfig.rpcURL, {
-      chainId: mobileConfig.chainId,
-      name: "berachain",
+    this.provider = new ethers.providers.JsonRpcProvider(runtimeConfig.rpcURL, {
+      chainId: runtimeConfig.activeChainId,
+      name: runtimeConfig.chainName,
     });
     this.provider.pollingInterval = PROVIDER_POLLING_INTERVAL_MS;
     this.backend = new BackendClient(
       walletConfig.backendURL,
-      mobileConfig.chainId,
+      runtimeConfig.activeChainId,
       walletConfig.paymasterAddress,
       walletConfig.paymasterType,
       walletConfig.backendKind,
@@ -253,7 +269,7 @@ export class SmartWalletService {
     );
 
     this.erc20 = new ethers.utils.Interface(ERC20_ABI);
-    this.token = new ethers.Contract(mobileConfig.tokenAddress, ERC20_ABI, this.provider);
+    this.token = new ethers.Contract(runtimeConfig.tokenAddress, ERC20_ABI, this.provider);
     this.account = new ethers.utils.Interface(ACCOUNT_ABI);
     this.safeAccount = new ethers.utils.Interface(SAFE_ACCOUNT_ABI);
     this.accountFactory = new ethers.Contract(walletConfig.accountFactory, ACCOUNT_FACTORY_ABI, this.provider);
@@ -273,8 +289,12 @@ export class SmartWalletService {
     return this.getAccessToken;
   }
 
-  routeConfig(): WalletConfig {
+  routeConfig(): RuntimeWalletConfig {
     return this.walletConfig;
+  }
+
+  clientConfig(): AppClientConfig {
+    return this.runtimeConfig;
   }
 
   smartAccountIndex(): number {
@@ -294,7 +314,7 @@ export class SmartWalletService {
   async smartAccountBalance(): Promise<string> {
     const account = await this.smartAccountAddress();
     const balance: ethers.BigNumber = await this.token.balanceOf(account);
-    return ethers.utils.formatUnits(balance, mobileConfig.tokenDecimals);
+    return ethers.utils.formatUnits(balance, this.runtimeConfig.tokenDecimals);
   }
 
   async smartAccountBalanceRaw(): Promise<string> {
@@ -420,7 +440,7 @@ export class SmartWalletService {
     }
 
     const deploymentCallData = this.erc20.encodeFunctionData("approve", [account, ethers.constants.Zero]);
-    await this.submitAccountContractCall(mobileConfig.tokenAddress, deploymentCallData);
+    await this.submitAccountContractCall(this.runtimeConfig.tokenAddress, deploymentCallData);
     return this.waitForDeployedCode(account);
   }
 
@@ -447,13 +467,13 @@ export class SmartWalletService {
       const fromBlock = Math.max(0, toBlock - TRANSFER_LOG_WINDOW + 1);
       const [outgoingLogs, incomingLogs] = await Promise.all([
         this.provider.getLogs({
-          address: mobileConfig.tokenAddress,
+          address: this.runtimeConfig.tokenAddress,
           fromBlock,
           toBlock,
           topics: [transferTopic, accountTopic],
         }),
         this.provider.getLogs({
-          address: mobileConfig.tokenAddress,
+          address: this.runtimeConfig.tokenAddress,
           fromBlock,
           toBlock,
           topics: [transferTopic, null, accountTopic],
@@ -507,7 +527,7 @@ export class SmartWalletService {
       id: `${log.hash}:${log.logIndex}`,
       hash: log.hash,
       amount: log.amount,
-      amountFormatted: formatTokenAmount(log.amount),
+      amountFormatted: formatTokenAmount(log.amount, this.runtimeConfig),
       timestamp: timestamps.get(log.blockNumber) ?? 0,
       from: log.from,
       to: log.to,
@@ -554,12 +574,12 @@ export class SmartWalletService {
     try {
       amount =
         amountUnit === "token"
-          ? ethers.utils.parseUnits(amountRaw.trim(), mobileConfig.tokenDecimals)
+          ? ethers.utils.parseUnits(amountRaw.trim(), this.runtimeConfig.tokenDecimals)
           : ethers.BigNumber.from(amountRaw.trim());
     } catch {
       throw new Error(
         amountUnit === "token"
-          ? `Amount must be a valid SFLUV number with up to ${mobileConfig.tokenDecimals} decimals`
+          ? `Amount must be a valid ${this.runtimeConfig.tokenSymbol} number with up to ${this.runtimeConfig.tokenDecimals} decimals`
           : "Amount must be a valid integer in wei",
       );
     }
@@ -568,23 +588,24 @@ export class SmartWalletService {
     }
 
     const transferCallData = this.erc20.encodeFunctionData("transfer", [recipient, amount]);
-    return this.submitAccountContractCall(mobileConfig.tokenAddress, transferCallData);
+    return this.submitAccountContractCall(this.runtimeConfig.tokenAddress, transferCallData);
   }
 }
 
 export async function createSmartWalletServiceFromSigner(
   signer: ethers.Signer,
+  config: AppClientConfig,
   selectedCandidateKey?: string,
   getAccessToken?: () => Promise<string | null>,
   options?: { forceRefresh?: boolean },
 ): Promise<{ service: SmartWalletService; discovery: RouteDiscovery }> {
   const ownerAddress = ethers.utils.getAddress(await signer.getAddress());
-  const provider = new ethers.providers.JsonRpcProvider(mobileConfig.rpcURL, {
-    chainId: mobileConfig.chainId,
-    name: "berachain",
+  const provider = new ethers.providers.JsonRpcProvider(config.rpcURL, {
+    chainId: config.activeChainId,
+    name: config.chainName,
   });
 
-  const discovery = await discoverRoutesForOwner(ownerAddress, provider, options);
+  const discovery = await discoverRoutesForOwner(ownerAddress, config, provider, options);
   const resolvedKey = selectedCandidateKey ?? discovery.selectedCandidateKey;
   const candidate =
     discovery.candidates.find((item) => item.key === resolvedKey) ??
@@ -603,7 +624,8 @@ export async function createSmartWalletServiceFromSigner(
     service: new SmartWalletService(
       signer,
       ownerAddress,
-      mobileConfig.wallet,
+      config,
+      config.wallet,
       candidate.smartIndex,
       getAccessToken,
       candidate.accountAddress,
@@ -617,6 +639,7 @@ export async function createSmartWalletServiceFromSigner(
 
 export async function createSmartWalletServiceForIndex(
   signer: ethers.Signer,
+  config: AppClientConfig,
   smartIndex: number,
   getAccessToken?: () => Promise<string | null>,
   smartAccountAddress?: string,
@@ -625,7 +648,8 @@ export async function createSmartWalletServiceForIndex(
   return new SmartWalletService(
     signer,
     ownerAddress,
-    mobileConfig.wallet,
+    config,
+    config.wallet,
     smartIndex,
     getAccessToken,
     smartAccountAddress,

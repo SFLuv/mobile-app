@@ -20,6 +20,8 @@ import { TransactionDetailPayload } from "../utils/transactions";
 type Props = {
   visible: boolean;
   details: TransactionDetailPayload | null;
+  tokenSymbol: string;
+  explorerURL?: string;
   onClose: () => void;
 };
 
@@ -34,15 +36,19 @@ function formatDate(timestamp: number): string {
   });
 }
 
-function signedAmount(details: TransactionDetailPayload): string {
-  return `${details.received ? "+" : "-"}${details.transaction.amountFormatted} SFLUV`;
+function signedAmount(details: TransactionDetailPayload, tokenSymbol: string): string {
+  return `${details.received ? "+" : "-"}${details.transaction.amountFormatted} ${tokenSymbol}`;
 }
 
-function explorerUrl(hash: string): string {
-  return `https://berascan.com/tx/${hash}`;
+function explorerUrl(hash: string, explorerURL?: string): string | null {
+  if (!explorerURL?.trim()) {
+    return null;
+  }
+  const baseURL = explorerURL.trim().replace(/\/+$/, "");
+  return `${baseURL}/tx/${hash}`;
 }
 
-export function TransactionDetailsModal({ visible, details, onClose }: Props) {
+export function TransactionDetailsModal({ visible, details, tokenSymbol, explorerURL, onClose }: Props) {
   const { palette, shadows } = useAppTheme();
   const { height: windowHeight } = useWindowDimensions();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
@@ -222,7 +228,7 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
           >
             <View style={styles.amountCard}>
               <Text style={[styles.amountText, renderedDetails.received ? styles.amountReceive : styles.amountSend]}>
-                {signedAmount(renderedDetails)}
+                {signedAmount(renderedDetails, tokenSymbol)}
               </Text>
               <Text style={styles.amountDate}>{formatDate(renderedDetails.transaction.timestamp)}</Text>
             </View>
@@ -285,15 +291,20 @@ export function TransactionDetailsModal({ visible, details, onClose }: Props) {
                   />
                 </Pressable>
               </View>
-              <Pressable
-                style={styles.inlineExplorerButton}
-                onPress={() => {
-                  void Linking.openURL(explorerUrl(renderedDetails.transaction.hash));
-                }}
-              >
-                <Ionicons name="open-outline" size={16} color={palette.primaryStrong} />
-                <Text style={styles.inlineExplorerButtonText}>View on Explorer</Text>
-              </Pressable>
+              {explorerUrl(renderedDetails.transaction.hash, explorerURL) ? (
+                <Pressable
+                  style={styles.inlineExplorerButton}
+                  onPress={() => {
+                    const url = explorerUrl(renderedDetails.transaction.hash, explorerURL);
+                    if (url) {
+                      void Linking.openURL(url);
+                    }
+                  }}
+                >
+                  <Ionicons name="open-outline" size={16} color={palette.primaryStrong} />
+                  <Text style={styles.inlineExplorerButtonText}>View on Explorer</Text>
+                </Pressable>
+              ) : null}
             </View>
           </ScrollView>
         </Animated.View>

@@ -1,7 +1,5 @@
 import { AppContact, AppLocation, AppTransaction } from "../types/app";
 
-export const FAUCET_ADDRESS = "0x21df0dfce7420c2dc4c92ec335e9f9ad447e864a";
-
 export type TransactionDetailPayload = {
   transaction: AppTransaction;
   fromLabel: string;
@@ -22,8 +20,13 @@ export function shortAddress(address: string, leading = 6, trailing = 4): string
   return `${address.slice(0, leading)}...${address.slice(-trailing)}`;
 }
 
-export function isRewardTransaction(transaction: AppTransaction): boolean {
-  return transaction.direction !== "send" && transaction.from.toLowerCase() === FAUCET_ADDRESS;
+function normalizeAddress(address?: string): string {
+  return address?.trim().toLowerCase() || "";
+}
+
+export function isRewardTransaction(transaction: AppTransaction, faucetAddress?: string): boolean {
+  const normalizedFaucet = normalizeAddress(faucetAddress);
+  return Boolean(normalizedFaucet) && transaction.direction !== "send" && normalizeAddress(transaction.from) === normalizedFaucet;
 }
 
 export function buildAddressNameMaps(
@@ -58,12 +61,14 @@ export function resolveAddressLabel(
   activeAddress: string,
   contactNameByAddress: Record<string, string>,
   merchantNameByAddress: Record<string, string>,
+  faucetAddress?: string,
 ): string {
   const normalizedAddress = address.toLowerCase();
   if (activeAddress && normalizedAddress === activeAddress.toLowerCase()) {
     return "You";
   }
-  if (normalizedAddress === FAUCET_ADDRESS) {
+  const normalizedFaucet = normalizeAddress(faucetAddress);
+  if (normalizedFaucet && normalizedAddress === normalizedFaucet) {
     return "SFLUV Faucet";
   }
   const contactName = contactNameByAddress[normalizedAddress];
@@ -82,15 +87,16 @@ export function buildTransactionDetailPayload(
   activeAddress: string,
   contactNameByAddress: Record<string, string>,
   merchantNameByAddress: Record<string, string>,
+  faucetAddress?: string,
 ): TransactionDetailPayload {
-  const reward = isRewardTransaction(transaction);
+  const reward = isRewardTransaction(transaction, faucetAddress);
   const received = transaction.direction !== "send";
 
   return {
     transaction,
     received,
-    fromLabel: resolveAddressLabel(transaction.from, activeAddress, contactNameByAddress, merchantNameByAddress),
-    toLabel: resolveAddressLabel(transaction.to, activeAddress, contactNameByAddress, merchantNameByAddress),
+    fromLabel: resolveAddressLabel(transaction.from, activeAddress, contactNameByAddress, merchantNameByAddress, faucetAddress),
+    toLabel: resolveAddressLabel(transaction.to, activeAddress, contactNameByAddress, merchantNameByAddress, faucetAddress),
     typeLabel: reward ? "Reward" : "Currency Transfer",
     statusLabel: "Completed",
   };

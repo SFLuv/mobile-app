@@ -16,6 +16,7 @@ import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 
 type Props = {
   user: AppUser | null;
+  tokenSymbol: string;
   improver?: AppImprover | null;
   wallets: AppWallet[];
   ownedLocations?: AppOwnedLocation[];
@@ -794,6 +795,7 @@ function MerchantModeSettingsCard({
 
 export function SettingsScreen({
   user,
+  tokenSymbol,
   improver,
   wallets,
   ownedLocations = [],
@@ -1159,7 +1161,7 @@ export function SettingsScreen({
               {dangerZoneOpen ? (
                 <View style={styles.dangerZoneContent}>
                   <Text style={styles.body}>
-                    Delete your account and log out. Your account stays recoverable for 30 days, but any SFLUV in your accessible wallets will be transferred out before the deletion request is submitted.
+                    Delete your account and log out. Your account stays recoverable for 30 days, but any {tokenSymbol} in your accessible wallets will be transferred out before the deletion request is submitted.
                   </Text>
                   <Text style={styles.dangerZoneNote}>Only use this if you really want to remove this account.</Text>
                   {accountDeletionMessage ? <Text style={styles.inlineError}>{accountDeletionMessage}</Text> : null}
@@ -1325,7 +1327,7 @@ export function SettingsScreen({
               <Text style={styles.deleteConfirmTitle}>Confirm account deletion</Text>
             </View>
             <Text style={styles.body}>
-              This starts the account deletion flow and may transfer SFLUV out of accessible wallets before the deletion request is submitted.
+              This starts the account deletion flow and may transfer {tokenSymbol} out of accessible wallets before the deletion request is submitted.
             </Text>
             <Text style={styles.dangerZoneNote}>Type DELETE to continue.</Text>
             <TextInput

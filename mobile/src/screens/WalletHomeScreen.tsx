@@ -8,13 +8,16 @@ import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import {
   buildAddressNameMaps,
   buildTransactionDetailPayload,
-  FAUCET_ADDRESS,
+  isRewardTransaction,
   shortAddress,
   TransactionDetailPayload,
 } from "../utils/transactions";
 
 type Props = {
   balance: string;
+  tokenSymbol: string;
+  explorerURL?: string;
+  faucetAddress?: string;
   smartAddress: string;
   ownerBadge?: string;
   selectedWalletLabel?: string;
@@ -35,8 +38,8 @@ type Props = {
   merchantLocationName?: string;
 };
 
-function formatTxTitle(tx: AppTransaction): string {
-  if (tx.direction !== "send" && tx.from.toLowerCase() === FAUCET_ADDRESS) {
+function formatTxTitle(tx: AppTransaction, faucetAddress?: string): string {
+  if (isRewardTransaction(tx, faucetAddress)) {
     return "Received Reward";
   }
   return tx.direction === "send" ? "Sent" : "Received";
@@ -51,6 +54,9 @@ function formatTxDate(timestamp: number): string {
 
 export function WalletHomeScreen({
   balance,
+  tokenSymbol,
+  explorerURL,
+  faucetAddress,
   smartAddress,
   ownerBadge,
   selectedWalletLabel,
@@ -84,9 +90,9 @@ export function WalletHomeScreen({
   const decoratedTransactions = useMemo(
     () =>
       recentTransactions.map((transaction) =>
-        buildTransactionDetailPayload(transaction, activeAddress, contactNameByAddress, merchantNameByAddress),
+        buildTransactionDetailPayload(transaction, activeAddress, contactNameByAddress, merchantNameByAddress, faucetAddress),
       ),
-    [activeAddress, contactNameByAddress, merchantNameByAddress, recentTransactions],
+    [activeAddress, contactNameByAddress, faucetAddress, merchantNameByAddress, recentTransactions],
   );
 
   return (
@@ -127,7 +133,7 @@ export function WalletHomeScreen({
             <Text style={styles.merchantLocationText}>{merchantLocationName}</Text>
           ) : null}
           <Text style={styles.heroBalance}>{balance}</Text>
-          <Text style={styles.heroCurrency}>SFLUV available</Text>
+          <Text style={styles.heroCurrency}>{tokenSymbol} available</Text>
 
           <View style={styles.addressBar}>
             <Ionicons name="wallet-outline" size={16} color={palette.primaryStrong} />
@@ -161,7 +167,7 @@ export function WalletHomeScreen({
           <View style={styles.sectionHeaderRow}>
             <View>
               <Text style={styles.sectionTitle}>Recent activity</Text>
-              <Text style={styles.sectionMeta}>Your latest SFLUV movement</Text>
+              <Text style={styles.sectionMeta}>Your latest {tokenSymbol} movement</Text>
             </View>
             {!merchantMode ? (
               <Pressable onPress={onOpenActivity}>
@@ -184,7 +190,7 @@ export function WalletHomeScreen({
           ) : (
             decoratedTransactions.slice(0, merchantMode ? 10 : 5).map((details) => {
               const incoming = details.received;
-              const reward = incoming && details.transaction.from.toLowerCase() === FAUCET_ADDRESS;
+              const reward = incoming && isRewardTransaction(details.transaction, faucetAddress);
               const counterpartyAddress = incoming ? details.transaction.from : details.transaction.to;
               const counterpartyLabel = incoming ? details.fromLabel : details.toLabel;
               const shortCounterparty = shortAddress(counterpartyAddress);
@@ -208,7 +214,7 @@ export function WalletHomeScreen({
                     <Text style={styles.txTitle}>
                       {reward
                         ? "Received Reward"
-                        : `${formatTxTitle(details.transaction)} ${incoming ? "from" : "to"} ${counterpartyLabel}`}
+                        : `${formatTxTitle(details.transaction, faucetAddress)} ${incoming ? "from" : "to"} ${counterpartyLabel}`}
                     </Text>
                     <Text style={styles.txMeta}>{counterpartyMeta}</Text>
                   </View>
@@ -217,7 +223,7 @@ export function WalletHomeScreen({
                       {incoming ? "+" : "-"}
                       {details.transaction.amountFormatted}
                     </Text>
-                    <Text style={styles.txCurrency}>SFLUV</Text>
+                    <Text style={styles.txCurrency}>{tokenSymbol}</Text>
                   </View>
                 </Pressable>
               );
@@ -229,6 +235,8 @@ export function WalletHomeScreen({
       <TransactionDetailsModal
         visible={Boolean(selectedTransaction)}
         details={selectedTransaction}
+        tokenSymbol={tokenSymbol}
+        explorerURL={explorerURL}
         onClose={() => setSelectedTransaction(null)}
       />
     </>

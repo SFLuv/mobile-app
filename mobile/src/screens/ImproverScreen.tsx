@@ -41,6 +41,7 @@ import { triggerClickHaptic } from "../utils/haptics";
 type Props = {
   user: AppUser | null;
   improver: AppImprover | null;
+  tokenSymbol: string;
   backendClient?: AppBackendClient | null;
   hapticsEnabled?: boolean;
   onRefreshProfile: () => Promise<void>;
@@ -434,6 +435,7 @@ function emptyStepNotPossibleForm(): StepNotPossibleForm {
 export function ImproverScreen({
   user,
   improver,
+  tokenSymbol,
   backendClient,
   hapticsEnabled = true,
   onRefreshProfile,
@@ -3471,7 +3473,7 @@ export function ImproverScreen({
 
                       {!currentDetailStepHasCompletionForm ? (
                         <>
-                          <Text style={styles.meta}>Bounty: {currentDetailStep.bounty} SFLUV</Text>
+                          <Text style={styles.meta}>Bounty: {currentDetailStep.bounty} {tokenSymbol}</Text>
                           {currentDetailStep.assignedImproverName ? (
                             <Text style={styles.meta}>Assigned: {currentDetailStep.assignedImproverName}</Text>
                           ) : null}

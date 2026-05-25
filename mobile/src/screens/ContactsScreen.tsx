@@ -5,11 +5,12 @@ import { Ionicons } from "@expo/vector-icons";
 import QRCode from "react-native-qrcode-svg";
 import { ethers } from "ethers";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
-import { AppContact } from "../types/app";
+import { AppClientConfig, AppContact } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { buildUniversalAddContactLink, parseSendTarget, parseSfluvUniversalLink } from "../utils/universalLinks";
 
 type Props = {
+  clientConfig: AppClientConfig;
   contacts: AppContact[];
   shareAddress?: string;
   syncNotice?: string | null;
@@ -38,13 +39,13 @@ function validateContactInput(name: string, address: string): string | null {
   return null;
 }
 
-function resolveScannedAddress(rawValue: string): string | null {
-  const parsedTarget = parseSendTarget(rawValue);
+function resolveScannedAddress(rawValue: string, clientConfig: AppClientConfig): string | null {
+  const parsedTarget = parseSendTarget(rawValue, clientConfig);
   if (parsedTarget) {
     return ethers.utils.getAddress(parsedTarget.recipient);
   }
 
-  const universalLink = parseSfluvUniversalLink(rawValue);
+  const universalLink = parseSfluvUniversalLink(rawValue, clientConfig);
   if (universalLink?.type === "addcontact") {
     return ethers.utils.getAddress(universalLink.address);
   }
@@ -58,6 +59,7 @@ function resolveScannedAddress(rawValue: string): string | null {
 }
 
 export function ContactsScreen({
+  clientConfig,
   contacts,
   shareAddress,
   syncNotice,
@@ -97,8 +99,8 @@ export function ContactsScreen({
     if (!shareAddress || !ethers.utils.isAddress(shareAddress)) {
       return null;
     }
-    return buildUniversalAddContactLink({ address: shareAddress });
-  }, [shareAddress]);
+    return buildUniversalAddContactLink({ address: shareAddress }, clientConfig);
+  }, [clientConfig, shareAddress]);
 
   useEffect(() => {
     if (contactMode !== "scan") {
@@ -173,7 +175,7 @@ export function ContactsScreen({
       scanCooldownRef.current = null;
     }, 1200);
 
-    const resolvedAddress = resolveScannedAddress(rawValue);
+    const resolvedAddress = resolveScannedAddress(rawValue, clientConfig);
     if (!resolvedAddress) {
       setScanErrorMessage("That QR code does not contain a valid wallet address.");
       return;

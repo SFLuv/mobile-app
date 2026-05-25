@@ -150,6 +150,7 @@ export interface AppWalletOwnerLookup {
 
 export interface AppTransaction {
   id: string;
+  chainId?: number;
   hash: string;
   amount: string;
   amountFormatted: string;
@@ -165,6 +166,30 @@ export interface AppClientConfig {
   configVersion: string;
   environment: string;
   activeChainId: number;
+  chainName: string;
+  rpcURL: string;
+  tokenAddress: string;
+  tokenDecimals: number;
+  tokenSymbol: string;
+  explorerURL?: string;
+  appOrigin: string;
+  alias: string;
+  honeyTokenAddress?: string;
+  honeyDecimals?: number;
+  byusdTokenAddress?: string;
+  byusdDecimals?: number;
+  zapperAddress?: string;
+  faucetAddress?: string;
+  backingAssets: string[];
+  maxSmartAccountScan: number;
+  wallet: {
+    entryPoint: string;
+    accountFactory: string;
+    paymasterAddress: string;
+    paymasterType: "cw-safe";
+    backendURL: string;
+    backendKind: "cw-engine";
+  };
   features: {
     migrationBanner: boolean;
     sendsEnabled: boolean;

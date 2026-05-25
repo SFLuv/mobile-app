@@ -20,11 +20,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { ethers } from "ethers";
 import { ScannerCornerGuide } from "../components/ScannerCornerGuide";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
-import { mobileConfig } from "../config";
 import { useCurrentLocation } from "../hooks/useCurrentLocation";
 import { AmountUnit, SendResult } from "../services/smartWallet";
 import type { AppBackendClient } from "../services/appBackend";
-import { AppContact, AppLocation, AppWalletOwnerLookup } from "../types/app";
+import { AppClientConfig, AppContact, AppLocation, AppWalletOwnerLookup } from "../types/app";
 import { SendFlowEntryMode } from "../types/preferences";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { formatDistanceLabel, locationDistanceMeters, sortLocationsByProximity } from "../utils/location";
@@ -62,6 +61,7 @@ type SendAttempt = {
 };
 
 type Props = {
+  clientConfig: AppClientConfig;
   contacts: AppContact[];
   merchants: AppLocation[];
   availableBalance: string;
@@ -105,7 +105,7 @@ function initials(name: string): string {
   return parts.map((part) => part[0]?.toUpperCase() ?? "").join("");
 }
 
-function sanitizeTokenInput(value: string): string {
+function sanitizeTokenInput(value: string, tokenDecimals: number): string {
   const cleaned = value.replace(/[^\d.]/g, "");
   const dotIndex = cleaned.indexOf(".");
   const whole = (dotIndex >= 0 ? cleaned.slice(0, dotIndex) : cleaned).replace(/^0+(?=\d)/, "");
@@ -116,11 +116,11 @@ function sanitizeTokenInput(value: string): string {
   const fraction = cleaned
     .slice(dotIndex + 1)
     .replace(/\./g, "")
-    .slice(0, mobileConfig.tokenDecimals);
+    .slice(0, tokenDecimals);
   return `${normalizedWhole}.${fraction}`;
 }
 
-function appendAmountCharacter(current: string, character: string): string {
+function appendAmountCharacter(current: string, character: string, tokenDecimals: number): string {
   if (character === ".") {
     if (current.includes(".")) {
       return current;
@@ -133,7 +133,7 @@ function appendAmountCharacter(current: string, character: string): string {
   if (current === "0") {
     return character;
   }
-  return sanitizeTokenInput(`${current}${character}`);
+  return sanitizeTokenInput(`${current}${character}`, tokenDecimals);
 }
 
 function removeAmountCharacter(current: string): string {
@@ -147,20 +147,20 @@ function removeAmountCharacter(current: string): string {
   return next;
 }
 
-function parseTokenAmount(value: string): ethers.BigNumber | null {
+function parseTokenAmount(value: string, tokenDecimals: number): ethers.BigNumber | null {
   const trimmed = value.trim();
   if (!trimmed) {
     return null;
   }
   try {
-    return ethers.utils.parseUnits(trimmed, mobileConfig.tokenDecimals);
+    return ethers.utils.parseUnits(trimmed, tokenDecimals);
   } catch {
     return null;
   }
 }
 
-function formatTokenAmount(value: ethers.BigNumberish, maxDecimals = 4): string {
-  const formatted = ethers.utils.formatUnits(value, mobileConfig.tokenDecimals);
+function formatTokenAmount(value: ethers.BigNumberish, tokenDecimals: number, maxDecimals = 4): string {
+  const formatted = ethers.utils.formatUnits(value, tokenDecimals);
   const [whole, fraction = ""] = formatted.split(".");
   const trimmed = fraction.replace(/0+$/, "");
   if (!trimmed) {
@@ -169,30 +169,30 @@ function formatTokenAmount(value: ethers.BigNumberish, maxDecimals = 4): string 
   return `${whole}.${trimmed.slice(0, maxDecimals)}`;
 }
 
-function formatBalanceText(rawBalance: string): string {
+function formatBalanceText(rawBalance: string, tokenDecimals: number, tokenSymbol: string): string {
   const normalized = rawBalance.trim();
   if (!normalized || normalized === "...") {
-    return "Balance: ... SFLUV";
+    return `Balance: ... ${tokenSymbol}`;
   }
   try {
-    return `Balance: ${sanitizeTokenInput(formatTokenAmount(ethers.utils.parseUnits(normalized, mobileConfig.tokenDecimals), 2)) || "0"} SFLUV`;
+    return `Balance: ${sanitizeTokenInput(formatTokenAmount(ethers.utils.parseUnits(normalized, tokenDecimals), tokenDecimals, 2), tokenDecimals) || "0"} ${tokenSymbol}`;
   } catch {
-    return `Balance: ${normalized} SFLUV`;
+    return `Balance: ${normalized} ${tokenSymbol}`;
   }
 }
 
-function formatTargetAmount(target: SendTarget): string {
+function formatTargetAmount(target: SendTarget, tokenDecimals: number): string {
   if (!target.amount) {
     return "";
   }
   if (target.amountUnit === "wei") {
     try {
-      return sanitizeTokenInput(ethers.utils.formatUnits(target.amount, mobileConfig.tokenDecimals));
+      return sanitizeTokenInput(ethers.utils.formatUnits(target.amount, tokenDecimals), tokenDecimals);
     } catch {
       return "";
     }
   }
-  return sanitizeTokenInput(target.amount);
+  return sanitizeTokenInput(target.amount, tokenDecimals);
 }
 
 function SwipeToSend({
@@ -352,6 +352,7 @@ function NumberPad({
 }
 
 export function SendScreen({
+  clientConfig,
   contacts,
   merchants,
   availableBalance,
@@ -397,19 +398,19 @@ export function SendScreen({
   const [permission, requestPermission] = useCameraPermissions();
   const { location: userLocation } = useCurrentLocation(step === "recipient" && phase === "editing");
 
-  const parsedTarget = useMemo(() => parseSendTarget(recipientInput), [recipientInput]);
+  const parsedTarget = useMemo(() => parseSendTarget(recipientInput, clientConfig), [clientConfig, recipientInput]);
   const lookupAddress = activeTarget?.recipient ?? parsedTarget?.recipient ?? null;
   const parsedBalanceRaw = useMemo(() => {
     try {
       if (!availableBalance.trim() || availableBalance.trim() === "...") {
         return null;
       }
-      return ethers.utils.parseUnits(availableBalance.trim(), mobileConfig.tokenDecimals);
+      return ethers.utils.parseUnits(availableBalance.trim(), clientConfig.tokenDecimals);
     } catch {
       return null;
     }
-  }, [availableBalance]);
-  const amountRaw = useMemo(() => parseTokenAmount(amountInput), [amountInput]);
+  }, [availableBalance, clientConfig.tokenDecimals]);
+  const amountRaw = useMemo(() => parseTokenAmount(amountInput, clientConfig.tokenDecimals), [amountInput, clientConfig.tokenDecimals]);
   const scannerPermissionGranted = permission?.granted === true;
 
   const payableMerchants = useMemo(
@@ -628,7 +629,7 @@ export function SendScreen({
 
     setRecipientInput(draft.recipient);
     setActiveTarget(target);
-    setAmountInput(draft.amount ? sanitizeTokenInput(draft.amount) : "");
+    setAmountInput(draft.amount ? sanitizeTokenInput(draft.amount, clientConfig.tokenDecimals) : "");
     setMemoInput(draft.memo ?? "");
     setDraftRecipient(
       draft.recipientLabel
@@ -649,7 +650,7 @@ export function SendScreen({
     setTipStatus("idle");
     setTipMessage(null);
     onDraftApplied?.();
-  }, [draft, onDraftApplied]);
+  }, [clientConfig.tokenDecimals, draft, onDraftApplied]);
 
   useEffect(() => {
     setEntryMode(defaultEntryMode);
@@ -765,7 +766,7 @@ export function SendScreen({
       if (suggestion) {
         setDraftRecipient(suggestion);
       }
-      const targetAmount = formatTargetAmount(target);
+      const targetAmount = formatTargetAmount(target, clientConfig.tokenDecimals);
       if (targetAmount) {
         setAmountInput((current) => (current.trim() ? current : targetAmount));
       }
@@ -778,7 +779,7 @@ export function SendScreen({
       clearTipState();
       setResultAttempt(null);
     },
-    [clearTipState],
+    [clearTipState, clientConfig.tokenDecimals],
   );
 
   const selectSuggestion = useCallback(
@@ -814,7 +815,7 @@ export function SendScreen({
 
   const submitPayment = useCallback(async () => {
     const target = activeTarget ?? parsedTarget;
-    const normalizedAmount = sanitizeTokenInput(amountInput).trim();
+    const normalizedAmount = sanitizeTokenInput(amountInput, clientConfig.tokenDecimals).trim();
     if (!target || !amountRaw || amountRaw.lte(0) || !normalizedAmount) {
       return;
     }
@@ -848,6 +849,7 @@ export function SendScreen({
     amountInput,
     amountRaw,
     clearTipState,
+    clientConfig.tokenDecimals,
     dismissNoteEditor,
     hapticsEnabled,
     memoInput,
@@ -878,12 +880,12 @@ export function SendScreen({
         return {
           key: `${percentage}` as TipChoice,
           label: `${percentage}%`,
-          amountValue: ethers.utils.formatUnits(amount, mobileConfig.tokenDecimals),
-          amountLabel: `${formatTokenAmount(amount, 2)} SFLUV`,
+          amountValue: ethers.utils.formatUnits(amount, clientConfig.tokenDecimals),
+          amountLabel: `${formatTokenAmount(amount, clientConfig.tokenDecimals, 2)} ${clientConfig.tokenSymbol}`,
         };
       })
       .filter(Boolean) as Array<{ key: TipChoice; label: string; amountValue: string; amountLabel: string }>;
-  }, [resultAttempt]);
+  }, [clientConfig.tokenDecimals, clientConfig.tokenSymbol, resultAttempt]);
 
   const canUseCustomTip = useMemo(
     () => {
@@ -900,12 +902,15 @@ export function SendScreen({
       return "";
     }
     if (tipChoice === "custom") {
-      return sanitizeTokenInput(customTipInput);
+      return sanitizeTokenInput(customTipInput, clientConfig.tokenDecimals);
     }
     return tipPresetOptions.find((option) => option.key === tipChoice)?.amountValue || "";
-  }, [customTipInput, resultAttempt, tipChoice, tipPresetOptions]);
+  }, [clientConfig.tokenDecimals, customTipInput, resultAttempt, tipChoice, tipPresetOptions]);
 
-  const selectedTipAmountRaw = useMemo(() => parseTokenAmount(selectedTipAmount), [selectedTipAmount]);
+  const selectedTipAmountRaw = useMemo(
+    () => parseTokenAmount(selectedTipAmount, clientConfig.tokenDecimals),
+    [clientConfig.tokenDecimals, selectedTipAmount],
+  );
 
   const sendTip = useCallback(async () => {
     if (
@@ -957,7 +962,7 @@ export function SendScreen({
       setScanLocked(true);
       triggerClickHaptic(hapticsEnabled, "medium");
 
-      const universalLink = parseSfluvUniversalLink(rawValue);
+      const universalLink = parseSfluvUniversalLink(rawValue, clientConfig);
       if (universalLink?.type === "redeem" || universalLink?.type === "addcontact") {
         if (onOpenUniversalLink) {
           onOpenUniversalLink(universalLink);
@@ -968,7 +973,7 @@ export function SendScreen({
         return;
       }
 
-      const scannedTarget = parseSendTarget(rawValue);
+      const scannedTarget = parseSendTarget(rawValue, clientConfig);
       if (scannedTarget) {
         const suggestion = suggestionByAddress.get(scannedTarget.recipient.toLowerCase()) || undefined;
         if (suggestion) {
@@ -984,7 +989,7 @@ export function SendScreen({
       setEntryMode("manual");
       setFeedback("Scanned.");
     },
-    [continueToAmount, hapticsEnabled, onOpenUniversalLink, scanLocked, suggestionByAddress],
+    [clientConfig, continueToAmount, hapticsEnabled, onOpenUniversalLink, scanLocked, suggestionByAddress],
   );
 
   const renderSuggestionCard = (suggestion: RecipientSuggestion) => (
@@ -1218,14 +1223,16 @@ export function SendScreen({
                 }}
               >
                 <Text style={styles.amountValue}>{amountInput || "0"}</Text>
-                <Text style={styles.amountSuffix}>SFLUV</Text>
+                <Text style={styles.amountSuffix}>{clientConfig.tokenSymbol}</Text>
               </Pressable>
             </View>
 
             <View style={styles.flexGrow} />
 
             <View style={styles.amountMetaBlock}>
-              <Text style={styles.balanceLabel}>{formatBalanceText(availableBalance)}</Text>
+              <Text style={styles.balanceLabel}>
+                {formatBalanceText(availableBalance, clientConfig.tokenDecimals, clientConfig.tokenSymbol)}
+              </Text>
               <View style={styles.noteWrap}>
                 <TextInput
                   ref={noteInputRef}
@@ -1244,8 +1251,8 @@ export function SendScreen({
             {!noteFocused ? (
               <NumberPad
                 layoutMode={layoutMode}
-                onDigit={(digit) => setAmountInput((current) => appendAmountCharacter(current, digit))}
-                onDecimal={() => setAmountInput((current) => appendAmountCharacter(current, "."))}
+                onDigit={(digit) => setAmountInput((current) => appendAmountCharacter(current, digit, clientConfig.tokenDecimals))}
+                onDecimal={() => setAmountInput((current) => appendAmountCharacter(current, ".", clientConfig.tokenDecimals))}
                 onBackspace={() => setAmountInput((current) => removeAmountCharacter(current))}
               />
             ) : (
@@ -1273,8 +1280,8 @@ export function SendScreen({
     const title = success ? "Sent" : "Failed";
     const message = resultAttempt
       ? success
-        ? `Sent ${resultAttempt.amountLabel} SFLUV to ${resultAttempt.recipientLabel}`
-        : `Failed to send ${resultAttempt.amountLabel} SFLUV to ${resultAttempt.recipientLabel}`
+        ? `Sent ${resultAttempt.amountLabel} to ${resultAttempt.recipientLabel}`
+        : `Failed to send ${resultAttempt.amountLabel} to ${resultAttempt.recipientLabel}`
       : success
         ? "Sent"
         : "Failed";
@@ -1332,7 +1339,7 @@ export function SendScreen({
                           if (tipSelectionLocked || tipSubmissionLockedRef.current) {
                             return;
                           }
-                          setCustomTipInput(sanitizeTokenInput(value));
+                          setCustomTipInput(sanitizeTokenInput(value, clientConfig.tokenDecimals));
                           setTipStatus("idle");
                           setTipMessage(null);
                         }}

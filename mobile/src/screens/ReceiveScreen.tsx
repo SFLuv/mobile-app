@@ -18,8 +18,10 @@ import { ScannerCornerGuide } from "../components/ScannerCornerGuide";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { buildUniversalPayLink, parseSfluvUniversalLink } from "../utils/universalLinks";
+import { AppClientConfig } from "../types/app";
 
 type Props = {
+  clientConfig: AppClientConfig;
   accountAddress: string;
   onRedeemCodeScanned?: (code: string) => void;
   showRedeemScanner?: boolean;
@@ -63,7 +65,7 @@ function shortLink(rawValue: string): string {
   }
 }
 
-export function ReceiveScreen({ accountAddress, onRedeemCodeScanned, showRedeemScanner = true }: Props) {
+export function ReceiveScreen({ clientConfig, accountAddress, onRedeemCodeScanned, showRedeemScanner = true }: Props) {
   const { palette, shadows } = useAppTheme();
   const windowFrame = useWindowDimensions();
   const compactLayout = windowFrame.height < 740;
@@ -98,7 +100,10 @@ export function ReceiveScreen({ accountAddress, onRedeemCodeScanned, showRedeemS
     setCopied(false);
   }, [mode]);
 
-  const paymentLink = useMemo(() => buildUniversalPayLink({ address: accountAddress }), [accountAddress]);
+  const paymentLink = useMemo(
+    () => buildUniversalPayLink({ address: accountAddress }, clientConfig),
+    [accountAddress, clientConfig],
+  );
   const qrValue = mode === "link" ? paymentLink : accountAddress;
   const qrCaption = mode === "link" ? shortLink(paymentLink) : shortAddress(accountAddress);
 
@@ -220,7 +225,7 @@ export function ReceiveScreen({ accountAddress, onRedeemCodeScanned, showRedeemS
                     return;
                   }
 
-                  const universalLink = parseSfluvUniversalLink(result.data);
+                  const universalLink = parseSfluvUniversalLink(result.data, clientConfig);
                   if (universalLink?.type === "redeem") {
                     setScanLocked(true);
                     setScanError(null);
