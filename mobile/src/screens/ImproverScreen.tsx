@@ -1817,11 +1817,11 @@ export function ImproverScreen({
           ? item.dropdownOptions.find((option) => option.value === dropdownValue)
           : undefined;
         const dropdownRequiresPhoto = Boolean(selectedOption?.requiresPhotoAttachment);
+        const photosAllowed = item.requiresPhoto || dropdownRequiresPhoto;
         const requiresWritten =
           item.requiresWrittenResponse ||
           (dropdownValue ? Boolean(item.dropdownRequiresWrittenResponse[dropdownValue]) : false);
-        const requiresPhoto = item.requiresPhoto || dropdownRequiresPhoto;
-        const anyInput = form.photos.length > 0 || dropdownValue.length > 0 || writtenResponse.length > 0;
+        const anyInput = (photosAllowed && form.photos.length > 0) || dropdownValue.length > 0 || writtenResponse.length > 0;
 
         if (!item.optional && !anyInput) {
           throw new Error(`Missing response for ${item.title}.`);
@@ -1832,7 +1832,7 @@ export function ImproverScreen({
         if (requiresWritten && !writtenResponse) {
           throw new Error(`Enter a written response for ${item.title}.`);
         }
-        if (requiresPhoto) {
+        if (photosAllowed) {
           if (item.requiresPhoto && item.photoAllowAnyCount) {
             if (form.photos.length === 0) {
               throw new Error(`Add at least one photo for ${item.title}.`);
@@ -1853,7 +1853,7 @@ export function ImproverScreen({
         items.push({
           itemId: item.id,
           photoUploads:
-            form.photos.length > 0
+            photosAllowed && form.photos.length > 0
               ? form.photos.map((photo) => ({
                   fileName: photo.fileName,
                   contentType: photo.contentType,
@@ -3078,7 +3078,15 @@ export function ImproverScreen({
                               <Pressable
                                 key={option.value}
                                 style={[styles.choiceRow, selected ? styles.choiceRowActive : undefined]}
-                                onPress={() => setItemForm(step.id, item.id, { dropdown: option.value })}
+                                onPress={() => {
+                                  const nextRequiresPhoto = item.requiresPhoto || Boolean(option.requiresPhotoAttachment);
+                                  const nextRequiresLivePhoto =
+                                    Boolean(option.requiresPhotoAttachment) && Boolean(option.cameraCaptureOnly);
+                                  setItemForm(step.id, item.id, {
+                                    dropdown: option.value,
+                                    photos: nextRequiresLivePhoto ? [] : nextRequiresPhoto ? form.photos : [],
+                                  });
+                                }}
                               >
                                 <View style={styles.choiceCopy}>
                                   <Text style={styles.choiceTitle}>{option.label}</Text>
