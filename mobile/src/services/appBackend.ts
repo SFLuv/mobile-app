@@ -579,9 +579,28 @@ async function readResponseDetail(response: Response): Promise<string> {
   }
 }
 
+function cleanResponseDetail(detail: string): string {
+  return detail
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, " ")
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 500);
+}
+
 async function throwRequestError(response: Response, fallbackMessage: string): Promise<never> {
   const detail = await readResponseDetail(response);
-  const message = detail ? `${fallbackMessage} (${response.status}): ${detail}` : `${fallbackMessage} (${response.status}).`;
+  if (response.status === 413) {
+    throw new AppBackendRequestError(
+      `${fallbackMessage} (413): The request is too large. Retake attached photos and try again.`,
+      response.status,
+    );
+  }
+  const readableDetail = cleanResponseDetail(detail);
+  const message = readableDetail
+    ? `${fallbackMessage} (${response.status}): ${readableDetail}`
+    : `${fallbackMessage} (${response.status}).`;
   throw new AppBackendRequestError(message, response.status);
 }
 

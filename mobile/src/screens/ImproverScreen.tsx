@@ -107,17 +107,42 @@ type CameraTarget = {
   maxCount: number | null;
 };
 
+type CompletionPhotoSource = {
+  uri?: string;
+  base64?: string;
+  width?: number;
+  height?: number;
+  title: string;
+  contentType?: string;
+};
+
 type WorkflowSelectorOption = {
   value: WorkflowView;
   label: string;
 };
 
-const MAX_MOBILE_WORKFLOW_PHOTO_BYTES = 2 * 1024 * 1024;
+const TARGET_MOBILE_WORKFLOW_PHOTO_BYTES = 420 * 1024;
+const MAX_MOBILE_WORKFLOW_PHOTO_BYTES = 600 * 1024;
+const MAX_WORKFLOW_COMPLETION_PAYLOAD_CHARS = 900 * 1024;
 const IMPROVER_BACKGROUND_POLL_MS = 30000;
+const WORKFLOW_PHOTO_COMPRESSION_ATTEMPTS = [
+  { longestEdge: 1280, compress: 0.62 },
+  { longestEdge: 1080, compress: 0.56 },
+  { longestEdge: 900, compress: 0.5 },
+  { longestEdge: 720, compress: 0.44 },
+  { longestEdge: 640, compress: 0.38 },
+];
 const OPTIONAL_IMAGE_PICKER: any = (() => {
   try {
     // Loaded lazily at runtime so the panel still compiles even if the package has not been installed yet.
     return require("expo-image-picker");
+  } catch {
+    return null;
+  }
+})();
+const OPTIONAL_IMAGE_MANIPULATOR: any = (() => {
+  try {
+    return require("expo-image-manipulator");
   } catch {
     return null;
   }
@@ -397,6 +422,55 @@ function slugifyFileName(value: string): string {
 function estimateBase64Bytes(value: string): number {
   const normalized = value.replace(/=+$/, "");
   return Math.floor((normalized.length * 3) / 4);
+}
+
+function buildWorkflowPhotoResizeAction(
+  source: Pick<CompletionPhotoSource, "width" | "height">,
+  longestEdge: number,
+): Array<{ resize: { width?: number; height?: number } }> {
+  const width = typeof source.width === "number" && Number.isFinite(source.width) ? source.width : 0;
+  const height = typeof source.height === "number" && Number.isFinite(source.height) ? source.height : 0;
+
+  if (width > 0 && height > 0) {
+    const currentLongestEdge = Math.max(width, height);
+    if (currentLongestEdge <= longestEdge) {
+      return [];
+    }
+    return width >= height ? [{ resize: { width: longestEdge } }] : [{ resize: { height: longestEdge } }];
+  }
+
+  return [{ resize: { width: longestEdge } }];
+}
+
+function estimateWorkflowCompletionRequestChars(input: AppWorkflowStepCompletionInput): number {
+  const normalizedItems = Array.isArray(input.items)
+    ? input.items.map((item) => ({
+        item_id: item.itemId,
+        photo_ids: Array.isArray(item.photoIds) ? item.photoIds : undefined,
+        photo_uploads: Array.isArray(item.photoUploads)
+          ? item.photoUploads.map((upload) => ({
+              file_name: upload.fileName,
+              content_type: upload.contentType,
+              data_base64: upload.dataBase64,
+            }))
+          : undefined,
+        written_response: item.writtenResponse?.trim() || undefined,
+        dropdown_value: item.dropdownValue?.trim() || undefined,
+      }))
+    : [];
+
+  return JSON.stringify({
+    step_not_possible: input.stepNotPossible === true,
+    step_not_possible_details: input.stepNotPossibleDetails?.trim() || undefined,
+    items: normalizedItems,
+  }).length;
+}
+
+function assertWorkflowCompletionPayloadFits(input: AppWorkflowStepCompletionInput): void {
+  if (estimateWorkflowCompletionRequestChars(input) <= MAX_WORKFLOW_COMPLETION_PAYLOAD_CHARS) {
+    return;
+  }
+  throw new Error("Attached workflow photos are too large to submit together. Remove one or retake smaller photos.");
 }
 
 function splitName(input?: string | null): { firstName: string; lastName: string } {
@@ -1522,6 +1596,54 @@ export function ImproverScreen({
     };
   }, []);
 
+  const createOptimizedCompletionPhoto = useCallback(
+    async (source: CompletionPhotoSource): Promise<CompletionPhoto> => {
+      const manipulator = OPTIONAL_IMAGE_MANIPULATOR;
+      const saveFormat = manipulator?.SaveFormat?.JPEG || "jpeg";
+      let bestPhoto: CompletionPhoto | null = null;
+
+      if (source.uri && typeof manipulator?.manipulateAsync === "function") {
+        for (const attempt of WORKFLOW_PHOTO_COMPRESSION_ATTEMPTS) {
+          const result = await manipulator.manipulateAsync(
+            source.uri,
+            buildWorkflowPhotoResizeAction(source, attempt.longestEdge),
+            {
+              base64: true,
+              compress: attempt.compress,
+              format: saveFormat,
+            },
+          );
+          const normalizedBase64 = typeof result?.base64 === "string" ? result.base64.trim() : "";
+          if (!normalizedBase64) {
+            continue;
+          }
+          const photo = createCompletionPhoto(normalizedBase64, source.title, "image/jpeg");
+          if (!bestPhoto || photo.sizeBytes < bestPhoto.sizeBytes) {
+            bestPhoto = photo;
+          }
+          if (photo.sizeBytes <= TARGET_MOBILE_WORKFLOW_PHOTO_BYTES) {
+            return photo;
+          }
+        }
+
+        if (bestPhoto && bestPhoto.sizeBytes <= MAX_MOBILE_WORKFLOW_PHOTO_BYTES) {
+          return bestPhoto;
+        }
+      }
+
+      const fallbackBase64 = typeof source.base64 === "string" ? source.base64.trim() : "";
+      if (fallbackBase64) {
+        const fallbackPhoto = createCompletionPhoto(fallbackBase64, source.title, source.contentType || "image/jpeg");
+        if (fallbackPhoto.sizeBytes <= MAX_MOBILE_WORKFLOW_PHOTO_BYTES) {
+          return fallbackPhoto;
+        }
+      }
+
+      throw new Error("That photo is too large. Try again with a simpler shot.");
+    },
+    [createCompletionPhoto],
+  );
+
   const addPhotosToItem = useCallback(
     (stepId: string, itemId: string, photos: CompletionPhoto[], maxCount: number | null) => {
       const currentPhotos = completionForms[stepId]?.[itemId]?.photos || [];
@@ -1590,25 +1712,31 @@ export function ImproverScreen({
     triggerClickHaptic(hapticsEnabled, "selection");
     setCameraError(null);
     try {
+      const canOptimizeWorkflowPhotos = typeof OPTIONAL_IMAGE_MANIPULATOR?.manipulateAsync === "function";
       const result = await (cameraRef.current as any)?.takePictureAsync({
-        base64: true,
-        quality: 0.45,
+        base64: !canOptimizeWorkflowPhotos,
+        quality: canOptimizeWorkflowPhotos ? 0.82 : 0.35,
         skipProcessing: false,
       });
-      const base64 = typeof result?.base64 === "string" ? result.base64.trim() : "";
-      if (!base64) {
+      const uri = typeof result?.uri === "string" ? result.uri : undefined;
+      const base64 = typeof result?.base64 === "string" ? result.base64.trim() : undefined;
+      if (!uri && !base64) {
         throw new Error("Unable to capture a photo right now.");
       }
-      const photo = createCompletionPhoto(base64, cameraTarget.title, "image/jpeg");
-      if (photo.sizeBytes > MAX_MOBILE_WORKFLOW_PHOTO_BYTES) {
-        throw new Error("That photo is too large. Try again with a simpler shot.");
-      }
+      const photo = await createOptimizedCompletionPhoto({
+        uri,
+        base64,
+        width: typeof result?.width === "number" ? result.width : undefined,
+        height: typeof result?.height === "number" ? result.height : undefined,
+        title: cameraTarget.title,
+        contentType: "image/jpeg",
+      });
       addPhotosToItem(cameraTarget.stepId, cameraTarget.itemId, [photo], cameraTarget.maxCount);
       setCameraTarget(null);
     } catch (nextError) {
       setCameraError((nextError as Error)?.message || "Unable to capture a workflow photo.");
     }
-  }, [addPhotosToItem, cameraTarget, createCompletionPhoto, hapticsEnabled]);
+  }, [addPhotosToItem, cameraTarget, createOptimizedCompletionPhoto, hapticsEnabled]);
 
   const pickLibraryPhotos = useCallback(
     async (stepId: string, itemId: string, title: string, maxCount: number | null) => {
@@ -1617,13 +1745,14 @@ export function ImproverScreen({
         return;
       }
       try {
+        const canOptimizeWorkflowPhotos = typeof OPTIONAL_IMAGE_MANIPULATOR?.manipulateAsync === "function";
         const result = await OPTIONAL_IMAGE_PICKER.launchImageLibraryAsync({
           mediaTypes:
             OPTIONAL_IMAGE_PICKER.MediaTypeOptions?.Images ?? OPTIONAL_IMAGE_PICKER.MediaType?.images ?? ["images"],
           allowsMultipleSelection: maxCount === null || maxCount > 1,
           selectionLimit: maxCount === null ? 10 : Math.max(1, maxCount),
-          quality: 0.45,
-          base64: true,
+          quality: canOptimizeWorkflowPhotos ? 1 : 0.35,
+          base64: !canOptimizeWorkflowPhotos,
         });
 
         if (result?.canceled) {
@@ -1631,20 +1760,26 @@ export function ImproverScreen({
         }
 
         const assets = Array.isArray(result?.assets) ? result.assets : [];
-        const nextPhotos = assets.map((asset: any, index: number) => {
-          const base64 = typeof asset?.base64 === "string" ? asset.base64.trim() : "";
-          if (!base64) {
+        const nextPhotos: CompletionPhoto[] = [];
+        for (const [index, asset] of assets.entries()) {
+          const uri = typeof asset?.uri === "string" ? asset.uri : undefined;
+          const base64 = typeof asset?.base64 === "string" ? asset.base64.trim() : undefined;
+          if (!uri && !base64) {
             throw new Error("One of the selected photos could not be read.");
           }
           const contentType = typeof asset?.mimeType === "string" && asset.mimeType.startsWith("image/")
             ? asset.mimeType
             : "image/jpeg";
-          const photo = createCompletionPhoto(base64, `${title}_${index + 1}`, contentType);
-          if (photo.sizeBytes > MAX_MOBILE_WORKFLOW_PHOTO_BYTES) {
-            throw new Error("One of the selected photos is too large after compression.");
-          }
-          return photo;
-        });
+          const photo = await createOptimizedCompletionPhoto({
+            uri,
+            base64,
+            width: typeof asset?.width === "number" ? asset.width : undefined,
+            height: typeof asset?.height === "number" ? asset.height : undefined,
+            title: `${title}_${index + 1}`,
+            contentType,
+          });
+          nextPhotos.push(photo);
+        }
 
         if (nextPhotos.length > 0) {
           addPhotosToItem(stepId, itemId, nextPhotos, maxCount);
@@ -1654,7 +1789,7 @@ export function ImproverScreen({
         setCompletionItemError(stepId, itemId, (nextError as Error)?.message || "Unable to attach library photos.");
       }
     },
-    [addPhotosToItem, createCompletionPhoto, setCompletionItemError],
+    [addPhotosToItem, createOptimizedCompletionPhoto, setCompletionItemError],
   );
 
   const buildCompletionPayload = useCallback(
@@ -1754,6 +1889,7 @@ export function ImproverScreen({
       setActionKey(`complete:${step.id}`);
       try {
         const payload = buildCompletionPayload(workflow, step);
+        assertWorkflowCompletionPayloadFits(payload);
         const updatedWorkflow = await backendClient.completeWorkflowStep(workflow.id, step.id, payload);
         mergeWorkflow(updatedWorkflow);
         setNotice(payload.stepNotPossible ? "Step marked not possible." : "Workflow step completed.");
@@ -3078,7 +3214,7 @@ export function ImproverScreen({
         ]}
       >
         {permission?.granted ? (
-          <CameraView ref={cameraRef} style={styles.cameraView} facing="back" />
+          <CameraView ref={cameraRef} style={styles.cameraView} facing="back" pictureSize="1280x720" />
         ) : (
           <View style={styles.cameraPendingWrap}>
             <ThemedActivityIndicator size="large" color={palette.white} />
