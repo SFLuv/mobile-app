@@ -113,7 +113,7 @@ type WorkflowSelectorOption = {
   label: string;
 };
 
-const MAX_MOBILE_WORKFLOW_PHOTO_BYTES = 2 * 1024 * 1024;
+const MAX_MOBILE_WORKFLOW_PHOTO_BYTES = 4 * 1024 * 1024;
 const IMPROVER_BACKGROUND_POLL_MS = 30000;
 const OPTIONAL_IMAGE_PICKER: any = (() => {
   try {
