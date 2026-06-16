@@ -916,10 +916,15 @@ function mapClientConfig(input: ClientConfigResponse): AppClientConfig {
   const token = findConfigToken(input, primaryToken);
   const account = findConfigAccount(input, primaryFactory);
   const chain = input.chains?.[String(primaryToken.chain_id)];
-  const rpcURL = chain?.node?.url?.trim();
-  if (!rpcURL) {
+  const nodeURL = chain?.node?.url?.trim();
+  if (!nodeURL) {
     throw new AppBackendRequestError(`App configuration is missing chains.${primaryToken.chain_id}.node.url.`);
   }
+  // The Citizen Wallet engine serves JSON-RPC (and AA methods) at
+  // `${node.url}/v1/rpc/${paymaster}`, not at the bare node.url — posting to the
+  // root 401s and ethers fails network detection. Mirror the CW SDK's
+  // primaryRPCUrl construction for both reads and the bundler/sponsor calls.
+  const rpcURL = `${nodeURL.replace(/\/+$/, "")}/v1/rpc/${account.paymaster_address}`;
   if (typeof token.decimals !== "number" || !Number.isFinite(token.decimals)) {
     throw new AppBackendRequestError(`App configuration is missing decimals for token ${configKey(primaryToken)}.`);
   }
