@@ -2066,7 +2066,7 @@ function WalletAppShellContent({
           {
             text: "OK",
             onPress: () => {
-              onLogout();
+              handleLogout();
             },
           },
         ]);
@@ -3014,6 +3014,26 @@ function WalletAppShellContent({
     setPushSyncRequestVersion((current) => current + 1);
   };
 
+  const handleLogout = () => {
+    void (async () => {
+      if (backendClient) {
+        try {
+          const registration = await readCurrentPushRegistration();
+          const syncToken = storedPushToken ?? registration.token;
+          if (syncToken) {
+            await backendClient.syncPushNotifications(syncToken, [], {
+              // ponytail: logout is device state, not a user preference change.
+              deviceRegistered: false,
+            });
+          }
+        } catch (error) {
+          console.warn("Unable to disable push notifications before logout", error);
+        }
+      }
+      onLogout?.();
+    })();
+  };
+
   const handleSetMerchantModePin = async (pin: string, currentPin?: string) => {
     if (!backendClient) {
       throw new Error("Backend not configured.");
@@ -3185,7 +3205,7 @@ function WalletAppShellContent({
                       {
                         text: "OK",
                         onPress: () => {
-                          onLogout?.();
+                          handleLogout();
                         },
                       },
                     ],
@@ -3600,7 +3620,7 @@ function WalletAppShellContent({
               notificationSubscribedCount={pushSyncState.subscribedCount}
               notificationStatusMessage={pushSyncState.message}
               onSyncNotifications={handleSyncPushNotifications}
-              onLogout={onLogout}
+              onLogout={handleLogout}
               googleLinked={googleLinked}
               googleLinkedEmail={googleLinkedEmail}
               googleActionBusy={googleActionBusy}
