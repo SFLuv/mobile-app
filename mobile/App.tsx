@@ -5537,38 +5537,66 @@ function blockedCompatibilityState(
 export default function App() {
   const [preferences, setPreferences, preferencesLoaded] = useStoredPreferences();
   const [compatibility, setCompatibility] = useState<CompatibilityState>({ status: "loading" });
+  const compatibilityClientRef = useRef<AppBackendClient | null>(null);
+  if (compatibilityClientRef.current === null) {
+    compatibilityClientRef.current = new AppBackendClient(async () => null);
+  }
+  const compatibilityCheckInFlightRef = useRef(false);
+
+  // Re-fetches the client-version policy and backend config and re-evaluates the
+  // blocking state. Runs at cold start and again every time the app returns to
+  // the foreground, so a process the OS kept suspended (not terminated) still
+  // picks up a maintenance/force-update gate and a fresh config on resume
+  // instead of running on whatever it fetched at the last launch.
+  const refreshCompatibility = useCallback(async () => {
+    if (compatibilityCheckInFlightRef.current) {
+      return;
+    }
+    compatibilityCheckInFlightRef.current = true;
+    const client = compatibilityClientRef.current!;
+    try {
+      const [version, config] = await Promise.all([
+        client.getClientVersion(),
+        client.getClientConfig(),
+      ]);
+      const blocked = blockedCompatibilityState(version, config);
+      setCompatibility(blocked ?? { status: "ready", version, config });
+    } catch (error) {
+      // Only hard-fail the initial load. A transient failure on a foreground
+      // re-check should not tear down an already-running session.
+      setCompatibility((current) =>
+        current.status === "loading"
+          ? {
+              status: "blocked",
+              title: "Unable to Start SFLUV",
+              message:
+                (error as Error)?.message ||
+                "SFLUV could not load compatibility settings. Please try again.",
+            }
+          : current,
+      );
+    } finally {
+      compatibilityCheckInFlightRef.current = false;
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    const client = new AppBackendClient(async () => null);
-    const loadCompatibility = async () => {
-      try {
-        const [version, config] = await Promise.all([
-          client.getClientVersion(),
-          client.getClientConfig(),
-        ]);
-        if (cancelled) {
-          return;
-        }
-        const blocked = blockedCompatibilityState(version, config);
-        setCompatibility(blocked ?? { status: "ready", version, config });
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-        setCompatibility({
-          status: "blocked",
-          title: "Unable to Start SFLUV",
-          message: (error as Error)?.message || "SFLUV could not load compatibility settings. Please try again.",
-        });
-      }
-    };
+    void refreshCompatibility();
+  }, [refreshCompatibility]);
 
-    void loadCompatibility();
+  useEffect(() => {
+    let previousState = AppState.currentState;
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      const cameToForeground = previousState !== "active" && nextState === "active";
+      previousState = nextState;
+      if (cameToForeground) {
+        void refreshCompatibility();
+      }
+    });
     return () => {
-      cancelled = true;
+      subscription.remove();
     };
-  }, []);
+  }, [refreshCompatibility]);
 
   const readyConfig = compatibility.status === "ready" ? compatibility.config : null;
   const supportedChain = readyConfig ? {
