@@ -5548,7 +5548,7 @@ export default function App() {
   // the foreground, so a process the OS kept suspended (not terminated) still
   // picks up a maintenance/force-update gate and a fresh config on resume
   // instead of running on whatever it fetched at the last launch.
-  const refreshCompatibility = useCallback(async () => {
+  const refreshCompatibility = useCallback(async (silentReadyRefresh = false) => {
     if (compatibilityCheckInFlightRef.current) {
       return;
     }
@@ -5560,7 +5560,17 @@ export default function App() {
         client.getClientConfig(),
       ]);
       const blocked = blockedCompatibilityState(version, config);
-      setCompatibility(blocked ?? { status: "ready", version, config });
+      setCompatibility((current) => {
+        if (blocked) {
+          return blocked;
+        }
+        if (silentReadyRefresh && current.status === "ready") {
+          // ponytail: keep foreground success silent; hot-swap config here only if resume-time
+          // config changes must apply without relaunch.
+          return current;
+        }
+        return { status: "ready", version, config };
+      });
     } catch (error) {
       // Only hard-fail the initial load. A transient failure on a foreground
       // re-check should not tear down an already-running session.
@@ -5590,7 +5600,7 @@ export default function App() {
       const cameToForeground = previousState !== "active" && nextState === "active";
       previousState = nextState;
       if (cameToForeground) {
-        void refreshCompatibility();
+        void refreshCompatibility(true);
       }
     });
     return () => {
