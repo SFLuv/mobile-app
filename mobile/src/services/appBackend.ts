@@ -861,6 +861,16 @@ function findExtraAddress(input: ClientConfigResponse, ...keys: string[]): strin
   return undefined;
 }
 
+function findExtraString(input: ClientConfigResponse, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = input.extras?.[key as keyof NonNullable<ClientConfigResponse["extras"]>];
+    if (typeof value === "string" && value.trim() !== "") {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
 function findExtraNumber(input: ClientConfigResponse, ...keys: string[]): number | undefined {
   for (const key of keys) {
     const value = input.extras?.[key as keyof NonNullable<ClientConfigResponse["extras"]>];
@@ -916,10 +926,17 @@ function mapClientConfig(input: ClientConfigResponse): AppClientConfig {
   const token = findConfigToken(input, primaryToken);
   const account = findConfigAccount(input, primaryFactory);
   const chain = input.chains?.[String(primaryToken.chain_id)];
-  const rpcURL = chain?.node?.url?.trim();
-  if (!rpcURL) {
+  const nodeURL = chain?.node?.url?.trim();
+  if (!nodeURL) {
     throw new AppBackendRequestError(`App configuration is missing chains.${primaryToken.chain_id}.node.url.`);
   }
+  // The CW engine serves the AA bundler/paymaster methods at
+  // `${node.url}/v1/rpc/${paymaster}` (used for sponsorship + sending).
+  const bundlerURL = `${nodeURL.replace(/\/+$/, "")}/v1/rpc/${account.paymaster_address}`;
+  // Reads (eth_getCode/eth_getBalance/...) must use a full node RPC: the engine
+  // 404s those methods. Prefer the backend-provided rpc_url (RPC_URL env),
+  // falling back to the engine only if none is configured.
+  const rpcURL = findExtraString(input, "rpc_url", "rpcUrl") || bundlerURL;
   if (typeof token.decimals !== "number" || !Number.isFinite(token.decimals)) {
     throw new AppBackendRequestError(`App configuration is missing decimals for token ${configKey(primaryToken)}.`);
   }
@@ -956,7 +973,7 @@ function mapClientConfig(input: ClientConfigResponse): AppClientConfig {
       accountFactory: ethers.utils.getAddress(account.account_factory_address),
       paymasterAddress: ethers.utils.getAddress(account.paymaster_address),
       paymasterType: normalizePaymasterType(account.paymaster_type),
-      backendURL: rpcURL,
+      backendURL: bundlerURL,
       backendKind: "cw-engine",
     },
     features: {
