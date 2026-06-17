@@ -97,3 +97,29 @@ _None._
   - 2026-06-17T01:12:48Z: checkout requested (`mobile/App.tsx`)
   - 2026-06-17T01:14:27Z: released completed files: mobile/App.tsx (`mobile/App.tsx`)
   - 2026-06-17T01:14:50Z: finished implementation (`mobile/App.tsx`)
+
+## Completed 2026-06-17T13:52:11Z - `push-installation-id-mobile`
+
+- Agent: codex [949df2cb-1c76-48b2-b1fa-014b7a279502]
+- Started: 2026-06-17T13:49:31Z
+- Last check-in: 2026-06-17T13:52:11Z
+- Completed: 2026-06-17T13:52:11Z
+- Goal: Send installation ID with mobile push subscription sync
+- Final progress: finished implementation
+- Planned paths:
+  - `mobile/App.tsx`
+  - `mobile/src/services/appBackend.ts`
+- Completed paths:
+  - `mobile/App.tsx`
+  - `mobile/src/services/appBackend.ts`
+- Checked-out paths at completion:
+_None._
+- Queued paths at completion:
+_None._
+- Bumped paths at completion:
+_None._
+- Recent check-ins:
+  - 2026-06-17T13:49:31Z: checkout requested (`mobile/App.tsx, mobile/src/services/appBackend.ts`)
+  - 2026-06-17T13:51:19Z: installation ID payload wired; preflight next (`mobile/App.tsx, mobile/src/services/appBackend.ts`)
+  - 2026-06-17T13:51:59Z: released completed files: mobile/App.tsx, mobile/src/services/appBackend.ts (`mobile/App.tsx, mobile/src/services/appBackend.ts`)
+  - 2026-06-17T13:52:11Z: finished implementation (`mobile/App.tsx, mobile/src/services/appBackend.ts`)
