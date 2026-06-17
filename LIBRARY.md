@@ -26,23 +26,39 @@ Use the agent-work-coordinator skill or `scripts/coordinator.py` to edit this fi
             "mobile/src/services/appBackend.ts"
           ],
           "note": "checkout requested"
+        },
+        {
+          "at": "2026-06-17T13:51:19Z",
+          "bumped": [],
+          "checked_out": [
+            "mobile/App.tsx",
+            "mobile/src/services/appBackend.ts"
+          ],
+          "files": [
+            "mobile/App.tsx",
+            "mobile/src/services/appBackend.ts"
+          ],
+          "note": "installation ID payload wired; preflight next",
+          "queued": [],
+          "remote_state": "up-to-date"
         }
       ],
       "completed_files": [],
       "goal": "Send installation ID with mobile push subscription sync",
       "id": "push-installation-id-mobile",
-      "last_checkin_at": "2026-06-17T13:49:31Z",
+      "last_checkin_at": "2026-06-17T13:51:19Z",
       "planned_files": [
         "mobile/App.tsx",
         "mobile/src/services/appBackend.ts"
       ],
-      "progress_note": "checkout requested",
+      "progress_note": "installation ID payload wired; preflight next",
       "queued": [],
-      "started_at": "2026-06-17T13:49:31Z"
+      "started_at": "2026-06-17T13:49:31Z",
+      "updated_at": "2026-06-17T13:51:19Z"
     }
   },
   "queues": {},
-  "updated_at": "2026-06-17T13:49:31Z",
+  "updated_at": "2026-06-17T13:51:19Z",
   "version": 1
 }
 agent-work-coordinator-state -->
@@ -53,9 +69,9 @@ agent-work-coordinator-state -->
 
 - Agent: codex [949df2cb-1c76-48b2-b1fa-014b7a279502]
 - Started: 2026-06-17T13:49:31Z
-- Last check-in: 2026-06-17T13:49:31Z
+- Last check-in: 2026-06-17T13:51:19Z
 - Goal: Send installation ID with mobile push subscription sync
-- Progress: checkout requested
+- Progress: installation ID payload wired; preflight next
 - Planned paths:
   - `mobile/App.tsx`
   - `mobile/src/services/appBackend.ts`
@@ -70,6 +86,7 @@ _None._
 _None._
 - Recent check-ins:
   - 2026-06-17T13:49:31Z: checkout requested (`mobile/App.tsx, mobile/src/services/appBackend.ts`)
+  - 2026-06-17T13:51:19Z: installation ID payload wired; preflight next (`mobile/App.tsx, mobile/src/services/appBackend.ts`)
 
 ## File Checkouts
 
