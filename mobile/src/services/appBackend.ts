@@ -930,9 +930,9 @@ function mapClientConfig(input: ClientConfigResponse): AppClientConfig {
   if (!nodeURL) {
     throw new AppBackendRequestError(`App configuration is missing chains.${primaryToken.chain_id}.node.url.`);
   }
-  // The CW engine serves the AA bundler/paymaster methods at
-  // `${node.url}/v1/rpc/${paymaster}` (used for sponsorship + sending).
-  const bundlerURL = `${nodeURL.replace(/\/+$/, "")}/v1/rpc/${account.paymaster_address}`;
+  const engineURL = nodeURL.replace(/\/+$/, "");
+  // The CW engine client appends `/v1/rpc/${paymaster}` for sponsorship + sending.
+  const bundlerURL = `${engineURL}/v1/rpc/${account.paymaster_address}`;
   // Reads (eth_getCode/eth_getBalance/...) must use a full node RPC: the engine
   // 404s those methods. Prefer the backend-provided rpc_url (RPC_URL env),
   // falling back to the engine only if none is configured.
@@ -973,7 +973,7 @@ function mapClientConfig(input: ClientConfigResponse): AppClientConfig {
       accountFactory: ethers.utils.getAddress(account.account_factory_address),
       paymasterAddress: ethers.utils.getAddress(account.paymaster_address),
       paymasterType: normalizePaymasterType(account.paymaster_type),
-      backendURL: bundlerURL,
+      backendURL: engineURL,
       backendKind: "cw-engine",
     },
     features: {

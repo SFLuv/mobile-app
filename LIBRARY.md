@@ -5,19 +5,13 @@ Use the agent-work-coordinator skill or `scripts/coordinator.py` to edit this fi
 
 <!-- agent-work-coordinator-state
 {
-  "checkouts": {
-    "mobile/App.tsx": "fix-preview-push-tx",
-    "mobile/src/services/appBackend.ts": "fix-preview-push-tx"
-  },
+  "checkouts": {},
   "implementations": {
     "fix-preview-push-tx": {
       "agent": "codex",
       "agent_uuid": "36845345-6b1d-4e1f-8008-d58237911925",
       "bumped_files": [],
-      "checked_out": [
-        "mobile/App.tsx",
-        "mobile/src/services/appBackend.ts"
-      ],
+      "checked_out": [],
       "checkins": [
         {
           "at": "2026-06-17T00:31:29Z",
@@ -26,23 +20,41 @@ Use the agent-work-coordinator skill or `scripts/coordinator.py` to edit this fi
             "mobile/src/services/appBackend.ts"
           ],
           "note": "checkout requested"
+        },
+        {
+          "at": "2026-06-17T00:34:06Z",
+          "bumped": [],
+          "checked_out": [
+            "mobile/App.tsx",
+            "mobile/src/services/appBackend.ts"
+          ],
+          "files": [
+            "mobile/App.tsx",
+            "mobile/src/services/appBackend.ts"
+          ],
+          "note": "released completed files: mobile/App.tsx, mobile/src/services/appBackend.ts",
+          "queued": []
         }
       ],
-      "completed_files": [],
+      "completed_files": [
+        "mobile/App.tsx",
+        "mobile/src/services/appBackend.ts"
+      ],
       "goal": "Fix preview regressions in push notifications and transactions",
       "id": "fix-preview-push-tx",
-      "last_checkin_at": "2026-06-17T00:31:29Z",
+      "last_checkin_at": "2026-06-17T00:34:06Z",
       "planned_files": [
         "mobile/App.tsx",
         "mobile/src/services/appBackend.ts"
       ],
-      "progress_note": "checkout requested",
+      "progress_note": "released completed files: mobile/App.tsx, mobile/src/services/appBackend.ts",
       "queued": [],
-      "started_at": "2026-06-17T00:31:29Z"
+      "started_at": "2026-06-17T00:31:29Z",
+      "updated_at": "2026-06-17T00:34:06Z"
     }
   },
   "queues": {},
-  "updated_at": "2026-06-17T00:31:29Z",
+  "updated_at": "2026-06-17T00:34:06Z",
   "version": 1
 }
 agent-work-coordinator-state -->
@@ -53,28 +65,28 @@ agent-work-coordinator-state -->
 
 - Agent: codex [36845345-6b1d-4e1f-8008-d58237911925]
 - Started: 2026-06-17T00:31:29Z
-- Last check-in: 2026-06-17T00:31:29Z
+- Last check-in: 2026-06-17T00:34:06Z
 - Goal: Fix preview regressions in push notifications and transactions
-- Progress: checkout requested
+- Progress: released completed files: mobile/App.tsx, mobile/src/services/appBackend.ts
 - Planned paths:
   - `mobile/App.tsx`
   - `mobile/src/services/appBackend.ts`
 - Completed paths:
-_None._
-- Checked-out paths:
   - `mobile/App.tsx`
   - `mobile/src/services/appBackend.ts`
+- Checked-out paths:
+_None._
 - Queued paths:
 _None._
 - Bumped paths:
 _None._
 - Recent check-ins:
   - 2026-06-17T00:31:29Z: checkout requested (`mobile/App.tsx, mobile/src/services/appBackend.ts`)
+  - 2026-06-17T00:34:06Z: released completed files: mobile/App.tsx, mobile/src/services/appBackend.ts (`mobile/App.tsx, mobile/src/services/appBackend.ts`)
 
 ## File Checkouts
 
-- `mobile/App.tsx` -> `fix-preview-push-tx` by codex [36845345-6b1d-4e1f-8008-d58237911925] (Fix preview regressions in push notifications and transactions)
-- `mobile/src/services/appBackend.ts` -> `fix-preview-push-tx` by codex [36845345-6b1d-4e1f-8008-d58237911925] (Fix preview regressions in push notifications and transactions)
+_No checked-out files._
 
 ## Queues
 

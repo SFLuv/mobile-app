@@ -1949,9 +1949,20 @@ function WalletAppShellContent({
         let latestRegistrations = backendRegistrations;
         let deviceStateSynced = false;
         if (syncToken && backendState.deviceRegistered !== registration.deviceRegistered) {
-          await backendClient.syncPushNotifications(syncToken, [], {
-            deviceRegistered: registration.deviceRegistered,
-          });
+          const shouldRestorePushSubscriptions =
+            registration.deviceRegistered &&
+            preferences.notificationsEnabled &&
+            backendState.preferenceEnabled !== false &&
+            walletSyncReady &&
+            notificationAddresses.length > 0;
+          await backendClient.syncPushNotifications(
+            syncToken,
+            shouldRestorePushSubscriptions ? notificationAddresses : [],
+            {
+              ...(shouldRestorePushSubscriptions ? { preferenceEnabled: true } : {}),
+              deviceRegistered: registration.deviceRegistered,
+            },
+          );
           latestRegistrations = await backendClient.getPushNotificationRegistrations(syncToken);
           deviceStateSynced = true;
           if (cancelled) {
@@ -2002,6 +2013,7 @@ function WalletAppShellContent({
     pushSyncRequestVersion,
     storedPushToken,
     storedPushTokenLoaded,
+    walletSyncReady,
   ]);
 
   const loadPublicLocations = async () => {
