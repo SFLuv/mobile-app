@@ -523,6 +523,7 @@ type PonderEntryResponse = {
 type PonderResponse = PonderEntryResponse[] | null;
 
 type PushNotificationSyncOptions = {
+  installationID?: string;
   preferenceEnabled?: boolean;
   deviceRegistered?: boolean;
 };
@@ -2694,9 +2695,13 @@ export class AppBackendClient {
     const body: {
       token: string;
       addresses: string[];
+      installation_id?: string;
       preference_enabled?: boolean;
       device_registered?: boolean;
     } = { token, addresses };
+    if (options.installationID) {
+      body.installation_id = options.installationID;
+    }
     if (typeof options.preferenceEnabled === "boolean") {
       body.preference_enabled = options.preferenceEnabled;
     }

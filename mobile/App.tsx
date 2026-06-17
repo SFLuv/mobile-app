@@ -166,7 +166,7 @@ type OverlayWalletPane = Exclude<WalletPane, "home">;
 
 const PREFERENCES_STORAGE_KEY = "sfluv-wallet:preferences";
 const PUSH_TOKEN_STORAGE_KEY = "sfluv-wallet:push-token";
-const MERCHANT_MODE_INSTALLATION_ID_KEY = "sfluv-wallet.merchant-mode-installation-id";
+const APP_INSTALLATION_ID_KEY = "sfluv-wallet.merchant-mode-installation-id";
 const WALLET_PREFERENCES_STORAGE_KEY_PREFIX = "sfluv-wallet:wallet-preferences";
 const BALANCE_CACHE_STORAGE_KEY_PREFIX = "sfluv-wallet:balance-cache";
 const REACTIVATED_ACCOUNT_RECOVERY_NOTICE_STORAGE_KEY =
@@ -185,8 +185,8 @@ const WALLET_CREATE_TIMEOUT_MS = 30_000;
 const WALLET_DISCOVERY_TIMEOUT_MS = 45_000;
 const EMAIL_LOGIN_CODE_LENGTH = 6;
 
-async function getOrCreateMerchantModeInstallationID(): Promise<string> {
-  const existing = await SecureStore.getItemAsync(MERCHANT_MODE_INSTALLATION_ID_KEY);
+async function getOrCreateAppInstallationID(): Promise<string> {
+  const existing = await SecureStore.getItemAsync(APP_INSTALLATION_ID_KEY);
   if (existing) {
     return existing;
   }
@@ -195,7 +195,7 @@ async function getOrCreateMerchantModeInstallationID(): Promise<string> {
     typeof Crypto.randomUUID === "function"
       ? Crypto.randomUUID()
       : ethers.utils.hexlify(ethers.utils.randomBytes(16));
-  await SecureStore.setItemAsync(MERCHANT_MODE_INSTALLATION_ID_KEY, nextID);
+  await SecureStore.setItemAsync(APP_INSTALLATION_ID_KEY, nextID);
   return nextID;
 }
 
@@ -1934,7 +1934,10 @@ function WalletAppShellContent({
 
         if (registration.token && registration.token !== storedPushToken) {
           if (storedPushToken) {
-            await backendClient.syncPushNotifications(storedPushToken, [], { deviceRegistered: false });
+            await backendClient.syncPushNotifications(storedPushToken, [], {
+              installationID: await getOrCreateAppInstallationID(),
+              deviceRegistered: false,
+            });
             if (cancelled) {
               return;
             }
@@ -1959,6 +1962,7 @@ function WalletAppShellContent({
             syncToken,
             shouldRestorePushSubscriptions ? notificationAddresses : [],
             {
+              installationID: await getOrCreateAppInstallationID(),
               ...(shouldRestorePushSubscriptions ? { preferenceEnabled: true } : {}),
               deviceRegistered: registration.deviceRegistered,
             },
@@ -2032,7 +2036,7 @@ function WalletAppShellContent({
       return null;
     }
 
-    const installationID = merchantModeInstallationID ?? (await getOrCreateMerchantModeInstallationID());
+    const installationID = merchantModeInstallationID ?? (await getOrCreateAppInstallationID());
     if (!merchantModeInstallationID) {
       setMerchantModeInstallationID(installationID);
     }
@@ -2805,7 +2809,10 @@ function WalletAppShellContent({
             return;
           }
 
-          await backendClient.syncPushNotifications(syncToken, [], { preferenceEnabled: false });
+          await backendClient.syncPushNotifications(syncToken, [], {
+            installationID: await getOrCreateAppInstallationID(),
+            preferenceEnabled: false,
+          });
           const registrations = await backendClient.getPushNotificationRegistrations(syncToken);
           if (cancelled) {
             return;
@@ -2856,6 +2863,7 @@ function WalletAppShellContent({
         if (pendingPushPreferenceChangeRef.current === "enable" && syncToken) {
           try {
             await backendClient.syncPushNotifications(syncToken, [], {
+              installationID: await getOrCreateAppInstallationID(),
               preferenceEnabled: true,
               deviceRegistered: false,
             });
@@ -2909,7 +2917,10 @@ function WalletAppShellContent({
       }
 
       if (storedPushToken && storedPushToken !== registration.token) {
-        await backendClient.syncPushNotifications(storedPushToken, [], { deviceRegistered: false });
+        await backendClient.syncPushNotifications(storedPushToken, [], {
+          installationID: await getOrCreateAppInstallationID(),
+          deviceRegistered: false,
+        });
         if (cancelled) {
           return;
         }
@@ -2935,6 +2946,7 @@ function WalletAppShellContent({
 
       try {
         await backendClient.syncPushNotifications(registration.token, notificationAddresses, {
+          installationID: await getOrCreateAppInstallationID(),
           preferenceEnabled: true,
           deviceRegistered: registration.deviceRegistered,
         });
@@ -3045,6 +3057,7 @@ function WalletAppShellContent({
           );
           for (const syncToken of logoutTokens) {
             await backendClient.syncPushNotifications(syncToken, [], {
+              installationID: await getOrCreateAppInstallationID(),
               // ponytail: logout is device state, not a user preference change.
               deviceRegistered: false,
             });
@@ -3076,7 +3089,7 @@ function WalletAppShellContent({
     if (!backendClient) {
       throw new Error("Backend not configured.");
     }
-    const installationID = merchantModeInstallationID ?? (await getOrCreateMerchantModeInstallationID());
+    const installationID = merchantModeInstallationID ?? (await getOrCreateAppInstallationID());
     if (!merchantModeInstallationID) {
       setMerchantModeInstallationID(installationID);
     }
@@ -3111,7 +3124,7 @@ function WalletAppShellContent({
       return;
     }
 
-    const installationID = merchantModeInstallationID ?? (await getOrCreateMerchantModeInstallationID());
+    const installationID = merchantModeInstallationID ?? (await getOrCreateAppInstallationID());
     if (!merchantModeInstallationID) {
       setMerchantModeInstallationID(installationID);
     }
