@@ -3031,8 +3031,19 @@ function WalletAppShellContent({
       if (backendClient) {
         try {
           const registration = await readCurrentPushRegistration();
-          const syncToken = storedPushToken ?? registration.token;
-          if (syncToken) {
+          let backendTokens: Array<string | undefined> = [];
+          try {
+            backendTokens = (await backendClient.getPushNotificationRegistrations()).map((item) => item.token);
+          } catch (error) {
+            console.warn("Unable to load push notification tokens before logout", error);
+          }
+          const logoutTokens = Array.from(
+            new Set(
+              [registration.token, storedPushToken, ...backendTokens]
+                .filter((token): token is string => Boolean(token)),
+            ),
+          );
+          for (const syncToken of logoutTokens) {
             await backendClient.syncPushNotifications(syncToken, [], {
               // ponytail: logout is device state, not a user preference change.
               deviceRegistered: false,
