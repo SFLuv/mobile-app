@@ -5,21 +5,76 @@ Use the agent-work-coordinator skill or `scripts/coordinator.py` to edit this fi
 
 <!-- agent-work-coordinator-state
 {
-  "checkouts": {},
-  "implementations": {},
+  "checkouts": {
+    "mobile/App.tsx": "push-installation-id-mobile",
+    "mobile/src/services/appBackend.ts": "push-installation-id-mobile"
+  },
+  "implementations": {
+    "push-installation-id-mobile": {
+      "agent": "codex",
+      "agent_uuid": "949df2cb-1c76-48b2-b1fa-014b7a279502",
+      "bumped_files": [],
+      "checked_out": [
+        "mobile/App.tsx",
+        "mobile/src/services/appBackend.ts"
+      ],
+      "checkins": [
+        {
+          "at": "2026-06-17T13:49:31Z",
+          "files": [
+            "mobile/App.tsx",
+            "mobile/src/services/appBackend.ts"
+          ],
+          "note": "checkout requested"
+        }
+      ],
+      "completed_files": [],
+      "goal": "Send installation ID with mobile push subscription sync",
+      "id": "push-installation-id-mobile",
+      "last_checkin_at": "2026-06-17T13:49:31Z",
+      "planned_files": [
+        "mobile/App.tsx",
+        "mobile/src/services/appBackend.ts"
+      ],
+      "progress_note": "checkout requested",
+      "queued": [],
+      "started_at": "2026-06-17T13:49:31Z"
+    }
+  },
   "queues": {},
-  "updated_at": "2026-06-17T01:14:50Z",
+  "updated_at": "2026-06-17T13:49:31Z",
   "version": 1
 }
 agent-work-coordinator-state -->
 
 ## Active Implementation Briefs
 
-_No active implementations._
+### `push-installation-id-mobile`
+
+- Agent: codex [949df2cb-1c76-48b2-b1fa-014b7a279502]
+- Started: 2026-06-17T13:49:31Z
+- Last check-in: 2026-06-17T13:49:31Z
+- Goal: Send installation ID with mobile push subscription sync
+- Progress: checkout requested
+- Planned paths:
+  - `mobile/App.tsx`
+  - `mobile/src/services/appBackend.ts`
+- Completed paths:
+_None._
+- Checked-out paths:
+  - `mobile/App.tsx`
+  - `mobile/src/services/appBackend.ts`
+- Queued paths:
+_None._
+- Bumped paths:
+_None._
+- Recent check-ins:
+  - 2026-06-17T13:49:31Z: checkout requested (`mobile/App.tsx, mobile/src/services/appBackend.ts`)
 
 ## File Checkouts
 
-_No checked-out files._
+- `mobile/App.tsx` -> `push-installation-id-mobile` by codex [949df2cb-1c76-48b2-b1fa-014b7a279502] (Send installation ID with mobile push subscription sync)
+- `mobile/src/services/appBackend.ts` -> `push-installation-id-mobile` by codex [949df2cb-1c76-48b2-b1fa-014b7a279502] (Send installation ID with mobile push subscription sync)
 
 ## Queues
 
