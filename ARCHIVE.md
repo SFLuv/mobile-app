@@ -74,3 +74,26 @@ _None._
   - 2026-06-17T00:31:29Z: checkout requested (`mobile/App.tsx, mobile/src/services/appBackend.ts`)
   - 2026-06-17T00:34:06Z: released completed files: mobile/App.tsx, mobile/src/services/appBackend.ts (`mobile/App.tsx, mobile/src/services/appBackend.ts`)
   - 2026-06-17T00:34:19Z: finished implementation (`mobile/App.tsx, mobile/src/services/appBackend.ts`)
+
+## Completed 2026-06-17T01:14:50Z - `fix-logout-push-token-mismatch`
+
+- Agent: codex [1c6f49ab-8d81-4ce9-9f30-a3297b1ef4dc]
+- Started: 2026-06-17T01:12:48Z
+- Last check-in: 2026-06-17T01:14:50Z
+- Completed: 2026-06-17T01:14:50Z
+- Goal: Disable all known Expo push tokens for logged-out account
+- Final progress: finished implementation
+- Planned paths:
+  - `mobile/App.tsx`
+- Completed paths:
+  - `mobile/App.tsx`
+- Checked-out paths at completion:
+_None._
+- Queued paths at completion:
+_None._
+- Bumped paths at completion:
+_None._
+- Recent check-ins:
+  - 2026-06-17T01:12:48Z: checkout requested (`mobile/App.tsx`)
+  - 2026-06-17T01:14:27Z: released completed files: mobile/App.tsx (`mobile/App.tsx`)
+  - 2026-06-17T01:14:50Z: finished implementation (`mobile/App.tsx`)
