@@ -49,3 +49,28 @@ _None._
   - 2026-06-16T22:29:48Z: checkout requested (`mobile/App.tsx`)
   - 2026-06-16T22:30:52Z: released completed files: mobile/App.tsx (`mobile/App.tsx`)
   - 2026-06-16T22:31:01Z: finished implementation (`mobile/App.tsx`)
+
+## Completed 2026-06-17T00:34:19Z - `fix-preview-push-tx`
+
+- Agent: codex [36845345-6b1d-4e1f-8008-d58237911925]
+- Started: 2026-06-17T00:31:29Z
+- Last check-in: 2026-06-17T00:34:19Z
+- Completed: 2026-06-17T00:34:19Z
+- Goal: Fix preview regressions in push notifications and transactions
+- Final progress: finished implementation
+- Planned paths:
+  - `mobile/App.tsx`
+  - `mobile/src/services/appBackend.ts`
+- Completed paths:
+  - `mobile/App.tsx`
+  - `mobile/src/services/appBackend.ts`
+- Checked-out paths at completion:
+_None._
+- Queued paths at completion:
+_None._
+- Bumped paths at completion:
+_None._
+- Recent check-ins:
+  - 2026-06-17T00:31:29Z: checkout requested (`mobile/App.tsx, mobile/src/services/appBackend.ts`)
+  - 2026-06-17T00:34:06Z: released completed files: mobile/App.tsx, mobile/src/services/appBackend.ts (`mobile/App.tsx, mobile/src/services/appBackend.ts`)
+  - 2026-06-17T00:34:19Z: finished implementation (`mobile/App.tsx, mobile/src/services/appBackend.ts`)
