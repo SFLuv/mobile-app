@@ -123,3 +123,26 @@ _None._
   - 2026-06-17T13:51:19Z: installation ID payload wired; preflight next (`mobile/App.tsx, mobile/src/services/appBackend.ts`)
   - 2026-06-17T13:51:59Z: released completed files: mobile/App.tsx, mobile/src/services/appBackend.ts (`mobile/App.tsx, mobile/src/services/appBackend.ts`)
   - 2026-06-17T13:52:11Z: finished implementation (`mobile/App.tsx, mobile/src/services/appBackend.ts`)
+
+## Completed 2026-06-22T16:07:00Z - `disable-preview-autoincrement`
+
+- Agent: codex [9adfbfa2-22ba-446e-bf73-3fe50a7ed3a6]
+- Started: 2026-06-22T16:06:18Z
+- Last check-in: 2026-06-22T16:07:00Z
+- Completed: 2026-06-22T16:07:00Z
+- Goal: Disable EAS preview auto-increment inheritance
+- Final progress: finished implementation
+- Planned paths:
+  - `mobile/eas.json`
+- Completed paths:
+  - `mobile/eas.json`
+- Checked-out paths at completion:
+_None._
+- Queued paths at completion:
+_None._
+- Bumped paths at completion:
+_None._
+- Recent check-ins:
+  - 2026-06-22T16:06:18Z: checkout requested (`mobile/eas.json`)
+  - 2026-06-22T16:06:50Z: released completed files: mobile/eas.json (`mobile/eas.json`)
+  - 2026-06-22T16:07:00Z: finished implementation (`mobile/eas.json`)
