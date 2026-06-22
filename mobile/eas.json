@@ -58,6 +58,7 @@
     },
     "preview": {
       "extends": "production",
+      "autoIncrement": false,
       "distribution": "internal"
     }
   }

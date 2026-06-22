@@ -5,17 +5,13 @@ Use the agent-work-coordinator skill or `scripts/coordinator.py` to edit this fi
 
 <!-- agent-work-coordinator-state
 {
-  "checkouts": {
-    "mobile/eas.json": "disable-preview-autoincrement"
-  },
+  "checkouts": {},
   "implementations": {
     "disable-preview-autoincrement": {
       "agent": "codex",
       "agent_uuid": "9adfbfa2-22ba-446e-bf73-3fe50a7ed3a6",
       "bumped_files": [],
-      "checked_out": [
-        "mobile/eas.json"
-      ],
+      "checked_out": [],
       "checkins": [
         {
           "at": "2026-06-22T16:06:18Z",
@@ -23,22 +19,37 @@ Use the agent-work-coordinator skill or `scripts/coordinator.py` to edit this fi
             "mobile/eas.json"
           ],
           "note": "checkout requested"
+        },
+        {
+          "at": "2026-06-22T16:06:50Z",
+          "bumped": [],
+          "checked_out": [
+            "mobile/eas.json"
+          ],
+          "files": [
+            "mobile/eas.json"
+          ],
+          "note": "released completed files: mobile/eas.json",
+          "queued": []
         }
       ],
-      "completed_files": [],
+      "completed_files": [
+        "mobile/eas.json"
+      ],
       "goal": "Disable EAS preview auto-increment inheritance",
       "id": "disable-preview-autoincrement",
-      "last_checkin_at": "2026-06-22T16:06:18Z",
+      "last_checkin_at": "2026-06-22T16:06:50Z",
       "planned_files": [
         "mobile/eas.json"
       ],
-      "progress_note": "checkout requested",
+      "progress_note": "released completed files: mobile/eas.json",
       "queued": [],
-      "started_at": "2026-06-22T16:06:18Z"
+      "started_at": "2026-06-22T16:06:18Z",
+      "updated_at": "2026-06-22T16:06:50Z"
     }
   },
   "queues": {},
-  "updated_at": "2026-06-22T16:06:18Z",
+  "updated_at": "2026-06-22T16:06:50Z",
   "version": 1
 }
 agent-work-coordinator-state -->
@@ -49,25 +60,26 @@ agent-work-coordinator-state -->
 
 - Agent: codex [9adfbfa2-22ba-446e-bf73-3fe50a7ed3a6]
 - Started: 2026-06-22T16:06:18Z
-- Last check-in: 2026-06-22T16:06:18Z
+- Last check-in: 2026-06-22T16:06:50Z
 - Goal: Disable EAS preview auto-increment inheritance
-- Progress: checkout requested
+- Progress: released completed files: mobile/eas.json
 - Planned paths:
   - `mobile/eas.json`
 - Completed paths:
-_None._
-- Checked-out paths:
   - `mobile/eas.json`
+- Checked-out paths:
+_None._
 - Queued paths:
 _None._
 - Bumped paths:
 _None._
 - Recent check-ins:
   - 2026-06-22T16:06:18Z: checkout requested (`mobile/eas.json`)
+  - 2026-06-22T16:06:50Z: released completed files: mobile/eas.json (`mobile/eas.json`)
 
 ## File Checkouts
 
-- `mobile/eas.json` -> `disable-preview-autoincrement` by codex [9adfbfa2-22ba-446e-bf73-3fe50a7ed3a6] (Disable EAS preview auto-increment inheritance)
+_No checked-out files._
 
 ## Queues
 
