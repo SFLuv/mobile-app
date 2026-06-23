@@ -5,17 +5,13 @@ Use the agent-work-coordinator skill or `scripts/coordinator.py` to edit this fi
 
 <!-- agent-work-coordinator-state
 {
-  "checkouts": {
-    "mobile/eas.json": "celo-fork-ios-preview-profile"
-  },
+  "checkouts": {},
   "implementations": {
     "celo-fork-ios-preview-profile": {
       "agent": "Codex",
       "agent_uuid": "10c6fd89-c125-47c7-94c8-b2f39309e717",
       "bumped_files": [],
-      "checked_out": [
-        "mobile/eas.json"
-      ],
+      "checked_out": [],
       "checkins": [
         {
           "at": "2026-06-23T23:32:37Z",
@@ -23,22 +19,37 @@ Use the agent-work-coordinator skill or `scripts/coordinator.py` to edit this fi
             "mobile/eas.json"
           ],
           "note": "checkout requested"
+        },
+        {
+          "at": "2026-06-23T23:33:09Z",
+          "bumped": [],
+          "checked_out": [
+            "mobile/eas.json"
+          ],
+          "files": [
+            "mobile/eas.json"
+          ],
+          "note": "released completed files: mobile/eas.json",
+          "queued": []
         }
       ],
-      "completed_files": [],
+      "completed_files": [
+        "mobile/eas.json"
+      ],
       "goal": "Add an iOS internal EAS profile for Celo fork preview build",
       "id": "celo-fork-ios-preview-profile",
-      "last_checkin_at": "2026-06-23T23:32:37Z",
+      "last_checkin_at": "2026-06-23T23:33:09Z",
       "planned_files": [
         "mobile/eas.json"
       ],
-      "progress_note": "checkout requested",
+      "progress_note": "released completed files: mobile/eas.json",
       "queued": [],
-      "started_at": "2026-06-23T23:32:37Z"
+      "started_at": "2026-06-23T23:32:37Z",
+      "updated_at": "2026-06-23T23:33:09Z"
     }
   },
   "queues": {},
-  "updated_at": "2026-06-23T23:32:37Z",
+  "updated_at": "2026-06-23T23:33:09Z",
   "version": 1
 }
 agent-work-coordinator-state -->
@@ -49,25 +60,26 @@ agent-work-coordinator-state -->
 
 - Agent: Codex [10c6fd89-c125-47c7-94c8-b2f39309e717]
 - Started: 2026-06-23T23:32:37Z
-- Last check-in: 2026-06-23T23:32:37Z
+- Last check-in: 2026-06-23T23:33:09Z
 - Goal: Add an iOS internal EAS profile for Celo fork preview build
-- Progress: checkout requested
+- Progress: released completed files: mobile/eas.json
 - Planned paths:
   - `mobile/eas.json`
 - Completed paths:
-_None._
-- Checked-out paths:
   - `mobile/eas.json`
+- Checked-out paths:
+_None._
 - Queued paths:
 _None._
 - Bumped paths:
 _None._
 - Recent check-ins:
   - 2026-06-23T23:32:37Z: checkout requested (`mobile/eas.json`)
+  - 2026-06-23T23:33:09Z: released completed files: mobile/eas.json (`mobile/eas.json`)
 
 ## File Checkouts
 
-- `mobile/eas.json` -> `celo-fork-ios-preview-profile` by Codex [10c6fd89-c125-47c7-94c8-b2f39309e717] (Add an iOS internal EAS profile for Celo fork preview build)
+_No checked-out files._
 
 ## Queues
 

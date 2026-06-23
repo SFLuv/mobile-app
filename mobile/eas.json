@@ -60,6 +60,14 @@
       "extends": "production",
       "autoIncrement": false,
       "distribution": "internal"
+    },
+    "preview-celo-fork": {
+      "extends": "production",
+      "autoIncrement": false,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_APP_BACKEND_URL": "https://5891-135-180-49-112.ngrok-free.app"
+      }
     }
   }
 }
