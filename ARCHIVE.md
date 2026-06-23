@@ -169,3 +169,26 @@ _None._
   - 2026-06-22T16:57:15Z: checkout requested (`mobile/app.config.ts`)
   - 2026-06-22T16:57:44Z: released completed files: mobile/app.config.ts (`mobile/app.config.ts`)
   - 2026-06-22T16:57:50Z: finished implementation (`mobile/app.config.ts`)
+
+## Completed 2026-06-23T23:38:45Z - `celo-fork-ios-preview-profile`
+
+- Agent: Codex [10c6fd89-c125-47c7-94c8-b2f39309e717]
+- Started: 2026-06-23T23:32:37Z
+- Last check-in: 2026-06-23T23:38:45Z
+- Completed: 2026-06-23T23:38:45Z
+- Goal: Add an iOS internal EAS profile for Celo fork preview build
+- Final progress: finished implementation
+- Planned paths:
+  - `mobile/eas.json`
+- Completed paths:
+  - `mobile/eas.json`
+- Checked-out paths at completion:
+_None._
+- Queued paths at completion:
+_None._
+- Bumped paths at completion:
+_None._
+- Recent check-ins:
+  - 2026-06-23T23:32:37Z: checkout requested (`mobile/eas.json`)
+  - 2026-06-23T23:33:09Z: released completed files: mobile/eas.json (`mobile/eas.json`)
+  - 2026-06-23T23:38:45Z: finished implementation (`mobile/eas.json`)
