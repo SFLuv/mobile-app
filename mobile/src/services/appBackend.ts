@@ -280,16 +280,6 @@ type CredentialRequestResponse = Array<{
   requester_email: string;
 }>;
 
-type WorkflowStepPhotoUploadResponse = {
-  upload_id?: string;
-  complete: boolean;
-  received_chunks?: number;
-  total_chunks?: number;
-  photo?: {
-    id?: string;
-  };
-};
-
 type WorkflowResponse = {
   id: string;
   series_id: string;
@@ -623,10 +613,6 @@ type UserPolicyStatusResponse = {
 const POLICY_REQUIRED_HEADER = "X-SFLUV-Auth-Reason";
 const POLICY_REQUIRED_REASON = "privacy-policy-required";
 const APP_BACKEND_REQUEST_TIMEOUT_MS = 25_000;
-const WORKFLOW_PHOTO_MAX_BYTES = 4 * 1024 * 1024;
-const WORKFLOW_PHOTO_MAX_LABEL = "4MB";
-const WORKFLOW_PHOTO_CHUNK_UPLOAD_BYTES = 256 * 1024;
-const WORKFLOW_PHOTO_CHUNK_THRESHOLD_BYTES = 512 * 1024;
 
 function endpoint(path: string): string {
   return `${mobileConfig.appBackendURL.replace(/\/+$/, "")}${path}`;
@@ -670,41 +656,6 @@ function asString(value: unknown, fallback = ""): string {
 
 function asNumber(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-function createWorkflowPhotoUploadId(): string {
-  return `workflow-photo-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function normalizeWorkflowPhotoBase64(value: string): string {
-  let payload = value.trim();
-  const commaIndex = payload.indexOf(",");
-  if (commaIndex >= 0 && payload.slice(0, commaIndex).toLowerCase().includes("base64")) {
-    payload = payload.slice(commaIndex + 1).trim();
-  }
-  return payload.replace(/\s+/g, "");
-}
-
-function workflowPhotoBlob(data: Buffer, contentType: string): Blob {
-  return new Blob([data as any], {
-    type: contentType || "application/octet-stream",
-    lastModified: Date.now(),
-  });
-}
-
-function workflowPhotoFileName(upload: AppWorkflowPhotoUpload, fallback = "photo.jpg"): string {
-  const trimmed = upload.fileName?.trim();
-  return trimmed || fallback;
-}
-
-function appendWorkflowPhotoFormFile(
-  formData: FormData,
-  fieldName: string,
-  data: Buffer,
-  contentType: string,
-  fileName: string,
-): void {
-  (formData.append as any)(fieldName, workflowPhotoBlob(data, contentType), fileName);
 }
 
 function mapPonderSubscription(
@@ -2138,131 +2089,22 @@ export class AppBackendClient {
     return mapWorkflow(body);
   }
 
-  private async uploadWorkflowStepPhoto(
-    workflowId: string,
-    stepId: string,
-    itemId: string,
-    upload: AppWorkflowPhotoUpload,
-  ): Promise<string> {
-    const fileName = workflowPhotoFileName(upload);
-    const contentType = upload.contentType?.trim() || "image/jpeg";
-    const base64Payload = normalizeWorkflowPhotoBase64(upload.dataBase64);
-    if (!base64Payload) {
-      throw new AppBackendRequestError(`Workflow photo ${fileName} is empty.`);
-    }
-
-    const data = Buffer.from(base64Payload, "base64");
-    if (data.length === 0) {
-      throw new AppBackendRequestError(`Workflow photo ${fileName} is empty.`);
-    }
-    if (data.length > WORKFLOW_PHOTO_MAX_BYTES) {
-      throw new AppBackendRequestError(`Workflow photo ${fileName} exceeds the ${WORKFLOW_PHOTO_MAX_LABEL} upload limit.`);
-    }
-
-    const uploadPath =
-      `/improvers/workflows/${encodeURIComponent(workflowId)}/steps/${encodeURIComponent(stepId)}/photos`;
-
-    if (data.length > WORKFLOW_PHOTO_CHUNK_THRESHOLD_BYTES) {
-      const uploadId = createWorkflowPhotoUploadId();
-      const totalChunks = Math.max(1, Math.ceil(data.length / WORKFLOW_PHOTO_CHUNK_UPLOAD_BYTES));
-      let finalPhotoId = "";
-
-      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
-        const start = chunkIndex * WORKFLOW_PHOTO_CHUNK_UPLOAD_BYTES;
-        const end = Math.min(data.length, start + WORKFLOW_PHOTO_CHUNK_UPLOAD_BYTES);
-        const chunkData = data.subarray(start, end);
-        const formData = new FormData();
-        formData.append("item_id", itemId);
-        formData.append("upload_id", uploadId);
-        formData.append("chunk_index", String(chunkIndex));
-        formData.append("total_chunks", String(totalChunks));
-        formData.append("file_name", fileName);
-        formData.append("content_type", contentType);
-        appendWorkflowPhotoFormFile(formData, "chunk", chunkData, contentType, fileName);
-
-        const response = await this.authFetch(uploadPath, {
-          method: "POST",
-          body: formData,
-        });
-        if (!response.ok) {
-          await throwRequestError(response, "Unable to upload workflow photo");
-        }
-
-        const body = (await response.json()) as WorkflowStepPhotoUploadResponse;
-        if (body.complete && body.photo?.id) {
-          finalPhotoId = body.photo.id;
-        }
-      }
-
-      if (!finalPhotoId) {
-        throw new AppBackendRequestError("Uploaded workflow photo did not finalize correctly.");
-      }
-      return finalPhotoId;
-    }
-
-    const formData = new FormData();
-    formData.append("item_id", itemId);
-    appendWorkflowPhotoFormFile(formData, "photo", data, contentType, fileName);
-
-    const response = await this.authFetch(uploadPath, {
-      method: "POST",
-      body: formData,
-    });
-    if (!response.ok) {
-      await throwRequestError(response, "Unable to upload workflow photo");
-    }
-
-    const body = (await response.json()) as WorkflowStepPhotoUploadResponse;
-    if (!body.photo?.id) {
-      throw new AppBackendRequestError("Uploaded workflow photo is missing an id.");
-    }
-    return body.photo.id;
-  }
-
-  private async prepareWorkflowStepCompletionInput(
-    workflowId: string,
-    stepId: string,
-    input: AppWorkflowStepCompletionInput,
-  ): Promise<AppWorkflowStepCompletionInput> {
-    if (!Array.isArray(input.items) || input.items.length === 0) {
-      return {
-        ...input,
-        items: [],
-      };
-    }
-
-    const items: AppWorkflowStepCompletionInput["items"] = [];
-    for (const item of input.items) {
-      const photoIds = Array.isArray(item.photoIds) ? [...item.photoIds] : [];
-      if (Array.isArray(item.photoUploads)) {
-        for (const upload of item.photoUploads) {
-          photoIds.push(await this.uploadWorkflowStepPhoto(workflowId, stepId, item.itemId, upload));
-        }
-      }
-
-      items.push({
-        ...item,
-        photoIds: photoIds.length > 0 ? photoIds : undefined,
-        photoUploads: undefined,
-      });
-    }
-
-    return {
-      ...input,
-      items,
-    };
-  }
-
   async completeWorkflowStep(
     workflowId: string,
     stepId: string,
     input: AppWorkflowStepCompletionInput,
   ): Promise<AppWorkflow> {
-    const preparedInput = await this.prepareWorkflowStepCompletionInput(workflowId, stepId, input);
-    const normalizedItems = Array.isArray(preparedInput.items)
-      ? preparedInput.items.map((item) => ({
+    const normalizedItems = Array.isArray(input.items)
+      ? input.items.map((item) => ({
           item_id: item.itemId,
           photo_ids: Array.isArray(item.photoIds) ? item.photoIds : undefined,
+          photo_uploads: Array.isArray(item.photoUploads)
+            ? item.photoUploads.map((upload: AppWorkflowPhotoUpload) => ({
+                file_name: upload.fileName,
+                content_type: upload.contentType,
+                data_base64: upload.dataBase64,
+              }))
+            : undefined,
           written_response: item.writtenResponse?.trim() || undefined,
           dropdown_value: item.dropdownValue?.trim() || undefined,
         }))
@@ -2274,8 +2116,8 @@ export class AppBackendClient {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          step_not_possible: preparedInput.stepNotPossible === true,
-          step_not_possible_details: preparedInput.stepNotPossibleDetails?.trim() || undefined,
+          step_not_possible: input.stepNotPossible === true,
+          step_not_possible_details: input.stepNotPossibleDetails?.trim() || undefined,
           items: normalizedItems,
         }),
       },
