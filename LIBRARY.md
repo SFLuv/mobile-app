@@ -26,23 +26,39 @@ Use the agent-work-coordinator skill or `scripts/coordinator.py` to edit this fi
             "mobile/src/services/appBackend.ts"
           ],
           "note": "checkout requested"
+        },
+        {
+          "at": "2026-06-24T20:31:09Z",
+          "bumped": [],
+          "checked_out": [
+            "mobile/app.config.ts",
+            "mobile/src/services/appBackend.ts"
+          ],
+          "files": [
+            "mobile/app.config.ts",
+            "mobile/src/services/appBackend.ts"
+          ],
+          "note": "reverted mobile upload path; bumping version and validating",
+          "queued": [],
+          "remote_state": "up-to-date"
         }
       ],
       "completed_files": [],
       "goal": "Fix mobile workflow photo upload for 1.0.3 by reverting mobile to inline whole-photo uploads",
       "id": "fix-mobile-photo-upload-1-0-3",
-      "last_checkin_at": "2026-06-24T20:26:03Z",
+      "last_checkin_at": "2026-06-24T20:31:09Z",
       "planned_files": [
         "mobile/app.config.ts",
         "mobile/src/services/appBackend.ts"
       ],
-      "progress_note": "checkout requested",
+      "progress_note": "reverted mobile upload path; bumping version and validating",
       "queued": [],
-      "started_at": "2026-06-24T20:26:03Z"
+      "started_at": "2026-06-24T20:26:03Z",
+      "updated_at": "2026-06-24T20:31:09Z"
     }
   },
   "queues": {},
-  "updated_at": "2026-06-24T20:26:03Z",
+  "updated_at": "2026-06-24T20:31:09Z",
   "version": 1
 }
 agent-work-coordinator-state -->
@@ -53,9 +69,9 @@ agent-work-coordinator-state -->
 
 - Agent: codex [1fcc00c9-c7ac-416d-973d-43cc16c1dd87]
 - Started: 2026-06-24T20:26:03Z
-- Last check-in: 2026-06-24T20:26:03Z
+- Last check-in: 2026-06-24T20:31:09Z
 - Goal: Fix mobile workflow photo upload for 1.0.3 by reverting mobile to inline whole-photo uploads
-- Progress: checkout requested
+- Progress: reverted mobile upload path; bumping version and validating
 - Planned paths:
   - `mobile/app.config.ts`
   - `mobile/src/services/appBackend.ts`
@@ -70,6 +86,7 @@ _None._
 _None._
 - Recent check-ins:
   - 2026-06-24T20:26:03Z: checkout requested (`mobile/app.config.ts, mobile/src/services/appBackend.ts`)
+  - 2026-06-24T20:31:09Z: reverted mobile upload path; bumping version and validating (`mobile/app.config.ts, mobile/src/services/appBackend.ts`)
 
 ## File Checkouts
 
