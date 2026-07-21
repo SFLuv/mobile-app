@@ -1016,31 +1016,35 @@ export function ImproverScreen({
     const groups = new Map<string, WorkflowSeriesGroup>();
 
     for (const workflow of myClaimedWorkflows) {
-      const assignedStep = getPrimaryAssignedStepSummary(workflow);
-      if (!assignedStep) {
-        continue;
-      }
-      const selectionKey = `${workflow.seriesId}:${assignedStep.stepOrder}`;
-      const existing = groups.get(selectionKey);
-      if (!existing) {
-        groups.set(selectionKey, {
-          key: selectionKey,
-          seriesId: workflow.seriesId,
-          primaryStepOrder: assignedStep.stepOrder,
-          primaryStepTitle: assignedStep.title,
-          workflowTitle: workflow.title,
-          recurrence: workflow.recurrence,
-          absence: null,
-          canRevokeAbsence: false,
-          workflows: [workflow],
-        });
-        continue;
-      }
+      // One group per assigned step (not just the first) so improvers can
+      // request absence coverage for later steps too — including step 2+ while
+      // it is still locked.
+      const assignedSteps = getAssignedStepSummaries(workflow).filter((step) => step.status !== "paid_out");
+      for (const assignedStep of assignedSteps) {
+        const selectionKey = `${workflow.seriesId}:${assignedStep.stepOrder}`;
+        const existing = groups.get(selectionKey);
+        if (!existing) {
+          groups.set(selectionKey, {
+            key: selectionKey,
+            seriesId: workflow.seriesId,
+            primaryStepOrder: assignedStep.stepOrder,
+            primaryStepTitle: assignedStep.title,
+            workflowTitle: workflow.title,
+            recurrence: workflow.recurrence,
+            absence: null,
+            canRevokeAbsence: false,
+            workflows: [workflow],
+          });
+          continue;
+        }
 
-      groups.set(selectionKey, {
-        ...existing,
-        workflows: [...existing.workflows, workflow].sort((left, right) => right.startAt - left.startAt),
-      });
+        groups.set(selectionKey, {
+          ...existing,
+          workflows: existing.workflows.some((candidate) => candidate.id === workflow.id)
+            ? existing.workflows
+            : [...existing.workflows, workflow].sort((left, right) => right.startAt - left.startAt),
+        });
+      }
     }
 
     return Array.from(groups.values())
@@ -2874,6 +2878,24 @@ export function ImproverScreen({
             <Text style={styles.secondaryButtonText}>
               {actionKey === `start:${step.id}` ? "Starting..." : "Start step"}
             </Text>
+          </Pressable>
+        ) : null}
+
+        {mine && workflow.recurrence !== "one_time" && step.status !== "paid_out" && step.status !== "completed" ? (
+          <Pressable
+            style={styles.secondaryButton}
+            onPress={() => {
+              // Jump into My Workflows edit mode with this step's series group
+              // pre-selected for an absence coverage request. Works for locked
+              // step 2+ claims too.
+              setWorkflowView("my-workflows");
+              setWorkflowEditMode(true);
+              setWorkflowEditAction("absence");
+              setSelectedWorkflowKeys([`${workflow.seriesId}:${step.stepOrder}`]);
+              setSelectedWorkflow(null);
+            }}
+          >
+            <Text style={styles.secondaryButtonText}>Request absence coverage</Text>
           </Pressable>
         ) : null}
 
