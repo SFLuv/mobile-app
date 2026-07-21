@@ -4307,31 +4307,49 @@ function PrivyWalletApp({
     let cancelled = false;
     creatingWalletRef.current = true;
     const createEmbeddedWallet = async () => {
-      try {
+      // Resolve the account-deletion gate from a status, preferring the one the
+      // combined /users/bootstrap fetch already returned (zero extra round
+      // trips); falls back to the standalone endpoint on older backends.
+      const resolveDeleteGate = async (): Promise<boolean> => {
         try {
-          const status = await withTimeout(
-            backendClient.getDeleteAccountStatus(),
-            BACKEND_BOOTSTRAP_TIMEOUT_MS,
-            "check your account status",
-          );
+          let status = backendClient.lastBootstrapDeleteStatus;
+          if (status === undefined) {
+            status = await withTimeout(
+              backendClient.getDeleteAccountStatus(),
+              BACKEND_BOOTSTRAP_TIMEOUT_MS,
+              "check your account status",
+            );
+          }
           if (cancelled) {
-            return;
+            return true;
           }
           if (status && status.status !== "active") {
             showDeletedAccountGate(status);
-            return;
+            return true;
           }
         } catch (statusError) {
           if (cancelled) {
-            return;
+            return true;
           }
           console.warn("Unable to load deleted-account status", statusError);
         }
+        return false;
+      };
+
+      try {
+        // ensureUser's combined fetch also brings back the delete status, so
+        // profile load and account-status check now share one round trip.
         await withTimeout(
           backendClient.ensureUser(),
           BACKEND_BOOTSTRAP_TIMEOUT_MS,
           "prepare your SFLUV profile",
         );
+        if (cancelled) {
+          return;
+        }
+        if (await resolveDeleteGate()) {
+          return;
+        }
         if (cancelled || wallets.length > 0) {
           return;
         }
@@ -4342,6 +4360,13 @@ function PrivyWalletApp({
         );
       } catch (error) {
         if (cancelled) {
+          return;
+        }
+        // A deleted account outranks the policy gate, matching the previous
+        // status-first ordering.
+        const bootstrapStatus = backendClient.lastBootstrapDeleteStatus;
+        if (bootstrapStatus && bootstrapStatus.status !== "active") {
+          showDeletedAccountGate(bootstrapStatus);
           return;
         }
         if (error instanceof AppBackendPolicyRequiredError && error.policyStatus) {
@@ -4505,11 +4530,17 @@ function PrivyWalletApp({
         loadingMessage: "Loading your SFLUV profile...",
       }));
       try {
-        const profile = await withTimeout(
-          backendClient.ensureUser(),
-          BACKEND_BOOTSTRAP_TIMEOUT_MS,
-          "load your SFLUV profile",
-        );
+        // The profile fetch (backend) and the Privy embedded provider (local
+        // SDK) are independent — run them in parallel to shorten the loading
+        // state.
+        const [profile, embeddedProvider] = await Promise.all([
+          withTimeout(
+            backendClient.ensureUser(),
+            BACKEND_BOOTSTRAP_TIMEOUT_MS,
+            "load your SFLUV profile",
+          ),
+          embeddedWallet.getProvider(),
+        ]);
         if (cancelled) {
           return;
         }
@@ -4519,7 +4550,6 @@ function PrivyWalletApp({
           error: null,
           loadingMessage: "Opening your Privy wallet...",
         }));
-        const embeddedProvider = await embeddedWallet.getProvider();
         const web3Provider = new ethers.providers.Web3Provider(embeddedProvider as any);
         const signer = web3Provider.getSigner(embeddedWallet.address);
         const accessTokenProvider = async () => (await getAccessToken()) ?? null;

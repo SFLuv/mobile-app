@@ -1624,6 +1624,64 @@ export class AppBackendClient {
     return response;
   }
 
+  /**
+   * Latest account-deletion status observed by ensureUser's combined bootstrap
+   * fetch, so callers that need it right after ensureUser can skip a round
+   * trip. `undefined` means no combined fetch has run yet.
+   */
+  lastBootstrapDeleteStatus: AppAccountDeletionStatusResponse | null | undefined = undefined;
+
+  private mapProfileResponse(body: GetUserResponse): {
+    user: AppUser;
+    wallets: AppWallet[];
+    contacts: AppContact[];
+    locations: AppOwnedLocation[];
+    improver: AppImprover | null;
+  } {
+    return {
+      user: mapUser(body.user),
+      wallets: Array.isArray(body.wallets) ? body.wallets.map(mapWallet) : [],
+      contacts: Array.isArray(body.contacts) ? body.contacts.map(mapContact) : [],
+      locations: Array.isArray(body.locations) ? body.locations.map(mapOwnedLocation) : [],
+      improver: body.improver ? mapImprover(body.improver) : null,
+    };
+  }
+
+  /**
+   * One-round-trip startup fetch (GET /users/bootstrap): policy status,
+   * delete-account status, and — when the policy is accepted — the full
+   * profile. Returns null when the backend does not support it yet, so callers
+   * fall back to the sequential legacy path.
+   */
+  private async fetchBootstrap(): Promise<{
+    policyStatusCode: number;
+    policyStatus: AppUserPolicyStatus | null;
+    deleteStatus: AppAccountDeletionStatusResponse | null;
+    profile: GetUserResponse | null;
+  } | null> {
+    const response = await this.rawAuthFetch("/users/bootstrap");
+    if (response.status === 404 || response.status === 405) {
+      return null; // older backend without the combined endpoint
+    }
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load your profile from the shared app backend");
+    }
+    const body = (await response.json()) as {
+      policy_status_code: number;
+      policy_status?: UserPolicyStatusResponse;
+      delete_status_code: number;
+      delete_status?: AccountDeletionStatusResponse;
+      profile_status_code?: number;
+      profile?: GetUserResponse;
+    };
+    return {
+      policyStatusCode: body.policy_status_code,
+      policyStatus: body.policy_status ? mapUserPolicyStatus(body.policy_status) : null,
+      deleteStatus: body.delete_status ? mapAccountDeletionStatus(body.delete_status) : null,
+      profile: body.profile_status_code === 200 && body.profile ? body.profile : null,
+    };
+  }
+
   async ensureUser(): Promise<{
     user: AppUser;
     wallets: AppWallet[];
@@ -1631,6 +1689,32 @@ export class AppBackendClient {
     locations: AppOwnedLocation[];
     improver: AppImprover | null;
   }> {
+    // Fast path: one combined request (retried once after first-time user
+    // creation). Falls through to the legacy sequential path when the backend
+    // predates /users/bootstrap or returns an unexpected shape, preserving the
+    // exact existing behavior and error reporting.
+    let bootstrap = await this.fetchBootstrap();
+    if (bootstrap && bootstrap.policyStatusCode === 404) {
+      const created = await this.rawAuthFetch("/users", { method: "POST" });
+      if (!created.ok) {
+        await throwRequestError(created, "Unable to create user profile in the shared app backend");
+      }
+      bootstrap = await this.fetchBootstrap();
+    }
+    if (bootstrap) {
+      this.lastBootstrapDeleteStatus = bootstrap.deleteStatus;
+      if (bootstrap.policyStatus && !bootstrap.policyStatus.acceptedPrivacyPolicy) {
+        throw new AppBackendPolicyRequiredError(
+          "You need to accept the privacy policy before using the shared app features.",
+          403,
+          bootstrap.policyStatus,
+        );
+      }
+      if (bootstrap.profile) {
+        return this.mapProfileResponse(bootstrap.profile);
+      }
+    }
+
     let policyStatus = await this.getUserPolicyStatus();
     if (policyStatus === null) {
       const created = await this.rawAuthFetch("/users", { method: "POST" });
@@ -1653,13 +1737,7 @@ export class AppBackendClient {
     }
 
     const body = (await response.json()) as GetUserResponse;
-    return {
-      user: mapUser(body.user),
-      wallets: Array.isArray(body.wallets) ? body.wallets.map(mapWallet) : [],
-      contacts: Array.isArray(body.contacts) ? body.contacts.map(mapContact) : [],
-      locations: Array.isArray(body.locations) ? body.locations.map(mapOwnedLocation) : [],
-      improver: body.improver ? mapImprover(body.improver) : null,
-    };
+    return this.mapProfileResponse(body);
   }
 
   async getUserPolicyStatus(): Promise<AppUserPolicyStatus | null> {
