@@ -3522,9 +3522,20 @@ function WalletAppShellContent({
                   <Pressable style={styles.connectionStateButton} onPress={onRetryConnection}>
                     <Text style={styles.connectionStateButtonText}>Try again</Text>
                   </Pressable>
+                  <Pressable onPress={handleLogout}>
+                    <Text style={styles.connectionStateLogoutText}>Log out</Text>
+                  </Pressable>
                 </View>
               ) : (
-                <Text style={styles.errorText}>{runtime.error}</Text>
+                <View style={styles.connectionStateCard}>
+                  <Text style={styles.errorText}>{runtime.error}</Text>
+                  <Pressable style={styles.connectionStateButton} onPress={onRetryConnection}>
+                    <Text style={styles.connectionStateButtonText}>Try again</Text>
+                  </Pressable>
+                  <Pressable onPress={handleLogout}>
+                    <Text style={styles.connectionStateLogoutText}>Log out</Text>
+                  </Pressable>
+                </View>
               )}
             </View>
           ) : merchantModeActive || tab === "wallet" ? (
@@ -5959,6 +5970,13 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     color: palette.white,
     fontWeight: "800",
     fontSize: 15,
+  },
+  connectionStateLogoutText: {
+    color: palette.textMuted,
+    fontWeight: "700",
+    fontSize: 14,
+    marginTop: 14,
+    textDecorationLine: "underline",
   },
   bottomDockShell: {
     position: "absolute",
