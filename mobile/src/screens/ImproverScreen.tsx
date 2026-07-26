@@ -57,7 +57,6 @@ type Props = {
 
 type ImproverSection = "workflows" | "credentials";
 type WorkflowView = "my-workflows" | "workflow-board" | "unpaid-workflows";
-type WorkflowEditAction = "absence" | "revoke";
 
 type CompletionPhoto = {
   id: string;
@@ -485,7 +484,6 @@ export function ImproverScreen({
   const [includePastWorkflows, setIncludePastWorkflows] = useState(initialCache.includePastWorkflows);
   const [workflowSelectorVisible, setWorkflowSelectorVisible] = useState(false);
   const [workflowEditMode, setWorkflowEditMode] = useState(false);
-  const [workflowEditAction, setWorkflowEditAction] = useState<WorkflowEditAction>("absence");
   const [selectedWorkflowKeys, setSelectedWorkflowKeys] = useState<string[]>([]);
   const [badgesVisible, setBadgesVisible] = useState(false);
   const [badgeSearch, setBadgeSearch] = useState(initialCache.badgeSearch);
@@ -498,6 +496,9 @@ export function ImproverScreen({
   const [absenceFrom, setAbsenceFrom] = useState("");
   const [absenceUntil, setAbsenceUntil] = useState("");
   const [absencePickerField, setAbsencePickerField] = useState<"from" | "until" | null>(null);
+  // Absence coverage is its own screen (not a bar over the workflow list).
+  const [absenceScreenVisible, setAbsenceScreenVisible] = useState(false);
+  const [absenceAllWorkflows, setAbsenceAllWorkflows] = useState(false);
   const [workflows, setWorkflows] = useState<AppImproverWorkflowListItem[]>(initialCache.workflows);
   const [unpaidWorkflows, setUnpaidWorkflows] = useState<AppWorkflow[]>(initialCache.unpaidWorkflows);
   const [activeCredentials, setActiveCredentials] = useState<AppCredentialType[]>(initialCache.activeCredentials);
@@ -2052,55 +2053,76 @@ export function ImproverScreen({
     [backendClient, refreshWorkflowSurfaces],
   );
 
-  const applyWorkflowEditAction = useCallback(() => {
+  const revokeSelectedWorkflows = useCallback(() => {
     if (selectedWorkflowGroups.length === 0 || !backendClient) {
       return;
     }
-
-    if (workflowEditAction === "revoke") {
-      Alert.alert(
-        "Revoke selected workflows?",
-        "This will release the selected recurring workflow claims to other improvers.",
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Revoke",
-            style: "destructive",
-            onPress: () => {
-              void (async () => {
-                setActionKey("bulk-revoke");
-                try {
-                  for (const group of selectedWorkflowGroups) {
-                    if (group.primaryStepOrder === null) {
-                      continue;
-                    }
-                    await backendClient.unclaimImproverWorkflowSeries(group.seriesId, group.primaryStepOrder);
+    Alert.alert(
+      "Revoke selected workflows?",
+      "This will release the selected recurring workflow claims to other improvers.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Revoke",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              setActionKey("bulk-revoke");
+              try {
+                for (const group of selectedWorkflowGroups) {
+                  if (group.primaryStepOrder === null) {
+                    continue;
                   }
-                  setNotice(
-                    selectedWorkflowGroups.length === 1
-                      ? "Selected workflow revoked."
-                      : `${selectedWorkflowGroups.length} workflows revoked.`,
-                  );
-                  setError(null);
-                  setWorkflowEditMode(false);
-                  setSelectedWorkflowKeys([]);
-                  await refreshWorkflowSurfaces();
-                } catch (nextError) {
-                  setError((nextError as Error)?.message || "Unable to revoke selected workflows.");
-                  setNotice(null);
-                } finally {
-                  setActionKey("");
+                  await backendClient.unclaimImproverWorkflowSeries(group.seriesId, group.primaryStepOrder);
                 }
-              })();
-            },
+                setNotice(
+                  selectedWorkflowGroups.length === 1
+                    ? "Selected workflow revoked."
+                    : `${selectedWorkflowGroups.length} workflows revoked.`,
+                );
+                setError(null);
+                setWorkflowEditMode(false);
+                setSelectedWorkflowKeys([]);
+                await refreshWorkflowSurfaces();
+              } catch (nextError) {
+                setError((nextError as Error)?.message || "Unable to revoke selected workflows.");
+                setNotice(null);
+              } finally {
+                setActionKey("");
+              }
+            })();
           },
-        ],
-      );
+        },
+      ],
+    );
+  }, [backendClient, refreshWorkflowSurfaces, selectedWorkflowGroups]);
+
+  // Editable (recurring) groups that a valid absence request can target: either
+  // the current selection, or — when "all workflows" is checked — every one.
+  const absenceTargetGroups = useMemo(() => {
+    const editable = (group: WorkflowSeriesGroup) =>
+      group.recurrence !== "one_time" && group.primaryStepOrder !== null;
+    return absenceAllWorkflows
+      ? myWorkflowGroups.filter(editable)
+      : selectedWorkflowGroups.filter(editable);
+  }, [absenceAllWorkflows, myWorkflowGroups, selectedWorkflowGroups]);
+
+  const closeAbsenceScreen = useCallback(() => {
+    setAbsenceScreenVisible(false);
+    setAbsencePickerField(null);
+    // If the screen was opened directly (e.g. from a step, not via multi-select
+    // edit mode), drop the transient pre-selection so it doesn't linger.
+    if (!workflowEditMode) {
+      setSelectedWorkflowKeys([]);
+    }
+  }, [workflowEditMode]);
+
+  const saveAbsenceCoverage = useCallback(() => {
+    if (!backendClient) {
       return;
     }
-
     if (!isValidDateInput(absenceFrom) || !isValidDateInput(absenceUntil)) {
-      setError("Enter absence dates in YYYY-MM-DD format.");
+      setError("Choose both absence dates.");
       setNotice(null);
       return;
     }
@@ -2109,12 +2131,17 @@ export function ImproverScreen({
       setNotice(null);
       return;
     }
+    if (absenceTargetGroups.length === 0) {
+      setError("Select at least one workflow, or choose all workflows.");
+      setNotice(null);
+      return;
+    }
 
     void (async () => {
       setActionKey("bulk-absence");
       try {
         const summaries: AppImproverAbsencePeriodCreateResult[] = [];
-        for (const group of selectedWorkflowGroups) {
+        for (const group of absenceTargetGroups) {
           if (group.primaryStepOrder === null) {
             continue;
           }
@@ -2135,10 +2162,12 @@ export function ImproverScreen({
             : `Absence saved. Released ${released} assignments.`,
         );
         setError(null);
+        setAbsenceScreenVisible(false);
         setWorkflowEditMode(false);
         setSelectedWorkflowKeys([]);
         setAbsenceFrom("");
         setAbsenceUntil("");
+        setAbsenceAllWorkflows(false);
         await refreshWorkflowSurfaces();
       } catch (nextError) {
         setError((nextError as Error)?.message || "Unable to save absence coverage.");
@@ -2147,14 +2176,19 @@ export function ImproverScreen({
         setActionKey("");
       }
     })();
-  }, [
-    absenceFrom,
-    absenceUntil,
-    backendClient,
-    refreshWorkflowSurfaces,
-    selectedWorkflowGroups,
-    workflowEditAction,
-  ]);
+  }, [absenceFrom, absenceUntil, absenceTargetGroups, backendClient, refreshWorkflowSurfaces]);
+
+  // Open the dedicated absence screen, optionally pre-selecting one series.
+  const openAbsenceScreen = useCallback((preselectKey?: string) => {
+    if (preselectKey) {
+      setSelectedWorkflowKeys([preselectKey]);
+    }
+    setAbsenceAllWorkflows(false);
+    setAbsenceFrom("");
+    setAbsenceUntil("");
+    setError(null);
+    setAbsenceScreenVisible(true);
+  }, []);
 
   const currentWorkflowOptionsLabel =
     workflowSelectorOptions.find((option) => option.value === workflowView)?.label || "My workflows";
@@ -2910,17 +2944,12 @@ export function ImproverScreen({
           <Pressable
             style={styles.secondaryButton}
             onPress={() => {
-              // Jump into My Workflows edit mode with this step's series group
-              // pre-selected for an absence coverage request. Works for locked
-              // step 2+ claims too. Close the detail modal FIRST — otherwise it
-              // stays open showing a blank body (selectedWorkflow is cleared
-              // below) and the absence bar sits hidden behind it.
+              // Close the detail modal, then open the dedicated absence screen
+              // with this step's series pre-selected. Works for locked step 2+
+              // claims too.
               setDetailVisible(false);
               setSelectedWorkflow(null);
-              setWorkflowView("my-workflows");
-              setWorkflowEditMode(true);
-              setWorkflowEditAction("absence");
-              setSelectedWorkflowKeys([`${workflow.seriesId}:${step.stepOrder}`]);
+              openAbsenceScreen(`${workflow.seriesId}:${step.stepOrder}`);
             }}
           >
             <Text style={styles.secondaryButtonText}>Request absence coverage</Text>
@@ -3260,88 +3289,151 @@ export function ImproverScreen({
               ? "Select workflows"
               : `${selectedWorkflowGroups.length} selected`}
           </Text>
-          <View style={styles.segmentWrap}>
+          <View style={styles.bulkActionButtons}>
             <Pressable
-              style={[styles.segmentButton, workflowEditAction === "revoke" ? styles.segmentButtonActive : undefined]}
-              onPress={() => setWorkflowEditAction("revoke")}
+              style={[
+                styles.secondaryButton,
+                styles.bulkActionButton,
+                selectedWorkflowGroups.length === 0 || Boolean(actionKey) ? styles.buttonDisabled : undefined,
+              ]}
+              disabled={selectedWorkflowGroups.length === 0 || Boolean(actionKey)}
+              onPress={revokeSelectedWorkflows}
             >
-              <Text style={[styles.segmentText, workflowEditAction === "revoke" ? styles.segmentTextActive : undefined]}>
-                Revoke
+              <Text style={styles.secondaryButtonText}>
+                {actionKey === "bulk-revoke" ? "Revoking..." : "Revoke selected"}
               </Text>
             </Pressable>
             <Pressable
-              style={[styles.segmentButton, workflowEditAction === "absence" ? styles.segmentButtonActive : undefined]}
-              onPress={() => setWorkflowEditAction("absence")}
+              style={[
+                styles.primaryButton,
+                styles.bulkActionButton,
+                Boolean(actionKey) ? styles.buttonDisabled : undefined,
+              ]}
+              disabled={Boolean(actionKey)}
+              onPress={() => openAbsenceScreen()}
             >
-              <Text style={[styles.segmentText, workflowEditAction === "absence" ? styles.segmentTextActive : undefined]}>
-                Absence
-              </Text>
+              <Text style={styles.primaryButtonText}>Set absence coverage</Text>
             </Pressable>
           </View>
+        </View>
+      ) : null}
 
-          {workflowEditAction === "absence" ? (
-            <View style={styles.stack}>
-              <Pressable
-                style={[styles.input, styles.dateField]}
-                onPress={() => setAbsencePickerField("from")}
-              >
+      {/* Absence coverage — its own screen, not a bar over the workflow list. */}
+      <Modal
+        visible={absenceScreenVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={closeAbsenceScreen}
+      >
+        <View style={[styles.absenceScreen, { paddingTop: topInset }]}>
+          <View style={styles.absenceHeader}>
+            <Pressable style={styles.absenceBackButton} onPress={closeAbsenceScreen} hitSlop={8}>
+              <Ionicons name="chevron-back" size={22} color={palette.text} />
+            </Pressable>
+            <Text style={styles.absenceHeaderTitle}>Absence coverage</Text>
+            <View style={styles.absenceBackButton} />
+          </View>
+
+          <ScrollView contentContainerStyle={styles.absenceScreenContent} showsVerticalScrollIndicator={false}>
+            <Text style={styles.absenceIntro}>
+              Choose the dates you'll be away. Any assignments in that window are released so another improver can
+              cover them.
+            </Text>
+
+            <Pressable
+              style={styles.absenceCheckboxRow}
+              onPress={() => setAbsenceAllWorkflows((current) => !current)}
+            >
+              <Ionicons
+                name={absenceAllWorkflows ? "checkbox" : "square-outline"}
+                size={22}
+                color={absenceAllWorkflows ? palette.primary : palette.textMuted}
+              />
+              <Text style={styles.absenceCheckboxLabel}>
+                Request absence for all workflows within this time period
+              </Text>
+            </Pressable>
+
+            <View style={styles.absenceSection}>
+              <Text style={styles.absenceSectionLabel}>
+                {absenceAllWorkflows ? "Covering" : "Selected workflows"}
+              </Text>
+              {absenceAllWorkflows ? (
+                <Text style={styles.absenceCoverageSummary}>
+                  All {absenceTargetGroups.length} recurring workflow{absenceTargetGroups.length === 1 ? "" : "s"}
+                </Text>
+              ) : selectedWorkflowGroups.length === 0 ? (
+                <Text style={styles.absenceEmptyHint}>
+                  No workflows selected — tick the option above to cover all of them.
+                </Text>
+              ) : (
+                <View style={styles.stack}>
+                  {selectedWorkflowGroups.map((group) => (
+                    <View key={group.key} style={styles.absenceGroupRow}>
+                      <Text style={styles.absenceGroupTitle} numberOfLines={1}>
+                        {group.workflowTitle}
+                      </Text>
+                      <Text style={styles.absenceGroupMeta} numberOfLines={1}>
+                        {group.primaryStepOrder === null
+                          ? group.primaryStepTitle || "Assigned step"
+                          : `Step ${group.primaryStepOrder}: ${group.primaryStepTitle}`}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+
+            <View style={styles.absenceSection}>
+              <Text style={styles.absenceSectionLabel}>Absence dates</Text>
+              <Pressable style={[styles.input, styles.dateField]} onPress={() => setAbsencePickerField("from")}>
                 <Text style={absenceFrom ? styles.dateFieldValue : styles.dateFieldPlaceholder}>
                   {absenceFrom ? formatAbsenceFieldDate(absenceFrom) : "Absent from"}
                 </Text>
                 <Ionicons name="calendar-outline" size={18} color={palette.textMuted} />
               </Pressable>
-              <Pressable
-                style={[styles.input, styles.dateField]}
-                onPress={() => setAbsencePickerField("until")}
-              >
+              <Pressable style={[styles.input, styles.dateField]} onPress={() => setAbsencePickerField("until")}>
                 <Text style={absenceUntil ? styles.dateFieldValue : styles.dateFieldPlaceholder}>
                   {absenceUntil ? formatAbsenceFieldDate(absenceUntil) : "Absent until"}
                 </Text>
                 <Ionicons name="calendar-outline" size={18} color={palette.textMuted} />
               </Pressable>
             </View>
-          ) : null}
 
-          <Pressable
-            style={[
-              styles.primaryButton,
-              selectedWorkflowGroups.length === 0 || Boolean(actionKey) ? styles.buttonDisabled : undefined,
-            ]}
-            disabled={selectedWorkflowGroups.length === 0 || Boolean(actionKey)}
-            onPress={applyWorkflowEditAction}
-          >
-            <Text style={styles.primaryButtonText}>
-              {actionKey === "bulk-revoke"
-                ? "Revoking..."
-                : actionKey === "bulk-absence"
-                  ? "Saving..."
-                  : workflowEditAction === "revoke"
-                    ? "Revoke selected workflows"
-                    : "Save absence"}
-            </Text>
-          </Pressable>
+            {error ? <Text style={styles.absenceError}>{error}</Text> : null}
+
+            <Pressable
+              style={[styles.primaryButton, actionKey === "bulk-absence" ? styles.buttonDisabled : undefined]}
+              disabled={actionKey === "bulk-absence"}
+              onPress={saveAbsenceCoverage}
+            >
+              <Text style={styles.primaryButtonText}>
+                {actionKey === "bulk-absence" ? "Saving..." : "Save absence"}
+              </Text>
+            </Pressable>
+          </ScrollView>
         </View>
-      ) : null}
 
-      <DatePickerSheet
-        visible={absencePickerField === "from"}
-        value={absenceFrom}
-        title="Absent from"
-        onSelect={(next) => {
-          setAbsenceFrom(next);
-          // Keep the range valid: never leave "until" before "from".
-          setAbsenceUntil((current) => (current && current < next ? next : current));
-        }}
-        onClose={() => setAbsencePickerField(null)}
-      />
-      <DatePickerSheet
-        visible={absencePickerField === "until"}
-        value={absenceUntil}
-        title="Absent until"
-        minDate={absenceFrom || undefined}
-        onSelect={setAbsenceUntil}
-        onClose={() => setAbsencePickerField(null)}
-      />
+        <DatePickerSheet
+          visible={absencePickerField === "from"}
+          value={absenceFrom}
+          title="Absent from"
+          onSelect={(next) => {
+            setAbsenceFrom(next);
+            // Keep the range valid: never leave "until" before "from".
+            setAbsenceUntil((current) => (current && current < next ? next : current));
+          }}
+          onClose={() => setAbsencePickerField(null)}
+        />
+        <DatePickerSheet
+          visible={absencePickerField === "until"}
+          value={absenceUntil}
+          title="Absent until"
+          minDate={absenceFrom || undefined}
+          onSelect={setAbsenceUntil}
+          onClose={() => setAbsencePickerField(null)}
+        />
+      </Modal>
 
       <Modal
         visible={workflowSelectorVisible}
@@ -3957,6 +4049,106 @@ function createStyles(
     dateFieldPlaceholder: {
       color: palette.textMuted,
       fontSize: 15,
+    },
+    bulkActionButtons: {
+      flexDirection: "row",
+      gap: spacing.sm,
+    },
+    bulkActionButton: {
+      flex: 1,
+    },
+    absenceScreen: {
+      flex: 1,
+      backgroundColor: palette.background,
+    },
+    absenceHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.md,
+      borderBottomWidth: 1,
+      borderBottomColor: palette.border,
+    },
+    absenceBackButton: {
+      width: 40,
+      height: 40,
+      borderRadius: radii.pill,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    absenceHeaderTitle: {
+      color: palette.text,
+      fontSize: 17,
+      fontWeight: "900",
+    },
+    absenceScreenContent: {
+      padding: spacing.lg,
+      paddingBottom: 120,
+      gap: spacing.lg,
+    },
+    absenceIntro: {
+      color: palette.textMuted,
+      fontSize: 14,
+      lineHeight: 20,
+    },
+    absenceCheckboxRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surface,
+      padding: spacing.md,
+    },
+    absenceCheckboxLabel: {
+      flex: 1,
+      color: palette.text,
+      fontSize: 14,
+      fontWeight: "700",
+    },
+    absenceSection: {
+      gap: spacing.sm,
+    },
+    absenceSectionLabel: {
+      color: palette.textMuted,
+      fontSize: 12,
+      fontWeight: "800",
+      textTransform: "uppercase",
+      letterSpacing: 0.4,
+    },
+    absenceCoverageSummary: {
+      color: palette.text,
+      fontSize: 15,
+      fontWeight: "800",
+    },
+    absenceEmptyHint: {
+      color: palette.textMuted,
+      fontSize: 14,
+    },
+    absenceGroupRow: {
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surface,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    absenceGroupTitle: {
+      color: palette.text,
+      fontSize: 15,
+      fontWeight: "800",
+    },
+    absenceGroupMeta: {
+      color: palette.textMuted,
+      fontSize: 13,
+      marginTop: 2,
+    },
+    absenceError: {
+      color: palette.danger,
+      fontSize: 14,
+      fontWeight: "700",
     },
     multilineInput: {
       minHeight: 110,
