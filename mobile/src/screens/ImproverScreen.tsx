@@ -473,6 +473,10 @@ export function ImproverScreen({
   const refreshAccent = palette.primaryStrong;
   const refreshControlKey = `${isDark ? "dark" : "light"}:${refreshAccent}:${palette.surfaceStrong}`;
   const topInset = Math.max(Constants.statusBarHeight, Platform.OS === "ios" ? spacing.md : 0);
+  // Clearance so the floating edit bar sits ABOVE the app's bottom tab dock
+  // rather than overlapping it (the dock has no exposed inset to read).
+  const bulkBarBottomInset = Platform.OS === "ios" ? 100 : 84;
+  const [bulkBarHeight, setBulkBarHeight] = useState(0);
   const userId = user?.id ?? null;
   const initialCache = getImproverScreenCache(userId);
   const initialSection =
@@ -499,6 +503,7 @@ export function ImproverScreen({
   // Absence coverage is its own screen (not a bar over the workflow list).
   const [absenceScreenVisible, setAbsenceScreenVisible] = useState(false);
   const [absenceAllWorkflows, setAbsenceAllWorkflows] = useState(false);
+  const [revokeConfirmVisible, setRevokeConfirmVisible] = useState(false);
   const [workflows, setWorkflows] = useState<AppImproverWorkflowListItem[]>(initialCache.workflows);
   const [unpaidWorkflows, setUnpaidWorkflows] = useState<AppWorkflow[]>(initialCache.unpaidWorkflows);
   const [activeCredentials, setActiveCredentials] = useState<AppCredentialType[]>(initialCache.activeCredentials);
@@ -2027,74 +2032,44 @@ export function ImproverScreen({
     [backendClient, refreshWorkflowSurfaces],
   );
 
-  const revokeWorkflowSeries = useCallback(
-    async (seriesId: string, stepOrder: number) => {
-      if (!backendClient) {
-        return;
-      }
-      setActionKey(`unclaim:${seriesId}:${stepOrder}`);
-      try {
-        const result = await backendClient.unclaimImproverWorkflowSeries(seriesId, stepOrder);
-        setNotice(
-          result.skippedCount > 0
-            ? `Released ${result.releasedCount} claims and skipped ${result.skippedCount} active assignments.`
-            : `Released ${result.releasedCount} claims.`,
-        );
-        setError(null);
-        await refreshWorkflowSurfaces();
-        setDetailVisible(false);
-      } catch (nextError) {
-        setError((nextError as Error)?.message || "Unable to revoke these workflow claims.");
-        setNotice(null);
-      } finally {
-        setActionKey("");
-      }
-    },
-    [backendClient, refreshWorkflowSurfaces],
-  );
-
+  // Bulk revoke is confirmed with an in-app styled modal (not a native alert).
   const revokeSelectedWorkflows = useCallback(() => {
     if (selectedWorkflowGroups.length === 0 || !backendClient) {
       return;
     }
-    Alert.alert(
-      "Revoke selected workflows?",
-      "This will release the selected recurring workflow claims to other improvers.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Revoke",
-          style: "destructive",
-          onPress: () => {
-            void (async () => {
-              setActionKey("bulk-revoke");
-              try {
-                for (const group of selectedWorkflowGroups) {
-                  if (group.primaryStepOrder === null) {
-                    continue;
-                  }
-                  await backendClient.unclaimImproverWorkflowSeries(group.seriesId, group.primaryStepOrder);
-                }
-                setNotice(
-                  selectedWorkflowGroups.length === 1
-                    ? "Selected workflow revoked."
-                    : `${selectedWorkflowGroups.length} workflows revoked.`,
-                );
-                setError(null);
-                setWorkflowEditMode(false);
-                setSelectedWorkflowKeys([]);
-                await refreshWorkflowSurfaces();
-              } catch (nextError) {
-                setError((nextError as Error)?.message || "Unable to revoke selected workflows.");
-                setNotice(null);
-              } finally {
-                setActionKey("");
-              }
-            })();
-          },
-        },
-      ],
-    );
+    setRevokeConfirmVisible(true);
+  }, [backendClient, selectedWorkflowGroups.length]);
+
+  const confirmRevokeSelectedWorkflows = useCallback(() => {
+    setRevokeConfirmVisible(false);
+    if (selectedWorkflowGroups.length === 0 || !backendClient) {
+      return;
+    }
+    void (async () => {
+      setActionKey("bulk-revoke");
+      try {
+        for (const group of selectedWorkflowGroups) {
+          if (group.primaryStepOrder === null) {
+            continue;
+          }
+          await backendClient.unclaimImproverWorkflowSeries(group.seriesId, group.primaryStepOrder);
+        }
+        setNotice(
+          selectedWorkflowGroups.length === 1
+            ? "Selected workflow revoked."
+            : `${selectedWorkflowGroups.length} workflows revoked.`,
+        );
+        setError(null);
+        setWorkflowEditMode(false);
+        setSelectedWorkflowKeys([]);
+        await refreshWorkflowSurfaces();
+      } catch (nextError) {
+        setError((nextError as Error)?.message || "Unable to revoke selected workflows.");
+        setNotice(null);
+      } finally {
+        setActionKey("");
+      }
+    })();
   }, [backendClient, refreshWorkflowSurfaces, selectedWorkflowGroups]);
 
   // Editable (recurring) groups that a valid absence request can target: either
@@ -2221,9 +2196,10 @@ export function ImproverScreen({
     return true;
   }, [selectedWorkflowAbsence, selectedWorkflowAssignedStep, selectedWorkflow, user?.id]);
 
+  // Workflow revocation moved to the edit menu, so the detail actions row now
+  // only appears when there's a saved absence period to revoke.
   const shouldShowSelectedWorkflowActions = Boolean(
-    (selectedWorkflowAssignedStep && selectedWorkflow?.recurrence !== "one_time") ||
-      (selectedWorkflowAbsence && canRevokeSelectedWorkflowAbsence),
+    selectedWorkflowAbsence && canRevokeSelectedWorkflowAbsence,
   );
 
   const sortedDetailSteps = useMemo(
@@ -3244,7 +3220,11 @@ export function ImproverScreen({
       <ScrollView
         contentContainerStyle={[
           styles.container,
-          workflowEditMode && workflowView === "my-workflows" ? styles.containerWithActionBar : undefined,
+          // In edit mode, pad the list past the floating bar (bar height + its
+          // above-dock offset + a gap) so every workflow can scroll clear of it.
+          workflowEditMode && workflowView === "my-workflows"
+            ? { paddingBottom: bulkBarBottomInset + bulkBarHeight + spacing.lg }
+            : undefined,
         ]}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -3283,7 +3263,10 @@ export function ImproverScreen({
       </ScrollView>
 
       {workflowEditMode && workflowView === "my-workflows" ? (
-        <View style={[styles.bulkActionBar, { paddingBottom: spacing.lg }]}>
+        <View
+          style={[styles.bulkActionBar, { bottom: bulkBarBottomInset }]}
+          onLayout={(event) => setBulkBarHeight(event.nativeEvent.layout.height)}
+        >
           <Text style={styles.bulkActionTitle}>
             {selectedWorkflowGroups.length === 0
               ? "Select workflows"
@@ -3312,7 +3295,7 @@ export function ImproverScreen({
               disabled={Boolean(actionKey)}
               onPress={() => openAbsenceScreen()}
             >
-              <Text style={styles.primaryButtonText}>Set absence coverage</Text>
+              <Text style={styles.primaryButtonText}>Absence</Text>
             </Pressable>
           </View>
         </View>
@@ -3435,6 +3418,40 @@ export function ImproverScreen({
         />
       </Modal>
 
+      {/* Styled bulk-revoke confirmation (replaces the native alert). */}
+      <Modal
+        visible={revokeConfirmVisible}
+        transparent
+        presentationStyle="overFullScreen"
+        animationType="fade"
+        onRequestClose={() => setRevokeConfirmVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setRevokeConfirmVisible(false)}>
+          <Pressable style={styles.selectorSheetCard} onPress={() => {}}>
+            <Text style={styles.sectionTitle}>
+              {selectedWorkflowGroups.length === 1 ? "Revoke workflow?" : "Revoke selected workflows?"}
+            </Text>
+            <Text style={styles.confirmBody}>
+              This releases {selectedWorkflowGroups.length === 1 ? "this recurring workflow claim" : `these ${selectedWorkflowGroups.length} recurring workflow claims`} to other improvers.
+            </Text>
+            <View style={styles.bulkActionButtons}>
+              <Pressable
+                style={[styles.secondaryButton, styles.bulkActionButton]}
+                onPress={() => setRevokeConfirmVisible(false)}
+              >
+                <Text style={styles.secondaryButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.dangerButton, styles.bulkActionButton]}
+                onPress={confirmRevokeSelectedWorkflows}
+              >
+                <Text style={styles.dangerButtonText}>Revoke</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       <Modal
         visible={workflowSelectorVisible}
         transparent
@@ -3524,40 +3541,8 @@ export function ImproverScreen({
 
               {shouldShowSelectedWorkflowActions ? (
                 <View style={styles.inlineActions}>
-                  {selectedWorkflowAssignedStep && selectedWorkflow.recurrence !== "one_time" ? (
-                    <Pressable
-                      style={[
-                        styles.secondaryButton,
-                        actionKey === `unclaim:${selectedWorkflow.seriesId}:${selectedWorkflowAssignedStep.stepOrder}`
-                          ? styles.buttonDisabled
-                          : undefined,
-                      ]}
-                      disabled={Boolean(actionKey)}
-                      onPress={() =>
-                        Alert.alert(
-                          "Revoke workflow?",
-                          "This will release future recurring claims for this workflow to other improvers.",
-                          [
-                            { text: "Cancel", style: "cancel" },
-                            {
-                              text: "Revoke",
-                              style: "destructive",
-                              onPress: () => {
-                                void revokeWorkflowSeries(selectedWorkflow.seriesId, selectedWorkflowAssignedStep.stepOrder);
-                              },
-                            },
-                          ],
-                        )
-                      }
-                    >
-                      <Text style={styles.secondaryButtonText}>
-                        {actionKey === `unclaim:${selectedWorkflow.seriesId}:${selectedWorkflowAssignedStep.stepOrder}`
-                          ? "Revoking..."
-                          : "Revoke workflow"}
-                      </Text>
-                    </Pressable>
-                  ) : null}
-
+                  {/* Workflow revocation is done from the My Workflows edit
+                      menu (multi-select), not from the detail view. */}
                   {selectedWorkflowAbsence && canRevokeSelectedWorkflowAbsence ? (
                     <Pressable
                       style={[
@@ -3817,9 +3802,6 @@ function createStyles(
       paddingTop: spacing.md,
       paddingBottom: 140,
       gap: spacing.md,
-    },
-    containerWithActionBar: {
-      paddingBottom: 240,
     },
     heroCard: {
       backgroundColor: palette.surface,
@@ -4181,6 +4163,26 @@ function createStyles(
       color: palette.text,
       fontWeight: "800",
       fontSize: 14,
+    },
+    dangerButton: {
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: palette.danger,
+      backgroundColor: palette.danger,
+      paddingHorizontal: 18,
+      paddingVertical: 14,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    dangerButtonText: {
+      color: palette.white,
+      fontWeight: "900",
+      fontSize: 14,
+    },
+    confirmBody: {
+      color: palette.textMuted,
+      fontSize: 14,
+      lineHeight: 20,
     },
     compactActionButton: {
       borderRadius: radii.pill,
@@ -4670,7 +4672,7 @@ function createStyles(
       position: "absolute",
       left: spacing.lg,
       right: spacing.lg,
-      bottom: spacing.lg,
+      // `bottom` is set inline (bulkBarBottomInset) to clear the tab dock.
       borderRadius: radii.lg,
       borderWidth: 1,
       borderColor: palette.border,
