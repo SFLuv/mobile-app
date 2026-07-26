@@ -16,6 +16,7 @@ import {
 import { CameraView, useCameraPermissions } from "expo-camera";
 import Constants from "expo-constants";
 import { Ionicons } from "@expo/vector-icons";
+import { DatePickerSheet } from "../components/DatePickerSheet";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { AppBackendClient } from "../services/appBackend";
 import {
@@ -368,6 +369,29 @@ function isValidDateInput(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`));
 }
 
+const ABSENCE_MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+function formatAbsenceFieldDate(value: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const [year, month, day] = value.split("-").map((part) => Number.parseInt(part, 10));
+  const label = ABSENCE_MONTHS[month - 1];
+  if (!label) return value;
+  return `${label} ${day}, ${year}`;
+}
+
 function toDateInputValueFromUnix(value: number, inclusiveEnd = false): string {
   const adjustedValue = inclusiveEnd ? Math.max(value - 1, 0) : value;
   const date = new Date(adjustedValue * 1000);
@@ -473,6 +497,7 @@ export function ImproverScreen({
   const [requestLastName, setRequestLastName] = useState(initialCache.requestLastName);
   const [absenceFrom, setAbsenceFrom] = useState("");
   const [absenceUntil, setAbsenceUntil] = useState("");
+  const [absencePickerField, setAbsencePickerField] = useState<"from" | "until" | null>(null);
   const [workflows, setWorkflows] = useState<AppImproverWorkflowListItem[]>(initialCache.workflows);
   const [unpaidWorkflows, setUnpaidWorkflows] = useState<AppWorkflow[]>(initialCache.unpaidWorkflows);
   const [activeCredentials, setActiveCredentials] = useState<AppCredentialType[]>(initialCache.activeCredentials);
@@ -2887,12 +2912,15 @@ export function ImproverScreen({
             onPress={() => {
               // Jump into My Workflows edit mode with this step's series group
               // pre-selected for an absence coverage request. Works for locked
-              // step 2+ claims too.
+              // step 2+ claims too. Close the detail modal FIRST — otherwise it
+              // stays open showing a blank body (selectedWorkflow is cleared
+              // below) and the absence bar sits hidden behind it.
+              setDetailVisible(false);
+              setSelectedWorkflow(null);
               setWorkflowView("my-workflows");
               setWorkflowEditMode(true);
               setWorkflowEditAction("absence");
               setSelectedWorkflowKeys([`${workflow.seriesId}:${step.stepOrder}`]);
-              setSelectedWorkflow(null);
             }}
           >
             <Text style={styles.secondaryButtonText}>Request absence coverage</Text>
@@ -3253,20 +3281,24 @@ export function ImproverScreen({
 
           {workflowEditAction === "absence" ? (
             <View style={styles.stack}>
-              <TextInput
-                style={styles.input}
-                placeholder="Absent from (YYYY-MM-DD)"
-                placeholderTextColor={palette.textMuted}
-                value={absenceFrom}
-                onChangeText={setAbsenceFrom}
-              />
-              <TextInput
-                style={styles.input}
-                placeholder="Absent until (YYYY-MM-DD)"
-                placeholderTextColor={palette.textMuted}
-                value={absenceUntil}
-                onChangeText={setAbsenceUntil}
-              />
+              <Pressable
+                style={[styles.input, styles.dateField]}
+                onPress={() => setAbsencePickerField("from")}
+              >
+                <Text style={absenceFrom ? styles.dateFieldValue : styles.dateFieldPlaceholder}>
+                  {absenceFrom ? formatAbsenceFieldDate(absenceFrom) : "Absent from"}
+                </Text>
+                <Ionicons name="calendar-outline" size={18} color={palette.textMuted} />
+              </Pressable>
+              <Pressable
+                style={[styles.input, styles.dateField]}
+                onPress={() => setAbsencePickerField("until")}
+              >
+                <Text style={absenceUntil ? styles.dateFieldValue : styles.dateFieldPlaceholder}>
+                  {absenceUntil ? formatAbsenceFieldDate(absenceUntil) : "Absent until"}
+                </Text>
+                <Ionicons name="calendar-outline" size={18} color={palette.textMuted} />
+              </Pressable>
             </View>
           ) : null}
 
@@ -3290,6 +3322,26 @@ export function ImproverScreen({
           </Pressable>
         </View>
       ) : null}
+
+      <DatePickerSheet
+        visible={absencePickerField === "from"}
+        value={absenceFrom}
+        title="Absent from"
+        onSelect={(next) => {
+          setAbsenceFrom(next);
+          // Keep the range valid: never leave "until" before "from".
+          setAbsenceUntil((current) => (current && current < next ? next : current));
+        }}
+        onClose={() => setAbsencePickerField(null)}
+      />
+      <DatePickerSheet
+        visible={absencePickerField === "until"}
+        value={absenceUntil}
+        title="Absent until"
+        minDate={absenceFrom || undefined}
+        onSelect={setAbsenceUntil}
+        onClose={() => setAbsencePickerField(null)}
+      />
 
       <Modal
         visible={workflowSelectorVisible}
@@ -3890,6 +3942,20 @@ function createStyles(
       paddingHorizontal: 16,
       paddingVertical: 14,
       color: palette.text,
+      fontSize: 15,
+    },
+    dateField: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    dateFieldValue: {
+      color: palette.text,
+      fontSize: 15,
+      fontWeight: "700",
+    },
+    dateFieldPlaceholder: {
+      color: palette.textMuted,
       fontSize: 15,
     },
     multilineInput: {
