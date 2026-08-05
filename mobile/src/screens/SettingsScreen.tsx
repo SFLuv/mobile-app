@@ -9,8 +9,13 @@ import {
   AppMerchantModeStatus,
   AppOwnedLocation,
   AppUser,
+  AppVolunteerReminderPreferences,
   AppWallet,
 } from "../types/app";
+import {
+  DEFAULT_VOLUNTEER_REMINDER_HOURS,
+  VOLUNTEER_REMINDER_HOUR_OPTIONS,
+} from "../services/appBackend";
 import { AppPreferences, SendFlowEntryMode, ThemePreference } from "../types/preferences";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 
@@ -54,6 +59,12 @@ type Props = {
   onDisconnectApple?: () => void;
   onUpdateImproverRewardsWallet?: (address: string) => Promise<void>;
   onOpenImprover?: () => void;
+  /** Hides the volunteer preference entirely when the backend cannot serve it. */
+  volunteerPanelAvailable?: boolean;
+  onOpenVolunteer?: () => void;
+  /** Null until the backend answers; the row stays disabled until then. */
+  volunteerReminderPreferences?: AppVolunteerReminderPreferences | null;
+  onUpdateVolunteerReminderPreferences?: (next: AppVolunteerReminderPreferences) => void;
   onOpenImproverCredentials?: () => void;
   credentialRequests?: AppCredentialRequest[];
   credentialTypes?: AppGlobalCredentialType[];
@@ -334,11 +345,13 @@ function PreferenceRow({
   title,
   body,
   value,
+  disabled,
   onValueChange,
 }: {
   title: string;
   body: string;
   value: boolean;
+  disabled?: boolean;
   onValueChange: (next: boolean) => void;
 }) {
   const { palette } = useAppTheme();
@@ -354,10 +367,30 @@ function PreferenceRow({
         trackColor={{ false: palette.borderStrong, true: "#f5a59f" }}
         thumbColor={value ? palette.primaryStrong : palette.white}
         value={value}
+        disabled={disabled}
         onValueChange={onValueChange}
       />
     </View>
   );
+}
+
+/**
+ * The backend accepts any value in 1-168, so a stored setting that came from
+ * elsewhere gets its own chip rather than leaving the row with nothing selected.
+ */
+function reminderHourOptions(current: number): number[] {
+  if (VOLUNTEER_REMINDER_HOUR_OPTIONS.includes(current)) {
+    return VOLUNTEER_REMINDER_HOUR_OPTIONS;
+  }
+  return [...VOLUNTEER_REMINDER_HOUR_OPTIONS, current].sort((left, right) => left - right);
+}
+
+function formatReminderHours(hours: number): string {
+  if (hours % 24 === 0) {
+    const days = hours / 24;
+    return days === 1 ? "1 day" : `${days} days`;
+  }
+  return hours === 1 ? "1 hour" : `${hours} hours`;
 }
 
 function SocialAccountRow({
@@ -833,6 +866,10 @@ export function SettingsScreen({
   onDisconnectApple,
   onUpdateImproverRewardsWallet,
   onOpenImprover,
+  volunteerPanelAvailable,
+  onOpenVolunteer,
+  volunteerReminderPreferences,
+  onUpdateVolunteerReminderPreferences,
   onOpenImproverCredentials,
   credentialRequests = [],
   credentialTypes = [],
@@ -1015,6 +1052,70 @@ export function SettingsScreen({
               value={preferences.hapticsEnabled}
               onValueChange={(hapticsEnabled) => onUpdatePreferences({ ...preferences, hapticsEnabled })}
             />
+            {volunteerPanelAvailable ? (
+              <>
+                <PreferenceRow
+                  title="Show volunteer panel"
+                  body="Keep volunteer events in the bottom navigation."
+                  value={preferences.showVolunteerPanel}
+                  onValueChange={(showVolunteerPanel) => onUpdatePreferences({ ...preferences, showVolunteerPanel })}
+                />
+                <PreferenceRow
+                  title="Volunteer event reminders"
+                  body="Get a push reminder before events you signed up for, using the email on this account."
+                  value={volunteerReminderPreferences?.enabled ?? true}
+                  disabled={!volunteerReminderPreferences || !onUpdateVolunteerReminderPreferences}
+                  onValueChange={(enabled) =>
+                    onUpdateVolunteerReminderPreferences?.({
+                      enabled,
+                      hoursBefore: volunteerReminderPreferences?.hoursBefore ?? DEFAULT_VOLUNTEER_REMINDER_HOURS,
+                    })
+                  }
+                />
+                {volunteerReminderPreferences?.enabled ? (
+                  <View style={styles.preferenceStack}>
+                    <View style={styles.preferenceCopy}>
+                      <Text style={styles.preferenceTitle}>Remind me</Text>
+                      <Text style={styles.preferenceBody}>How far ahead of an event the reminder arrives.</Text>
+                    </View>
+                    <View style={styles.reminderHourRow}>
+                      {reminderHourOptions(volunteerReminderPreferences.hoursBefore).map((hours) => {
+                        const active = volunteerReminderPreferences.hoursBefore === hours;
+                        return (
+                          <Pressable
+                            key={hours}
+                            style={[styles.reminderHourChip, active ? styles.reminderHourChipActive : undefined]}
+                            onPress={() =>
+                              onUpdateVolunteerReminderPreferences?.({
+                                enabled: true,
+                                hoursBefore: hours,
+                              })
+                            }
+                          >
+                            <Text
+                              style={[
+                                styles.reminderHourChipText,
+                                active ? styles.reminderHourChipTextActive : undefined,
+                              ]}
+                            >
+                              {formatReminderHours(hours)}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ) : null}
+                {onOpenVolunteer ? (
+                  <Pressable
+                    style={[styles.primaryActionButton, styles.settingsWideButton]}
+                    onPress={onOpenVolunteer}
+                  >
+                    <Text style={styles.primaryActionButtonText}>Browse volunteer events</Text>
+                  </Pressable>
+                ) : null}
+              </>
+            ) : null}
             <View style={styles.preferenceStack}>
               <View style={styles.preferenceCopy}>
                 <Text style={styles.preferenceTitle}>Send flow</Text>
@@ -1541,6 +1642,32 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       fontWeight: "800",
     },
     themeOptionTextActive: {
+      color: palette.primaryStrong,
+    },
+    reminderHourRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    reminderHourChip: {
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surfaceStrong,
+      paddingVertical: 9,
+      paddingHorizontal: spacing.md,
+      alignItems: "center",
+    },
+    reminderHourChipActive: {
+      borderColor: palette.primary,
+      backgroundColor: palette.primarySoft,
+    },
+    reminderHourChipText: {
+      color: palette.textMuted,
+      fontWeight: "800",
+      fontSize: 13,
+    },
+    reminderHourChipTextActive: {
       color: palette.primaryStrong,
     },
     pushStatusCard: {

@@ -48,6 +48,7 @@ import { MapScreen } from "./src/screens/MapScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { ContactsScreen } from "./src/screens/ContactsScreen";
 import { ImproverScreen } from "./src/screens/ImproverScreen";
+import { VolunteerScreen } from "./src/screens/VolunteerScreen";
 import { ThemedActivityIndicator } from "./src/components/ThemedActivityIndicator";
 import { mobileConfig } from "./src/config";
 import {
@@ -72,6 +73,7 @@ import {
   AppCredentialRequest,
   AppGlobalCredentialType,
   AppImprover,
+  AppImproverNotificationFeed,
   AppLocation,
   AppMerchantModeStatus,
   AppOwnedLocation,
@@ -79,6 +81,7 @@ import {
   AppTransaction,
   AppUser,
   AppUserPolicyStatus,
+  AppVolunteerReminderPreferences,
   AppWallet,
 } from "./src/types/app";
 import { AppPreferences, defaultAppPreferences } from "./src/types/preferences";
@@ -160,7 +163,34 @@ type CompatibilityState =
   | { status: "ready"; config: AppClientConfig; version: AppClientVersionPolicy }
   | { status: "blocked"; title: string; message: string; updateUrl?: string };
 
-type Tab = "wallet" | "activity" | "improver" | "map" | "contacts" | "settings";
+type Tab = "wallet" | "activity" | "improver" | "volunteer" | "map" | "contacts" | "settings";
+
+/** Tabs that can be displaced into the "More" sheet by a panel tab. */
+type MoreMenuTab = Extract<Tab, "volunteer" | "activity" | "contacts">;
+
+const MORE_MENU_ENTRIES: Record<
+  MoreMenuTab,
+  { label: string; body: string; icon: keyof typeof Ionicons.glyphMap; activeIcon: keyof typeof Ionicons.glyphMap }
+> = {
+  volunteer: {
+    label: "Volunteer",
+    body: "Find volunteer events and earn rewards.",
+    icon: "people-circle-outline",
+    activeIcon: "people-circle",
+  },
+  activity: {
+    label: "Activity",
+    body: "Recent wallet transfers and rewards.",
+    icon: "pulse-outline",
+    activeIcon: "pulse",
+  },
+  contacts: {
+    label: "Contacts",
+    body: "People and wallet addresses you trust.",
+    icon: "people-outline",
+    activeIcon: "people",
+  },
+};
 type WalletPane = "home" | "send" | "receive";
 type OverlayWalletPane = Exclude<WalletPane, "home">;
 
@@ -179,6 +209,7 @@ const TRANSACTION_POLL_INTERVAL_MS = 2_000;
 const MERCHANT_MODE_STATUS_POLL_INTERVAL_MS = 15_000;
 const WALLET_TRANSACTION_LIMIT = 10;
 const ACTIVITY_TRANSACTION_PAGE_SIZE = 10;
+const IMPROVER_NOTIFICATION_POLL_MS = 60_000;
 const LINK_DEDUPE_WINDOW_MS = 4_000;
 const BACKEND_BOOTSTRAP_TIMEOUT_MS = 20_000;
 const WALLET_CREATE_TIMEOUT_MS = 30_000;
@@ -1118,6 +1149,10 @@ function mergePreferences(input: unknown): AppPreferences {
       typeof candidate.showImproverPanel === "boolean"
         ? candidate.showImproverPanel
         : defaultAppPreferences.showImproverPanel,
+    showVolunteerPanel:
+      typeof candidate.showVolunteerPanel === "boolean"
+        ? candidate.showVolunteerPanel
+        : defaultAppPreferences.showVolunteerPanel,
   };
 }
 
@@ -1166,22 +1201,27 @@ function BottomTab({
   label,
   icon,
   active,
+  showDot,
   onPress,
 }: {
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
   active: boolean;
+  showDot?: boolean;
   onPress: () => void;
 }) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   return (
     <Pressable style={[styles.bottomTab, active ? { backgroundColor: palette.primarySoft } : undefined]} onPress={onPress}>
-      <Ionicons
-        name={icon}
-        size={18}
-        color={active ? palette.primaryStrong : palette.textMuted}
-      />
+      <View>
+        <Ionicons
+          name={icon}
+          size={18}
+          color={active ? palette.primaryStrong : palette.textMuted}
+        />
+        {showDot ? <View style={styles.bottomTabDot} /> : null}
+      </View>
       <Text style={[styles.bottomTabText, { color: active ? palette.primaryStrong : palette.textMuted }]}>{label}</Text>
     </Pressable>
   );
@@ -1401,6 +1441,13 @@ function WalletAppShellContent({
     section: "workflows" | "credentials";
     nonce: number;
   }>({ section: "workflows", nonce: 0 });
+  const [volunteerRouteRequest, setVolunteerRouteRequest] = useState<{
+    eventId: string | null;
+    nonce: number;
+  }>({ eventId: null, nonce: 0 });
+  const [volunteerReminderPreferences, setVolunteerReminderPreferences] =
+    useState<AppVolunteerReminderPreferences | null>(null);
+  const [improverNotifications, setImproverNotifications] = useState<AppImproverNotificationFeed | null>(null);
   const [improverCredentialTypes, setImproverCredentialTypes] = useState<AppGlobalCredentialType[]>([]);
   const [improverCredentialRequests, setImproverCredentialRequests] = useState<AppCredentialRequest[]>([]);
   const [improverCredentialRequestsLoading, setImproverCredentialRequestsLoading] = useState(false);
@@ -1666,7 +1713,29 @@ function WalletAppShellContent({
   );
   const canAccessImproverPanel = Boolean(appUser?.isImprover || appImprover?.status === "approved");
   const showImproverNav = canAccessImproverPanel && preferences.showImproverPanel;
-  const moreTabActive = showImproverNav && (tab === "activity" || tab === "contacts");
+  // The volunteer portal is open to every signed-in user, but only once the
+  // backend says it can serve it — the tab must never point at a 404.
+  const canAccessVolunteerPanel = Boolean(appUser) && clientConfig.features.volunteerEventsEnabled;
+  const showVolunteerNav = canAccessVolunteerPanel && preferences.showVolunteerPanel;
+  // Only one panel can hold the second dock slot. Improvers keep Improver there
+  // and Volunteer drops into "More"; everyone else gets Volunteer in the dock.
+  const dockPanelTab: "improver" | "volunteer" | null = showImproverNav
+    ? "improver"
+    : showVolunteerNav
+      ? "volunteer"
+      : null;
+  const moreMenuTabs = useMemo<MoreMenuTab[]>(() => {
+    if (!dockPanelTab) {
+      return [];
+    }
+    const tabs: MoreMenuTab[] = [];
+    if (showVolunteerNav && dockPanelTab !== "volunteer") {
+      tabs.push("volunteer");
+    }
+    tabs.push("activity", "contacts");
+    return tabs;
+  }, [dockPanelTab, showVolunteerNav]);
+  const moreTabActive = moreMenuTabs.includes(tab as MoreMenuTab);
   const canChooseWallet = walletChooserCandidates.length > 1;
   const merchantModeDevice = merchantModeStatus?.device?.merchantModeEnabled ? merchantModeStatus.device : null;
   const merchantModeActive = Boolean(merchantModeDevice);
@@ -1745,16 +1814,25 @@ function WalletAppShellContent({
   }, [merchantLabelsByAddress]);
 
   useEffect(() => {
-    if (!appUser && tab === "improver") {
+    if (!appUser && (tab === "improver" || tab === "volunteer")) {
       setTab("wallet");
     }
   }, [appUser, tab]);
 
+  // Bounce only when the panel genuinely cannot be shown. The display
+  // preference governs dock placement, not reachability: a reminder deep link
+  // must still open its event for someone who hid the tab.
   useEffect(() => {
-    if (!showImproverNav && showMoreMenu) {
+    if (tab === "volunteer" && !canAccessVolunteerPanel) {
+      setTab("wallet");
+    }
+  }, [canAccessVolunteerPanel, tab]);
+
+  useEffect(() => {
+    if (moreMenuTabs.length === 0 && showMoreMenu) {
       setShowMoreMenu(false);
     }
-  }, [showImproverNav, showMoreMenu]);
+  }, [moreMenuTabs, showMoreMenu]);
 
   useEffect(() => {
     if (!toast) {
@@ -2095,6 +2173,38 @@ function WalletAppShellContent({
     setTab("improver");
   }, []);
 
+  const openVolunteerPanel = useCallback((eventId: string | null = null) => {
+    setVolunteerRouteRequest((current) => ({ eventId, nonce: current.nonce + 1 }));
+    setTab("volunteer");
+  }, []);
+
+  // Volunteer pushes (reminders, organizer blasts) carry {type, event_id}, so a
+  // tap lands on the event rather than the tab. Matching the `volunteer_event_`
+  // prefix rather than an explicit list means a new kind routes correctly
+  // without an app release. Covers a warm tap and the cold start where the
+  // notification is what launched the app.
+  useEffect(() => {
+    const routeFromResponse = (response: Notifications.NotificationResponse | null) => {
+      const data = response?.notification?.request?.content?.data as Record<string, unknown> | undefined;
+      const type = typeof data?.type === "string" ? data.type : "";
+      if (!type.startsWith("volunteer_event_")) {
+        return;
+      }
+      const eventId = typeof data?.event_id === "string" ? data.event_id : null;
+      if (eventId && canAccessVolunteerPanel) {
+        openVolunteerPanel(eventId);
+      }
+    };
+
+    void Notifications.getLastNotificationResponseAsync()
+      .then(routeFromResponse)
+      .catch(() => {
+        // No launch notification, or the module is unavailable in this runtime.
+      });
+    const subscription = Notifications.addNotificationResponseReceivedListener(routeFromResponse);
+    return () => subscription.remove();
+  }, [canAccessVolunteerPanel, openVolunteerPanel]);
+
   const handleImproverUpdated = useCallback((nextImprover: AppImprover) => {
     setAppImprover(nextImprover);
     if (nextImprover.status === "approved") {
@@ -2136,6 +2246,94 @@ function WalletAppShellContent({
   useEffect(() => {
     void refreshImproverCredentialRequests();
   }, [refreshImproverCredentialRequests]);
+
+  const refreshImproverNotifications = useCallback(async () => {
+    if (!backendClient || !canAccessImproverPanel) {
+      setImproverNotifications(null);
+      return;
+    }
+    try {
+      setImproverNotifications(await backendClient.getImproverNotifications());
+    } catch (error) {
+      // A notification feed is never worth interrupting the panel for.
+      console.warn("Unable to load improver notifications", error);
+    }
+  }, [backendClient, canAccessImproverPanel]);
+
+  useEffect(() => {
+    void refreshImproverNotifications();
+  }, [refreshImproverNotifications]);
+
+  // Keeps the badge and the tab dot honest while the app is open — the feed is
+  // derived from live state, so entries resolve themselves without any action.
+  // Only polls while foregrounded, matching the transaction pollers: a
+  // backgrounded timer burns battery and network for a badge nobody can see,
+  // and the AppState listener re-syncs on the way back in anyway.
+  useEffect(() => {
+    if (!backendClient || !canAccessImproverPanel) {
+      return;
+    }
+    const interval = setInterval(() => {
+      if (appIsActiveRef.current) {
+        void refreshImproverNotifications();
+      }
+    }, IMPROVER_NOTIFICATION_POLL_MS);
+    return () => clearInterval(interval);
+  }, [backendClient, canAccessImproverPanel, refreshImproverNotifications]);
+
+  const handleMarkImproverNotificationsSeen = useCallback(async () => {
+    if (!backendClient || !canAccessImproverPanel) {
+      return;
+    }
+    try {
+      // The POST returns the updated feed, so there is no follow-up read.
+      setImproverNotifications(await backendClient.markImproverNotificationsSeen());
+    } catch (error) {
+      console.warn("Unable to mark improver notifications seen", error);
+    }
+  }, [backendClient, canAccessImproverPanel]);
+
+  // Reminder settings live on the backend, not in device preferences, because
+  // the backend is what sends the push at a time this app may not be running.
+  useEffect(() => {
+    if (!backendClient || !canAccessVolunteerPanel) {
+      setVolunteerReminderPreferences(null);
+      return;
+    }
+    let cancelled = false;
+    void backendClient
+      .getVolunteerReminderPreferences()
+      .then((next) => {
+        if (!cancelled) {
+          setVolunteerReminderPreferences(next);
+        }
+      })
+      .catch((error) => {
+        console.warn("Unable to load volunteer reminder settings", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [backendClient, canAccessVolunteerPanel]);
+
+  const handleUpdateVolunteerReminderPreferences = useCallback(
+    async (next: AppVolunteerReminderPreferences) => {
+      if (!backendClient) {
+        return;
+      }
+      const previous = volunteerReminderPreferences;
+      setVolunteerReminderPreferences(next);
+      try {
+        const saved = await backendClient.updateVolunteerReminderPreferences(next);
+        setVolunteerReminderPreferences(saved);
+      } catch (error) {
+        // Roll back rather than leave a toggle showing a state the server rejected.
+        setVolunteerReminderPreferences(previous);
+        showToast(describeAppBackendIssue(error), "error");
+      }
+    },
+    [backendClient, volunteerReminderPreferences],
+  );
 
   useEffect(() => {
     if (!backendClient || !appUser?.isMerchant) {
@@ -2661,6 +2859,9 @@ function WalletAppShellContent({
           void loadAppProfile();
         }
         void loadPublicLocations();
+        // A payout may have landed while the app was away, so the badge and the
+        // tab dot must be re-derived before the user looks at them.
+        void refreshImproverNotifications();
         setPushDeviceSyncRequestVersion((current) => current + 1);
       }
     });
@@ -2673,6 +2874,7 @@ function WalletAppShellContent({
     backendBootstrapReady,
     backendClient,
     publicBackendClient,
+    refreshImproverNotifications,
     runtime.service,
     runtime.discovery,
     selectedCandidateKey,
@@ -3323,6 +3525,8 @@ function WalletAppShellContent({
         ? "Activity"
       : tab === "improver"
         ? "Improver"
+      : tab === "volunteer"
+        ? "Volunteer"
       : tab === "map"
         ? "Merchant Map"
         : tab === "contacts"
@@ -3463,7 +3667,9 @@ function WalletAppShellContent({
                     ? "Recent wallet transfers and rewards"
                     : tab === "improver"
                       ? "Claims, payouts, badges, and credentials"
-                      : selectedWalletLabel
+                      : tab === "volunteer"
+                        ? "Events, sign ups, and volunteer rewards"
+                        : selectedWalletLabel
                         ? `${selectedWalletLabel} selected`
                         : "Fast SFLuv payments"}
             </Text>
@@ -3583,7 +3789,29 @@ function WalletAppShellContent({
               onImproverUpdated={handleImproverUpdated}
               requestedSection={improverRouteRequest.section}
               requestedSectionNonce={improverRouteRequest.nonce}
+              notifications={improverNotifications}
+              onRefreshNotifications={() => {
+                void refreshImproverNotifications();
+              }}
+              onMarkNotificationsSeen={handleMarkImproverNotificationsSeen}
               onCredentialDataUpdated={handleImproverCredentialDataUpdated}
+            />
+          ) : tab === "volunteer" ? (
+            <VolunteerScreen
+              backendClient={backendClient}
+              tokenSymbol={clientConfig.tokenSymbol}
+              hapticsEnabled={preferences.hapticsEnabled}
+              requestedEventId={volunteerRouteRequest.eventId}
+              requestedEventNonce={volunteerRouteRequest.nonce}
+              volunteerListOptIn={appUser?.volunteerListOptIn}
+              onVolunteerListOptInChange={(volunteerListOptIn) => {
+                setAppUser((current) => (current ? { ...current, volunteerListOptIn } : current));
+              }}
+              onOpenRewardScanner={() => {
+                setTab("wallet");
+                setWalletPane("receive");
+              }}
+              onToast={showToast}
             />
           ) : tab === "map" ? (
             <MapScreen
@@ -3704,6 +3932,14 @@ function WalletAppShellContent({
                 await backendClient.updateImproverPrimaryRewardsAccount(address.trim());
                 await loadAppProfile();
               }}
+              volunteerPanelAvailable={canAccessVolunteerPanel}
+              onOpenVolunteer={() => {
+                openVolunteerPanel();
+              }}
+              volunteerReminderPreferences={volunteerReminderPreferences}
+              onUpdateVolunteerReminderPreferences={(next) => {
+                void handleUpdateVolunteerReminderPreferences(next);
+              }}
               onOpenImprover={() => {
                 openImproverPanel("workflows");
               }}
@@ -3753,16 +3989,28 @@ function WalletAppShellContent({
                 setWalletPane("home");
               }}
             />
-            {showImproverNav ? (
+            {dockPanelTab ? (
               <>
-                <BottomTab
-                  label="Improver"
-                  icon={tab === "improver" ? "construct" : "construct-outline"}
-                  active={tab === "improver"}
-                  onPress={() => {
-                    setTab("improver");
-                  }}
-                />
+                {dockPanelTab === "improver" ? (
+                  <BottomTab
+                    label="Improver"
+                    icon={tab === "improver" ? "construct" : "construct-outline"}
+                    active={tab === "improver"}
+                    showDot={improverNotifications?.hasUnseen === true}
+                    onPress={() => {
+                      setTab("improver");
+                    }}
+                  />
+                ) : (
+                  <BottomTab
+                    label="Volunteer"
+                    icon={tab === "volunteer" ? "people-circle" : "people-circle-outline"}
+                    active={tab === "volunteer"}
+                    onPress={() => {
+                      setTab("volunteer");
+                    }}
+                  />
+                )}
                 <BottomTab
                   label="Map"
                   icon={tab === "map" ? "map" : "map-outline"}
@@ -3927,7 +4175,7 @@ function WalletAppShellContent({
       </Modal>
 
       <Modal
-        visible={showMoreMenu && showImproverNav}
+        visible={showMoreMenu && moreMenuTabs.length > 0}
         transparent
         presentationStyle="overFullScreen"
         animationType="none"
@@ -3938,7 +4186,7 @@ function WalletAppShellContent({
             <View style={styles.moreMenuHeader}>
               <View style={styles.moreMenuHeaderCopy}>
                 <Text style={styles.moreMenuTitle}>More</Text>
-                <Text style={styles.moreMenuSubtitle}>Open additional wallet tools.</Text>
+                <Text style={styles.moreMenuSubtitle}>Open additional SFLuv tools.</Text>
               </View>
               <Pressable style={styles.walletChooserClose} onPress={() => setShowMoreMenu(false)}>
                 <Ionicons name="close" size={20} color={palette.primaryStrong} />
@@ -3946,41 +4194,30 @@ function WalletAppShellContent({
             </View>
 
             <View style={styles.moreMenuList}>
-              <Pressable
-                style={[styles.moreMenuItem, tab === "activity" ? styles.moreMenuItemActive : undefined]}
-                onPress={() => {
-                  setShowMoreMenu(false);
-                  setTab("activity");
-                }}
-              >
-                <View style={styles.moreMenuCopy}>
-                  <Text style={styles.moreMenuLabel}>Activity</Text>
-                  <Text style={styles.moreMenuBody}>Recent wallet transfers and rewards.</Text>
-                </View>
-                <Ionicons
-                  name={tab === "activity" ? "pulse" : "pulse-outline"}
-                  size={18}
-                  color={tab === "activity" ? palette.primaryStrong : palette.textMuted}
-                />
-              </Pressable>
-
-              <Pressable
-                style={[styles.moreMenuItem, tab === "contacts" ? styles.moreMenuItemActive : undefined]}
-                onPress={() => {
-                  setShowMoreMenu(false);
-                  setTab("contacts");
-                }}
-              >
-                <View style={styles.moreMenuCopy}>
-                  <Text style={styles.moreMenuLabel}>Contacts</Text>
-                  <Text style={styles.moreMenuBody}>People and wallet addresses you trust.</Text>
-                </View>
-                <Ionicons
-                  name={tab === "contacts" ? "people" : "people-outline"}
-                  size={18}
-                  color={tab === "contacts" ? palette.primaryStrong : palette.textMuted}
-                />
-              </Pressable>
+              {moreMenuTabs.map((menuTab) => {
+                const entry = MORE_MENU_ENTRIES[menuTab];
+                const active = tab === menuTab;
+                return (
+                  <Pressable
+                    key={menuTab}
+                    style={[styles.moreMenuItem, active ? styles.moreMenuItemActive : undefined]}
+                    onPress={() => {
+                      setShowMoreMenu(false);
+                      setTab(menuTab);
+                    }}
+                  >
+                    <View style={styles.moreMenuCopy}>
+                      <Text style={styles.moreMenuLabel}>{entry.label}</Text>
+                      <Text style={styles.moreMenuBody}>{entry.body}</Text>
+                    </View>
+                    <Ionicons
+                      name={active ? entry.activeIcon : entry.icon}
+                      size={18}
+                      color={active ? palette.primaryStrong : palette.textMuted}
+                    />
+                  </Pressable>
+                );
+              })}
             </View>
           </Pressable>
         </Pressable>
@@ -6045,6 +6282,17 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   },
   bottomTabTextActive: {
     color: palette.primaryStrong,
+  },
+  bottomTabDot: {
+    position: "absolute",
+    top: -2,
+    right: -3,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: palette.danger,
+    borderWidth: 1.5,
+    borderColor: palette.surface,
   },
   loginWrap: {
     flex: 1,

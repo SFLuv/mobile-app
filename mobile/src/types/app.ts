@@ -21,6 +21,8 @@ export interface AppUser {
   mailingListOptIn: boolean;
   mailingListOptInAt?: string | null;
   mailingListPolicyVersion: string;
+  /** Volunteer email list — distinct from `mailingListOptIn`. Undefined = unknown. */
+  volunteerListOptIn?: boolean;
 }
 
 export type AppImproverStatus = "pending" | "approved" | "rejected";
@@ -196,6 +198,7 @@ export interface AppClientConfig {
     redemptionsEnabled: boolean;
     workflowPayoutsEnabled: boolean;
     merchantPaymentsEnabled: boolean;
+    volunteerEventsEnabled: boolean;
   };
   migration: {
     state: string;
@@ -496,6 +499,190 @@ export interface AppImproverWorkflowSeriesUnclaimResult {
   stepOrder: number;
   releasedCount: number;
   skippedCount: number;
+}
+
+export type AppVolunteerOrganizerType = "sfluv" | "affiliate";
+
+export interface AppVolunteerOrganizer {
+  type: AppVolunteerOrganizerType;
+  organizationId?: number | null;
+  name: string;
+  logoUrl?: string | null;
+}
+
+export interface AppVolunteerCoverPhoto {
+  url: string;
+  width?: number | null;
+  height?: number | null;
+}
+
+export type AppVolunteerRecurrenceFrequency = "daily" | "weekly" | "monthly";
+export type AppVolunteerMonthlyMode = "day_of_month" | "day_of_week";
+
+export interface AppVolunteerRecurrence {
+  frequency: AppVolunteerRecurrenceFrequency;
+  interval: number;
+  weekdays?: string[];
+  monthlyMode?: AppVolunteerMonthlyMode | null;
+  dayOfMonth?: number | null;
+  weekOfMonth?: number | null;
+  weekday?: string | null;
+  /** Server-rendered human string, e.g. "First Thursday of every month". */
+  summary: string;
+}
+
+export type AppVolunteerSignupMode = "none" | "external" | "internal";
+export type AppVolunteerSignupClosedReason =
+  | "full"
+  | "ended"
+  | "cancelled"
+  | "not_open_yet";
+
+export interface AppVolunteerSignupInfo {
+  mode: AppVolunteerSignupMode;
+  url?: string | null;
+  open: boolean;
+  closedReason?: AppVolunteerSignupClosedReason | null;
+}
+
+export interface AppVolunteerQrStatus {
+  live: boolean;
+  liveAt?: string | null;
+}
+
+export type AppVolunteerEventStatus = "scheduled" | "live" | "ended" | "cancelled";
+
+/**
+ * Volunteer events point at real rows in the shared locations table, so the
+ * address arrives structured rather than as free text.
+ */
+export interface AppVolunteerLocation {
+  id?: number | null;
+  name?: string | null;
+  street?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+}
+
+export interface AppVolunteerViewerState {
+  signedUp: boolean;
+  signupId?: string | null;
+  redeemed: boolean;
+}
+
+export interface AppVolunteerEvent {
+  id: string;
+  seriesId?: string | null;
+  /** Non-unique, id remains authoritative. Used to build shareable web links. */
+  slug?: string | null;
+  title: string;
+  description: string;
+  coverPhotos: AppVolunteerCoverPhoto[];
+  organizer: AppVolunteerOrganizer;
+  startAt: string;
+  endAt: string;
+  timezone?: string | null;
+  recurrence?: AppVolunteerRecurrence | null;
+  maxParticipants?: number | null;
+  signupCount?: number | null;
+  spotsRemaining?: number | null;
+  rewardAmountSfluv: number;
+  signup: AppVolunteerSignupInfo;
+  qr: AppVolunteerQrStatus;
+  status: AppVolunteerEventStatus;
+  location?: AppVolunteerLocation | null;
+  viewer?: AppVolunteerViewerState | null;
+}
+
+export interface AppVolunteerOrganizerFacet extends AppVolunteerOrganizer {
+  eventCount?: number | null;
+}
+
+export interface AppVolunteerEventPage {
+  events: AppVolunteerEvent[];
+  page: number;
+  count: number;
+  hasMore: boolean;
+  total?: number | null;
+  organizers: AppVolunteerOrganizerFacet[];
+}
+
+export type AppVolunteerEventWindow = "upcoming" | "past" | "all";
+
+export interface AppVolunteerEventQuery {
+  page?: number;
+  count?: number;
+  search?: string;
+  /** "sfluv", "affiliate", or "org:<id>". */
+  organizer?: string;
+  when?: AppVolunteerEventWindow;
+  openSignups?: boolean;
+}
+
+export interface AppVolunteerSignupInput {
+  volunteerListOptIn?: boolean;
+}
+
+export interface AppVolunteerSignupResult {
+  signupId: string;
+  status: string;
+  spotsRemaining?: number | null;
+  /** Server's post-signup truth for the volunteer email list. Undefined = unstated. */
+  volunteerListOptIn?: boolean;
+  /**
+   * What actually happened to the email-list subscription. A verified account
+   * email joins immediately; an unverified one still needs a confirmation mail.
+   * Driving copy off this means the app never claims the wrong one.
+   */
+  volunteerList?: "active" | "pending_confirmation" | "none";
+}
+
+/**
+ * Server-side because the backend sends the reminder — it needs the value at a
+ * time the phone may not be running, so this cannot be a device preference.
+ */
+export interface AppVolunteerReminderPreferences {
+  enabled: boolean;
+  hoursBefore: number;
+}
+
+export type AppVolunteerSignupFailureReason =
+  | "full"
+  | "already_signed_up"
+  | "closed"
+  | "not_internal";
+
+/**
+ * Derived from live state rather than stored rows: an entry exists for exactly
+ * as long as its condition holds, so there is nothing to dismiss or delete.
+ * `seen` is the only part the client controls; resolution removes it on its own.
+ */
+export interface AppImproverNotification {
+  key: string;
+  type: string;
+  title: string;
+  body: string;
+  createdAt: number;
+  seen: boolean;
+  seenAt?: number | null;
+  workflowId?: string | null;
+  workflowTitle?: string | null;
+  stepId?: string | null;
+  stepTitle?: string | null;
+  isManager: boolean;
+  amountSfluv?: number | null;
+  payoutError?: string | null;
+}
+
+export interface AppImproverNotificationFeed {
+  notifications: AppImproverNotification[];
+  /** Computed server-side over the whole feed — do not derive from the array. */
+  unseenCount: number;
+  hasUnseen: boolean;
+  total: number;
 }
 
 export interface AppWorkflowPhotoUpload {

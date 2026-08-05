@@ -14,6 +14,8 @@ import {
   AppImproverAbsencePeriod,
   AppImproverAbsencePeriodCreateResult,
   AppImproverAbsencePeriodDeleteResult,
+  AppImproverNotification,
+  AppImproverNotificationFeed,
   AppImproverWorkflowFeed,
   AppImproverWorkflowListItem,
   AppImproverWorkflowSeriesUnclaimResult,
@@ -23,6 +25,20 @@ import {
   AppTransaction,
   AppUser,
   AppUserPolicyStatus,
+  AppVolunteerCoverPhoto,
+  AppVolunteerEvent,
+  AppVolunteerEventPage,
+  AppVolunteerEventQuery,
+  AppVolunteerLocation,
+  AppVolunteerOrganizer,
+  AppVolunteerOrganizerFacet,
+  AppVolunteerRecurrence,
+  AppVolunteerRecurrenceFrequency,
+  AppVolunteerReminderPreferences,
+  AppVolunteerSignupInfo,
+  AppVolunteerSignupInput,
+  AppVolunteerSignupResult,
+  AppVolunteerViewerState,
   AppWallet,
   AppWalletOwnerLookup,
   AppWorkflow,
@@ -45,11 +61,18 @@ export class AppBackendAuthError extends Error {
 
 export class AppBackendRequestError extends Error {
   readonly status?: number;
+  /**
+   * The raw response body. `message` wraps it with a fallback and status code,
+   * which is right for logs but noisy in UI — prefer this when showing a
+   * server-authored rejection to a user.
+   */
+  readonly detail?: string;
 
-  constructor(message: string, status?: number) {
+  constructor(message: string, status?: number, detail?: string) {
     super(message);
     this.name = "AppBackendRequestError";
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -87,6 +110,7 @@ type GetUserResponse = {
     mailing_list_opt_in: boolean;
     mailing_list_opt_in_at?: string | null;
     mailing_list_policy_version: string;
+    volunteer_list_opt_in?: boolean;
   };
   wallets: Array<{
     id?: number;
@@ -215,6 +239,7 @@ type ClientConfigResponse = {
     redemptions_enabled?: boolean;
     workflow_payouts_enabled?: boolean;
     merchant_payments_enabled?: boolean;
+    volunteer_events_enabled?: boolean;
   };
   migration?: {
     state?: string;
@@ -610,6 +635,48 @@ type UserPolicyStatusResponse = {
   mailing_list_policy_version: string;
 };
 
+export const VOLUNTEER_EVENT_PAGE_SIZE = 20;
+
+/**
+ * Public volunteer reads deliberately sit outside the `/events*` tree, which is
+ * admin-guarded as a whole. Keeping them on their own prefix means a future
+ * router refactor cannot silently flip this boundary in either direction.
+ */
+const VOLUNTEER_EVENTS_PATH = "/volunteer-events";
+
+/** Signup rejection the UI can act on, rather than a generic request failure. */
+export class AppVolunteerSignupError extends Error {
+  constructor(
+    message: string,
+    readonly reason?: string,
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = "AppVolunteerSignupError";
+  }
+}
+
+function volunteerSignupMessage(reason?: string): string {
+  switch (reason) {
+    case "full":
+      return "This event just filled up. Check back in case a spot opens.";
+    case "already_signed_up":
+      return "You are already signed up for this event.";
+    case "closed":
+      return "Sign ups for this event are closed.";
+    case "not_internal":
+      return "This event is managed outside the SFLuv app. Use its sign up link.";
+    case "not_found":
+      return "This event is no longer available.";
+    case "rate_limited":
+      return "Too many sign up attempts. Please wait a moment and try again.";
+    case "validation_error":
+      return "Some of your account details are missing. Add your name and email in Settings, then try again.";
+    default:
+      return "Unable to sign you up right now. Please try again.";
+  }
+}
+
 const POLICY_REQUIRED_HEADER = "X-SFLUV-Auth-Reason";
 const POLICY_REQUIRED_REASON = "privacy-policy-required";
 const APP_BACKEND_REQUEST_TIMEOUT_MS = 25_000;
@@ -647,7 +714,7 @@ async function readResponseDetail(response: Response): Promise<string> {
 async function throwRequestError(response: Response, fallbackMessage: string): Promise<never> {
   const detail = await readResponseDetail(response);
   const message = detail ? `${fallbackMessage} (${response.status}): ${detail}` : `${fallbackMessage} (${response.status}).`;
-  throw new AppBackendRequestError(message, response.status);
+  throw new AppBackendRequestError(message, response.status, detail || undefined);
 }
 
 function asString(value: unknown, fallback = ""): string {
@@ -713,6 +780,10 @@ function mapUser(input: GetUserResponse["user"]): AppUser {
         ? input.mailing_list_opt_in_at
         : undefined,
     mailingListPolicyVersion: asString(input.mailing_list_policy_version),
+    // Separate from the account-level mailing list. Undefined means the backend
+    // has not told us yet, which is not the same as "opted out".
+    volunteerListOptIn:
+      typeof input.volunteer_list_opt_in === "boolean" ? input.volunteer_list_opt_in : undefined,
   };
 }
 
@@ -934,6 +1005,10 @@ function mapClientConfig(input: ClientConfigResponse): AppClientConfig {
       redemptionsEnabled: input.features?.redemptions_enabled !== false,
       workflowPayoutsEnabled: input.features?.workflow_payouts_enabled !== false,
       merchantPaymentsEnabled: input.features?.merchant_payments_enabled !== false,
+      // Opt-in rather than opt-out: the volunteer tab changes the bottom nav for
+      // every user, so an older backend that has never heard of it must not
+      // surface a tab pointing at endpoints it cannot serve.
+      volunteerEventsEnabled: input.features?.volunteer_events_enabled === true,
     },
     migration: {
       state: asString(input.migration?.state, "pre_cutover"),
@@ -1349,6 +1424,313 @@ function mapImproverAbsencePeriod(
     absentUntil: input.absent_until,
     createdAt: input.created_at,
     updatedAt: input.updated_at,
+  };
+}
+
+/**
+ * Volunteer event mapping.
+ *
+ * These read defensively on purpose: the volunteer contract is shared with the
+ * web client and is still being ratified by the app backend, so a partial
+ * payload should degrade to a less detailed card rather than crash the tab.
+ */
+function readRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function readOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function readOptionalNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) {
+    return Number(value);
+  }
+  return undefined;
+}
+
+/**
+ * Photo and logo URLs come back root-relative when the backend's
+ * PUBLIC_BACKEND_URL is unset (local dev, mostly). React Native's <Image> cannot
+ * resolve those — there is no document base — so anchor them to the API host.
+ */
+function absoluteBackendURL(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  if (!value.startsWith("/")) {
+    return value;
+  }
+  return `${mobileConfig.appBackendURL.replace(/\/+$/, "")}${value}`;
+}
+
+function mapVolunteerOrganizer(input: unknown): AppVolunteerOrganizer {
+  const record = readRecord(input);
+  const type = record.type === "affiliate" ? "affiliate" : "sfluv";
+  return {
+    type,
+    organizationId: readOptionalNumber(record.organization_id) ?? null,
+    name: asString(record.name, type === "affiliate" ? "Affiliate organization" : "SFLuv"),
+    logoUrl: absoluteBackendURL(readOptionalString(record.logo_url)) ?? null,
+  };
+}
+
+function mapVolunteerCoverPhotos(input: unknown): AppVolunteerCoverPhoto[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  return input
+    .map((entry): AppVolunteerCoverPhoto | null => {
+      if (typeof entry === "string") {
+        const direct = absoluteBackendURL(entry.trim());
+        return direct ? { url: direct } : null;
+      }
+      const record = readRecord(entry);
+      const url = absoluteBackendURL(readOptionalString(record.url));
+      if (!url) {
+        return null;
+      }
+      return {
+        url,
+        width: readOptionalNumber(record.width) ?? null,
+        height: readOptionalNumber(record.height) ?? null,
+      };
+    })
+    .filter((photo): photo is AppVolunteerCoverPhoto => Boolean(photo));
+}
+
+function mapVolunteerRecurrence(input: unknown): AppVolunteerRecurrence | null {
+  const record = readRecord(input);
+  const frequency = record.frequency;
+  if (frequency !== "daily" && frequency !== "weekly" && frequency !== "monthly") {
+    return null;
+  }
+  const monthlyMode =
+    record.monthly_mode === "day_of_month" || record.monthly_mode === "day_of_week"
+      ? record.monthly_mode
+      : null;
+  const interval = readOptionalNumber(record.interval) ?? 1;
+  const weekdays = Array.isArray(record.weekdays)
+    ? record.weekdays.filter((value): value is string => typeof value === "string")
+    : undefined;
+
+  return {
+    frequency,
+    interval: interval > 0 ? interval : 1,
+    weekdays,
+    monthlyMode,
+    dayOfMonth: readOptionalNumber(record.day_of_month) ?? null,
+    weekOfMonth: readOptionalNumber(record.week_of_month) ?? null,
+    weekday: readOptionalString(record.weekday) ?? null,
+    summary: asString(record.summary, describeVolunteerRecurrence(frequency, interval)),
+  };
+}
+
+/**
+ * Fallback only. The backend is asked to send `recurrence.summary` so the three
+ * clients cannot disagree about how a repeat rule reads.
+ */
+function describeVolunteerRecurrence(
+  frequency: AppVolunteerRecurrenceFrequency,
+  interval: number,
+): string {
+  const unit = frequency === "daily" ? "day" : frequency === "weekly" ? "week" : "month";
+  return interval > 1 ? `Every ${interval} ${unit}s` : `Every ${unit}`;
+}
+
+function mapVolunteerSignup(input: unknown): AppVolunteerSignupInfo {
+  const record = readRecord(input);
+  const mode =
+    record.mode === "internal" || record.mode === "external" || record.mode === "none"
+      ? record.mode
+      : "none";
+  const closedReason = record.closed_reason;
+  return {
+    mode,
+    url: readOptionalString(record.url) ?? null,
+    open: typeof record.open === "boolean" ? record.open : mode !== "none",
+    closedReason:
+      closedReason === "full" ||
+      closedReason === "ended" ||
+      closedReason === "cancelled" ||
+      closedReason === "not_open_yet"
+        ? closedReason
+        : null,
+  };
+}
+
+function mapVolunteerViewer(input: unknown): AppVolunteerViewerState | null {
+  if (!input || typeof input !== "object") {
+    return null;
+  }
+  const record = readRecord(input);
+  return {
+    signedUp: record.signed_up === true,
+    signupId: readOptionalString(record.signup_id) ?? null,
+    redeemed: record.redeemed === true,
+  };
+}
+
+function mapVolunteerLocation(input: unknown): AppVolunteerLocation | null {
+  if (!input || typeof input !== "object") {
+    return null;
+  }
+  const record = readRecord(input);
+  const location: AppVolunteerLocation = {
+    id: readOptionalNumber(record.id) ?? null,
+    name: readOptionalString(record.name) ?? null,
+    // `address` is the pre-Q1 flat form; treat it as the street line if a
+    // backend still sends it, so an older payload degrades instead of blanking.
+    street: readOptionalString(record.street) ?? readOptionalString(record.address) ?? null,
+    city: readOptionalString(record.city) ?? null,
+    state: readOptionalString(record.state) ?? null,
+    zip: readOptionalString(record.zip) ?? null,
+    lat: readOptionalNumber(record.lat) ?? null,
+    lng: readOptionalNumber(record.lng) ?? null,
+  };
+
+  const hasAnything =
+    location.name || location.street || location.city || location.state || location.zip ||
+    location.lat !== null || location.lng !== null;
+  return hasAnything ? location : null;
+}
+
+function mapVolunteerEvent(input: unknown): AppVolunteerEvent | null {
+  const record = readRecord(input);
+  const id = readOptionalString(record.id);
+  if (!id) {
+    return null;
+  }
+
+  const status = record.status;
+  const startAt = asString(record.start_at);
+  const endAt = asString(record.end_at, startAt);
+
+  return {
+    id,
+    seriesId: readOptionalString(record.series_id) ?? null,
+    slug: readOptionalString(record.slug) ?? null,
+    title: asString(record.title, "Volunteer event"),
+    description: asString(record.description),
+    coverPhotos: mapVolunteerCoverPhotos(record.cover_photos),
+    organizer: mapVolunteerOrganizer(record.organizer),
+    startAt,
+    endAt,
+    timezone: readOptionalString(record.timezone) ?? null,
+    recurrence: mapVolunteerRecurrence(record.recurrence),
+    maxParticipants: readOptionalNumber(record.max_participants) ?? null,
+    signupCount: readOptionalNumber(record.signup_count) ?? null,
+    spotsRemaining: readOptionalNumber(record.spots_remaining) ?? null,
+    rewardAmountSfluv: readOptionalNumber(record.reward_amount_sfluv) ?? 0,
+    signup: mapVolunteerSignup(record.signup),
+    qr: {
+      live: readRecord(record.qr).live === true,
+      liveAt: readOptionalString(readRecord(record.qr).live_at) ?? null,
+    },
+    status:
+      status === "scheduled" || status === "live" || status === "ended" || status === "cancelled"
+        ? status
+        : "scheduled",
+    location: mapVolunteerLocation(record.location),
+    viewer: mapVolunteerViewer(record.viewer),
+  };
+}
+
+export const VOLUNTEER_REMINDER_HOUR_OPTIONS = [1, 2, 6, 12, 24, 48];
+export const DEFAULT_VOLUNTEER_REMINDER_HOURS = 24;
+const MIN_VOLUNTEER_REMINDER_HOURS = 1;
+const MAX_VOLUNTEER_REMINDER_HOURS = 168;
+
+function clampVolunteerReminderHours(hours: number): number {
+  if (!Number.isFinite(hours)) {
+    return DEFAULT_VOLUNTEER_REMINDER_HOURS;
+  }
+  return Math.min(MAX_VOLUNTEER_REMINDER_HOURS, Math.max(MIN_VOLUNTEER_REMINDER_HOURS, Math.round(hours)));
+}
+
+function mapVolunteerReminderPreferences(input: unknown): AppVolunteerReminderPreferences {
+  const record = readRecord(input);
+  return {
+    // Reminders are opt-out, so an unstated value means on.
+    enabled: record.enabled !== false,
+    hoursBefore: clampVolunteerReminderHours(
+      readOptionalNumber(record.hours_before) ?? DEFAULT_VOLUNTEER_REMINDER_HOURS,
+    ),
+  };
+}
+
+function mapVolunteerOrganizerFacets(input: unknown): AppVolunteerOrganizerFacet[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  return input.map((entry) => ({
+    ...mapVolunteerOrganizer(entry),
+    eventCount: readOptionalNumber(readRecord(entry).event_count) ?? null,
+  }));
+}
+
+function mapVolunteerEventPage(input: unknown, fallbackPage: number, fallbackCount: number): AppVolunteerEventPage {
+  const record = readRecord(input);
+  const rawEvents = Array.isArray(record.events)
+    ? record.events
+    : Array.isArray(input)
+      ? (input as unknown[])
+      : [];
+  const events = rawEvents
+    .map((entry) => mapVolunteerEvent(entry))
+    .filter((event): event is AppVolunteerEvent => Boolean(event));
+  const count = readOptionalNumber(record.count) ?? fallbackCount;
+
+  return {
+    events,
+    page: readOptionalNumber(record.page) ?? fallbackPage,
+    count,
+    hasMore: typeof record.has_more === "boolean" ? record.has_more : events.length >= count,
+    total: readOptionalNumber(record.total) ?? null,
+    organizers: mapVolunteerOrganizerFacets(record.organizers),
+  };
+}
+
+function mapImproverNotification(input: unknown): AppImproverNotification | null {
+  const record = readRecord(input);
+  const key = readOptionalString(record.key);
+  if (!key) {
+    return null;
+  }
+  return {
+    key,
+    type: asString(record.type, "unknown"),
+    title: asString(record.title, "Notification"),
+    body: asString(record.body),
+    createdAt: readOptionalNumber(record.created_at) ?? 0,
+    seen: record.seen === true,
+    seenAt: readOptionalNumber(record.seen_at) ?? null,
+    workflowId: readOptionalString(record.workflow_id) ?? null,
+    workflowTitle: readOptionalString(record.workflow_title) ?? null,
+    stepId: readOptionalString(record.step_id) ?? null,
+    stepTitle: readOptionalString(record.step_title) ?? null,
+    isManager: record.is_manager === true,
+    amountSfluv: readOptionalNumber(record.amount_sfluv) ?? null,
+    payoutError: readOptionalString(record.payout_error) ?? null,
+  };
+}
+
+function mapImproverNotificationFeed(input: unknown): AppImproverNotificationFeed {
+  const record = readRecord(input);
+  const notifications = (Array.isArray(record.notifications) ? record.notifications : [])
+    .map((entry) => mapImproverNotification(entry))
+    .filter((entry): entry is AppImproverNotification => Boolean(entry));
+  // unseen_count and has_unseen are authoritative: they are computed over the
+  // whole feed, so they stay correct even if the list is ever paginated.
+  const unseenCount = readOptionalNumber(record.unseen_count) ?? notifications.filter((entry) => !entry.seen).length;
+  return {
+    notifications,
+    unseenCount,
+    hasUnseen: typeof record.has_unseen === "boolean" ? record.has_unseen : unseenCount > 0,
+    total: readOptionalNumber(record.total) ?? notifications.length,
   };
 }
 
@@ -2043,6 +2425,31 @@ export class AppBackendClient {
     return mapCredentialRequest(body);
   }
 
+  async getImproverNotifications(): Promise<AppImproverNotificationFeed> {
+    const response = await this.authFetch("/improvers/notifications");
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load notifications");
+    }
+    return mapImproverNotificationFeed(await response.json());
+  }
+
+  /**
+   * Marks everything currently visible seen, or specific keys. Returns the
+   * updated feed, so callers never need a follow-up read. Idempotent server-side.
+   */
+  async markImproverNotificationsSeen(input?: { keys?: string[] }): Promise<AppImproverNotificationFeed> {
+    const body = input?.keys?.length ? { keys: input.keys } : { all: true };
+    const response = await this.authFetch("/improvers/notifications/seen", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to update notifications");
+    }
+    return mapImproverNotificationFeed(await response.json());
+  }
+
   async getImproverAbsencePeriods(): Promise<AppImproverAbsencePeriod[]> {
     const response = await this.authFetch("/improvers/workflows/absence-periods");
     if (!response.ok) {
@@ -2243,6 +2650,147 @@ export class AppBackendClient {
     const payload = await response.arrayBuffer();
     const base64 = Buffer.from(payload).toString("base64");
     return `data:${contentType};base64,${base64}`;
+  }
+
+  private buildVolunteerEventQuery(query: AppVolunteerEventQuery = {}): string {
+    const params = new URLSearchParams();
+    params.set("page", String(query.page ?? 0));
+    params.set("count", String(query.count ?? VOLUNTEER_EVENT_PAGE_SIZE));
+    if (query.search?.trim()) {
+      params.set("search", query.search.trim());
+    }
+    if (query.organizer) {
+      params.set("organizer", query.organizer);
+    }
+    if (query.when) {
+      params.set("when", query.when);
+    }
+    if (query.openSignups) {
+      params.set("open_signups", "true");
+    }
+    return params.toString();
+  }
+
+  async getVolunteerEvents(query: AppVolunteerEventQuery = {}): Promise<AppVolunteerEventPage> {
+    const response = await this.authFetch(`${VOLUNTEER_EVENTS_PATH}?${this.buildVolunteerEventQuery(query)}`);
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load volunteer events");
+    }
+    return mapVolunteerEventPage(
+      await response.json(),
+      query.page ?? 0,
+      query.count ?? VOLUNTEER_EVENT_PAGE_SIZE,
+    );
+  }
+
+  async getMyVolunteerEvents(query: AppVolunteerEventQuery = {}): Promise<AppVolunteerEventPage> {
+    const response = await this.authFetch(
+      `${VOLUNTEER_EVENTS_PATH}/mine?${this.buildVolunteerEventQuery(query)}`,
+    );
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load your volunteer events");
+    }
+    return mapVolunteerEventPage(
+      await response.json(),
+      query.page ?? 0,
+      query.count ?? VOLUNTEER_EVENT_PAGE_SIZE,
+    );
+  }
+
+  /**
+   * Organizer facets live on their own route rather than inline on every list
+   * page, so the list query does not pay for a full-corpus aggregate.
+   */
+  async getVolunteerEventOrganizers(): Promise<AppVolunteerOrganizerFacet[]> {
+    const response = await this.authFetch(`${VOLUNTEER_EVENTS_PATH}/organizers`);
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load event organizers");
+    }
+    const body = await response.json();
+    return mapVolunteerOrganizerFacets(Array.isArray(body) ? body : readRecord(body).organizers);
+  }
+
+  async getVolunteerEvent(eventId: string): Promise<AppVolunteerEvent> {
+    const response = await this.authFetch(`${VOLUNTEER_EVENTS_PATH}/${encodeURIComponent(eventId)}`);
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load this volunteer event");
+    }
+    const event = mapVolunteerEvent(await response.json());
+    if (!event) {
+      throw new AppBackendRequestError("This volunteer event could not be read.");
+    }
+    return event;
+  }
+
+  async signUpForVolunteerEvent(
+    eventId: string,
+    input: AppVolunteerSignupInput = {},
+  ): Promise<AppVolunteerSignupResult> {
+    const response = await this.authFetch(`${VOLUNTEER_EVENTS_PATH}/${encodeURIComponent(eventId)}/signup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ volunteer_list_opt_in: input.volunteerListOptIn === true }),
+    });
+
+    if (!response.ok) {
+      const detail = await readResponseDetail(response);
+      let reason: string | undefined;
+      try {
+        reason = (JSON.parse(detail) as { reason?: string }).reason;
+      } catch {
+        reason = undefined;
+      }
+      throw new AppVolunteerSignupError(volunteerSignupMessage(reason), reason, response.status);
+    }
+
+    const record = readRecord(await response.json());
+    return {
+      signupId: asString(record.signup_id),
+      status: asString(record.status, "confirmed"),
+      spotsRemaining: readOptionalNumber(record.spots_remaining) ?? null,
+      volunteerListOptIn:
+        typeof record.volunteer_list_opt_in === "boolean" ? record.volunteer_list_opt_in : undefined,
+      volunteerList:
+        record.volunteer_list === "active" ||
+        record.volunteer_list === "pending_confirmation" ||
+        record.volunteer_list === "none"
+          ? record.volunteer_list
+          : undefined,
+    };
+  }
+
+  async getVolunteerReminderPreferences(): Promise<AppVolunteerReminderPreferences> {
+    const response = await this.authFetch(`${VOLUNTEER_EVENTS_PATH}/reminder-preferences`);
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load volunteer reminder settings");
+    }
+    return mapVolunteerReminderPreferences(await response.json());
+  }
+
+  async updateVolunteerReminderPreferences(
+    input: AppVolunteerReminderPreferences,
+  ): Promise<AppVolunteerReminderPreferences> {
+    const response = await this.authFetch(`${VOLUNTEER_EVENTS_PATH}/reminder-preferences`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        enabled: input.enabled,
+        hours_before: clampVolunteerReminderHours(input.hoursBefore),
+      }),
+    });
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to save volunteer reminder settings");
+    }
+    return mapVolunteerReminderPreferences(await response.json());
+  }
+
+  async cancelVolunteerEventSignup(eventId: string): Promise<void> {
+    const response = await this.authFetch(`${VOLUNTEER_EVENTS_PATH}/${encodeURIComponent(eventId)}/signup`, {
+      method: "DELETE",
+    });
+    if (!response.ok && response.status !== 404) {
+      await throwRequestError(response, "Unable to cancel your spot");
+    }
   }
 
   async getWallets(): Promise<AppWallet[]> {
