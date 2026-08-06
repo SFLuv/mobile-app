@@ -181,7 +181,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
   return StyleSheet.create({
     container: {
       paddingHorizontal: spacing.lg,
-      paddingTop: spacing.md,
+      paddingTop: spacing.sm,
       gap: spacing.md,
       paddingBottom: 120,
     },

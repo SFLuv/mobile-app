@@ -3944,7 +3944,7 @@ function createStyles(
   return StyleSheet.create({
     container: {
       paddingHorizontal: spacing.lg,
-      paddingTop: spacing.md,
+      paddingTop: spacing.sm,
       paddingBottom: 140,
       gap: spacing.md,
     },

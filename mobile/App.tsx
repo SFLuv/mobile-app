@@ -165,11 +165,28 @@ type CompatibilityState =
 
 type Tab = "wallet" | "activity" | "improver" | "volunteer" | "map" | "contacts" | "settings";
 
-/** Tabs that can be displaced into the "More" sheet by a panel tab. */
-type MoreMenuTab = Extract<Tab, "volunteer" | "activity" | "contacts">;
+/** Slots in the bottom dock. Distinct from `Tab`: "participate" can lead to two screens. */
+type DockTabKey = "participate" | "map" | "wallet" | "activity" | "contacts";
 
-const MORE_MENU_ENTRIES: Record<
-  MoreMenuTab,
+/**
+ * Left-to-right reading order of the screens, used only to decide which way a
+ * tab change should slide. Volunteer and Improver share the Participate slot but
+ * keep distinct positions so switching between them still animates.
+ */
+const TAB_SLIDE_ORDER: Tab[] = [
+  "volunteer",
+  "improver",
+  "map",
+  "wallet",
+  "activity",
+  "contacts",
+  "settings",
+];
+const TAB_SLIDE_DISTANCE = 26;
+
+/** The panels reachable from the Participate slot, in the order they're offered. */
+const PARTICIPATE_ENTRIES: Record<
+  Extract<Tab, "volunteer" | "improver">,
   { label: string; body: string; icon: keyof typeof Ionicons.glyphMap; activeIcon: keyof typeof Ionicons.glyphMap }
 > = {
   volunteer: {
@@ -178,17 +195,11 @@ const MORE_MENU_ENTRIES: Record<
     icon: "people-circle-outline",
     activeIcon: "people-circle",
   },
-  activity: {
-    label: "Activity",
-    body: "Recent wallet transfers and rewards.",
-    icon: "pulse-outline",
-    activeIcon: "pulse",
-  },
-  contacts: {
-    label: "Contacts",
-    body: "People and wallet addresses you trust.",
-    icon: "people-outline",
-    activeIcon: "people",
+  improver: {
+    label: "Improver",
+    body: "Claims, payouts, badges, and credentials.",
+    icon: "construct-outline",
+    activeIcon: "construct",
   },
 };
 type WalletPane = "home" | "send" | "receive";
@@ -1197,33 +1208,152 @@ function useStoredPreferences(): [AppPreferences, React.Dispatch<React.SetStateA
   return [preferences, setPreferences, preferencesLoaded];
 }
 
-function BottomTab({
-  label,
-  icon,
-  active,
-  showDot,
-  onPress,
-}: {
+type DockTab = {
+  key: DockTabKey;
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
-  active: boolean;
+  /** The raised, always-centered action button. Exactly one tab carries this. */
+  center?: boolean;
   showDot?: boolean;
-  onPress: () => void;
+};
+
+/**
+ * Five-slot dock with a raised centre action and a bubble that slides between
+ * slots, morphing into a circle as it reaches the centre.
+ *
+ * The bubble is JS-driven rather than native-driven because width, height and
+ * borderRadius all interpolate during the morph, and those are not properties
+ * the native driver can animate.
+ */
+function BottomDock({
+  tabs,
+  activeKey,
+  onSelect,
+}: {
+  tabs: DockTab[];
+  activeKey: DockTabKey | null;
+  onSelect: (key: DockTabKey) => void;
 }) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
+  const [barWidth, setBarWidth] = useState(0);
+
+  const activeIndex = Math.max(
+    0,
+    tabs.findIndex((tab) => tab.key === activeKey),
+  );
+  const centerIndex = Math.max(
+    0,
+    tabs.findIndex((tab) => tab.center),
+  );
+  const tabWidth = tabs.length > 0 ? barWidth / tabs.length : 0;
+
+  const BUBBLE_PAD = 8;
+  const RECT_HEIGHT = 50;
+  const CIRCLE = 54;
+  const rectWidth = Math.max(0, tabWidth - BUBBLE_PAD);
+  const centerX = centerIndex * tabWidth;
+
+  const travel = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (tabWidth <= 0) {
+      return;
+    }
+    Animated.spring(travel, {
+      toValue: activeIndex * tabWidth,
+      useNativeDriver: false,
+      friction: 11,
+      tension: 95,
+    }).start();
+  }, [activeIndex, tabWidth, travel]);
+
+  // 0 = rounded rect travelling along the bar, 1 = circle sitting on the raised
+  // centre button. Morphing only over the last stretch of the approach keeps the
+  // bubble reading as a bubble for most of its journey.
+  const circleness = travel.interpolate({
+    inputRange: [centerX - Math.max(1, tabWidth * 0.42), centerX, centerX + Math.max(1, tabWidth * 0.42)],
+    outputRange: [0, 1, 0],
+    extrapolate: "clamp",
+  });
+  const lerp = (from: number, to: number) =>
+    circleness.interpolate({ inputRange: [0, 1], outputRange: [from, to] });
+
+  const bubbleWidth = lerp(rectWidth, CIRCLE);
+  const bubbleHeight = lerp(RECT_HEIGHT, CIRCLE);
+  const bubbleRadius = lerp(radii.md, CIRCLE / 2);
+  const bubbleRise = lerp(0, -18);
+  const bubbleShift = Animated.add(travel, lerp(BUBBLE_PAD / 2, Math.max(0, (tabWidth - CIRCLE) / 2)));
+  // Invisible at rest on the centre button — the raised button is its own
+  // highlight — but visible the whole way there and back.
+  const bubbleOpacity = circleness.interpolate({ inputRange: [0, 0.75, 1], outputRange: [1, 1, 0] });
+  const centerFill = circleness.interpolate({
+    inputRange: [0, 1],
+    outputRange: [palette.primarySoft, palette.primaryStrong],
+  });
+
   return (
-    <Pressable style={[styles.bottomTab, active ? { backgroundColor: palette.primarySoft } : undefined]} onPress={onPress}>
-      <View>
-        <Ionicons
-          name={icon}
-          size={18}
-          color={active ? palette.primaryStrong : palette.textMuted}
+    <View style={styles.bottomDock} onLayout={(event) => setBarWidth(event.nativeEvent.layout.width - 16)}>
+      <View pointerEvents="none" style={styles.bottomDockGlassLayer} />
+      <View pointerEvents="none" style={styles.bottomDockGlassSheen} />
+      {barWidth > 0 ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.dockBubble,
+            {
+              width: bubbleWidth,
+              height: bubbleHeight,
+              borderRadius: bubbleRadius,
+              opacity: bubbleOpacity,
+              transform: [{ translateX: bubbleShift }, { translateY: bubbleRise }],
+            },
+          ]}
         />
-        {showDot ? <View style={styles.bottomTabDot} /> : null}
-      </View>
-      <Text style={[styles.bottomTabText, { color: active ? palette.primaryStrong : palette.textMuted }]}>{label}</Text>
-    </Pressable>
+      ) : null}
+
+      {tabs.map((tab) => {
+        const active = tab.key === activeKey;
+        if (tab.center) {
+          return (
+            <Pressable
+              key={tab.key}
+              style={styles.dockTab}
+              accessibilityRole="button"
+              accessibilityLabel={tab.label}
+              onPress={() => onSelect(tab.key)}
+            >
+              <Animated.View style={[styles.dockCenterButton, { backgroundColor: centerFill }]}>
+                <Ionicons name={tab.icon} size={26} color={active ? palette.white : palette.primaryStrong} />
+              </Animated.View>
+              <Text style={[styles.bottomTabText, active ? styles.bottomTabTextActive : undefined]}>
+                {tab.label}
+              </Text>
+            </Pressable>
+          );
+        }
+        return (
+          <Pressable
+            key={tab.key}
+            style={styles.dockTab}
+            accessibilityRole="button"
+            accessibilityLabel={tab.label}
+            onPress={() => onSelect(tab.key)}
+          >
+            <View>
+              <Ionicons
+                name={tab.icon}
+                size={20}
+                color={active ? palette.primaryStrong : palette.textMuted}
+              />
+              {tab.showDot ? <View style={styles.bottomTabDot} /> : null}
+            </View>
+            <Text style={[styles.bottomTabText, active ? styles.bottomTabTextActive : undefined]}>
+              {tab.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 
@@ -1482,7 +1612,7 @@ function WalletAppShellContent({
   const [activityHasMore, setActivityHasMore] = useState(true);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [showWalletChooser, setShowWalletChooser] = useState(false);
-  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showParticipateMenu, setShowParticipateMenu] = useState(false);
   const [merchantMapViewMode, setMerchantMapViewMode] = useState<"map" | "list">("map");
   const [pendingContactAddress, setPendingContactAddress] = useState<string | null>(null);
   const [sendDraft, setSendDraft] = useState<SendDraft | null>(null);
@@ -1717,25 +1847,20 @@ function WalletAppShellContent({
   // backend says it can serve it — the tab must never point at a 404.
   const canAccessVolunteerPanel = Boolean(appUser) && clientConfig.features.volunteerEventsEnabled;
   const showVolunteerNav = canAccessVolunteerPanel && preferences.showVolunteerPanel;
-  // Only one panel can hold the second dock slot. Improvers keep Improver there
-  // and Volunteer drops into "More"; everyone else gets Volunteer in the dock.
-  const dockPanelTab: "improver" | "volunteer" | null = showImproverNav
-    ? "improver"
-    : showVolunteerNav
-      ? "volunteer"
-      : null;
-  const moreMenuTabs = useMemo<MoreMenuTab[]>(() => {
-    if (!dockPanelTab) {
-      return [];
+  // Participate is one slot leading to one or two panels. With both available
+  // it opens a chooser; with one it goes straight there; with neither the slot
+  // is dropped rather than left as a button that does nothing.
+  const participateTargets = useMemo<Array<Extract<Tab, "volunteer" | "improver">>>(() => {
+    const targets: Array<Extract<Tab, "volunteer" | "improver">> = [];
+    if (showVolunteerNav) {
+      targets.push("volunteer");
     }
-    const tabs: MoreMenuTab[] = [];
-    if (showVolunteerNav && dockPanelTab !== "volunteer") {
-      tabs.push("volunteer");
+    if (showImproverNav) {
+      targets.push("improver");
     }
-    tabs.push("activity", "contacts");
-    return tabs;
-  }, [dockPanelTab, showVolunteerNav]);
-  const moreTabActive = moreMenuTabs.includes(tab as MoreMenuTab);
+    return targets;
+  }, [showImproverNav, showVolunteerNav]);
+  const participateActive = tab === "volunteer" || tab === "improver";
   const canChooseWallet = walletChooserCandidates.length > 1;
   const merchantModeDevice = merchantModeStatus?.device?.merchantModeEnabled ? merchantModeStatus.device : null;
   const merchantModeActive = Boolean(merchantModeDevice);
@@ -1829,10 +1954,10 @@ function WalletAppShellContent({
   }, [canAccessVolunteerPanel, tab]);
 
   useEffect(() => {
-    if (moreMenuTabs.length === 0 && showMoreMenu) {
-      setShowMoreMenu(false);
+    if (participateTargets.length < 2 && showParticipateMenu) {
+      setShowParticipateMenu(false);
     }
-  }, [moreMenuTabs, showMoreMenu]);
+  }, [participateTargets, showParticipateMenu]);
 
   useEffect(() => {
     if (!toast) {
@@ -2172,6 +2297,78 @@ function WalletAppShellContent({
     setImproverRouteRequest((current) => ({ section, nonce: current.nonce + 1 }));
     setTab("improver");
   }, []);
+
+  const dockTabs = useMemo<DockTab[]>(() => {
+    const tabs: DockTab[] = [];
+    if (participateTargets.length > 0) {
+      tabs.push({
+        key: "participate",
+        label: "Participate",
+        icon: participateActive ? "people-circle" : "people-circle-outline",
+        showDot: improverNotifications?.hasUnseen === true && participateTargets.includes("improver"),
+      });
+    }
+    tabs.push({ key: "map", label: "Map", icon: tab === "map" ? "map" : "map-outline" });
+    tabs.push({ key: "wallet", label: "Wallet", icon: "wallet", center: true });
+    tabs.push({ key: "activity", label: "Activity", icon: tab === "activity" ? "pulse" : "pulse-outline" });
+    tabs.push({ key: "contacts", label: "Contacts", icon: tab === "contacts" ? "people" : "people-outline" });
+    return tabs;
+  }, [improverNotifications?.hasUnseen, participateActive, participateTargets, tab]);
+
+  const activeDockKey = useMemo<DockTabKey | null>(() => {
+    if (participateActive) {
+      return "participate";
+    }
+    if (tab === "map" || tab === "wallet" || tab === "activity" || tab === "contacts") {
+      return tab;
+    }
+    return null;
+  }, [participateActive, tab]);
+
+  const handleDockSelect = useCallback(
+    (key: DockTabKey) => {
+      if (key === "participate") {
+        // One destination goes straight there; two offers the choice, in the
+        // same sheet style the displaced tabs used to use.
+        if (participateTargets.length === 1) {
+          setTab(participateTargets[0]);
+          return;
+        }
+        setShowParticipateMenu(true);
+        return;
+      }
+      if (key === "wallet") {
+        setTab("wallet");
+        setWalletPane("home");
+        return;
+      }
+      if (key === "map") {
+        setMerchantMapViewMode("map");
+      }
+      setTab(key);
+    },
+    [participateTargets],
+  );
+
+  // Tab content slides in from the side the new screen sits on, so a tab change
+  // reads as lateral movement rather than an instant swap.
+  const tabSlideX = useRef(new Animated.Value(0)).current;
+  const tabFade = useRef(new Animated.Value(1)).current;
+  const previousTabOrderRef = useRef(TAB_SLIDE_ORDER.indexOf("wallet"));
+  useEffect(() => {
+    const nextOrder = TAB_SLIDE_ORDER.indexOf(tab);
+    const previousOrder = previousTabOrderRef.current;
+    if (nextOrder < 0 || nextOrder === previousOrder) {
+      return;
+    }
+    previousTabOrderRef.current = nextOrder;
+    tabSlideX.setValue(nextOrder > previousOrder ? TAB_SLIDE_DISTANCE : -TAB_SLIDE_DISTANCE);
+    tabFade.setValue(0.4);
+    Animated.parallel([
+      Animated.spring(tabSlideX, { toValue: 0, useNativeDriver: true, friction: 10, tension: 90 }),
+      Animated.timing(tabFade, { toValue: 1, duration: 180, useNativeDriver: true }),
+    ]).start();
+  }, [tab, tabFade, tabSlideX]);
 
   const openVolunteerPanel = useCallback((eventId: string | null = null) => {
     setVolunteerRouteRequest((current) => ({ eventId, nonce: current.nonce + 1 }));
@@ -3706,7 +3903,9 @@ function WalletAppShellContent({
       ) : null}
 
       <View style={[styles.contentShell, !showStandardChrome ? styles.contentShellFullscreen : undefined]}>
-        <View style={styles.content}>
+        <Animated.View
+          style={[styles.content, { opacity: tabFade, transform: [{ translateX: tabSlideX }] }]}
+        >
           {showBlockingWalletState ? (
             <View style={styles.centerState}>
               <ThemedActivityIndicator size="large" color={palette.primaryStrong} />
@@ -3806,10 +4005,6 @@ function WalletAppShellContent({
               volunteerListOptIn={appUser?.volunteerListOptIn}
               onVolunteerListOptInChange={(volunteerListOptIn) => {
                 setAppUser((current) => (current ? { ...current, volunteerListOptIn } : current));
-              }}
-              onOpenRewardScanner={() => {
-                setTab("wallet");
-                setWalletPane("receive");
               }}
               onToast={showToast}
             />
@@ -3950,7 +4145,7 @@ function WalletAppShellContent({
               onUpdatePreferences={handleUpdatePreferences}
             />
           )}
-        </View>
+        </Animated.View>
 
         {toast ? (
           <View
@@ -3977,88 +4172,7 @@ function WalletAppShellContent({
             style={styles.bottomDockShellBackdrop}
           />
           <View pointerEvents="none" style={styles.bottomDockLiquidLayer} />
-          <View style={styles.bottomDock}>
-            <View pointerEvents="none" style={styles.bottomDockGlassLayer} />
-            <View pointerEvents="none" style={styles.bottomDockGlassSheen} />
-            <BottomTab
-              label="Wallet"
-              icon={tab === "wallet" ? "wallet" : "wallet-outline"}
-              active={tab === "wallet"}
-              onPress={() => {
-                setTab("wallet");
-                setWalletPane("home");
-              }}
-            />
-            {dockPanelTab ? (
-              <>
-                {dockPanelTab === "improver" ? (
-                  <BottomTab
-                    label="Improver"
-                    icon={tab === "improver" ? "construct" : "construct-outline"}
-                    active={tab === "improver"}
-                    showDot={improverNotifications?.hasUnseen === true}
-                    onPress={() => {
-                      setTab("improver");
-                    }}
-                  />
-                ) : (
-                  <BottomTab
-                    label="Volunteer"
-                    icon={tab === "volunteer" ? "people-circle" : "people-circle-outline"}
-                    active={tab === "volunteer"}
-                    onPress={() => {
-                      setTab("volunteer");
-                    }}
-                  />
-                )}
-                <BottomTab
-                  label="Map"
-                  icon={tab === "map" ? "map" : "map-outline"}
-                  active={tab === "map"}
-                  onPress={() => {
-                    setMerchantMapViewMode("map");
-                    setTab("map");
-                  }}
-                />
-                <BottomTab
-                  label="More"
-                  icon={moreTabActive ? "ellipsis-horizontal-circle" : "ellipsis-horizontal-circle-outline"}
-                  active={moreTabActive}
-                  onPress={() => {
-                    setShowMoreMenu(true);
-                  }}
-                />
-              </>
-            ) : (
-              <>
-                <BottomTab
-                  label="Activity"
-                  icon={tab === "activity" ? "pulse" : "pulse-outline"}
-                  active={tab === "activity"}
-                  onPress={() => {
-                    setTab("activity");
-                  }}
-                />
-                <BottomTab
-                  label="Map"
-                  icon={tab === "map" ? "map" : "map-outline"}
-                  active={tab === "map"}
-                  onPress={() => {
-                    setMerchantMapViewMode("map");
-                    setTab("map");
-                  }}
-                />
-                <BottomTab
-                  label="Contacts"
-                  icon={tab === "contacts" ? "people" : "people-outline"}
-                  active={tab === "contacts"}
-                  onPress={() => {
-                    setTab("contacts");
-                  }}
-                />
-              </>
-            )}
-          </View>
+          <BottomDock tabs={dockTabs} activeKey={activeDockKey} onSelect={handleDockSelect} />
         </View>
       ) : null}
 
@@ -4175,46 +4289,50 @@ function WalletAppShellContent({
       </Modal>
 
       <Modal
-        visible={showMoreMenu && moreMenuTabs.length > 0}
+        visible={showParticipateMenu && participateTargets.length > 1}
         transparent
         presentationStyle="overFullScreen"
         animationType="none"
-        onRequestClose={() => setShowMoreMenu(false)}
+        onRequestClose={() => setShowParticipateMenu(false)}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setShowMoreMenu(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setShowParticipateMenu(false)}>
           <Pressable style={styles.moreMenuCard} onPress={() => {}}>
             <View style={styles.moreMenuHeader}>
               <View style={styles.moreMenuHeaderCopy}>
-                <Text style={styles.moreMenuTitle}>More</Text>
-                <Text style={styles.moreMenuSubtitle}>Open additional SFLuv tools.</Text>
+                <Text style={styles.moreMenuTitle}>Participate</Text>
+                <Text style={styles.moreMenuSubtitle}>Choose how you want to pitch in.</Text>
               </View>
-              <Pressable style={styles.walletChooserClose} onPress={() => setShowMoreMenu(false)}>
+              <Pressable style={styles.walletChooserClose} onPress={() => setShowParticipateMenu(false)}>
                 <Ionicons name="close" size={20} color={palette.primaryStrong} />
               </Pressable>
             </View>
 
             <View style={styles.moreMenuList}>
-              {moreMenuTabs.map((menuTab) => {
-                const entry = MORE_MENU_ENTRIES[menuTab];
-                const active = tab === menuTab;
+              {participateTargets.map((target) => {
+                const entry = PARTICIPATE_ENTRIES[target];
+                const active = tab === target;
+                const showDot = target === "improver" && improverNotifications?.hasUnseen === true;
                 return (
                   <Pressable
-                    key={menuTab}
+                    key={target}
                     style={[styles.moreMenuItem, active ? styles.moreMenuItemActive : undefined]}
                     onPress={() => {
-                      setShowMoreMenu(false);
-                      setTab(menuTab);
+                      setShowParticipateMenu(false);
+                      setTab(target);
                     }}
                   >
                     <View style={styles.moreMenuCopy}>
                       <Text style={styles.moreMenuLabel}>{entry.label}</Text>
                       <Text style={styles.moreMenuBody}>{entry.body}</Text>
                     </View>
-                    <Ionicons
-                      name={active ? entry.activeIcon : entry.icon}
-                      size={18}
-                      color={active ? palette.primaryStrong : palette.textMuted}
-                    />
+                    <View>
+                      <Ionicons
+                        name={active ? entry.activeIcon : entry.icon}
+                        size={18}
+                        color={active ? palette.primaryStrong : palette.textMuted}
+                      />
+                      {showDot ? <View style={styles.bottomTabDot} /> : null}
+                    </View>
                   </Pressable>
                 );
               })}
@@ -6032,7 +6150,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   topBar: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
-    paddingBottom: spacing.lg,
+    paddingBottom: spacing.sm,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -6274,6 +6392,38 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   },
   bottomTabActive: {
     backgroundColor: palette.primarySoft,
+  },
+  dockTab: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "flex-start",
+    paddingTop: 6,
+    gap: 4,
+  },
+  // Sits behind the tabs and slides between them; the morph to a circle is
+  // driven by proximity to the raised centre button.
+  dockBubble: {
+    position: "absolute",
+    top: 6,
+    left: 8,
+    backgroundColor: palette.primarySoft,
+    borderWidth: 1,
+    borderColor: palette.primary,
+  },
+  dockCenterButton: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: -22,
+    borderWidth: 4,
+    borderColor: palette.surface,
+    shadowColor: palette.primaryStrong,
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
   },
   bottomTabText: {
     color: palette.textMuted,

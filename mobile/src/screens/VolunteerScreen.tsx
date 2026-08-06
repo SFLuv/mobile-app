@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
   AppState,
   Image,
   Linking,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   RefreshControl,
@@ -39,8 +41,6 @@ type Props = {
   /** Deep link target: opens straight into an event detail when it changes. */
   requestedEventId?: string | null;
   requestedEventNonce?: number;
-  /** Sends the user to the reward QR scanner on the receive pane. */
-  onOpenRewardScanner?: () => void;
   /** The account's current volunteer-list state; undefined until the backend says. */
   volunteerListOptIn?: boolean;
   onVolunteerListOptInChange?: (optedIn: boolean) => void;
@@ -122,19 +122,6 @@ function formatEventTimeRange(event: AppVolunteerEvent): string {
   return `${startLabel} - ${formatLocal(end, { month: "short", day: "numeric", ...timeOptions })}`;
 }
 
-function formatQrLiveAt(event: AppVolunteerEvent): string | null {
-  const liveAt = parseDate(event.qr.liveAt);
-  if (!liveAt) {
-    return null;
-  }
-  return formatLocal(liveAt, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
 /** Name, street, "City, ST ZIP" — skipping whatever the location does not carry. */
 function locationLines(location: AppVolunteerLocation): string[] {
   const cityState = [location.city, location.state].filter(Boolean).join(", ");
@@ -188,6 +175,20 @@ function signupSuccessMessage(result: AppVolunteerSignupResult): string {
   return "You are signed up. See you there!";
 }
 
+/** "12 / 40 Remaining", or "Full" once there is nothing left to claim. */
+function remainingSpotsLabel(event: AppVolunteerEvent): string | null {
+  if (typeof event.spotsRemaining === "number" && typeof event.maxParticipants === "number") {
+    return event.spotsRemaining > 0
+      ? `${event.spotsRemaining} / ${event.maxParticipants} Remaining`
+      : "Full";
+  }
+  // External and no-signup events publish a cap but not a live count.
+  if (typeof event.maxParticipants === "number") {
+    return `${event.maxParticipants} spots`;
+  }
+  return null;
+}
+
 function spotsLabel(event: AppVolunteerEvent): string | null {
   if (typeof event.spotsRemaining === "number" && typeof event.maxParticipants === "number") {
     return event.spotsRemaining > 0
@@ -221,7 +222,6 @@ export function VolunteerScreen({
   hapticsEnabled,
   requestedEventId,
   requestedEventNonce,
-  onOpenRewardScanner,
   volunteerListOptIn,
   onVolunteerListOptInChange,
   onToast,
@@ -234,8 +234,12 @@ export function VolunteerScreen({
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [organizerFilter, setOrganizerFilter] = useState<string>(ORGANIZER_FILTER_ALL);
-  const [openSpotsOnly, setOpenSpotsOnly] = useState(false);
+  // Full events are hidden by default; ticking this brings them back. Stored as
+  // "show full" rather than "open spots" so the checked state is the additive one.
+  const [showFull, setShowFull] = useState(false);
   const [organizerPickerOpen, setOrganizerPickerOpen] = useState(false);
+  /** Set when the list was reached by tapping an organizer, so we can walk back. */
+  const [organizerReturnEventId, setOrganizerReturnEventId] = useState<string | null>(null);
 
   const [events, setEvents] = useState<AppVolunteerEvent[]>([]);
   const [organizers, setOrganizers] = useState<AppVolunteerOrganizerFacet[]>([]);
@@ -259,6 +263,8 @@ export function VolunteerScreen({
   // types quickly or flips filters mid-flight.
   const listRequestRef = useRef(0);
   const detailRequestRef = useRef(0);
+  const detailSlide = useRef(new Animated.Value(0)).current;
+  const listSlide = useRef(new Animated.Value(0)).current;
 
   const haptics = useCallback(() => {
     triggerClickHaptic(hapticsEnabled === true);
@@ -274,10 +280,10 @@ export function VolunteerScreen({
       search,
       organizer: organizerFilter === ORGANIZER_FILTER_ALL ? undefined : organizerFilter,
       when: (feed === "past" ? "past" : feed === "mine" ? "all" : "upcoming") as AppVolunteerEventWindow,
-      openSignups: openSpotsOnly || undefined,
+      openSignups: showFull ? undefined : true,
       count: VOLUNTEER_EVENT_PAGE_SIZE,
     }),
-    [feed, openSpotsOnly, organizerFilter, search],
+    [feed, organizerFilter, search, showFull],
   );
 
   const fetchPage = useCallback(
@@ -486,7 +492,104 @@ export function VolunteerScreen({
     setDetailError(null);
     setDetailLoading(false);
     setSignupSheetOpen(false);
-  }, []);
+    detailSlide.setValue(0);
+  }, [detailSlide]);
+
+  /**
+   * Jumping from an event to "everything by this organizer". The event we came
+   * from is remembered so the same back-swipe that leaves a detail also walks
+   * back out of the filtered list to where the journey started.
+   */
+  const openOrganizerEvents = useCallback(
+    (event: AppVolunteerEvent) => {
+      haptics();
+      setOrganizerFilter(organizerFilterKey(event.organizer));
+      setOrganizerReturnEventId(event.id);
+      closeDetail();
+    },
+    [closeDetail, haptics],
+  );
+
+  const returnToOriginEvent = useCallback(() => {
+    const originId = organizerReturnEventId;
+    if (!originId) {
+      return;
+    }
+    setOrganizerReturnEventId(null);
+    setOrganizerFilter(ORGANIZER_FILTER_ALL);
+    void openEvent({ id: originId });
+  }, [openEvent, organizerReturnEventId]);
+
+  const listPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          Boolean(organizerReturnEventId) &&
+          gesture.x0 <= 28 &&
+          gesture.dx > 10 &&
+          Math.abs(gesture.dx) > Math.abs(gesture.dy),
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderMove: (_, gesture) => {
+          listSlide.setValue(Math.max(0, Math.min(gesture.dx, width)));
+        },
+        onPanResponderRelease: (_, gesture) => {
+          if (gesture.dx > width * 0.32 || gesture.vx > 0.5) {
+            Animated.timing(listSlide, { toValue: width, duration: 160, useNativeDriver: true }).start(
+              ({ finished }) => {
+                if (finished) {
+                  listSlide.setValue(0);
+                  returnToOriginEvent();
+                }
+              },
+            );
+            return;
+          }
+          Animated.spring(listSlide, { toValue: 0, useNativeDriver: true, friction: 10, tension: 90 }).start();
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(listSlide, { toValue: 0, useNativeDriver: true, friction: 10 }).start();
+        },
+      }),
+    [listSlide, organizerReturnEventId, returnToOriginEvent, width],
+  );
+
+  // Edge swipe back to the list, matching the wallet panes: drag follows the
+  // finger, and a decisive swipe (or a fast flick) completes the dismissal.
+  const detailPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          gesture.x0 <= 28 && gesture.dx > 10 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderMove: (_, gesture) => {
+          detailSlide.setValue(Math.max(0, Math.min(gesture.dx, width)));
+        },
+        onPanResponderRelease: (_, gesture) => {
+          if (gesture.dx > width * 0.32 || gesture.vx > 0.5) {
+            Animated.timing(detailSlide, {
+              toValue: width,
+              duration: 160,
+              useNativeDriver: true,
+            }).start(({ finished }) => {
+              if (finished) {
+                closeDetail();
+              }
+            });
+            return;
+          }
+          Animated.spring(detailSlide, {
+            toValue: 0,
+            useNativeDriver: true,
+            friction: 10,
+            tension: 90,
+          }).start();
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(detailSlide, { toValue: 0, useNativeDriver: true, friction: 10 }).start();
+        },
+      }),
+    [closeDetail, detailSlide, width],
+  );
 
   const openExternalSignup = useCallback(
     async (event: AppVolunteerEvent) => {
@@ -605,6 +708,10 @@ export function VolunteerScreen({
 
   if (selectedEvent || detailLoading || detailError) {
     return (
+      <Animated.View
+        style={[styles.detailPane, { transform: [{ translateX: detailSlide }] }]}
+        {...detailPanResponder.panHandlers}
+      >
       <EventDetail
         styles={styles}
         palette={palette}
@@ -627,19 +734,23 @@ export function VolunteerScreen({
           setSignupSheetOpen(true);
         }}
         alreadyOnVolunteerList={volunteerListOptIn === true}
+        onOpenOrganizer={openOrganizerEvents}
         onCancelSignup={cancelSignup}
-        onOpenRewardScanner={onOpenRewardScanner}
         signupSheetOpen={signupSheetOpen}
         signupOptIn={signupOptIn}
         onSignupOptInChange={setSignupOptIn}
         onConfirmSignup={confirmInternalSignup}
         onCloseSignupSheet={() => setSignupSheetOpen(false)}
       />
+      </Animated.View>
     );
   }
 
   return (
-    <>
+    <Animated.View
+      style={[styles.detailPane, { transform: [{ translateX: listSlide }] }]}
+      {...listPanResponder.panHandlers}
+    >
       <ScrollView
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
@@ -655,96 +766,91 @@ export function VolunteerScreen({
           />
         }
       >
-        <View style={styles.introCard}>
-          <Text style={styles.introTitle}>Volunteer with SFLuv</Text>
-          <Text style={styles.introBody}>
-            Find events near you, sign up, and earn {tokenSymbol} for showing up.
-          </Text>
-        </View>
-
-        <View style={styles.searchRow}>
-          <Ionicons name="search" size={16} color={palette.textMuted} />
-          <TextInput
-            style={styles.searchInput}
-            value={searchInput}
-            onChangeText={setSearchInput}
-            placeholder="Search events or organizers"
-            placeholderTextColor={palette.textMuted}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-          />
-          {searchInput ? (
-            <Pressable onPress={() => setSearchInput("")} hitSlop={8}>
-              <Ionicons name="close-circle" size={16} color={palette.textMuted} />
-            </Pressable>
-          ) : null}
-        </View>
-
-        <View style={styles.segmentRow}>
-          {FEED_OPTIONS.map((option) => {
-            const active = feed === option.value;
-            return (
-              <Pressable
-                key={option.value}
-                style={[styles.segment, active ? styles.segmentActive : undefined]}
-                onPress={() => {
-                  if (active) {
-                    return;
-                  }
-                  haptics();
-                  setFeed(option.value);
-                }}
-              >
-                <Text style={[styles.segmentText, active ? styles.segmentTextActive : undefined]}>
-                  {option.label}
-                </Text>
+        <View style={styles.filterCard}>
+          <View style={styles.searchRow}>
+            <Ionicons name="search-outline" size={16} color={palette.textMuted} />
+            <TextInput
+              style={styles.searchInput}
+              value={searchInput}
+              onChangeText={setSearchInput}
+              placeholder="Search events or organizers"
+              placeholderTextColor={palette.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+            />
+            {searchInput ? (
+              <Pressable onPress={() => setSearchInput("")} hitSlop={8}>
+                <Ionicons name="close-circle" size={16} color={palette.textMuted} />
               </Pressable>
-            );
-          })}
-        </View>
+            ) : null}
+          </View>
 
-        <View style={styles.filterRow}>
-          <Pressable
-            style={[styles.filterChip, organizerFilter !== ORGANIZER_FILTER_ALL ? styles.filterChipActive : undefined]}
-            onPress={() => {
-              haptics();
-              setOrganizerPickerOpen(true);
-            }}
-          >
-            <Ionicons
-              name="business-outline"
-              size={14}
-              color={organizerFilter !== ORGANIZER_FILTER_ALL ? palette.primaryStrong : palette.textMuted}
-            />
-            <Text
-              style={[
-                styles.filterChipText,
-                organizerFilter !== ORGANIZER_FILTER_ALL ? styles.filterChipTextActive : undefined,
-              ]}
-              numberOfLines={1}
+          <View style={styles.segmentRow}>
+            {FEED_OPTIONS.map((option) => {
+              const active = feed === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  style={[styles.segment, active ? styles.segmentActive : undefined]}
+                  onPress={() => {
+                    if (active) {
+                      return;
+                    }
+                    haptics();
+                    setFeed(option.value);
+                  }}
+                >
+                  <Text style={[styles.segmentText, active ? styles.segmentTextActive : undefined]}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <View style={styles.filterRow}>
+            <Pressable
+              style={[styles.filterChip, organizerFilter !== ORGANIZER_FILTER_ALL ? styles.filterChipActive : undefined]}
+              onPress={() => {
+                haptics();
+                setOrganizerPickerOpen(true);
+              }}
             >
-              {organizerFilterLabel}
-            </Text>
-            <Ionicons name="chevron-down" size={13} color={palette.textMuted} />
-          </Pressable>
+              <Ionicons
+                name="business-outline"
+                size={14}
+                color={organizerFilter !== ORGANIZER_FILTER_ALL ? palette.primaryStrong : palette.textMuted}
+              />
+              <Text
+                style={[
+                  styles.filterChipText,
+                  organizerFilter !== ORGANIZER_FILTER_ALL ? styles.filterChipTextActive : undefined,
+                ]}
+                numberOfLines={1}
+              >
+                {organizerFilterLabel}
+              </Text>
+              <Ionicons name="chevron-down" size={13} color={palette.textMuted} />
+            </Pressable>
 
-          <Pressable
-            style={[styles.filterChip, openSpotsOnly ? styles.filterChipActive : undefined]}
-            onPress={() => {
-              haptics();
-              setOpenSpotsOnly((current) => !current);
-            }}
-          >
-            <Ionicons
-              name={openSpotsOnly ? "checkmark-circle" : "ellipse-outline"}
-              size={14}
-              color={openSpotsOnly ? palette.primaryStrong : palette.textMuted}
-            />
-            <Text style={[styles.filterChipText, openSpotsOnly ? styles.filterChipTextActive : undefined]}>
-              Open spots
-            </Text>
-          </Pressable>
+            <Pressable
+              style={[styles.filterChip, showFull ? styles.filterChipActive : undefined]}
+              onPress={() => {
+                haptics();
+                setShowFull((current) => !current);
+              }}
+            >
+              <Ionicons
+                name={showFull ? "checkmark-circle" : "ellipse-outline"}
+                size={14}
+                color={showFull ? palette.primaryStrong : palette.textMuted}
+              />
+              <Text style={[styles.filterChipText, showFull ? styles.filterChipTextActive : undefined]}>
+                Show full
+              </Text>
+            </Pressable>
+          </View>
         </View>
 
         {loading ? (
@@ -826,6 +932,7 @@ export function VolunteerScreen({
                 ]}
                 onPress={() => {
                   setOrganizerFilter(ORGANIZER_FILTER_ALL);
+                  setOrganizerReturnEventId(null);
                   setOrganizerPickerOpen(false);
                 }}
               >
@@ -844,6 +951,7 @@ export function VolunteerScreen({
                     style={[styles.sheetOption, active ? styles.sheetOptionActive : undefined]}
                     onPress={() => {
                       setOrganizerFilter(key);
+                      setOrganizerReturnEventId(null);
                       setOrganizerPickerOpen(false);
                     }}
                   >
@@ -863,7 +971,7 @@ export function VolunteerScreen({
           </Pressable>
         </Pressable>
       </Modal>
-    </>
+    </Animated.View>
   );
 }
 
@@ -887,6 +995,29 @@ function OrganizerAvatar({
   return (
     <View style={[styles.organizerLogoFallback, dimension]}>
       <Ionicons name={organizer.type === "sfluv" ? "heart" : "business"} size={size * 0.5} color={palette.primaryStrong} />
+    </View>
+  );
+}
+
+/**
+ * Branded stand-in for an event with no photo, matching the treatment @WEB
+ * landed on: a 135°-ish brand wash with the SFLuv heart mark at half the box
+ * height. The gradient is approximated with two offset translucent shapes —
+ * a real multi-stop gradient would mean adding a native dependency for one
+ * decorative box, and a dev-client rebuild with it.
+ */
+function EventCoverPlaceholder({ styles, palette }: { styles: StyleSet; palette: Palette }) {
+  const [boxHeight, setBoxHeight] = useState(0);
+  return (
+    <View
+      style={[styles.eventCardCover, styles.coverPlaceholder]}
+      onLayout={(event) => setBoxHeight(event.nativeEvent.layout.height)}
+    >
+      <View style={styles.coverPlaceholderWash} />
+      <View style={styles.coverPlaceholderMuted} />
+      {boxHeight > 0 ? (
+        <Ionicons name="heart" size={boxHeight * 0.5} color={palette.primaryStrong} style={styles.coverPlaceholderMark} />
+      ) : null}
     </View>
   );
 }
@@ -918,10 +1049,7 @@ function EventCard({
       {cover ? (
         <Image source={{ uri: cover.url }} style={styles.eventCardCover} resizeMode="cover" />
       ) : (
-        <View style={[styles.eventCardCover, styles.coverPlaceholder]}>
-          <View style={styles.coverPlaceholderGlow} />
-          <Ionicons name="leaf" size={30} color={palette.primaryStrong} />
-        </View>
+        <EventCoverPlaceholder styles={styles} palette={palette} />
       )}
 
       <View style={styles.eventCardBody}>
@@ -1010,8 +1138,8 @@ function EventDetail({
   onBack,
   onExternalSignup,
   onOpenSignupSheet,
+  onOpenOrganizer,
   onCancelSignup,
-  onOpenRewardScanner,
   signupSheetOpen,
   signupOptIn,
   alreadyOnVolunteerList,
@@ -1033,8 +1161,8 @@ function EventDetail({
   onBack: () => void;
   onExternalSignup: (event: AppVolunteerEvent) => void;
   onOpenSignupSheet: () => void;
+  onOpenOrganizer: (event: AppVolunteerEvent) => void;
   onCancelSignup: () => void;
-  onOpenRewardScanner?: () => void;
   signupSheetOpen: boolean;
   signupOptIn: boolean;
   alreadyOnVolunteerList: boolean;
@@ -1042,18 +1170,23 @@ function EventDetail({
   onConfirmSignup: () => void;
   onCloseSignupSheet: () => void;
 }) {
-  const coverWidth = Math.max(0, width - spacing.lg * 2);
+  // The carousel now sits inside the detail card, so it has to clear the card's
+  // own padding as well as the page gutters or it overflows its container.
+  const coverWidth = Math.max(0, width - spacing.lg * 2 - spacing.md * 2);
   const signedUp = event?.viewer?.signedUp === true;
   const closedLabel = event ? signupClosedLabel(event) : null;
-  const qrLiveAt = event ? formatQrLiveAt(event) : null;
+  const remainingLabel = event ? remainingSpotsLabel(event) : null;
+  const isFull = remainingLabel === "Full";
 
   return (
     <>
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+      <View style={styles.detailPage}>
         <Pressable style={styles.backRow} onPress={onBack}>
           <Ionicons name="chevron-back" size={18} color={palette.primaryStrong} />
           <Text style={styles.backText}>All events</Text>
         </Pressable>
+
+        {event ? <Text style={styles.detailTitle}>{event.title}</Text> : null}
 
         {!event ? (
           <View style={styles.stateCard}>
@@ -1072,54 +1205,50 @@ function EventDetail({
           </View>
         ) : (
           <>
-            {event.coverPhotos.length > 0 ? (
-              <View>
-                <ScrollView
-                  horizontal
-                  pagingEnabled
-                  showsHorizontalScrollIndicator={false}
-                  onMomentumScrollEnd={(scrollEvent) => {
-                    const offset = scrollEvent.nativeEvent.contentOffset.x;
-                    onCoverIndexChange(coverWidth > 0 ? Math.round(offset / coverWidth) : 0);
-                  }}
-                >
-                  {event.coverPhotos.map((photo, index) => (
-                    <Image
-                      key={`${photo.url}:${index}`}
-                      source={{ uri: photo.url }}
-                      style={[styles.detailCover, { width: coverWidth }]}
-                      resizeMode="cover"
-                    />
-                  ))}
-                </ScrollView>
-                {event.coverPhotos.length > 1 ? (
-                  <View style={styles.coverDots}>
-                    {event.coverPhotos.map((photo, index) => (
-                      <View
-                        key={`dot:${photo.url}:${index}`}
-                        style={[styles.coverDot, index === coverIndex ? styles.coverDotActive : undefined]}
-                      />
-                    ))}
-                  </View>
-                ) : null}
-              </View>
-            ) : null}
-
-            <View style={styles.detailCard}>
+            <View style={[styles.detailCard, styles.detailCardFill]}>
               <View style={styles.organizerRow}>
-                <OrganizerAvatar styles={styles} palette={palette} organizer={event.organizer} size={34} />
-                <View style={styles.organizerCopy}>
-                  <Text style={styles.organizerNameStrong} numberOfLines={1}>
+                {/* Tapping the organizer filters the list to just their events. */}
+                <Pressable
+                  style={styles.organizerLink}
+                  onPress={() => onOpenOrganizer(event)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`See all events from ${event.organizer.name}`}
+                >
+                  <OrganizerAvatar styles={styles} palette={palette} organizer={event.organizer} size={34} />
+                  <Text style={[styles.organizerNameStrong, styles.detailOrganizerName]} numberOfLines={1}>
                     {event.organizer.name}
                   </Text>
-                  <Text style={styles.organizerRole}>
-                    {event.organizer.type === "sfluv" ? "SFLuv event" : "Affiliate organization"}
-                  </Text>
-                </View>
+                  <Ionicons name="chevron-forward" size={14} color={palette.textMuted} />
+                </Pressable>
                 {loading ? <ThemedActivityIndicator size="small" color={palette.primaryStrong} /> : null}
+                {event.rewardAmountSfluv > 0 ? (
+                  <View style={styles.rewardBubble}>
+                    <Text style={styles.rewardBubbleText}>
+                      {event.rewardAmountSfluv} {tokenSymbol}
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={styles.noRewardBubble}>
+                    <Text style={styles.noRewardBubbleText}>No Reward</Text>
+                  </View>
+                )}
               </View>
 
-              <Text style={styles.detailTitle}>{event.title}</Text>
+              {/* Date and remaining spots share a row, unlabelled — the shapes of
+                  the values say what they are without a caption. */}
+              <View style={styles.detailFactRow}>
+                <View style={styles.detailFactCopy}>
+                  <Text style={styles.detailWhen}>{formatEventDay(event)}</Text>
+                  {formatEventTimeRange(event) ? (
+                    <Text style={styles.detailWhenTime}>{formatEventTimeRange(event)}</Text>
+                  ) : null}
+                </View>
+                {remainingLabel ? (
+                  <Text style={[styles.detailSpots, isFull ? styles.detailSpotsFull : undefined]}>
+                    {remainingLabel}
+                  </Text>
+                ) : null}
+              </View>
 
               {event.status === "cancelled" ? (
                 <View style={styles.cancelledBanner}>
@@ -1138,56 +1267,18 @@ function EventDetail({
                 </View>
               ) : null}
 
-              <DetailRow
-                styles={styles}
-                palette={palette}
-                icon="calendar-outline"
-                label="When"
-                value={`${formatEventDay(event)}${
-                  formatEventTimeRange(event) ? `\n${formatEventTimeRange(event)}` : ""
-                }`}
-              />
-
               {event.recurrence ? (
-                <DetailRow
-                  styles={styles}
-                  palette={palette}
-                  icon="repeat"
-                  label="Repeats"
-                  value={event.recurrence.summary}
-                />
-              ) : null}
-
-              <DetailRow
-                styles={styles}
-                palette={palette}
-                icon="gift-outline"
-                label="Reward"
-                value={`${event.rewardAmountSfluv} ${tokenSymbol} for attending`}
-              />
-
-              {spotsLabel(event) ? (
-                <DetailRow
-                  styles={styles}
-                  palette={palette}
-                  icon="people-outline"
-                  label="Spots"
-                  value={
-                    typeof event.signupCount === "number" && typeof event.maxParticipants === "number"
-                      ? `${event.signupCount} of ${event.maxParticipants} signed up`
-                      : (spotsLabel(event) as string)
-                  }
-                />
+                <View style={styles.detailLine}>
+                  <Ionicons name="repeat" size={15} color={palette.textMuted} />
+                  <Text style={styles.detailLineText}>{event.recurrence.summary}</Text>
+                </View>
               ) : null}
 
               {event.location && locationLines(event.location).length > 0 ? (
-                <DetailRow
-                  styles={styles}
-                  palette={palette}
-                  icon="location-outline"
-                  label="Where"
-                  value={locationLines(event.location).join("\n")}
-                />
+                <View style={styles.detailLine}>
+                  <Ionicons name="location-outline" size={15} color={palette.textMuted} style={styles.detailLineIcon} />
+                  <Text style={styles.detailLineText}>{locationLines(event.location).join("\n")}</Text>
+                </View>
               ) : null}
 
               {event.location && hasCoordinates(event.location) ? (
@@ -1204,43 +1295,52 @@ function EventDetail({
                   <Text style={styles.secondaryButtonText}>Directions</Text>
                 </Pressable>
               ) : null}
-            </View>
-
-            {event.description ? (
-              <View style={styles.detailCard}>
-                <Text style={styles.sectionLabel}>About this event</Text>
-                <Text style={styles.detailDescription}>{event.description}</Text>
-              </View>
-            ) : null}
-
-            {event.status === "cancelled" ? null : (
-            <View style={styles.detailCard}>
-              <Text style={styles.sectionLabel}>Reward QR code</Text>
-              {event.qr.live ? (
-                <>
-                  <View style={styles.qrLiveRow}>
-                    <View style={styles.qrLiveDot} />
-                    <Text style={styles.qrLiveText}>QR codes are live for this event.</Text>
-                  </View>
-                  <Text style={styles.detailHint}>
-                    Scan the organizer's QR code at the event to receive your {tokenSymbol}.
-                  </Text>
-                  {onOpenRewardScanner ? (
-                    <Pressable style={styles.secondaryButton} onPress={onOpenRewardScanner}>
-                      <Ionicons name="qr-code-outline" size={16} color={palette.primaryStrong} />
-                      <Text style={styles.secondaryButtonText}>Open reward scanner</Text>
-                    </Pressable>
-                  ) : null}
-                </>
+              {event.description ? (
+                <ScrollView
+                  style={styles.detailDescriptionScroll}
+                  contentContainerStyle={styles.detailDescriptionContent}
+                  showsVerticalScrollIndicator
+                  nestedScrollEnabled
+                >
+                  <Text style={styles.detailDescription}>{event.description}</Text>
+                </ScrollView>
               ) : (
-                <Text style={styles.detailHint}>
-                  {qrLiveAt
-                    ? `Reward QR codes go live ${qrLiveAt}, one day before the event starts.`
-                    : "Reward QR codes go live one day before the event starts."}
-                </Text>
+                <View style={styles.detailDescriptionScroll} />
               )}
+
+              {event.coverPhotos.length > 0 ? (
+                <View>
+                  <ScrollView
+                    horizontal
+                    pagingEnabled
+                    showsHorizontalScrollIndicator={false}
+                    onMomentumScrollEnd={(scrollEvent) => {
+                      const offset = scrollEvent.nativeEvent.contentOffset.x;
+                      onCoverIndexChange(coverWidth > 0 ? Math.round(offset / coverWidth) : 0);
+                    }}
+                  >
+                    {event.coverPhotos.map((photo, index) => (
+                      <Image
+                        key={`${photo.url}:${index}`}
+                        source={{ uri: photo.url }}
+                        style={[styles.detailCover, { width: coverWidth }]}
+                        resizeMode="cover"
+                      />
+                    ))}
+                  </ScrollView>
+                  {event.coverPhotos.length > 1 ? (
+                    <View style={styles.coverDots}>
+                      {event.coverPhotos.map((photo, index) => (
+                        <View
+                          key={`dot:${photo.url}:${index}`}
+                          style={[styles.coverDot, index === coverIndex ? styles.coverDotActive : undefined]}
+                        />
+                      ))}
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
             </View>
-            )}
 
             <View style={styles.signupBar}>
               {event.status === "cancelled" ? (
@@ -1278,7 +1378,7 @@ function EventDetail({
             </View>
           </>
         )}
-      </ScrollView>
+      </View>
 
       <Modal
         visible={signupSheetOpen}
@@ -1334,56 +1434,25 @@ function EventDetail({
   );
 }
 
-function DetailRow({
-  styles,
-  palette,
-  icon,
-  label,
-  value,
-}: {
-  styles: StyleSet;
-  palette: Palette;
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  value: string;
-}) {
-  return (
-    <View style={styles.detailRow}>
-      <Ionicons name={icon} size={16} color={palette.textMuted} style={styles.detailRowIcon} />
-      <View style={styles.detailRowCopy}>
-        <Text style={styles.detailRowLabel}>{label}</Text>
-        <Text style={styles.detailRowValue}>{value}</Text>
-      </View>
-    </View>
-  );
-}
-
 function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, isDark: boolean) {
   return StyleSheet.create({
     container: {
       paddingHorizontal: spacing.lg,
-      paddingTop: spacing.md,
+      paddingTop: spacing.sm,
       gap: spacing.md,
       paddingBottom: 140,
     },
-    introCard: {
+    // Header controls follow the improver panel's conventions so the two panels
+    // read as the same app: a card wrapper, filled-primary segments, and the
+    // same pill search field.
+    filterCard: {
       backgroundColor: palette.surface,
       borderRadius: radii.lg,
       borderWidth: 1,
       borderColor: palette.border,
       padding: spacing.md,
-      gap: 4,
+      gap: spacing.md,
       ...shadows.soft,
-    },
-    introTitle: {
-      fontSize: 18,
-      fontWeight: "700",
-      color: palette.text,
-    },
-    introBody: {
-      fontSize: 13,
-      color: palette.textMuted,
-      lineHeight: 18,
     },
     searchRow: {
       flexDirection: "row",
@@ -1393,8 +1462,8 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       borderRadius: radii.pill,
       borderWidth: 1,
       borderColor: palette.border,
-      paddingHorizontal: spacing.md,
-      paddingVertical: 10,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
     },
     searchInput: {
       flex: 1,
@@ -1404,31 +1473,32 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     },
     segmentRow: {
       flexDirection: "row",
-      backgroundColor: palette.surfaceMuted,
-      borderRadius: radii.pill,
+      gap: spacing.sm,
+      backgroundColor: palette.surfaceStrong,
+      borderRadius: radii.lg,
+      padding: 6,
       borderWidth: 1,
       borderColor: palette.border,
-      padding: 3,
-      gap: 3,
     },
     segment: {
       flex: 1,
+      minWidth: 0,
       alignItems: "center",
       justifyContent: "center",
-      paddingVertical: 8,
-      borderRadius: radii.pill,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      borderRadius: radii.md,
     },
     segmentActive: {
-      backgroundColor: palette.surface,
-      ...shadows.soft,
+      backgroundColor: palette.primary,
     },
     segmentText: {
       fontSize: 13,
-      fontWeight: "600",
+      fontWeight: "800",
       color: palette.textMuted,
     },
     segmentTextActive: {
-      color: palette.primaryStrong,
+      color: palette.white,
     },
     filterRow: {
       flexDirection: "row",
@@ -1515,15 +1585,30 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       backgroundColor: palette.primarySoft,
       overflow: "hidden",
     },
-    coverPlaceholderGlow: {
+    // Coral at the top-left falling away to muted at the bottom-right, which is
+    // the direction @WEB's 135deg gradient runs.
+    coverPlaceholderWash: {
       position: "absolute",
-      top: "-55%",
-      right: "-18%",
-      width: "70%",
+      top: "-70%",
+      left: "-30%",
+      width: "110%",
       aspectRatio: 1,
       borderRadius: 999,
       backgroundColor: palette.primary,
-      opacity: isDark ? 0.16 : 0.2,
+      opacity: isDark ? 0.28 : 0.42,
+    },
+    coverPlaceholderMuted: {
+      position: "absolute",
+      bottom: "-80%",
+      right: "-35%",
+      width: "115%",
+      aspectRatio: 1,
+      borderRadius: 999,
+      backgroundColor: palette.backgroundMuted,
+      opacity: isDark ? 0.5 : 0.75,
+    },
+    coverPlaceholderMark: {
+      opacity: 0.6,
     },
     eventCardBody: {
       padding: spacing.md,
@@ -1533,10 +1618,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       flexDirection: "row",
       alignItems: "center",
       gap: spacing.sm,
-    },
-    organizerCopy: {
-      flex: 1,
-      gap: 1,
     },
     organizerLogo: {
       backgroundColor: palette.surfaceMuted,
@@ -1556,10 +1637,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       fontSize: 14,
       fontWeight: "700",
       color: palette.text,
-    },
-    organizerRole: {
-      fontSize: 11,
-      color: palette.textMuted,
     },
     goingChip: {
       flexDirection: "row",
@@ -1704,9 +1781,11 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       fontWeight: "600",
       color: palette.primaryStrong,
     },
+    // Fixed height rather than an aspect ratio: the page must fit one screen,
+    // so the photo takes a known slice and the description flexes around it.
     detailCover: {
-      aspectRatio: 16 / 9,
-      borderRadius: radii.lg,
+      height: 132,
+      borderRadius: radii.md,
       backgroundColor: palette.surfaceMuted,
     },
     coverDots: {
@@ -1733,11 +1812,108 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       gap: spacing.sm,
       ...shadows.soft,
     },
+    detailPane: {
+      flex: 1,
+    },
+    // The detail page deliberately does not scroll: everything through the sign
+    // up button has to be reachable without hunting for it, so the description
+    // absorbs the slack and scrolls inside the card instead.
+    detailPage: {
+      flex: 1,
+      paddingHorizontal: spacing.lg,
+      paddingTop: 2,
+      paddingBottom: 130,
+      gap: spacing.sm,
+    },
+    detailDescriptionScroll: {
+      flex: 1,
+      minHeight: 40,
+    },
+    detailDescriptionContent: {
+      paddingBottom: 2,
+    },
     detailTitle: {
-      fontSize: 20,
+      fontSize: 22,
       fontWeight: "700",
       color: palette.text,
-      lineHeight: 26,
+      lineHeight: 28,
+    },
+    detailOrganizerName: {
+      flex: 1,
+    },
+    detailCardFill: {
+      flex: 1,
+    },
+    organizerLink: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    rewardBubble: {
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: radii.pill,
+      backgroundColor: palette.primary,
+    },
+    rewardBubbleText: {
+      fontSize: 12,
+      fontWeight: "800",
+      color: palette.white,
+    },
+    noRewardBubble: {
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: radii.pill,
+      backgroundColor: palette.surfaceStrong,
+      borderWidth: 1,
+      borderColor: palette.border,
+    },
+    noRewardBubbleText: {
+      fontSize: 12,
+      fontWeight: "800",
+      color: palette.textMuted,
+    },
+    detailFactRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: spacing.sm,
+    },
+    detailFactCopy: {
+      flex: 1,
+      gap: 1,
+    },
+    detailWhen: {
+      fontSize: 15,
+      fontWeight: "700",
+      color: palette.text,
+    },
+    detailWhenTime: {
+      fontSize: 13,
+      color: palette.textMuted,
+    },
+    detailSpots: {
+      fontSize: 13,
+      fontWeight: "700",
+      color: palette.textMuted,
+    },
+    detailSpotsFull: {
+      color: palette.danger,
+    },
+    detailLine: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: spacing.sm,
+    },
+    detailLineIcon: {
+      marginTop: 2,
+    },
+    detailLineText: {
+      flex: 1,
+      fontSize: 13,
+      color: palette.textMuted,
+      lineHeight: 19,
     },
     signedUpBanner: {
       flexDirection: "row",
@@ -1754,62 +1930,10 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       fontWeight: "600",
       color: palette.success,
     },
-    detailRow: {
-      flexDirection: "row",
-      gap: spacing.sm,
-      alignItems: "flex-start",
-    },
-    detailRowIcon: {
-      marginTop: 2,
-    },
-    detailRowCopy: {
-      flex: 1,
-      gap: 1,
-    },
-    detailRowLabel: {
-      fontSize: 11,
-      fontWeight: "700",
-      color: palette.textMuted,
-      textTransform: "uppercase",
-      letterSpacing: 0.4,
-    },
-    detailRowValue: {
-      fontSize: 13,
-      color: palette.text,
-      lineHeight: 19,
-    },
-    sectionLabel: {
-      fontSize: 11,
-      fontWeight: "700",
-      color: palette.textMuted,
-      textTransform: "uppercase",
-      letterSpacing: 0.4,
-    },
     detailDescription: {
       fontSize: 14,
       color: palette.text,
       lineHeight: 21,
-    },
-    detailHint: {
-      fontSize: 12,
-      color: palette.textMuted,
-      lineHeight: 18,
-    },
-    qrLiveRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6,
-    },
-    qrLiveDot: {
-      width: 8,
-      height: 8,
-      borderRadius: 4,
-      backgroundColor: palette.success,
-    },
-    qrLiveText: {
-      fontSize: 13,
-      fontWeight: "700",
-      color: palette.success,
     },
     signupBar: {
       gap: spacing.sm,
