@@ -346,10 +346,12 @@ export function ContactsScreen({
           ))}
         </View>
 
-        {contactMode === "my-qr" ? (
-          shareQRValue ? (
-            <View style={styles.qrCard}>
-              <SfluvQRCode value={shareQRValue} />
+        {shareQRValue ? (
+          <View
+            style={contactMode === "my-qr" ? styles.qrCard : styles.qrCardHidden}
+            pointerEvents={contactMode === "my-qr" ? "auto" : "none"}
+          >
+            <SfluvQRCode value={shareQRValue} />
               <Text style={styles.qrAddress}>{shortAddress(shareAddress || "")}</Text>
               <Pressable style={[styles.primaryButton, styles.shareButton]} onPress={() => void handleShareContact()}>
                 <View style={styles.primaryButtonContent}>
@@ -357,9 +359,12 @@ export function ContactsScreen({
                   <Text style={styles.primaryButtonText}>Share contact</Text>
                 </View>
               </Pressable>
-              {shareErrorMessage ? <Text style={styles.errorText}>{shareErrorMessage}</Text> : null}
-            </View>
-          ) : (
+            {shareErrorMessage ? <Text style={styles.errorText}>{shareErrorMessage}</Text> : null}
+          </View>
+        ) : null}
+
+        {contactMode === "my-qr" ? (
+          shareQRValue ? null : (
             <View style={styles.emptyStateCard}>
               <Ionicons name="wallet-outline" size={20} color={palette.textMuted} />
               <Text style={styles.body}>Your wallet is still loading. Once it is ready, your contact QR will appear here.</Text>
@@ -876,6 +881,15 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     qrCard: {
       gap: spacing.md,
       alignItems: "stretch",
+    },
+    // Kept in the tree but out of the way, so the code is already drawn when
+    // the tab is opened.
+    qrCardHidden: {
+      position: "absolute",
+      opacity: 0,
+      left: 0,
+      right: 0,
+      zIndex: -1,
     },
     qrAddress: {
       color: palette.text,

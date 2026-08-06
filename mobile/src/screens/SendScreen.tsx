@@ -1199,12 +1199,6 @@ export function SendScreen({
           }}
         >
           <View style={[styles.amountScreen, { paddingTop: spacing.sm }]}>
-            <View style={styles.stepHeader}>
-              <Pressable style={styles.iconButton} onPress={handleBack}>
-                <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
-              </Pressable>
-                </View>
-
             {feedback ? (
               <View style={styles.feedbackCard}>
                 <Text style={styles.feedbackText}>{feedback}</Text>
@@ -1212,7 +1206,14 @@ export function SendScreen({
             ) : null}
 
             <View style={styles.amountHero}>
-              <Text style={styles.recipientLine}>To {primaryRecipientLabel || "Recipient"}</Text>
+              <View style={styles.amountHeroTop}>
+                <Pressable style={styles.iconButton} onPress={handleBack}>
+                  <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
+                </Pressable>
+                <Text style={[styles.recipientLine, styles.recipientLineInline]} numberOfLines={1}>
+                  To {primaryRecipientLabel || "Recipient"}
+                </Text>
+              </View>
               <Pressable
                 style={styles.amountDisplay}
                 onPress={() => {
@@ -1861,16 +1862,28 @@ function createStyles(
       paddingHorizontal: spacing.lg,
       gap: denseLayout ? spacing.xs : compactLayout ? spacing.sm : spacing.md,
     },
+    amountHeroTop: {
+      alignSelf: "stretch",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
     amountHero: {
       alignItems: "center",
       justifyContent: "center",
-      paddingTop: denseLayout ? 0 : compactLayout ? spacing.xs : spacing.xl,
+      paddingTop: 0,
       gap: denseLayout ? 4 : compactLayout ? spacing.xs : spacing.sm,
     },
     recipientLine: {
       color: palette.textMuted,
       fontSize: 13,
       fontWeight: "800",
+    },
+    // Offsets the back button's width so the label stays optically centred.
+    recipientLineInline: {
+      flex: 1,
+      textAlign: "center",
+      marginRight: 42,
     },
     amountDisplay: {
       alignItems: "center",

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Animated,
   AppState,
+  Easing,
   Image,
   Linking,
   Modal,
@@ -281,18 +282,18 @@ export function VolunteerScreen({
 
   const filterHeight = searchReveal.interpolate({
     inputRange: [0, 1],
-    outputRange: [0, filterContentHeight + spacing.sm],
+    outputRange: [0, (filterContentHeight > 0 ? filterContentHeight : 148) + spacing.sm],
   });
 
   const toggleSearch = useCallback(() => {
     haptics();
     const next = !searchOpen;
     setSearchOpen(next);
-    Animated.spring(searchReveal, {
+    Animated.timing(searchReveal, {
       toValue: next ? 1 : 0,
+      duration: next ? 220 : 170,
+      easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
-      friction: 12,
-      tension: 110,
     }).start();
     if (next) {
       // Small delay so focus lands once the field actually has height.
@@ -537,6 +538,13 @@ export function VolunteerScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestedEventId, requestedEventNonce]);
 
+  const detailVisible = Boolean(selectedEvent) || detailLoading || Boolean(detailError);
+  useEffect(() => {
+    if (!detailVisible) {
+      detailSlide.setValue(0);
+    }
+  }, [detailSlide, detailVisible]);
+
   const closeDetail = useCallback(() => {
     detailRequestRef.current += 1;
     setSelectedEvent(null);
@@ -594,10 +602,8 @@ export function VolunteerScreen({
         onPanResponderRelease: (_, gesture) => {
           if (gesture.dx > width * 0.32 || gesture.vx > 0.5) {
             Animated.timing(listSlide, { toValue: width, duration: 160, useNativeDriver: true }).start(
-              ({ finished }) => {
-                if (finished) {
-                  returnToOriginEvent();
-                }
+              () => {
+                returnToOriginEvent();
               },
             );
             return;
@@ -617,10 +623,8 @@ export function VolunteerScreen({
       toValue: width,
       duration: 190,
       useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) {
-        closeDetail();
-      }
+    }).start(() => {
+      closeDetail();
     });
   }, [closeDetail, detailSlide, width]);
 
@@ -641,10 +645,8 @@ export function VolunteerScreen({
               toValue: width,
               duration: 160,
               useNativeDriver: true,
-            }).start(({ finished }) => {
-              if (finished) {
-                closeDetail();
-              }
+            }).start(() => {
+              closeDetail();
             });
             return;
           }
@@ -1750,7 +1752,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     },
     eventCardBody: {
       padding: spacing.md,
-      gap: 3,
+      gap: 2,
     },
     organizerRow: {
       flexDirection: "row",
@@ -1804,7 +1806,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       lineHeight: 21,
     },
     metaBlock: {
-      height: 36,
+      height: 34,
       gap: 2,
       justifyContent: "center",
       overflow: "hidden",
@@ -1857,7 +1859,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       flexWrap: "nowrap",
       alignItems: "center",
       gap: 6,
-      marginTop: 2,
+      marginTop: 4,
       height: 26,
       overflow: "hidden",
     },

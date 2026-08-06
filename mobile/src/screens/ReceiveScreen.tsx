@@ -149,7 +149,7 @@ export function ReceiveScreen({
           <View style={styles.paneHeaderRow}>
             {onBack ? (
               <Pressable style={styles.paneBackButton} onPress={onBack} hitSlop={8} accessibilityLabel="Back">
-                <Ionicons name="chevron-back" size={22} color={palette.primaryStrong} />
+                <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
               </Pressable>
             ) : null}
             <View style={[styles.modeToggle, styles.modeToggleFill]}>
@@ -186,7 +186,19 @@ export function ReceiveScreen({
               </Pressable>
             </View>
 
-            <SfluvQRCode value={qrValue} />
+            {/* Both codes stay mounted: switching tabs then costs nothing,
+                rather than rebuilding several hundred SVG nodes on the spot. */}
+            <View>
+              <View style={mode === "link" ? undefined : styles.qrLayerHidden}>
+                <SfluvQRCode value={paymentLink} />
+              </View>
+              <View
+                style={[StyleSheet.absoluteFill, mode === "address" ? undefined : styles.qrLayerHidden]}
+                pointerEvents="none"
+              >
+                <SfluvQRCode value={accountAddress} />
+              </View>
+            </View>
 
             <Text style={styles.qrCaption} numberOfLines={1} ellipsizeMode="middle">
               {qrCaption}
@@ -301,17 +313,23 @@ function createStyles(
       minHeight: 0,
       gap: compactLayout ? spacing.sm : spacing.md,
     },
+    qrLayerHidden: {
+      opacity: 0,
+    },
     paneHeaderRow: {
       flexDirection: "row",
       alignItems: "center",
       gap: spacing.sm,
     },
     paneBackButton: {
-      width: 34,
-      height: 34,
+      width: 42,
+      height: 42,
+      borderRadius: radii.pill,
       alignItems: "center",
       justifyContent: "center",
-      marginLeft: -6,
+      backgroundColor: palette.surface,
+      borderWidth: 1,
+      borderColor: palette.border,
     },
     modeToggleFill: {
       flex: 1,

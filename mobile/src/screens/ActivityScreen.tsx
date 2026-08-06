@@ -95,9 +95,9 @@ export function ActivityScreen({
         }
         showsVerticalScrollIndicator={false}
       >
-        {/* One pill instead of a header block: it names the wallet these
-            transactions belong to, and still opens the chooser when there is
-            more than one wallet to choose from. */}
+        <View style={styles.historyPanel}>
+        {/* Names the wallet these transactions belong to, and still opens the
+            chooser when there is more than one wallet to choose from. */}
         <Pressable
           style={styles.walletPill}
           disabled={!showWalletChooser || !onOpenWalletChooser}
@@ -113,23 +113,27 @@ export function ActivityScreen({
         </Pressable>
 
         {!transactionsLoaded ? (
-          <View style={styles.emptyCard}>
+          <View style={styles.emptyCardInline}>
             <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
-            <Text style={styles.emptyTitle}>loading transactions</Text>
+            <Text style={styles.emptyTitle}>Loading transactions</Text>
           </View>
         ) : decoratedTransactions.length === 0 ? (
-          <View style={styles.emptyCard}>
+          <View style={styles.emptyCardInline}>
             <Text style={styles.emptyTitle}>No transactions yet</Text>
             <Text style={styles.emptyBody}>Your sends and receives will show up here after the first payment.</Text>
           </View>
         ) : (
-          decoratedTransactions.map((details) => {
+          decoratedTransactions.map((details, index) => {
             const incoming = details.received;
             const reward = incoming && isRewardTransaction(details.transaction, faucetAddress);
             const title = reward ? "Received Reward" : incoming ? `Received from ${details.fromLabel}` : `Sent to ${details.toLabel}`;
 
             return (
-              <Pressable key={details.transaction.id} style={styles.card} onPress={() => setSelectedTransaction(details)}>
+              <Pressable
+                key={details.transaction.id}
+                style={[styles.row, index === decoratedTransactions.length - 1 ? styles.rowLast : undefined]}
+                onPress={() => setSelectedTransaction(details)}
+              >
                 <View style={[styles.iconWrap, incoming ? styles.iconReceive : styles.iconSend]}>
                   <Ionicons
                     name={incoming ? "arrow-down" : "arrow-up"}
@@ -153,6 +157,8 @@ export function ActivityScreen({
             );
           })
         )}
+
+        </View>
 
         {decoratedTransactions.length > 0 && canLoadMore ? (
           <Pressable
@@ -227,15 +233,10 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       borderWidth: 1,
       borderColor: palette.primary,
     },
-    emptyCard: {
-      backgroundColor: palette.surface,
-      borderRadius: radii.lg,
-      borderWidth: 1,
-      borderColor: palette.border,
-      padding: spacing.xl,
-      alignItems: "flex-start",
-      gap: spacing.sm,
-      ...shadows.soft,
+    emptyCardInline: {
+      alignItems: "center",
+      gap: spacing.xs,
+      paddingVertical: spacing.md,
     },
     emptyTitle: {
       color: palette.text,
@@ -246,17 +247,27 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       color: palette.textMuted,
       lineHeight: 20,
     },
-    card: {
+    historyPanel: {
       backgroundColor: palette.surface,
       borderRadius: radii.lg,
       borderWidth: 1,
       borderColor: palette.border,
       padding: spacing.md,
+      gap: spacing.sm,
+      ...shadows.soft,
+    },
+    row: {
+      paddingVertical: spacing.sm,
+      borderBottomWidth: 1,
+      borderBottomColor: palette.border,
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
       gap: spacing.md,
-      ...shadows.soft,
+    },
+    rowLast: {
+      borderBottomWidth: 0,
+      paddingBottom: 0,
     },
     iconWrap: {
       width: 42,

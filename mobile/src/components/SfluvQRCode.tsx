@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { Image, StyleSheet, View } from "react-native";
 import Svg, { Circle, Rect } from "react-native-svg";
 // The matrix generator the QR library uses internally. Drawing the modules
@@ -70,22 +70,24 @@ function isFinderModule(row: number, col: number, count: number): boolean {
 export function SfluvQRCode({ value, size }: Props) {
   const { palette, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, isDark), [palette, isDark]);
-  const [frameWidth, setFrameWidth] = useState(0);
-
-  const resolvedSize = size ?? Math.max(0, Math.floor(frameWidth - FRAME_PADDING * 2));
 
   const matrix = useMemo<number[][]>(() => (value ? buildMatrix(value) : []), [value]);
 
+  /**
+   * Everything is laid out in module units and scaled by the SVG's viewBox, so
+   * the code does not have to wait for a layout pass to learn its pixel size.
+   * That round-trip was why a QR faded in a beat after its tab opened.
+   */
   const drawing = useMemo(() => {
     const count = matrix.length;
-    if (!count || resolvedSize <= 0) {
+    if (!count) {
       return null;
     }
 
-    const cell = resolvedSize / (count + QUIET_MODULES * 2);
-    const origin = cell * QUIET_MODULES;
-    const logoRadius = (resolvedSize * LOGO_RATIO) / 2 + cell;
-    const centre = resolvedSize / 2;
+    const units = count + QUIET_MODULES * 2;
+    const origin = QUIET_MODULES;
+    const centre = units / 2;
+    const logoRadius = (units * LOGO_RATIO) / 2 + 1;
 
     const dots: Array<{ key: string; cx: number; cy: number }> = [];
     for (let row = 0; row < count; row += 1) {
@@ -93,8 +95,8 @@ export function SfluvQRCode({ value, size }: Props) {
         if (!matrix[row][col] || isFinderModule(row, col, count)) {
           continue;
         }
-        const cx = origin + (col + 0.5) * cell;
-        const cy = origin + (row + 0.5) * cell;
+        const cx = origin + col + 0.5;
+        const cy = origin + row + 0.5;
         // Clear the modules the logo covers so it sits on a clean field, the
         // way removeQrCodeBehindLogo does on the web.
         if (Math.hypot(cx - centre, cy - centre) < logoRadius) {
@@ -108,62 +110,51 @@ export function SfluvQRCode({ value, size }: Props) {
       { key: "tl", row: 0, col: 0 },
       { key: "tr", row: 0, col: count - 7 },
       { key: "bl", row: count - 7, col: 0 },
-    ].map((eye) => ({
-      key: eye.key,
-      x: origin + eye.col * cell,
-      y: origin + eye.row * cell,
-    }));
+    ].map((eye) => ({ key: eye.key, x: origin + eye.col, y: origin + eye.row }));
 
-    return { cell, dots, eyes, dotRadius: cell * 0.46 };
-  }, [matrix, resolvedSize]);
+    return { units, dots, eyes };
+  }, [matrix]);
 
-  const logoSize = Math.round(resolvedSize * LOGO_RATIO);
+  const logoPercent = `${LOGO_RATIO * 100}%`;
+  const logoOffset = `${(1 - LOGO_RATIO) * 50}%`;
 
   return (
-    <View style={styles.frame} onLayout={(event) => setFrameWidth(event.nativeEvent.layout.width)}>
+    <View style={[styles.frame, size ? { width: size + FRAME_PADDING * 2 } : null]}>
       {drawing ? (
-        <View>
-          <Svg width={resolvedSize} height={resolvedSize}>
+        <View style={styles.canvas}>
+          <Svg width="100%" height="100%" viewBox={`0 0 ${drawing.units} ${drawing.units}`}>
             {drawing.eyes.map((eye) => (
               <React.Fragment key={eye.key}>
                 {/* Outer ring: a rounded square stroked one module wide. */}
                 <Rect
-                  x={eye.x + drawing.cell / 2}
-                  y={eye.y + drawing.cell / 2}
-                  width={drawing.cell * 6}
-                  height={drawing.cell * 6}
-                  rx={drawing.cell * 1.75}
-                  ry={drawing.cell * 1.75}
+                  x={eye.x + 0.5}
+                  y={eye.y + 0.5}
+                  width={6}
+                  height={6}
+                  rx={1.75}
+                  ry={1.75}
                   fill="none"
                   stroke={EYE_COLOR}
-                  strokeWidth={drawing.cell}
+                  strokeWidth={1}
                 />
                 <Rect
-                  x={eye.x + drawing.cell * 2}
-                  y={eye.y + drawing.cell * 2}
-                  width={drawing.cell * 3}
-                  height={drawing.cell * 3}
-                  rx={drawing.cell * 0.9}
-                  ry={drawing.cell * 0.9}
+                  x={eye.x + 2}
+                  y={eye.y + 2}
+                  width={3}
+                  height={3}
+                  rx={0.9}
+                  ry={0.9}
                   fill={EYE_COLOR}
                 />
               </React.Fragment>
             ))}
             {drawing.dots.map((dot) => (
-              <Circle key={dot.key} cx={dot.cx} cy={dot.cy} r={drawing.dotRadius} fill={MODULE_COLOR} />
+              <Circle key={dot.key} cx={dot.cx} cy={dot.cy} r={0.46} fill={MODULE_COLOR} />
             ))}
           </Svg>
           <Image
             source={SFLUV_LOGO}
-            style={[
-              styles.logoMark,
-              {
-                width: logoSize,
-                height: logoSize,
-                left: (resolvedSize - logoSize) / 2,
-                top: (resolvedSize - logoSize) / 2,
-              },
-            ]}
+            style={[styles.logoMark, { width: logoPercent, height: logoPercent, left: logoOffset, top: logoOffset }]}
             resizeMode="contain"
           />
         </View>
@@ -190,6 +181,10 @@ function createStyles(palette: Palette, isDark: boolean) {
     },
     // No plate behind it: the modules underneath are already cleared, so the
     // mark sits on the card's own white, exactly as it does on the web.
+    canvas: {
+      width: "100%",
+      aspectRatio: 1,
+    },
     logoMark: {
       position: "absolute",
     },

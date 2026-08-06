@@ -1251,7 +1251,7 @@ function BottomDock({
   const tabWidth = tabs.length > 0 ? barWidth / tabs.length : 0;
 
   const BUBBLE_PAD = 3;
-  const RECT_HEIGHT = 46;
+  const RECT_HEIGHT = 52;
   const CIRCLE = 54;
   const rectWidth = Math.max(0, tabWidth - BUBBLE_PAD);
   const centerX = centerIndex * tabWidth;
@@ -6418,10 +6418,10 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     borderWidth: 4,
     borderColor: palette.surface,
     shadowColor: palette.shadow,
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
     shadowOffset: { width: 0, height: 3 },
-    elevation: 5,
+    elevation: 3,
   },
   bottomTabText: {
     color: palette.textMuted,
