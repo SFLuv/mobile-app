@@ -421,9 +421,27 @@ export function VolunteerScreen({
     setEvents((current) => current.map((event) => (event.id === next.id ? next : event)));
   }, []);
 
+  /**
+   * Pushes the detail in from the right, the way a native stack would. The
+   * motion is the affordance: it tells the user this screen sits on top of the
+   * list and can be swiped back off it.
+   */
+  const pushInDetail = useCallback(() => {
+    detailSlide.setValue(width);
+    Animated.spring(detailSlide, {
+      toValue: 0,
+      useNativeDriver: true,
+      friction: 12,
+      tension: 88,
+    }).start();
+  }, [detailSlide, width]);
+
   const openEvent = useCallback(
-    async (event: AppVolunteerEvent | { id: string }) => {
+    async (event: AppVolunteerEvent | { id: string }, options?: { animate?: boolean }) => {
       const known = "title" in event ? event : events.find((entry) => entry.id === event.id) ?? null;
+      if (options?.animate !== false) {
+        pushInDetail();
+      }
       // Paint whatever the list already knows immediately, then refine.
       setSelectedEvent(known);
       setCoverIndex(0);
@@ -454,7 +472,7 @@ export function VolunteerScreen({
         }
       }
     },
-    [applyEventUpdate, backendClient, events],
+    [applyEventUpdate, backendClient, events, pushInDetail],
   );
 
   // Refreshes an open event without the paint-known-then-refine path openEvent
@@ -506,8 +524,15 @@ export function VolunteerScreen({
       setOrganizerFilter(organizerFilterKey(event.organizer));
       setOrganizerReturnEventId(event.id);
       closeDetail();
+      listSlide.setValue(width);
+      Animated.spring(listSlide, {
+        toValue: 0,
+        useNativeDriver: true,
+        friction: 12,
+        tension: 88,
+      }).start();
     },
-    [closeDetail, haptics],
+    [closeDetail, haptics, listSlide, width],
   );
 
   const returnToOriginEvent = useCallback(() => {
@@ -517,7 +542,7 @@ export function VolunteerScreen({
     }
     setOrganizerReturnEventId(null);
     setOrganizerFilter(ORGANIZER_FILTER_ALL);
-    void openEvent({ id: originId });
+    void openEvent({ id: originId }, { animate: false });
   }, [openEvent, organizerReturnEventId]);
 
   const listPanResponder = useMemo(
@@ -552,6 +577,19 @@ export function VolunteerScreen({
       }),
     [listSlide, organizerReturnEventId, returnToOriginEvent, width],
   );
+
+  /** Back button dismissal mirrors the swipe, so both exits look the same. */
+  const dismissDetail = useCallback(() => {
+    Animated.timing(detailSlide, {
+      toValue: width,
+      duration: 190,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        closeDetail();
+      }
+    });
+  }, [closeDetail, detailSlide, width]);
 
   // Edge swipe back to the list, matching the wallet panes: drag follows the
   // finger, and a decisive swipe (or a fast flick) completes the dismissal.
@@ -724,7 +762,7 @@ export function VolunteerScreen({
         coverIndex={coverIndex}
         signupBusy={signupBusy}
         onCoverIndexChange={setCoverIndex}
-        onBack={closeDetail}
+        onBack={dismissDetail}
         onExternalSignup={openExternalSignup}
         onOpenSignupSheet={() => {
           haptics();
@@ -1181,12 +1219,16 @@ function EventDetail({
   return (
     <>
       <View style={styles.detailPage}>
-        <Pressable style={styles.backRow} onPress={onBack}>
-          <Ionicons name="chevron-back" size={18} color={palette.primaryStrong} />
-          <Text style={styles.backText}>All events</Text>
-        </Pressable>
-
-        {event ? <Text style={styles.detailTitle}>{event.title}</Text> : null}
+        <View style={styles.detailTitleRow}>
+          <Pressable style={styles.backButton} onPress={onBack} hitSlop={10} accessibilityLabel="All events">
+            <Ionicons name="chevron-back" size={22} color={palette.primaryStrong} />
+          </Pressable>
+          {event ? (
+            <Text style={styles.detailTitle} numberOfLines={2}>
+              {event.title}
+            </Text>
+          ) : null}
+        </View>
 
         {!event ? (
           <View style={styles.stateCard}>
@@ -1206,6 +1248,39 @@ function EventDetail({
         ) : (
           <>
             <View style={[styles.detailCard, styles.detailCardFill]}>
+              {event.coverPhotos.length > 0 ? (
+                <View>
+                  <ScrollView
+                    horizontal
+                    pagingEnabled
+                    showsHorizontalScrollIndicator={false}
+                    onMomentumScrollEnd={(scrollEvent) => {
+                      const offset = scrollEvent.nativeEvent.contentOffset.x;
+                      onCoverIndexChange(coverWidth > 0 ? Math.round(offset / coverWidth) : 0);
+                    }}
+                  >
+                    {event.coverPhotos.map((photo, index) => (
+                      <Image
+                        key={`${photo.url}:${index}`}
+                        source={{ uri: photo.url }}
+                        style={[styles.detailCover, { width: coverWidth }]}
+                        resizeMode="cover"
+                      />
+                    ))}
+                  </ScrollView>
+                  {event.coverPhotos.length > 1 ? (
+                    <View style={styles.coverDots}>
+                      {event.coverPhotos.map((photo, index) => (
+                        <View
+                          key={`dot:${photo.url}:${index}`}
+                          style={[styles.coverDot, index === coverIndex ? styles.coverDotActive : undefined]}
+                        />
+                      ))}
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+
               <View style={styles.organizerRow}>
                 {/* Tapping the organizer filters the list to just their events. */}
                 <Pressable
@@ -1218,7 +1293,6 @@ function EventDetail({
                   <Text style={[styles.organizerNameStrong, styles.detailOrganizerName]} numberOfLines={1}>
                     {event.organizer.name}
                   </Text>
-                  <Ionicons name="chevron-forward" size={14} color={palette.textMuted} />
                 </Pressable>
                 {loading ? <ThemedActivityIndicator size="small" color={palette.primaryStrong} /> : null}
                 {event.rewardAmountSfluv > 0 ? (
@@ -1308,38 +1382,6 @@ function EventDetail({
                 <View style={styles.detailDescriptionScroll} />
               )}
 
-              {event.coverPhotos.length > 0 ? (
-                <View>
-                  <ScrollView
-                    horizontal
-                    pagingEnabled
-                    showsHorizontalScrollIndicator={false}
-                    onMomentumScrollEnd={(scrollEvent) => {
-                      const offset = scrollEvent.nativeEvent.contentOffset.x;
-                      onCoverIndexChange(coverWidth > 0 ? Math.round(offset / coverWidth) : 0);
-                    }}
-                  >
-                    {event.coverPhotos.map((photo, index) => (
-                      <Image
-                        key={`${photo.url}:${index}`}
-                        source={{ uri: photo.url }}
-                        style={[styles.detailCover, { width: coverWidth }]}
-                        resizeMode="cover"
-                      />
-                    ))}
-                  </ScrollView>
-                  {event.coverPhotos.length > 1 ? (
-                    <View style={styles.coverDots}>
-                      {event.coverPhotos.map((photo, index) => (
-                        <View
-                          key={`dot:${photo.url}:${index}`}
-                          style={[styles.coverDot, index === coverIndex ? styles.coverDotActive : undefined]}
-                        />
-                      ))}
-                    </View>
-                  ) : null}
-                </View>
-              ) : null}
             </View>
 
             <View style={styles.signupBar}>
@@ -1768,19 +1810,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       fontWeight: "700",
       color: palette.white,
     },
-    backRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 2,
-      alignSelf: "flex-start",
-      paddingVertical: 4,
-      paddingRight: spacing.md,
-    },
-    backText: {
-      fontSize: 14,
-      fontWeight: "600",
-      color: palette.primaryStrong,
-    },
     // Fixed height rather than an aspect ratio: the page must fit one screen,
     // so the photo takes a known slice and the description flexes around it.
     detailCover: {
@@ -1792,7 +1821,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       flexDirection: "row",
       justifyContent: "center",
       gap: 5,
-      marginTop: spacing.sm,
+      marginTop: 6,
     },
     coverDot: {
       width: 6,
@@ -1809,7 +1838,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       borderWidth: 1,
       borderColor: palette.border,
       padding: spacing.md,
-      gap: spacing.sm,
+      gap: 12,
       ...shadows.soft,
     },
     detailPane: {
@@ -1822,21 +1851,35 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       flex: 1,
       paddingHorizontal: spacing.lg,
       paddingTop: 2,
-      paddingBottom: 130,
-      gap: spacing.sm,
+      paddingBottom: 128,
+      gap: 10,
     },
     detailDescriptionScroll: {
       flex: 1,
-      minHeight: 40,
+      minHeight: 44,
+      marginTop: 2,
     },
     detailDescriptionContent: {
       paddingBottom: 2,
     },
+    detailTitleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 2,
+    },
+    backButton: {
+      width: 30,
+      height: 30,
+      alignItems: "center",
+      justifyContent: "center",
+      marginLeft: -6,
+    },
     detailTitle: {
-      fontSize: 22,
+      flex: 1,
+      fontSize: 21,
       fontWeight: "700",
       color: palette.text,
-      lineHeight: 28,
+      lineHeight: 27,
     },
     detailOrganizerName: {
       flex: 1,

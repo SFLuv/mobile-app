@@ -1238,17 +1238,18 @@ function BottomDock({
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const [barWidth, setBarWidth] = useState(0);
 
-  const activeIndex = Math.max(
-    0,
-    tabs.findIndex((tab) => tab.key === activeKey),
-  );
+  // -1 when the active screen has no dock slot (Settings, reached from the
+  // header). The bubble then holds its position and hides rather than sliding
+  // to the first tab and implying that tab is selected.
+  const activeIndex = tabs.findIndex((tab) => tab.key === activeKey);
+  const hasActiveSlot = activeIndex >= 0;
   const centerIndex = Math.max(
     0,
     tabs.findIndex((tab) => tab.center),
   );
   const tabWidth = tabs.length > 0 ? barWidth / tabs.length : 0;
 
-  const BUBBLE_PAD = 8;
+  const BUBBLE_PAD = 3;
   const RECT_HEIGHT = 50;
   const CIRCLE = 54;
   const rectWidth = Math.max(0, tabWidth - BUBBLE_PAD);
@@ -1256,7 +1257,7 @@ function BottomDock({
 
   const travel = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    if (tabWidth <= 0) {
+    if (tabWidth <= 0 || !hasActiveSlot) {
       return;
     }
     Animated.spring(travel, {
@@ -1265,7 +1266,7 @@ function BottomDock({
       friction: 11,
       tension: 95,
     }).start();
-  }, [activeIndex, tabWidth, travel]);
+  }, [activeIndex, hasActiveSlot, tabWidth, travel]);
 
   // 0 = rounded rect travelling along the bar, 1 = circle sitting on the raised
   // centre button. Morphing only over the last stretch of the approach keeps the
@@ -1288,7 +1289,7 @@ function BottomDock({
   const bubbleOpacity = circleness.interpolate({ inputRange: [0, 0.75, 1], outputRange: [1, 1, 0] });
   const centerFill = circleness.interpolate({
     inputRange: [0, 1],
-    outputRange: [palette.primarySoft, palette.primaryStrong],
+    outputRange: [palette.surfaceStrong, palette.primaryStrong],
   });
 
   return (
@@ -1304,7 +1305,7 @@ function BottomDock({
               width: bubbleWidth,
               height: bubbleHeight,
               borderRadius: bubbleRadius,
-              opacity: bubbleOpacity,
+              opacity: hasActiveSlot ? bubbleOpacity : 0,
               transform: [{ translateX: bubbleShift }, { translateY: bubbleRise }],
             },
           ]}
@@ -1323,9 +1324,12 @@ function BottomDock({
               onPress={() => onSelect(tab.key)}
             >
               <Animated.View style={[styles.dockCenterButton, { backgroundColor: centerFill }]}>
-                <Ionicons name={tab.icon} size={26} color={active ? palette.white : palette.primaryStrong} />
+                <Ionicons name={tab.icon} size={24} color={active ? palette.white : palette.textMuted} />
               </Animated.View>
-              <Text style={[styles.bottomTabText, active ? styles.bottomTabTextActive : undefined]}>
+              <Text
+                numberOfLines={1}
+                style={[styles.bottomTabText, active ? styles.bottomTabTextActive : undefined]}
+              >
                 {tab.label}
               </Text>
             </Pressable>
@@ -1347,7 +1351,10 @@ function BottomDock({
               />
               {tab.showDot ? <View style={styles.bottomTabDot} /> : null}
             </View>
-            <Text style={[styles.bottomTabText, active ? styles.bottomTabTextActive : undefined]}>
+            <Text
+              numberOfLines={1}
+              style={[styles.bottomTabText, active ? styles.bottomTabTextActive : undefined]}
+            >
               {tab.label}
             </Text>
           </Pressable>
@@ -6341,7 +6348,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     zIndex: 20,
     elevation: 20,
     paddingHorizontal: spacing.lg,
-    paddingTop: Platform.OS === "android" ? spacing.md : spacing.sm,
+    paddingTop: Platform.OS === "android" ? spacing.lg : spacing.md,
     paddingBottom: Platform.OS === "android" ? spacing.md : spacing.xl + 12,
     backgroundColor: "transparent",
     overflow: "hidden",
@@ -6358,14 +6365,16 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   bottomDock: {
     position: "relative",
     flexDirection: "row",
-    paddingTop: 8,
-    paddingHorizontal: 8,
-    paddingBottom: 8,
+    paddingTop: 10,
+    paddingHorizontal: 6,
+    paddingBottom: 5,
     borderRadius: radii.lg,
     backgroundColor: palette.surface,
     borderWidth: 1,
     borderColor: palette.border,
-    overflow: "hidden",
+    // Not hidden: the raised centre button is meant to break the top edge, and
+    // clipping it was cutting the wallet icon in half.
+    overflow: "visible",
     ...shadows.card,
   },
   bottomDockGlassLayer: {
@@ -6416,7 +6425,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     borderRadius: 27,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: -22,
+    marginTop: -20,
     borderWidth: 4,
     borderColor: palette.surface,
     shadowColor: palette.primaryStrong,
@@ -6428,7 +6437,8 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   bottomTabText: {
     color: palette.textMuted,
     fontWeight: "800",
-    fontSize: 11,
+    fontSize: 10,
+    letterSpacing: -0.1,
   },
   bottomTabTextActive: {
     color: palette.primaryStrong,
