@@ -286,26 +286,24 @@ export function VolunteerScreen({
 
   const toggleSearch = useCallback(() => {
     haptics();
-    setSearchOpen((current) => {
-      const next = !current;
-      Animated.spring(searchReveal, {
-        toValue: next ? 1 : 0,
-        useNativeDriver: false,
-        friction: 12,
-        tension: 110,
-      }).start();
-      if (next) {
-        // Small delay so focus lands once the field actually has height.
-        setTimeout(() => searchInputRef.current?.focus(), 120);
-      } else {
-        searchInputRef.current?.blur();
-        // Collapsing clears the term: a filter you cannot see is a filter you
-        // will not remember you set.
-        setSearchInput("");
-      }
-      return next;
-    });
-  }, [haptics, searchReveal]);
+    const next = !searchOpen;
+    setSearchOpen(next);
+    Animated.spring(searchReveal, {
+      toValue: next ? 1 : 0,
+      useNativeDriver: false,
+      friction: 12,
+      tension: 110,
+    }).start();
+    if (next) {
+      // Small delay so focus lands once the field actually has height.
+      setTimeout(() => searchInputRef.current?.focus(), 120);
+    } else {
+      searchInputRef.current?.blur();
+      // Collapsing clears the term: a filter you cannot see is a filter you
+      // will not remember you set.
+      setSearchInput("");
+    }
+  }, [haptics, searchOpen, searchReveal]);
 
   const query = useMemo(
     () => ({
@@ -1902,7 +1900,8 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     // Fixed height rather than an aspect ratio: the page must fit one screen,
     // so the photo takes a known slice and the description flexes around it.
     detailCover: {
-      height: 168,
+      aspectRatio: 4 / 3,
+      maxHeight: 260,
       borderRadius: radii.md,
       backgroundColor: palette.surfaceMuted,
     },
@@ -1944,8 +1943,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       gap: 10,
     },
     detailDescriptionBox: {
-      flex: 1,
-      minHeight: 56,
+      flexShrink: 1,
       backgroundColor: palette.surfaceStrong,
       borderRadius: radii.md,
       borderWidth: 1,
@@ -1954,8 +1952,8 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       paddingVertical: 10,
     },
     detailDescriptionScroll: {
-      flex: 1,
-      minHeight: 36,
+      flexGrow: 0,
+      flexShrink: 1,
     },
     detailDescriptionContent: {
       paddingBottom: 2,
@@ -1963,7 +1961,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     detailTitleRow: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 2,
+      gap: 8,
     },
     backButton: {
       width: 30,
@@ -1974,10 +1972,10 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     },
     detailTitle: {
       flex: 1,
-      fontSize: 24,
+      fontSize: 20,
       fontWeight: "700",
       color: palette.text,
-      lineHeight: 30,
+      lineHeight: 26,
     },
     detailOrganizerName: {
       flex: 1,
@@ -1988,7 +1986,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       borderBottomColor: palette.border,
     },
     detailCardFill: {
-      flex: 1,
+      flexShrink: 1,
     },
     organizerLink: {
       flex: 1,
@@ -2083,6 +2081,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     },
     signupBar: {
       gap: spacing.sm,
+      marginTop: "auto",
     },
     signupNote: {
       flex: 1,

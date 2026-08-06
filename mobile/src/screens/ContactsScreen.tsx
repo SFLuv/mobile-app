@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { SfluvQRCode } from "../components/SfluvQRCode";
@@ -22,7 +22,7 @@ type Props = {
   onDeleteContact: (contactID: number) => Promise<void>;
 };
 
-type ContactMode = "contacts" | "me" | "scan";
+type ContactMode = "contacts" | "my-qr";
 
 function shortAddress(address: string): string {
   if (address.length <= 16) return address;
@@ -74,6 +74,8 @@ export function ContactsScreen({
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
   const [contactMode, setContactMode] = useState<ContactMode>("contacts");
   const [contactSearch, setContactSearch] = useState("");
+  const [addSheetOpen, setAddSheetOpen] = useState(false);
+  const [manualEntry, setManualEntry] = useState("");
   const [editingID, setEditingID] = useState<number | null>(null);
   const [editingName, setEditingName] = useState("");
   const [editingAddress, setEditingAddress] = useState("");
@@ -117,14 +119,14 @@ export function ContactsScreen({
   }, [clientConfig, shareAddress]);
 
   useEffect(() => {
-    if (contactMode !== "scan") {
+    if (!addSheetOpen) {
       return;
     }
     if (permission?.status === "granted") {
       return;
     }
     void requestPermission();
-  }, [contactMode, permission?.status, requestPermission]);
+  }, [addSheetOpen, permission?.status, requestPermission]);
 
   useEffect(() => {
     return () => {
@@ -148,7 +150,7 @@ export function ContactsScreen({
     const normalizedAddress = ethers.utils.getAddress(trimmed);
     const existingContact = contacts.find((contact) => contact.address.toLowerCase() === normalizedAddress.toLowerCase());
 
-    setContactMode("scan");
+    setAddSheetOpen(true);
     if (existingContact) {
       setPendingScannedAddress(null);
       setPendingScannedName("");
@@ -173,6 +175,40 @@ export function ContactsScreen({
     setPendingScannedAddress(null);
     setPendingScannedName("");
     setScanErrorMessage(null);
+  };
+
+  const closeAddSheet = () => {
+    setAddSheetOpen(false);
+    setManualEntry("");
+    clearPendingScan();
+    setScanErrorMessage(null);
+  };
+
+  /**
+   * Manual entry runs through the same resolver as the camera, so a pasted raw
+   * address, an add-contact link and a payment link all behave identically.
+   */
+  const submitManualEntry = () => {
+    const raw = manualEntry.trim();
+    if (!raw) {
+      return;
+    }
+    const resolvedAddress = resolveScannedAddress(raw, clientConfig);
+    if (!resolvedAddress) {
+      setScanErrorMessage("That is not a wallet address or a SFLuv link.");
+      return;
+    }
+    const existingContact = contacts.find(
+      (contact) => contact.address.toLowerCase() === resolvedAddress.toLowerCase(),
+    );
+    if (existingContact) {
+      setScanErrorMessage(`${existingContact.name} is already saved in your contacts.`);
+      return;
+    }
+    setPendingScannedAddress(resolvedAddress);
+    setPendingScannedName("");
+    setScanErrorMessage(null);
+    setManualEntry("");
   };
 
   const handleScannedValue = (rawValue: string) => {
@@ -231,6 +267,7 @@ export function ContactsScreen({
   };
 
   return (
+    <View style={styles.screen}>
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       {syncNotice ? (
         <View style={styles.noticeCard}>
@@ -243,17 +280,13 @@ export function ContactsScreen({
         <View style={styles.segmentWrap}>
           {([
             ["contacts", "My Contacts"],
-            ["me", "Me"],
-            ["scan", "Scan"],
+            ["my-qr", "My QR"],
           ] as Array<[ContactMode, string]>).map(([value, label]) => (
             <Pressable
               key={value}
               style={[styles.segmentButton, contactMode === value ? styles.segmentButtonActive : undefined]}
               onPress={() => {
                 setContactMode(value);
-                if (value !== "scan") {
-                  clearPendingScan();
-                }
                 setScanErrorMessage(null);
               }}
             >
@@ -264,7 +297,7 @@ export function ContactsScreen({
           ))}
         </View>
 
-        {contactMode === "me" ? (
+        {contactMode === "my-qr" ? (
           shareQRValue ? (
             <View style={styles.qrCard}>
               <SfluvQRCode value={shareQRValue} />
@@ -283,91 +316,6 @@ export function ContactsScreen({
               <Text style={styles.body}>Your wallet is still loading. Once it is ready, your contact QR will appear here.</Text>
             </View>
           )
-        ) : contactMode === "scan" ? (
-          <View style={styles.scanCard}>
-            {permission?.status === "granted" ? (
-              <View style={styles.scannerFrame}>
-                <CameraView
-                  style={StyleSheet.absoluteFillObject}
-                  barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-                  onBarcodeScanned={
-                    pendingScannedAddress
-                      ? undefined
-                      : (result) => {
-                          handleScannedValue(result.data);
-                        }
-                  }
-                />
-              </View>
-            ) : (
-              <View style={styles.permissionCard}>
-                <Ionicons name="camera-outline" size={24} color={palette.primaryStrong} />
-                <Text style={styles.permissionText}>
-                  {permission?.status === "undetermined"
-                    ? "Allow camera access to scan contact QR codes here."
-                    : "Camera access is required to scan contact QR codes here."}
-                </Text>
-                <Pressable style={styles.permissionButton} onPress={() => void requestPermission()}>
-                  <Text style={styles.permissionButtonText}>Enable Camera</Text>
-                </Pressable>
-              </View>
-            )}
-
-            {pendingScannedAddress ? (
-              <View style={styles.pendingCard}>
-                <Text style={styles.sectionTitle}>Save scanned contact</Text>
-                <Text style={styles.meta}>{shortAddress(pendingScannedAddress)}</Text>
-                <TextInput
-                  style={styles.input}
-                  value={pendingScannedName}
-                  onChangeText={setPendingScannedName}
-                  placeholder="Contact name"
-                  placeholderTextColor={palette.textMuted}
-                />
-                {scanErrorMessage ? <Text style={styles.errorText}>{scanErrorMessage}</Text> : null}
-                <View style={styles.inlineActions}>
-                  <Pressable
-                    style={[styles.primaryButton, busyID === "scan" ? styles.buttonDisabled : undefined]}
-                    disabled={busyID === "scan"}
-                    onPress={async () => {
-                      const scannedAddress = pendingScannedAddress;
-                      if (!scannedAddress) {
-                        return;
-                      }
-
-                      const validationError = validateContactInput(pendingScannedName, scannedAddress);
-                      if (validationError) {
-                        setScanErrorMessage(validationError);
-                        return;
-                      }
-
-                      setBusyID("scan");
-                      setScanErrorMessage(null);
-                      try {
-                        await onAddContact(pendingScannedName.trim(), ethers.utils.getAddress(scannedAddress.trim()));
-                        clearPendingScan();
-                      } catch (error) {
-                        setScanErrorMessage((error as Error).message || "Unable to add contact.");
-                      } finally {
-                        setBusyID(null);
-                      }
-                    }}
-                  >
-                    {busyID === "scan" ? (
-                      <ThemedActivityIndicator size="small" color={palette.white} />
-                    ) : (
-                      <Text style={styles.primaryButtonText}>Save contact</Text>
-                    )}
-                  </Pressable>
-                  <Pressable style={styles.inlineButtonMuted} onPress={clearPendingScan}>
-                    <Text style={styles.inlineButtonMutedText}>Cancel</Text>
-                  </Pressable>
-                </View>
-              </View>
-            ) : null}
-
-            {scanErrorMessage && !pendingScannedAddress ? <Text style={styles.errorText}>{scanErrorMessage}</Text> : null}
-          </View>
         ) : (
           <View style={styles.contactsPane}>
           <View style={styles.searchRow}>
@@ -529,11 +477,227 @@ export function ContactsScreen({
       </View>
 
     </ScrollView>
+
+      {contactMode === "contacts" ? (
+        <Pressable
+          style={styles.fab}
+          onPress={() => setAddSheetOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Add contact"
+        >
+          <Ionicons name="add" size={30} color={palette.white} />
+        </Pressable>
+      ) : null}
+
+      {/* Adding a contact is an action, not a place — it lives behind the
+          floating button rather than taking a permanent tab. */}
+      <Modal
+        visible={addSheetOpen}
+        transparent
+        presentationStyle="overFullScreen"
+        animationType="slide"
+        onRequestClose={closeAddSheet}
+      >
+        <View style={styles.addSheetBackdrop}>
+          <View style={styles.addSheetCard}>
+            <View style={styles.addSheetHeader}>
+              <Text style={styles.sectionTitle}>Add contact</Text>
+              <Pressable style={styles.addSheetClose} onPress={closeAddSheet} hitSlop={8}>
+                <Ionicons name="close" size={18} color={palette.primaryStrong} />
+              </Pressable>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <View style={styles.scanCard}>
+              {permission?.status === "granted" ? (
+                <View style={styles.scannerFrame}>
+                  <CameraView
+                    style={StyleSheet.absoluteFillObject}
+                    barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+                    onBarcodeScanned={
+                      pendingScannedAddress
+                        ? undefined
+                        : (result) => {
+                            handleScannedValue(result.data);
+                          }
+                    }
+                  />
+                </View>
+              ) : (
+                <View style={styles.permissionCard}>
+                  <Ionicons name="camera-outline" size={24} color={palette.primaryStrong} />
+                  <Text style={styles.permissionText}>
+                    {permission?.status === "undetermined"
+                      ? "Allow camera access to scan contact QR codes here."
+                      : "Camera access is required to scan contact QR codes here."}
+                  </Text>
+                  <Pressable style={styles.permissionButton} onPress={() => void requestPermission()}>
+                    <Text style={styles.permissionButtonText}>Enable Camera</Text>
+                  </Pressable>
+                </View>
+              )}
+
+              {pendingScannedAddress ? (
+                <View style={styles.pendingCard}>
+                  <Text style={styles.sectionTitle}>Save scanned contact</Text>
+                  <Text style={styles.meta}>{shortAddress(pendingScannedAddress)}</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={pendingScannedName}
+                    onChangeText={setPendingScannedName}
+                    placeholder="Contact name"
+                    placeholderTextColor={palette.textMuted}
+                  />
+                  {scanErrorMessage ? <Text style={styles.errorText}>{scanErrorMessage}</Text> : null}
+                  <View style={styles.inlineActions}>
+                    <Pressable
+                      style={[styles.primaryButton, busyID === "scan" ? styles.buttonDisabled : undefined]}
+                      disabled={busyID === "scan"}
+                      onPress={async () => {
+                        const scannedAddress = pendingScannedAddress;
+                        if (!scannedAddress) {
+                          return;
+                        }
+
+                        const validationError = validateContactInput(pendingScannedName, scannedAddress);
+                        if (validationError) {
+                          setScanErrorMessage(validationError);
+                          return;
+                        }
+
+                        setBusyID("scan");
+                        setScanErrorMessage(null);
+                        try {
+                          await onAddContact(pendingScannedName.trim(), ethers.utils.getAddress(scannedAddress.trim()));
+                          // The contact is saved, so the sheet has done its job.
+                          closeAddSheet();
+                        } catch (error) {
+                          setScanErrorMessage((error as Error).message || "Unable to add contact.");
+                        } finally {
+                          setBusyID(null);
+                        }
+                      }}
+                    >
+                      {busyID === "scan" ? (
+                        <ThemedActivityIndicator size="small" color={palette.white} />
+                      ) : (
+                        <Text style={styles.primaryButtonText}>Save contact</Text>
+                      )}
+                    </Pressable>
+                    <Pressable style={styles.inlineButtonMuted} onPress={clearPendingScan}>
+                      <Text style={styles.inlineButtonMutedText}>Cancel</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : null}
+
+              {scanErrorMessage && !pendingScannedAddress ? <Text style={styles.errorText}>{scanErrorMessage}</Text> : null}
+            </View>
+              <View style={styles.manualEntryBlock}>
+                <Text style={styles.manualEntryLabel}>Or paste an address or link</Text>
+                <View style={styles.manualEntryRow}>
+                  <TextInput
+                    style={styles.manualEntryInput}
+                    value={manualEntry}
+                    onChangeText={(next) => {
+                      setManualEntry(next);
+                      setScanErrorMessage(null);
+                    }}
+                    placeholder="0x… or sfluv.org link"
+                    placeholderTextColor={palette.textMuted}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  <Pressable
+                    style={[styles.inlineButton, !manualEntry.trim() ? styles.buttonDisabled : undefined]}
+                    disabled={!manualEntry.trim()}
+                    onPress={() => submitManualEntry()}
+                  >
+                    <Text style={styles.inlineButtonText}>Use</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </View>
   );
 }
 
 function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) {
   return StyleSheet.create({
+    screen: {
+      flex: 1,
+    },
+    // Mirrors the reference app's compose button: circular, brand-filled, and
+    // clear of the tab dock.
+    fab: {
+      position: "absolute",
+      right: spacing.lg,
+      bottom: 132,
+      width: 58,
+      height: 58,
+      borderRadius: 29,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: palette.primaryStrong,
+      shadowColor: palette.shadow,
+      shadowOpacity: 0.5,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 8,
+    },
+    addSheetBackdrop: {
+      flex: 1,
+      justifyContent: "flex-end",
+      backgroundColor: palette.overlay,
+    },
+    addSheetCard: {
+      maxHeight: "88%",
+      backgroundColor: palette.background,
+      borderTopLeftRadius: radii.xl,
+      borderTopRightRadius: radii.xl,
+      padding: spacing.lg,
+      gap: spacing.md,
+    },
+    addSheetHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    addSheetClose: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: palette.primarySoft,
+    },
+    manualEntryBlock: {
+      gap: spacing.sm,
+      marginTop: spacing.md,
+    },
+    manualEntryLabel: {
+      fontSize: 13,
+      fontWeight: "700",
+      color: palette.textMuted,
+    },
+    manualEntryRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    manualEntryInput: {
+      flex: 1,
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surface,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      fontSize: 14,
+      color: palette.text,
+    },
     container: {
       paddingHorizontal: spacing.lg,
       paddingTop: spacing.sm,

@@ -6333,8 +6333,11 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     zIndex: 20,
     elevation: 20,
     paddingHorizontal: spacing.lg,
-    paddingTop: Platform.OS === "android" ? spacing.lg : spacing.md,
-    paddingBottom: Platform.OS === "android" ? spacing.lg : spacing.xl + 22,
+    // Lifts the whole dock: just enough headroom for the raised centre button
+    // (it breaks 10pt above the dock's edge, and the bubble rises 11pt) and the
+    // rest of the room given back below.
+    paddingTop: Platform.OS === "android" ? 14 : 12,
+    paddingBottom: Platform.OS === "android" ? spacing.xl + 2 : spacing.xl + 34,
     backgroundColor: "transparent",
     overflow: "hidden",
   },
