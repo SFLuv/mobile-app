@@ -1323,7 +1323,13 @@ function BottomDock({
               accessibilityLabel={tab.label}
               onPress={() => onSelect(tab.key)}
             >
-              <Animated.View style={[styles.dockCenterButton, { backgroundColor: centerFill }]}>
+              <Animated.View
+                style={[
+                  styles.dockCenterButton,
+                  active ? styles.dockCenterButtonActive : undefined,
+                  { backgroundColor: centerFill },
+                ]}
+              >
                 <Ionicons name={tab.icon} size={24} color={active ? palette.white : palette.textMuted} />
               </Animated.View>
               <Text
@@ -1369,7 +1375,6 @@ function WalletAppShell({
   runtime,
   selectedCandidateKey,
   onSelectCandidate,
-  ownerBadge,
   onLogout,
   backendClient,
   backendBootstrapReady,
@@ -1405,7 +1410,6 @@ function WalletAppShell({
   runtime: RuntimeState;
   selectedCandidateKey?: string;
   onSelectCandidate: (key: string) => void;
-  ownerBadge?: string;
   onLogout?: () => void;
   backendClient?: AppBackendClient | null;
   backendBootstrapReady: boolean;
@@ -1443,7 +1447,6 @@ function WalletAppShell({
       runtime={runtime}
       selectedCandidateKey={selectedCandidateKey}
       onSelectCandidate={onSelectCandidate}
-      ownerBadge={ownerBadge}
       onLogout={onLogout}
       backendClient={backendClient}
       backendBootstrapReady={backendBootstrapReady}
@@ -1483,7 +1486,6 @@ function WalletAppShellContent({
   runtime,
   selectedCandidateKey,
   onSelectCandidate,
-  ownerBadge,
   onLogout,
   backendClient,
   backendBootstrapReady,
@@ -1519,7 +1521,6 @@ function WalletAppShellContent({
   runtime: RuntimeState;
   selectedCandidateKey?: string;
   onSelectCandidate: (key: string) => void;
-  ownerBadge?: string;
   onLogout?: () => void;
   backendClient?: AppBackendClient | null;
   backendBootstrapReady: boolean;
@@ -1848,6 +1849,10 @@ function WalletAppShellContent({
         : undefined,
     [backendWallets, selectedCandidate],
   );
+  const isPrimaryWallet = useMemo(() => {
+    const primary = appUser?.primaryWalletAddress?.trim().toLowerCase();
+    return Boolean(primary && smartAddress && primary === smartAddress.trim().toLowerCase());
+  }, [appUser?.primaryWalletAddress, smartAddress]);
   const canAccessImproverPanel = Boolean(appUser?.isImprover || appImprover?.status === "approved");
   const showImproverNav = canAccessImproverPanel && preferences.showImproverPanel;
   // The volunteer portal is open to every signed-in user, but only once the
@@ -3747,8 +3752,8 @@ function WalletAppShellContent({
       explorerURL={clientConfig.explorerURL}
       faucetAddress={clientConfig.faucetAddress}
       smartAddress={smartAddress}
-      ownerBadge={ownerBadge}
       selectedWalletLabel={selectedWalletLabel}
+      isPrimaryWallet={isPrimaryWallet}
       recentTransactions={walletTransactions}
       transactionsLoaded={walletTransactionsLoaded}
       contacts={contacts}
@@ -5664,10 +5669,6 @@ function PrivyWalletApp({
     );
   }
 
-  const ownerBadge = runtime.discovery?.ownerAddress
-    ? `${runtime.discovery.ownerAddress.slice(0, 6)}...${runtime.discovery.ownerAddress.slice(-4)}`
-    : undefined;
-
   return (
     <WalletAppShell
       clientConfig={clientConfig}
@@ -5681,7 +5682,6 @@ function PrivyWalletApp({
         manualWalletSelectionRef.current = true;
         setPreferredCandidateKey(key);
       }}
-      ownerBadge={ownerBadge}
       onLogout={() => {
         void logout();
       }}
@@ -6413,7 +6413,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   // driven by proximity to the raised centre button.
   dockBubble: {
     position: "absolute",
-    top: 6,
+    top: 9,
     left: 8,
     backgroundColor: palette.primarySoft,
     borderWidth: 1,
@@ -6428,6 +6428,8 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     marginTop: -20,
     borderWidth: 4,
     borderColor: palette.surface,
+  },
+  dockCenterButtonActive: {
     shadowColor: palette.primaryStrong,
     shadowOpacity: 0.35,
     shadowRadius: 10,
@@ -6437,8 +6439,8 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   bottomTabText: {
     color: palette.textMuted,
     fontWeight: "800",
-    fontSize: 10,
-    letterSpacing: -0.1,
+    fontSize: 9,
+    letterSpacing: -0.15,
   },
   bottomTabTextActive: {
     color: palette.primaryStrong,

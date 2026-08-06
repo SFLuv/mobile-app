@@ -238,6 +238,7 @@ export function VolunteerScreen({
   // "show full" rather than "open spots" so the checked state is the additive one.
   const [showFull, setShowFull] = useState(false);
   const [organizerPickerOpen, setOrganizerPickerOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   /** Set when the list was reached by tapping an organizer, so we can walk back. */
   const [organizerReturnEventId, setOrganizerReturnEventId] = useState<string | null>(null);
 
@@ -264,6 +265,8 @@ export function VolunteerScreen({
   const listRequestRef = useRef(0);
   const detailRequestRef = useRef(0);
   const detailSlide = useRef(new Animated.Value(0)).current;
+  const searchReveal = useRef(new Animated.Value(0)).current;
+  const searchInputRef = useRef<TextInput>(null);
   const listSlide = useRef(new Animated.Value(0)).current;
 
   const haptics = useCallback(() => {
@@ -274,6 +277,35 @@ export function VolunteerScreen({
     const timeout = setTimeout(() => setSearch(searchInput.trim()), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timeout);
   }, [searchInput]);
+
+  const SEARCH_FIELD_HEIGHT = 45;
+  const searchHeight = searchReveal.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, SEARCH_FIELD_HEIGHT + spacing.md],
+  });
+
+  const toggleSearch = useCallback(() => {
+    haptics();
+    setSearchOpen((current) => {
+      const next = !current;
+      Animated.spring(searchReveal, {
+        toValue: next ? 1 : 0,
+        useNativeDriver: false,
+        friction: 12,
+        tension: 110,
+      }).start();
+      if (next) {
+        // Small delay so focus lands once the field actually has height.
+        setTimeout(() => searchInputRef.current?.focus(), 120);
+      } else {
+        searchInputRef.current?.blur();
+        // Collapsing clears the term: a filter you cannot see is a filter you
+        // will not remember you set.
+        setSearchInput("");
+      }
+      return next;
+    });
+  }, [haptics, searchReveal]);
 
   const query = useMemo(
     () => ({
@@ -805,46 +837,69 @@ export function VolunteerScreen({
         }
       >
         <View style={styles.filterCard}>
-          <View style={styles.searchRow}>
-            <Ionicons name="search-outline" size={16} color={palette.textMuted} />
-            <TextInput
-              style={styles.searchInput}
-              value={searchInput}
-              onChangeText={setSearchInput}
-              placeholder="Search events or organizers"
-              placeholderTextColor={palette.textMuted}
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="search"
-            />
-            {searchInput ? (
-              <Pressable onPress={() => setSearchInput("")} hitSlop={8}>
-                <Ionicons name="close-circle" size={16} color={palette.textMuted} />
-              </Pressable>
-            ) : null}
-          </View>
-
-          <View style={styles.segmentRow}>
-            {FEED_OPTIONS.map((option) => {
-              const active = feed === option.value;
-              return (
-                <Pressable
-                  key={option.value}
-                  style={[styles.segment, active ? styles.segmentActive : undefined]}
-                  onPress={() => {
-                    if (active) {
-                      return;
-                    }
-                    haptics();
-                    setFeed(option.value);
-                  }}
-                >
-                  <Text style={[styles.segmentText, active ? styles.segmentTextActive : undefined]}>
-                    {option.label}
-                  </Text>
+          {/* Collapsed by default — most visits are a browse, not a lookup — and
+              grows out of the button in the corner when asked for. */}
+          <Animated.View
+            style={[styles.searchCollapsible, { height: searchHeight, opacity: searchReveal }]}
+            pointerEvents={searchOpen ? "auto" : "none"}
+          >
+            <View style={styles.searchRow}>
+              <Ionicons name="search-outline" size={16} color={palette.textMuted} />
+              <TextInput
+                ref={searchInputRef}
+                style={styles.searchInput}
+                value={searchInput}
+                onChangeText={setSearchInput}
+                placeholder="Search events or organizers"
+                placeholderTextColor={palette.textMuted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="search"
+              />
+              {searchInput ? (
+                <Pressable onPress={() => setSearchInput("")} hitSlop={8}>
+                  <Ionicons name="close-circle" size={16} color={palette.textMuted} />
                 </Pressable>
-              );
-            })}
+              ) : null}
+            </View>
+          </Animated.View>
+
+          <View style={styles.filterHeaderRow}>
+            <View style={[styles.segmentRow, styles.segmentRowFill]}>
+              {FEED_OPTIONS.map((option) => {
+                const active = feed === option.value;
+                return (
+                  <Pressable
+                    key={option.value}
+                    style={[styles.segment, active ? styles.segmentActive : undefined]}
+                    onPress={() => {
+                      if (active) {
+                        return;
+                      }
+                      haptics();
+                      setFeed(option.value);
+                    }}
+                  >
+                    <Text style={[styles.segmentText, active ? styles.segmentTextActive : undefined]}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Pressable
+              style={[styles.searchToggle, searchOpen || search ? styles.searchToggleActive : undefined]}
+              onPress={toggleSearch}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={searchOpen ? "Hide search" : "Search events"}
+            >
+              <Ionicons
+                name={searchOpen ? "close" : "search"}
+                size={18}
+                color={searchOpen || search ? palette.primaryStrong : palette.textMuted}
+              />
+            </Pressable>
           </View>
 
           <View style={styles.filterRow}>
@@ -1493,8 +1548,33 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       borderWidth: 1,
       borderColor: palette.border,
       padding: spacing.md,
-      gap: spacing.md,
       ...shadows.soft,
+    },
+    filterHeaderRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    segmentRowFill: {
+      flex: 1,
+    },
+    searchToggle: {
+      width: 40,
+      height: 40,
+      borderRadius: radii.md,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surfaceStrong,
+    },
+    searchToggleActive: {
+      borderColor: palette.primary,
+      backgroundColor: palette.primarySoft,
+    },
+    searchCollapsible: {
+      overflow: "hidden",
+      justifyContent: "flex-start",
     },
     searchRow: {
       flexDirection: "row",
@@ -1545,6 +1625,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     filterRow: {
       flexDirection: "row",
       gap: spacing.sm,
+      marginTop: spacing.md,
     },
     filterChip: {
       flexDirection: "row",

@@ -19,8 +19,8 @@ type Props = {
   explorerURL?: string;
   faucetAddress?: string;
   smartAddress: string;
-  ownerBadge?: string;
   selectedWalletLabel?: string;
+  isPrimaryWallet?: boolean;
   recentTransactions: AppTransaction[];
   transactionsLoaded: boolean;
   contacts: AppContact[];
@@ -58,8 +58,8 @@ export function WalletHomeScreen({
   explorerURL,
   faucetAddress,
   smartAddress,
-  ownerBadge,
   selectedWalletLabel,
+  isPrimaryWallet,
   recentTransactions,
   transactionsLoaded,
   contacts,
@@ -115,39 +115,38 @@ export function WalletHomeScreen({
           <View style={styles.heroGlowLarge} />
           <View style={styles.heroGlowSmall} />
 
+          {/* Wallet identity leads: its name when it has one, the short address
+              otherwise, with its status to the right. */}
           <View style={styles.heroTopRow}>
-            <View style={styles.heroBadge}>
-              <Ionicons name={merchantMode ? "storefront" : "shield-checkmark"} size={14} color={palette.primaryStrong} />
-              <Text style={styles.heroBadgeText}>{merchantMode ? "Merchant mode" : "Wallet ready"}</Text>
+            <View style={styles.addressBar}>
+              <Ionicons name="wallet-outline" size={16} color={palette.primaryStrong} />
+              <Text style={styles.addressText} numberOfLines={1}>
+                {selectedWalletLabel?.trim() || shortAddress(smartAddress, 8, 6)}
+              </Text>
             </View>
+            {merchantMode ? (
+              <View style={styles.heroBadge}>
+                <Ionicons name="storefront" size={14} color={palette.primaryStrong} />
+                <Text style={styles.heroBadgeText}>Merchant mode</Text>
+              </View>
+            ) : isPrimaryWallet ? (
+              <View style={styles.heroBadge}>
+                <Ionicons name="star" size={13} color={palette.primaryStrong} />
+                <Text style={styles.heroBadgeText}>Primary</Text>
+              </View>
+            ) : null}
             {showWalletChooser ? (
               <Pressable style={styles.chooseWalletButton} onPress={onOpenWalletChooser}>
-                <Text style={styles.chooseWalletButtonText}>Choose Wallet</Text>
-                <Ionicons name="chevron-down" size={14} color={palette.primaryStrong} />
+                <Ionicons name="swap-horizontal" size={14} color={palette.primaryStrong} />
               </Pressable>
             ) : null}
           </View>
 
-          <Text style={styles.heroEyebrow}>Selected wallet</Text>
           {merchantMode && merchantLocationName ? (
             <Text style={styles.merchantLocationText}>{merchantLocationName}</Text>
           ) : null}
           <Text style={styles.heroBalance}>{balance}</Text>
           <Text style={styles.heroCurrency}>{tokenSymbol} available</Text>
-
-          <View style={styles.addressBar}>
-            <Ionicons name="wallet-outline" size={16} color={palette.primaryStrong} />
-            <Text style={styles.addressText}>{shortAddress(smartAddress, 8, 6)}</Text>
-          </View>
-
-          <View style={styles.metaRow}>
-            {selectedWalletLabel ? (
-              <View style={styles.routePill}>
-                <Text style={styles.routePillText}>{selectedWalletLabel}</Text>
-              </View>
-            ) : null}
-            {ownerBadge ? <Text style={styles.ownerText}>Owner {ownerBadge}</Text> : null}
-          </View>
 
           <View style={styles.heroActionRow}>
             {!merchantMode ? (
@@ -301,36 +300,25 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     chooseWalletButton: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 6,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
+      justifyContent: "center",
+      width: 36,
+      height: 36,
       borderRadius: radii.pill,
       backgroundColor: palette.surfaceStrong,
       borderWidth: 1,
       borderColor: palette.primary,
     },
-    chooseWalletButtonText: {
-      color: palette.primaryStrong,
-      fontWeight: "800",
-      fontSize: 12,
-    },
-    heroEyebrow: {
-      marginTop: spacing.xl,
-      color: palette.primaryStrong,
-      fontSize: 13,
-      fontWeight: "700",
-      letterSpacing: 0.2,
-    },
     heroBalance: {
-      marginTop: 10,
+      marginTop: spacing.lg,
       color: palette.primaryStrong,
-      fontSize: 42,
+      fontSize: 54,
       fontWeight: "900",
-      letterSpacing: -1,
+      letterSpacing: -1.5,
     },
     heroCurrency: {
+      marginTop: 2,
       color: palette.textMuted,
-      fontSize: 15,
+      fontSize: 16,
       fontWeight: "600",
     },
     merchantLocationText: {
@@ -340,7 +328,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       fontWeight: "900",
     },
     addressBar: {
-      marginTop: spacing.lg,
+      flexShrink: 1,
       flexDirection: "row",
       alignItems: "center",
       gap: 8,
@@ -356,30 +344,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       color: palette.text,
       fontSize: 13,
       fontWeight: "700",
-    },
-    metaRow: {
-      marginTop: 10,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: spacing.sm,
-    },
-    routePill: {
-      paddingHorizontal: 10,
-      paddingVertical: 7,
-      borderRadius: radii.pill,
-      backgroundColor: palette.primarySoft,
-    },
-    routePillText: {
-      color: palette.primaryStrong,
-      fontWeight: "800",
-      fontSize: 12,
-    },
-    ownerText: {
-      color: palette.textMuted,
-      fontSize: 12,
-      flex: 1,
-      textAlign: "right",
     },
     heroActionRow: {
       marginTop: spacing.xl,
