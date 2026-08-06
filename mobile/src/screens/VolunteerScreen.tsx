@@ -1164,9 +1164,11 @@ function EventCard({
           ) : null}
         </View>
 
-        <Text style={[styles.eventTitle, cancelled ? styles.eventTitleCancelled : undefined]} numberOfLines={2}>
-          {event.title}
-        </Text>
+        <View style={styles.eventTitleBox}>
+          <Text style={[styles.eventTitle, cancelled ? styles.eventTitleCancelled : undefined]} numberOfLines={2}>
+            {event.title}
+          </Text>
+        </View>
 
         {/* Fixed-height block: an event without a location must not make its
             card shorter than the one above it. */}
@@ -1336,7 +1338,7 @@ function EventDetail({
                 </View>
               ) : null}
 
-              <View style={styles.organizerRow}>
+              <View style={[styles.organizerRow, styles.detailOrganizerRow]}>
                 {/* Tapping the organizer filters the list to just their events. */}
                 <Pressable
                   style={styles.organizerLink}
@@ -1425,14 +1427,16 @@ function EventDetail({
                 </Pressable>
               ) : null}
               {event.description ? (
-                <ScrollView
-                  style={styles.detailDescriptionScroll}
-                  contentContainerStyle={styles.detailDescriptionContent}
-                  showsVerticalScrollIndicator
-                  nestedScrollEnabled
-                >
-                  <Text style={styles.detailDescription}>{event.description}</Text>
-                </ScrollView>
+                <View style={styles.detailDescriptionBox}>
+                  <ScrollView
+                    style={styles.detailDescriptionScroll}
+                    contentContainerStyle={styles.detailDescriptionContent}
+                    showsVerticalScrollIndicator
+                    nestedScrollEnabled
+                  >
+                    <Text style={styles.detailDescription}>{event.description}</Text>
+                  </ScrollView>
+                </View>
               ) : (
                 <View style={styles.detailDescriptionScroll} />
               )}
@@ -1735,7 +1739,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     },
     eventCardBody: {
       padding: spacing.md,
-      gap: 6,
+      gap: 3,
     },
     organizerRow: {
       flexDirection: "row",
@@ -1778,16 +1782,20 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     // The next three heights are fixed rather than intrinsic so every card in
     // the list is exactly the same size regardless of title length, a missing
     // location, or how many chips an event happens to have.
+    eventTitleBox: {
+      height: 42,
+      justifyContent: "center",
+    },
     eventTitle: {
       fontSize: 16,
       fontWeight: "700",
       color: palette.text,
       lineHeight: 21,
-      height: 42,
     },
     metaBlock: {
-      height: 38,
-      gap: 3,
+      height: 36,
+      gap: 2,
+      justifyContent: "center",
       overflow: "hidden",
     },
     eventTitleCancelled: {
@@ -1838,7 +1846,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       flexWrap: "nowrap",
       alignItems: "center",
       gap: 6,
-      marginTop: 4,
+      marginTop: 2,
       height: 26,
       overflow: "hidden",
     },
@@ -1894,7 +1902,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     // Fixed height rather than an aspect ratio: the page must fit one screen,
     // so the photo takes a known slice and the description flexes around it.
     detailCover: {
-      height: 132,
+      height: 168,
       borderRadius: radii.md,
       backgroundColor: palette.surfaceMuted,
     },
@@ -1935,10 +1943,19 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       paddingBottom: 128,
       gap: 10,
     },
+    detailDescriptionBox: {
+      flex: 1,
+      minHeight: 56,
+      backgroundColor: palette.surfaceStrong,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: palette.border,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
     detailDescriptionScroll: {
       flex: 1,
-      minHeight: 44,
-      marginTop: 2,
+      minHeight: 36,
     },
     detailDescriptionContent: {
       paddingBottom: 2,
@@ -1957,13 +1974,18 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     },
     detailTitle: {
       flex: 1,
-      fontSize: 21,
+      fontSize: 24,
       fontWeight: "700",
       color: palette.text,
-      lineHeight: 27,
+      lineHeight: 30,
     },
     detailOrganizerName: {
       flex: 1,
+    },
+    detailOrganizerRow: {
+      paddingBottom: 10,
+      borderBottomWidth: 1,
+      borderBottomColor: palette.border,
     },
     detailCardFill: {
       flex: 1,

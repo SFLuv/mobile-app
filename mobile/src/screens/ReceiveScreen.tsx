@@ -12,7 +12,7 @@ import {
 import Constants from "expo-constants";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
-import QRCode from "react-native-qrcode-svg";
+import { SfluvQRCode } from "../components/SfluvQRCode";
 import * as Clipboard from "expo-clipboard";
 import { ScannerCornerGuide } from "../components/ScannerCornerGuide";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
@@ -71,13 +71,6 @@ export function ReceiveScreen({ clientConfig, accountAddress, onRedeemCodeScanne
   const compactLayout = windowFrame.height < 740;
   const styles = useMemo(() => createStyles(palette, shadows, compactLayout), [compactLayout, palette, shadows]);
   const topInset = Math.max(Constants.statusBarHeight, Platform.OS === "ios" ? spacing.md : 0);
-  const qrSize = Math.min(
-    Math.max(
-      Math.min(windowFrame.width - (compactLayout ? 152 : 164), windowFrame.height * (compactLayout ? 0.18 : 0.22)),
-      compactLayout ? 132 : 148,
-    ),
-    compactLayout ? 166 : 188,
-  );
 
   const [mode, setMode] = useState<ReceiveMode>("link");
   const [copied, setCopied] = useState(false);
@@ -172,9 +165,7 @@ export function ReceiveScreen({ clientConfig, accountAddress, onRedeemCodeScanne
               </Pressable>
             </View>
 
-            <View style={styles.qrFrame}>
-              <QRCode value={qrValue} size={qrSize} backgroundColor={palette.white} color="#111111" />
-            </View>
+            <SfluvQRCode value={qrValue} />
 
             <Text style={styles.qrCaption} numberOfLines={1} ellipsizeMode="middle">
               {qrCaption}
@@ -341,8 +332,8 @@ function createStyles(
       borderRadius: radii.lg,
       borderWidth: 1,
       borderColor: palette.border,
-      padding: compactLayout ? spacing.xs : spacing.sm,
-      gap: spacing.xs,
+      padding: compactLayout ? 12 : spacing.md,
+      gap: compactLayout ? spacing.sm : spacing.md,
       justifyContent: "space-between",
       ...shadows.soft,
     },
@@ -372,15 +363,6 @@ function createStyles(
       color: palette.primaryStrong,
       fontWeight: "800",
       fontSize: 13,
-    },
-    qrFrame: {
-      alignSelf: "center",
-      maxWidth: "100%",
-      backgroundColor: palette.white,
-      borderRadius: radii.md,
-      padding: compactLayout ? 6 : 8,
-      borderWidth: 1,
-      borderColor: palette.border,
     },
     qrCaption: {
       color: palette.textMuted,

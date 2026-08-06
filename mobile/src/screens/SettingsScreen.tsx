@@ -61,7 +61,6 @@ type Props = {
   onOpenImprover?: () => void;
   /** Hides the volunteer preference entirely when the backend cannot serve it. */
   volunteerPanelAvailable?: boolean;
-  onOpenVolunteer?: () => void;
   /** Null until the backend answers; the row stays disabled until then. */
   volunteerReminderPreferences?: AppVolunteerReminderPreferences | null;
   onUpdateVolunteerReminderPreferences?: (next: AppVolunteerReminderPreferences) => void;
@@ -867,7 +866,6 @@ export function SettingsScreen({
   onUpdateImproverRewardsWallet,
   onOpenImprover,
   volunteerPanelAvailable,
-  onOpenVolunteer,
   volunteerReminderPreferences,
   onUpdateVolunteerReminderPreferences,
   onOpenImproverCredentials,
@@ -885,6 +883,7 @@ export function SettingsScreen({
   const { palette, shadows } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
   const [section, setSection] = useState<SettingsSection>("general");
+  const [showPushDetails, setShowPushDetails] = useState(false);
   const [rewardsWalletDraft, setRewardsWalletDraft] = useState(
     improver?.primaryRewardsAccount?.trim() || primaryWalletAddress || "",
   );
@@ -1030,7 +1029,6 @@ export function SettingsScreen({
         <>
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Appearance</Text>
-            <Text style={styles.body}>System now follows your phone preference, while light and dark remain manual overrides on this device.</Text>
             <View style={styles.themeRow}>
               <ThemeOption label="System" active={preferences.themePreference === "system"} onPress={() => applyThemePreference("system")} />
               <ThemeOption label="Light" active={preferences.themePreference === "light"} onPress={() => applyThemePreference("light")} />
@@ -1038,31 +1036,22 @@ export function SettingsScreen({
             </View>
           </View>
 
+          {/* Everything notification-related lives together, with the technical
+              diagnostics kept but folded away — they are for troubleshooting,
+              not for every visit. */}
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>App behavior</Text>
+            <Text style={styles.sectionTitle}>Notifications</Text>
             <PreferenceRow
-              title="Notifications"
-              body="Get phone alerts on this device when money lands in one of your wallets."
+              title="Payment alerts"
+              body="Get notified when money lands in one of your wallets."
               value={preferences.notificationsEnabled}
               onValueChange={(notificationsEnabled) => onUpdatePreferences({ ...preferences, notificationsEnabled })}
-            />
-            <PreferenceRow
-              title="Haptic feedback"
-              body="Toggle whether your phone will buzz when you send or receive."
-              value={preferences.hapticsEnabled}
-              onValueChange={(hapticsEnabled) => onUpdatePreferences({ ...preferences, hapticsEnabled })}
             />
             {volunteerPanelAvailable ? (
               <>
                 <PreferenceRow
-                  title="Show volunteer panel"
-                  body="Keep volunteer events in the bottom navigation."
-                  value={preferences.showVolunteerPanel}
-                  onValueChange={(showVolunteerPanel) => onUpdatePreferences({ ...preferences, showVolunteerPanel })}
-                />
-                <PreferenceRow
                   title="Volunteer event reminders"
-                  body="Get a push reminder before events you signed up for, using the email on this account."
+                  body="A reminder before events you signed up for."
                   value={volunteerReminderPreferences?.enabled ?? true}
                   disabled={!volunteerReminderPreferences || !onUpdateVolunteerReminderPreferences}
                   onValueChange={(enabled) =>
@@ -1073,53 +1062,83 @@ export function SettingsScreen({
                   }
                 />
                 {volunteerReminderPreferences?.enabled ? (
-                  <View style={styles.preferenceStack}>
-                    <View style={styles.preferenceCopy}>
-                      <Text style={styles.preferenceTitle}>Remind me</Text>
-                      <Text style={styles.preferenceBody}>How far ahead of an event the reminder arrives.</Text>
-                    </View>
-                    <View style={styles.reminderHourRow}>
-                      {reminderHourOptions(volunteerReminderPreferences.hoursBefore).map((hours) => {
-                        const active = volunteerReminderPreferences.hoursBefore === hours;
-                        return (
-                          <Pressable
-                            key={hours}
-                            style={[styles.reminderHourChip, active ? styles.reminderHourChipActive : undefined]}
-                            onPress={() =>
-                              onUpdateVolunteerReminderPreferences?.({
-                                enabled: true,
-                                hoursBefore: hours,
-                              })
-                            }
+                  <View style={styles.reminderHourRow}>
+                    {reminderHourOptions(volunteerReminderPreferences.hoursBefore).map((hours) => {
+                      const active = volunteerReminderPreferences.hoursBefore === hours;
+                      return (
+                        <Pressable
+                          key={hours}
+                          style={[styles.reminderHourChip, active ? styles.reminderHourChipActive : undefined]}
+                          onPress={() =>
+                            onUpdateVolunteerReminderPreferences?.({ enabled: true, hoursBefore: hours })
+                          }
+                        >
+                          <Text
+                            style={[
+                              styles.reminderHourChipText,
+                              active ? styles.reminderHourChipTextActive : undefined,
+                            ]}
                           >
-                            <Text
-                              style={[
-                                styles.reminderHourChipText,
-                                active ? styles.reminderHourChipTextActive : undefined,
-                              ]}
-                            >
-                              {formatReminderHours(hours)}
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
+                            {formatReminderHours(hours)}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
                   </View>
-                ) : null}
-                {onOpenVolunteer ? (
-                  <Pressable
-                    style={[styles.primaryActionButton, styles.settingsWideButton]}
-                    onPress={onOpenVolunteer}
-                  >
-                    <Text style={styles.primaryActionButtonText}>Browse volunteer events</Text>
-                  </Pressable>
                 ) : null}
               </>
             ) : null}
+
+            <Pressable style={styles.disclosureRow} onPress={() => setShowPushDetails((current) => !current)}>
+              <Text style={styles.disclosureText}>Delivery status</Text>
+              <Ionicons
+                name={showPushDetails ? "chevron-up" : "chevron-down"}
+                size={16}
+                color={palette.textMuted}
+              />
+            </Pressable>
+            {showPushDetails ? (
+              <View style={styles.pushStatusCard}>
+                <View style={styles.pushStatusHeader}>
+                  <Text style={styles.pushStatusTitle}>Push status</Text>
+                  <Pressable
+                    style={[styles.syncButton, notificationSyncState === "syncing" ? styles.buttonDisabled : undefined]}
+                    disabled={notificationSyncState === "syncing"}
+                    onPress={onSyncNotifications}
+                  >
+                    <Text style={styles.syncButtonText}>{notificationSyncState === "syncing" ? "Syncing..." : "Sync now"}</Text>
+                  </Pressable>
+                </View>
+                <Text style={styles.pushStatusMeta}>System permission: {formatPermissionStatus(notificationPermissionStatus)}</Text>
+                <Text style={styles.pushStatusMeta}>Device token: {notificationTokenRegistered ? "Registered" : "Missing"}</Text>
+                <Text style={styles.pushStatusMeta}>
+                  Wallet subscriptions: {notificationSubscribedCount} / {notificationAddressCount}
+                </Text>
+                {notificationStatusMessage ? <Text style={styles.pushStatusMessage}>{notificationStatusMessage}</Text> : null}
+              </View>
+            ) : null}
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>App behavior</Text>
+            <PreferenceRow
+              title="Haptic feedback"
+              body="Buzz on send and receive."
+              value={preferences.hapticsEnabled}
+              onValueChange={(hapticsEnabled) => onUpdatePreferences({ ...preferences, hapticsEnabled })}
+            />
+            {volunteerPanelAvailable ? (
+              <PreferenceRow
+                title="Show volunteer panel"
+                body="Keep volunteer events in the bottom navigation."
+                value={preferences.showVolunteerPanel}
+                onValueChange={(showVolunteerPanel) => onUpdatePreferences({ ...preferences, showVolunteerPanel })}
+              />
+            ) : null}
             <View style={styles.preferenceStack}>
               <View style={styles.preferenceCopy}>
-                <Text style={styles.preferenceTitle}>Send flow</Text>
-                <Text style={styles.preferenceBody}>Choose whether Send opens on search or QR scan first.</Text>
+                <Text style={styles.preferenceTitle}>Send opens on</Text>
+                <Text style={styles.preferenceBody}>Search for a recipient, or go straight to the scanner.</Text>
               </View>
               <View style={styles.themeRow}>
                 <SendFlowOption
@@ -1134,28 +1153,9 @@ export function SettingsScreen({
                 />
               </View>
             </View>
-            <View style={styles.pushStatusCard}>
-              <View style={styles.pushStatusHeader}>
-                <Text style={styles.pushStatusTitle}>Push status</Text>
-                <Pressable
-                  style={[styles.syncButton, notificationSyncState === "syncing" ? styles.buttonDisabled : undefined]}
-                  disabled={notificationSyncState === "syncing"}
-                  onPress={onSyncNotifications}
-                >
-                  <Text style={styles.syncButtonText}>{notificationSyncState === "syncing" ? "Syncing..." : "Sync now"}</Text>
-                </Pressable>
-              </View>
-              <Text style={styles.pushStatusMeta}>System permission: {formatPermissionStatus(notificationPermissionStatus)}</Text>
-              <Text style={styles.pushStatusMeta}>Device token: {notificationTokenRegistered ? "Registered" : "Missing"}</Text>
-              <Text style={styles.pushStatusMeta}>
-                Wallet subscriptions: {notificationSubscribedCount} / {notificationAddressCount}
-              </Text>
-              {notificationStatusMessage ? <Text style={styles.pushStatusMessage}>{notificationStatusMessage}</Text> : null}
-            </View>
           </View>
         </>
       ) : null}
-
       {section === "wallets" ? (
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Wallet settings</Text>
@@ -1643,6 +1643,17 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     themeOptionTextActive: {
       color: palette.primaryStrong,
+    },
+    disclosureRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingVertical: 6,
+    },
+    disclosureText: {
+      fontSize: 13,
+      fontWeight: "700",
+      color: palette.textMuted,
     },
     reminderHourRow: {
       flexDirection: "row",

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
-import QRCode from "react-native-qrcode-svg";
+import { SfluvQRCode } from "../components/SfluvQRCode";
 import { ethers } from "ethers";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { AppClientConfig, AppContact } from "../types/app";
@@ -22,7 +22,7 @@ type Props = {
   onDeleteContact: (contactID: number) => Promise<void>;
 };
 
-type ContactMode = "my-qr" | "scan";
+type ContactMode = "contacts" | "me" | "scan";
 
 function shortAddress(address: string): string {
   if (address.length <= 16) return address;
@@ -72,7 +72,8 @@ export function ContactsScreen({
 }: Props) {
   const { palette, shadows } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
-  const [contactMode, setContactMode] = useState<ContactMode>("my-qr");
+  const [contactMode, setContactMode] = useState<ContactMode>("contacts");
+  const [contactSearch, setContactSearch] = useState("");
   const [editingID, setEditingID] = useState<number | null>(null);
   const [editingName, setEditingName] = useState("");
   const [editingAddress, setEditingAddress] = useState("");
@@ -94,6 +95,19 @@ export function ContactsScreen({
       return left.name.localeCompare(right.name);
     });
   }, [contacts]);
+
+  const visibleContacts = useMemo(() => {
+    const term = contactSearch.trim().toLowerCase();
+    if (!term) {
+      return sortedContacts;
+    }
+    // Address search matters as much as name search here: people paste an
+    // address to check whether they have already saved it.
+    return sortedContacts.filter(
+      (contact) =>
+        contact.name.toLowerCase().includes(term) || contact.address.toLowerCase().includes(term),
+    );
+  }, [contactSearch, sortedContacts]);
 
   const shareQRValue = useMemo(() => {
     if (!shareAddress || !ethers.utils.isAddress(shareAddress)) {
@@ -226,39 +240,34 @@ export function ContactsScreen({
       ) : null}
 
       <View style={styles.card}>
-        <View style={styles.listHeader}>
-          <Text style={styles.sectionTitle}>Contact QR</Text>
-          <Text style={styles.meta}>{contactMode === "my-qr" ? "Share" : "Scan"}</Text>
-        </View>
-
         <View style={styles.segmentWrap}>
-          <Pressable
-            style={[styles.segmentButton, contactMode === "my-qr" ? styles.segmentButtonActive : undefined]}
-            onPress={() => {
-              setContactMode("my-qr");
-              clearPendingScan();
-            }}
-          >
-            <Text style={[styles.segmentText, contactMode === "my-qr" ? styles.segmentTextActive : undefined]}>My QR</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.segmentButton, contactMode === "scan" ? styles.segmentButtonActive : undefined]}
-            onPress={() => {
-              setContactMode("scan");
-              setScanErrorMessage(null);
-            }}
-          >
-            <Text style={[styles.segmentText, contactMode === "scan" ? styles.segmentTextActive : undefined]}>Scan QR</Text>
-          </Pressable>
+          {([
+            ["contacts", "My Contacts"],
+            ["me", "Me"],
+            ["scan", "Scan"],
+          ] as Array<[ContactMode, string]>).map(([value, label]) => (
+            <Pressable
+              key={value}
+              style={[styles.segmentButton, contactMode === value ? styles.segmentButtonActive : undefined]}
+              onPress={() => {
+                setContactMode(value);
+                if (value !== "scan") {
+                  clearPendingScan();
+                }
+                setScanErrorMessage(null);
+              }}
+            >
+              <Text style={[styles.segmentText, contactMode === value ? styles.segmentTextActive : undefined]}>
+                {label}
+              </Text>
+            </Pressable>
+          ))}
         </View>
 
-        {contactMode === "my-qr" ? (
+        {contactMode === "me" ? (
           shareQRValue ? (
             <View style={styles.qrCard}>
-              <Text style={styles.body}>Show this code to let someone save your current wallet as a contact.</Text>
-              <View style={styles.qrFrame}>
-                <QRCode value={shareQRValue} size={216} backgroundColor={palette.white} color="#111111" />
-              </View>
+              <SfluvQRCode value={shareQRValue} />
               <Text style={styles.qrAddress}>{shortAddress(shareAddress || "")}</Text>
               <Pressable style={[styles.primaryButton, styles.shareButton]} onPress={() => void handleShareContact()}>
                 <View style={styles.primaryButtonContent}>
@@ -274,10 +283,8 @@ export function ContactsScreen({
               <Text style={styles.body}>Your wallet is still loading. Once it is ready, your contact QR will appear here.</Text>
             </View>
           )
-        ) : (
+        ) : contactMode === "scan" ? (
           <View style={styles.scanCard}>
-            <Text style={styles.body}>Scan a SFLUV contact, pay, request, or wallet QR to save that address as a contact.</Text>
-
             {permission?.status === "granted" ? (
               <View style={styles.scannerFrame}>
                 <CameraView
@@ -361,21 +368,34 @@ export function ContactsScreen({
 
             {scanErrorMessage && !pendingScannedAddress ? <Text style={styles.errorText}>{scanErrorMessage}</Text> : null}
           </View>
-        )}
-      </View>
-
-      <View style={styles.card}>
-        <View style={styles.listHeader}>
-          <Text style={styles.sectionTitle}>Saved contacts</Text>
-          <Text style={styles.meta}>{sortedContacts.length}</Text>
-        </View>
+        ) : (
+          <View style={styles.contactsPane}>
+          <View style={styles.searchRow}>
+            <Ionicons name="search-outline" size={16} color={palette.textMuted} />
+            <TextInput
+              style={styles.searchInput}
+              value={contactSearch}
+              onChangeText={setContactSearch}
+              placeholder="Search name or address"
+              placeholderTextColor={palette.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {contactSearch ? (
+              <Pressable onPress={() => setContactSearch("")} hitSlop={8}>
+                <Ionicons name="close-circle" size={16} color={palette.textMuted} />
+              </Pressable>
+            ) : null}
+          </View>
 
         {listErrorMessage ? <Text style={styles.errorText}>{listErrorMessage}</Text> : null}
 
-        {sortedContacts.length === 0 ? (
-          <Text style={styles.body}>No contacts saved yet.</Text>
+        {visibleContacts.length === 0 ? (
+          <Text style={styles.body}>
+            {contactSearch.trim() ? "No contacts match that search." : "No contacts saved yet."}
+          </Text>
         ) : (
-          sortedContacts.map((contact) => {
+          visibleContacts.map((contact) => {
             const editing = editingID === contact.id;
             const busy = busyID === contact.id;
 
@@ -504,7 +524,10 @@ export function ContactsScreen({
             );
           })
         )}
+          </View>
+        )}
       </View>
+
     </ScrollView>
   );
 }
@@ -575,15 +598,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     qrCard: {
       gap: spacing.md,
-      alignItems: "center",
-    },
-    qrFrame: {
-      alignSelf: "center",
-      backgroundColor: palette.white,
-      borderRadius: radii.lg,
-      padding: 18,
-      borderWidth: 1,
-      borderColor: palette.border,
+      alignItems: "stretch",
     },
     qrAddress: {
       color: palette.text,
@@ -600,10 +615,31 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     scanCard: {
       gap: spacing.md,
     },
+    contactsPane: {
+      gap: spacing.md,
+    },
+    searchRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surface,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+    },
+    searchInput: {
+      flex: 1,
+      fontSize: 14,
+      color: palette.text,
+      padding: 0,
+    },
+    // Fills the card rather than sitting as a small square inside it.
     scannerFrame: {
-      alignSelf: "center",
-      width: 230,
-      height: 230,
+      alignSelf: "stretch",
+      width: "100%",
+      aspectRatio: 1,
       borderRadius: radii.lg,
       overflow: "hidden",
       backgroundColor: palette.surfaceStrong,

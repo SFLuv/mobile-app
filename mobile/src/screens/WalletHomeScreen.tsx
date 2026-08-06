@@ -145,7 +145,16 @@ export function WalletHomeScreen({
           {merchantMode && merchantLocationName ? (
             <Text style={styles.merchantLocationText}>{merchantLocationName}</Text>
           ) : null}
-          <Text style={styles.heroBalance}>{balance}</Text>
+          {/* Shrinks instead of overflowing: a long balance stays on one line
+              and scales down rather than running past the card. */}
+          <Text
+            style={styles.heroBalance}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.5}
+          >
+            {balance}
+          </Text>
           <Text style={styles.heroCurrency}>{tokenSymbol} available</Text>
 
           <View style={styles.heroActionRow}>
@@ -311,7 +320,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     heroBalance: {
       marginTop: spacing.lg,
       color: palette.primaryStrong,
-      fontSize: 54,
+      fontSize: 62,
       fontWeight: "900",
       letterSpacing: -1.5,
     },

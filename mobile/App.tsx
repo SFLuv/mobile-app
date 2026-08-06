@@ -1250,7 +1250,7 @@ function BottomDock({
   const tabWidth = tabs.length > 0 ? barWidth / tabs.length : 0;
 
   const BUBBLE_PAD = 3;
-  const RECT_HEIGHT = 50;
+  const RECT_HEIGHT = 46;
   const CIRCLE = 54;
   const rectWidth = Math.max(0, tabWidth - BUBBLE_PAD);
   const centerX = centerIndex * tabWidth;
@@ -1287,13 +1287,22 @@ function BottomDock({
   // Invisible at rest on the centre button — the raised button is its own
   // highlight — but visible the whole way there and back.
   const bubbleOpacity = circleness.interpolate({ inputRange: [0, 0.75, 1], outputRange: [1, 1, 0] });
-  const centerFill = circleness.interpolate({
+  const centerSelected = useRef(new Animated.Value(0)).current;
+  const centerIsActive = hasActiveSlot && tabs[activeIndex]?.center === true;
+  useEffect(() => {
+    Animated.timing(centerSelected, {
+      toValue: centerIsActive ? 1 : 0,
+      duration: 180,
+      useNativeDriver: false,
+    }).start();
+  }, [centerIsActive, centerSelected]);
+  const centerFill = centerSelected.interpolate({
     inputRange: [0, 1],
     outputRange: [palette.surfaceStrong, palette.primaryStrong],
   });
 
   return (
-    <View style={styles.bottomDock} onLayout={(event) => setBarWidth(event.nativeEvent.layout.width - 16)}>
+    <View style={styles.bottomDock} onLayout={(event) => setBarWidth(event.nativeEvent.layout.width - 12)}>
       <View pointerEvents="none" style={styles.bottomDockGlassLayer} />
       <View pointerEvents="none" style={styles.bottomDockGlassSheen} />
       {barWidth > 0 ? (
@@ -1326,7 +1335,6 @@ function BottomDock({
               <Animated.View
                 style={[
                   styles.dockCenterButton,
-                  active ? styles.dockCenterButtonActive : undefined,
                   { backgroundColor: centerFill },
                 ]}
               >
@@ -3865,23 +3873,6 @@ function WalletAppShellContent({
           <View style={styles.topTitleWrap}>
             <Text style={styles.brandKicker}>SFLuv</Text>
             <Text style={styles.brand}>{activeTitle}</Text>
-            <Text style={styles.topMeta}>
-              {merchantModeActive
-                ? "Payment-only store device"
-                : tab === "settings"
-                ? "Preferences and account details"
-                : tab === "contacts"
-                  ? "People and wallets you trust"
-                  : tab === "activity"
-                    ? "Recent wallet transfers and rewards"
-                    : tab === "improver"
-                      ? "Claims, payouts, badges, and credentials"
-                      : tab === "volunteer"
-                        ? "Events, sign ups, and volunteer rewards"
-                        : selectedWalletLabel
-                        ? `${selectedWalletLabel} selected`
-                        : "Fast SFLuv payments"}
-            </Text>
           </View>
           <View style={styles.topActions}>
             {showWalletPaneBack ? (
@@ -4140,9 +4131,6 @@ function WalletAppShellContent({
                 await loadAppProfile();
               }}
               volunteerPanelAvailable={canAccessVolunteerPanel}
-              onOpenVolunteer={() => {
-                openVolunteerPanel();
-              }}
               volunteerReminderPreferences={volunteerReminderPreferences}
               onUpdateVolunteerReminderPreferences={(next) => {
                 void handleUpdateVolunteerReminderPreferences(next);
@@ -6156,8 +6144,8 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   },
   topBar: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.sm,
+    paddingTop: 6,
+    paddingBottom: 6,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -6179,9 +6167,6 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     fontSize: 30,
     fontWeight: "900",
     letterSpacing: 0,
-  },
-  topMeta: {
-    color: palette.textMuted,
   },
   topActions: {
     flexDirection: "row",
@@ -6349,7 +6334,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     elevation: 20,
     paddingHorizontal: spacing.lg,
     paddingTop: Platform.OS === "android" ? spacing.lg : spacing.md,
-    paddingBottom: Platform.OS === "android" ? spacing.md : spacing.xl + 12,
+    paddingBottom: Platform.OS === "android" ? spacing.lg : spacing.xl + 22,
     backgroundColor: "transparent",
     overflow: "hidden",
   },
@@ -6413,8 +6398,8 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   // driven by proximity to the raised centre button.
   dockBubble: {
     position: "absolute",
-    top: 9,
-    left: 8,
+    top: 7,
+    left: 6,
     backgroundColor: palette.primarySoft,
     borderWidth: 1,
     borderColor: palette.primary,
@@ -6428,13 +6413,11 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     marginTop: -20,
     borderWidth: 4,
     borderColor: palette.surface,
-  },
-  dockCenterButtonActive: {
-    shadowColor: palette.primaryStrong,
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
+    shadowColor: palette.shadow,
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 5,
   },
   bottomTabText: {
     color: palette.textMuted,
