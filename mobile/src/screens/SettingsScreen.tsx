@@ -363,7 +363,7 @@ function PreferenceRow({
         <Text style={styles.preferenceBody}>{body}</Text>
       </View>
       <Switch
-        trackColor={{ false: palette.borderStrong, true: "#f5a59f" }}
+        trackColor={{ false: palette.borderStrong, true: palette.primarySoft }}
         thumbColor={value ? palette.primaryStrong : palette.white}
         value={value}
         disabled={disabled}
@@ -592,7 +592,7 @@ function WalletSettingsRow({
             <Text style={styles.preferenceBody}>Controls whether this smart wallet appears in the mobile wallet picker.</Text>
           </View>
           <Switch
-            trackColor={{ false: palette.borderStrong, true: "#f5a59f" }}
+            trackColor={{ false: palette.borderStrong, true: palette.primarySoft }}
             thumbColor={isVisible ? palette.primaryStrong : palette.white}
             value={isVisible}
             disabled={saveState.visibilitySaving || !canPersistWallet}
@@ -1536,7 +1536,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     title: {
       color: palette.text,
       fontSize: 28,
-      fontWeight: "900",
+      fontWeight: "800",
       letterSpacing: 0,
     },
     subtitle: {
@@ -1568,7 +1568,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     sectionTitle: {
       color: palette.text,
       fontSize: 18,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     sectionTitleRow: {
       flexDirection: "row",
@@ -1795,7 +1795,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       flex: 1,
       color: palette.text,
       fontSize: 20,
-      fontWeight: "900",
+      fontWeight: "800",
       letterSpacing: 4,
       textAlign: "center",
     },
@@ -1835,7 +1835,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     pinKeypadText: {
       color: palette.text,
       fontSize: 22,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     pinSwipeTrack: {
       minHeight: 58,
@@ -1854,7 +1854,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       color: palette.white,
       textAlign: "center",
       fontSize: 15,
-      fontWeight: "900",
+      fontWeight: "800",
       paddingHorizontal: 72,
     },
     pinSwipeTextDisabled: {
@@ -1892,7 +1892,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     selectOptionTitle: {
       color: palette.text,
       fontSize: 15,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     selectOptionTitleActive: {
       color: palette.primaryStrong,
@@ -1931,7 +1931,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     socialProviderTitle: {
       color: palette.text,
       fontSize: 16,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     socialProviderTitleRow: {
       flexDirection: "row",
@@ -2027,7 +2027,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     walletAddress: {
       color: palette.text,
       fontSize: 16,
-      fontWeight: "900",
+      fontWeight: "800",
       fontFamily: "Courier",
     },
     walletRow: {
@@ -2132,7 +2132,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     primaryActionButtonText: {
       color: palette.white,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     buttonDisabled: {
       opacity: 0.55,
@@ -2166,7 +2166,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     logoutButtonText: {
       color: palette.danger,
-      fontWeight: "900",
+      fontWeight: "800",
       fontSize: 15,
     },
     dangerZoneHeader: {
@@ -2190,7 +2190,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     dangerZoneTitle: {
       color: "#b91c1c",
       fontSize: 18,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     dangerZoneNote: {
       color: "#b91c1c",
@@ -2211,7 +2211,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     deleteAccountButtonText: {
       color: palette.white,
-      fontWeight: "900",
+      fontWeight: "800",
       fontSize: 15,
     },
     deleteConfirmCard: {
@@ -2234,7 +2234,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       flex: 1,
       color: "#b91c1c",
       fontSize: 18,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     deleteConfirmInput: {
       borderWidth: 1,
@@ -2245,7 +2245,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       backgroundColor: "rgba(185, 28, 28, 0.06)",
       color: palette.text,
       fontSize: 18,
-      fontWeight: "900",
+      fontWeight: "800",
       letterSpacing: 1,
     },
     deleteConfirmActions: {

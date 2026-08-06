@@ -297,7 +297,7 @@ async function ensurePushNotificationChannelAsync(): Promise<void> {
       name: "Wallet activity",
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 200, 250],
-      lightColor: "#ef6d66",
+      lightColor: "#eb6c6c",
     });
   }
 }
@@ -1237,6 +1237,7 @@ function BottomDock({
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const [barWidth, setBarWidth] = useState(0);
+  const [barHeight, setBarHeight] = useState(0);
 
   // -1 when the active screen has no dock slot (Settings, reached from the
   // header). The bubble then holds its position and hides rather than sliding
@@ -1279,14 +1280,15 @@ function BottomDock({
   const lerp = (from: number, to: number) =>
     circleness.interpolate({ inputRange: [0, 1], outputRange: [from, to] });
 
+  const bubbleTop = barHeight > 0 ? Math.max(4, (barHeight - RECT_HEIGHT) / 2) : 7;
   const bubbleWidth = lerp(rectWidth, CIRCLE);
   const bubbleHeight = lerp(RECT_HEIGHT, CIRCLE);
   const bubbleRadius = lerp(radii.md, CIRCLE / 2);
-  const bubbleRise = lerp(0, -18);
+  const bubbleRise = lerp(0, -8);
   const bubbleShift = Animated.add(travel, lerp(BUBBLE_PAD / 2, Math.max(0, (tabWidth - CIRCLE) / 2)));
   // Invisible at rest on the centre button — the raised button is its own
   // highlight — but visible the whole way there and back.
-  const bubbleOpacity = circleness.interpolate({ inputRange: [0, 0.75, 1], outputRange: [1, 1, 0] });
+  const bubbleOpacity = circleness.interpolate({ inputRange: [0, 0.5, 0.85], outputRange: [1, 0.55, 0] });
   const centerSelected = useRef(new Animated.Value(0)).current;
   const centerIsActive = hasActiveSlot && tabs[activeIndex]?.center === true;
   useEffect(() => {
@@ -1302,7 +1304,13 @@ function BottomDock({
   });
 
   return (
-    <View style={styles.bottomDock} onLayout={(event) => setBarWidth(event.nativeEvent.layout.width - 12)}>
+    <View
+      style={styles.bottomDock}
+      onLayout={(event) => {
+        setBarWidth(event.nativeEvent.layout.width - 12);
+        setBarHeight(event.nativeEvent.layout.height);
+      }}
+    >
       <View pointerEvents="none" style={styles.bottomDockGlassLayer} />
       <View pointerEvents="none" style={styles.bottomDockGlassSheen} />
       {barWidth > 0 ? (
@@ -1311,6 +1319,7 @@ function BottomDock({
           style={[
             styles.dockBubble,
             {
+              top: bubbleTop,
               width: bubbleWidth,
               height: bubbleHeight,
               borderRadius: bubbleRadius,
@@ -3749,9 +3758,11 @@ function WalletAppShellContent({
         : tab === "contacts"
           ? "Contacts"
           : "Settings";
-  const showWalletPaneBack = tab === "wallet" && walletPane !== "home";
   const showBlockingWalletState = runtime.loading && !runtime.service;
-  const showStandardChrome = !(tab === "wallet" && walletPane === "send");
+  // The send pane keeps the header (it is not a separate context) but takes the
+  // dock's space, since its keypad reaches the bottom of the screen.
+  const sendPaneActive = tab === "wallet" && walletPane === "send";
+  const showStandardChrome = true;
   const RootContainer = showStandardChrome ? SafeAreaView : View;
   const walletHomeContent = (
     <WalletHomeScreen
@@ -3842,6 +3853,7 @@ function WalletAppShellContent({
         clientConfig={clientConfig}
         accountAddress={smartAddress || runtime.discovery?.ownerAddress || ethers.constants.AddressZero}
         onRedeemCodeScanned={openRedeemFlowForCode}
+        onBack={closeWalletPaneToWallet}
         showRedeemScanner={!merchantModeActive}
       />
     ) : null;
@@ -3875,16 +3887,6 @@ function WalletAppShellContent({
             <Text style={styles.brand}>{activeTitle}</Text>
           </View>
           <View style={styles.topActions}>
-            {showWalletPaneBack ? (
-              <Pressable
-                style={styles.iconButton}
-                onPress={() => {
-                  closeWalletPaneToWallet();
-                }}
-              >
-                <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
-              </Pressable>
-            ) : null}
             <Pressable
               style={[styles.iconButton, tab === "settings" ? styles.iconButtonActive : undefined]}
               onPress={() => {
@@ -4163,7 +4165,7 @@ function WalletAppShellContent({
         ) : null}
       </View>
 
-      {showStandardChrome && !merchantModeActive ? (
+      {showStandardChrome && !merchantModeActive && !sendPaneActive ? (
         <View pointerEvents="box-none" style={styles.bottomDockShell}>
           <BlurView
             pointerEvents="none"
@@ -6165,7 +6167,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   brand: {
     color: palette.primaryStrong,
     fontSize: 30,
-    fontWeight: "900",
+    fontWeight: "800",
     letterSpacing: 0,
   },
   topActions: {
@@ -6252,7 +6254,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   stateTitle: {
     color: palette.primaryStrong,
     fontSize: 22,
-    fontWeight: "900",
+    fontWeight: "800",
     textAlign: "center",
   },
   errorText: {
@@ -6296,7 +6298,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   connectionStateTitle: {
     color: palette.primaryStrong,
     fontSize: 22,
-    fontWeight: "900",
+    fontWeight: "800",
     textAlign: "center",
   },
   connectionStateBody: {
@@ -6401,7 +6403,6 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   // driven by proximity to the raised centre button.
   dockBubble: {
     position: "absolute",
-    top: 7,
     left: 6,
     backgroundColor: palette.primarySoft,
     borderWidth: 1,
@@ -6462,7 +6463,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   loginTitle: {
     color: palette.primaryStrong,
     fontSize: 38,
-    fontWeight: "900",
+    fontWeight: "800",
     lineHeight: 42,
   },
   loginBody: {
@@ -6547,7 +6548,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   loginCodeCellText: {
     color: palette.text,
     fontSize: 22,
-    fontWeight: "900",
+    fontWeight: "800",
     textAlign: "center",
   },
   loginCodeHiddenInput: {
@@ -6594,21 +6595,21 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   loginOptionButtonText: {
     flex: 1,
     color: palette.text,
-    fontWeight: "900",
+    fontWeight: "800",
     fontSize: 16,
     textAlign: "center",
   },
   loginOptionOutlineText: {
     flex: 1,
     color: palette.primaryStrong,
-    fontWeight: "900",
+    fontWeight: "800",
     fontSize: 16,
     textAlign: "center",
   },
   loginOptionButtonTextDark: {
     flex: 1,
     color: palette.white,
-    fontWeight: "900",
+    fontWeight: "800",
     fontSize: 16,
     textAlign: "center",
   },
@@ -6627,7 +6628,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   },
   loginButtonText: {
     color: palette.text,
-    fontWeight: "900",
+    fontWeight: "800",
     fontSize: 16,
   },
   loginSecondaryButton: {
@@ -6723,7 +6724,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   sendingTitle: {
     color: palette.primaryStrong,
     fontSize: 20,
-    fontWeight: "900",
+    fontWeight: "800",
     textAlign: "center",
   },
   sendingText: {
@@ -6782,7 +6783,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   moreMenuTitle: {
     color: palette.primaryStrong,
     fontSize: 24,
-    fontWeight: "900",
+    fontWeight: "800",
   },
   moreMenuSubtitle: {
     color: palette.textMuted,
@@ -6829,7 +6830,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   merchantExitTitle: {
     color: palette.text,
     fontSize: 18,
-    fontWeight: "900",
+    fontWeight: "800",
   },
   merchantExitBody: {
     color: palette.textMuted,
@@ -6843,7 +6844,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     backgroundColor: palette.surface,
     color: palette.text,
     fontSize: 18,
-    fontWeight: "900",
+    fontWeight: "800",
     letterSpacing: 4,
     textAlign: "center",
     paddingHorizontal: spacing.md,
@@ -6862,7 +6863,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     flex: 1,
     color: palette.text,
     fontSize: 20,
-    fontWeight: "900",
+    fontWeight: "800",
     letterSpacing: 4,
     textAlign: "center",
   },
@@ -6901,7 +6902,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   merchantExitKeypadText: {
     color: palette.text,
     fontSize: 22,
-    fontWeight: "900",
+    fontWeight: "800",
   },
   merchantExitError: {
     color: palette.danger,
@@ -6917,7 +6918,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   },
   merchantExitButtonText: {
     color: palette.white,
-    fontWeight: "900",
+    fontWeight: "800",
   },
   merchantExitSwipeTrack: {
     minHeight: 58,
@@ -6935,7 +6936,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     color: palette.white,
     textAlign: "center",
     fontSize: 15,
-    fontWeight: "900",
+    fontWeight: "800",
     paddingHorizontal: 72,
   },
   merchantExitSwipeTextDisabled: {
@@ -6971,7 +6972,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   walletChooserTitle: {
     color: palette.primaryStrong,
     fontSize: 24,
-    fontWeight: "900",
+    fontWeight: "800",
   },
   walletChooserClose: {
     width: 38,
@@ -7020,7 +7021,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   },
   walletChooserBalance: {
     color: palette.text,
-    fontWeight: "900",
+    fontWeight: "800",
     fontSize: 18,
   },
   walletChooserAddress: {

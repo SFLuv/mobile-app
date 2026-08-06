@@ -239,6 +239,7 @@ export function VolunteerScreen({
   const [showFull, setShowFull] = useState(false);
   const [organizerPickerOpen, setOrganizerPickerOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [filterContentHeight, setFilterContentHeight] = useState(0);
   /** Set when the list was reached by tapping an organizer, so we can walk back. */
   const [organizerReturnEventId, setOrganizerReturnEventId] = useState<string | null>(null);
 
@@ -278,10 +279,9 @@ export function VolunteerScreen({
     return () => clearTimeout(timeout);
   }, [searchInput]);
 
-  const SEARCH_FIELD_HEIGHT = 45;
-  const searchHeight = searchReveal.interpolate({
+  const filterHeight = searchReveal.interpolate({
     inputRange: [0, 1],
-    outputRange: [0, SEARCH_FIELD_HEIGHT + spacing.md],
+    outputRange: [0, filterContentHeight + spacing.sm],
   });
 
   const toggleSearch = useCallback(() => {
@@ -471,6 +471,9 @@ export function VolunteerScreen({
       const known = "title" in event ? event : events.find((entry) => entry.id === event.id) ?? null;
       if (options?.animate !== false) {
         pushInDetail();
+      } else {
+        // Arriving by a back gesture: appear in place rather than flying in.
+        detailSlide.setValue(0);
       }
       // Paint whatever the list already knows immediately, then refine.
       setSelectedEvent(known);
@@ -502,7 +505,7 @@ export function VolunteerScreen({
         }
       }
     },
-    [applyEventUpdate, backendClient, events, pushInDetail],
+    [applyEventUpdate, backendClient, detailSlide, events, pushInDetail],
   );
 
   // Refreshes an open event without the paint-known-then-refine path openEvent
@@ -540,8 +543,9 @@ export function VolunteerScreen({
     setDetailError(null);
     setDetailLoading(false);
     setSignupSheetOpen(false);
-    detailSlide.setValue(0);
-  }, [detailSlide]);
+    // The list is not mounted right now, so this cannot flicker.
+    listSlide.setValue(0);
+  }, [listSlide]);
 
   /**
    * Jumping from an event to "everything by this organizer". The event we came
@@ -592,7 +596,6 @@ export function VolunteerScreen({
             Animated.timing(listSlide, { toValue: width, duration: 160, useNativeDriver: true }).start(
               ({ finished }) => {
                 if (finished) {
-                  listSlide.setValue(0);
                   returnToOriginEvent();
                 }
               },
@@ -834,12 +837,52 @@ export function VolunteerScreen({
           />
         }
       >
-        <View style={styles.filterCard}>
-          {/* Collapsed by default — most visits are a browse, not a lookup — and
-              grows out of the button in the corner when asked for. */}
-          <Animated.View
-            style={[styles.searchCollapsible, { height: searchHeight, opacity: searchReveal }]}
-            pointerEvents={searchOpen ? "auto" : "none"}
+        <View style={styles.filterHeaderRow}>
+          <View style={[styles.segmentRow, styles.segmentRowFill]}>
+            {FEED_OPTIONS.map((option) => {
+              const active = feed === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  style={[styles.segment, active ? styles.segmentActive : undefined]}
+                  onPress={() => {
+                    if (active) {
+                      return;
+                    }
+                    haptics();
+                    setFeed(option.value);
+                  }}
+                >
+                  <Text style={[styles.segmentText, active ? styles.segmentTextActive : undefined]}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Pressable
+            style={[styles.searchToggle, searchOpen || search ? styles.searchToggleActive : undefined]}
+            onPress={toggleSearch}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel={searchOpen ? "Hide search" : "Search events"}
+          >
+            <Ionicons
+              name={searchOpen ? "close" : "search"}
+              size={18}
+              color={searchOpen || search ? palette.primaryStrong : palette.textMuted}
+            />
+          </Pressable>
+        </View>
+        <Animated.View
+          style={[styles.filterCollapsible, { height: filterHeight, opacity: searchReveal }]}
+          pointerEvents={searchOpen ? "auto" : "none"}
+        >
+          {/* Search and both filters live together behind the search icon:
+              all three narrow the list, and none is wanted on a plain browse. */}
+          <View
+            style={styles.filterCard}
+            onLayout={(event) => setFilterContentHeight(event.nativeEvent.layout.height)}
           >
             <View style={styles.searchRow}>
               <Ionicons name="search-outline" size={16} color={palette.textMuted} />
@@ -860,47 +903,8 @@ export function VolunteerScreen({
                 </Pressable>
               ) : null}
             </View>
-          </Animated.View>
 
-          <View style={styles.filterHeaderRow}>
-            <View style={[styles.segmentRow, styles.segmentRowFill]}>
-              {FEED_OPTIONS.map((option) => {
-                const active = feed === option.value;
-                return (
-                  <Pressable
-                    key={option.value}
-                    style={[styles.segment, active ? styles.segmentActive : undefined]}
-                    onPress={() => {
-                      if (active) {
-                        return;
-                      }
-                      haptics();
-                      setFeed(option.value);
-                    }}
-                  >
-                    <Text style={[styles.segmentText, active ? styles.segmentTextActive : undefined]}>
-                      {option.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <Pressable
-              style={[styles.searchToggle, searchOpen || search ? styles.searchToggleActive : undefined]}
-              onPress={toggleSearch}
-              hitSlop={6}
-              accessibilityRole="button"
-              accessibilityLabel={searchOpen ? "Hide search" : "Search events"}
-            >
-              <Ionicons
-                name={searchOpen ? "close" : "search"}
-                size={18}
-                color={searchOpen || search ? palette.primaryStrong : palette.textMuted}
-              />
-            </Pressable>
-          </View>
-
-          <View style={styles.filterRow}>
+            <View style={styles.filterRow}>
             <Pressable
               style={[styles.filterChip, organizerFilter !== ORGANIZER_FILTER_ALL ? styles.filterChipActive : undefined]}
               onPress={() => {
@@ -942,7 +946,8 @@ export function VolunteerScreen({
               </Text>
             </Pressable>
           </View>
-        </View>
+          </View>
+        </Animated.View>
 
         {loading ? (
           <View style={styles.stateCard}>
@@ -1426,6 +1431,7 @@ function EventDetail({
               ) : null}
               {event.description ? (
                 <View style={styles.detailDescriptionBox}>
+                  <Text style={styles.detailDescriptionLabel}>Description</Text>
                   <ScrollView
                     style={styles.detailDescriptionScroll}
                     contentContainerStyle={styles.detailDescriptionContent}
@@ -1557,6 +1563,9 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       alignItems: "center",
       gap: spacing.sm,
     },
+    segmentLabel: {
+      flexShrink: 1,
+    },
     segmentRowFill: {
       flex: 1,
     },
@@ -1574,7 +1583,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       borderColor: palette.primary,
       backgroundColor: palette.primarySoft,
     },
-    searchCollapsible: {
+    filterCollapsible: {
       overflow: "hidden",
       justifyContent: "flex-start",
     },
@@ -1607,6 +1616,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     segment: {
       flex: 1,
       minWidth: 0,
+      flexShrink: 1,
       alignItems: "center",
       justifyContent: "center",
       paddingHorizontal: 12,
@@ -1628,6 +1638,9 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       flexDirection: "row",
       gap: spacing.sm,
       marginTop: spacing.md,
+    },
+    filterCardSpacing: {
+      gap: spacing.md,
     },
     filterChip: {
       flexDirection: "row",
@@ -1770,7 +1783,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       paddingHorizontal: 8,
       paddingVertical: 3,
       borderRadius: radii.pill,
-      backgroundColor: isDark ? "rgba(87, 200, 150, 0.16)" : "rgba(23, 130, 87, 0.12)",
+      backgroundColor: isDark ? "rgba(78, 195, 140, 0.16)" : "rgba(19, 115, 51, 0.10)",
     },
     goingChipText: {
       fontSize: 10,
@@ -1807,7 +1820,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       paddingHorizontal: 8,
       paddingVertical: 3,
       borderRadius: radii.pill,
-      backgroundColor: isDark ? "rgba(255, 138, 128, 0.16)" : "rgba(207, 77, 67, 0.12)",
+      backgroundColor: isDark ? "rgba(255, 138, 128, 0.16)" : "rgba(176, 0, 32, 0.08)",
     },
     cancelledChipText: {
       fontSize: 10,
@@ -1821,7 +1834,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       paddingHorizontal: spacing.sm,
       paddingVertical: 8,
       borderRadius: radii.sm,
-      backgroundColor: isDark ? "rgba(255, 138, 128, 0.14)" : "rgba(207, 77, 67, 0.10)",
+      backgroundColor: isDark ? "rgba(255, 138, 128, 0.14)" : "rgba(176, 0, 32, 0.07)",
     },
     cancelledBannerText: {
       flex: 1,
@@ -1942,6 +1955,14 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       paddingBottom: 128,
       gap: 10,
     },
+    detailDescriptionLabel: {
+      fontSize: 11,
+      fontWeight: "800",
+      color: palette.primaryStrong,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      marginBottom: 6,
+    },
     detailDescriptionBox: {
       flexShrink: 1,
       backgroundColor: palette.surfaceStrong,
@@ -1983,7 +2004,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     detailOrganizerRow: {
       paddingBottom: 10,
       borderBottomWidth: 1,
-      borderBottomColor: palette.border,
+      borderBottomColor: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.05)",
     },
     detailCardFill: {
       flexShrink: 1,
@@ -2023,6 +2044,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       alignItems: "center",
       justifyContent: "space-between",
       gap: spacing.sm,
+      paddingVertical: 4,
     },
     detailFactCopy: {
       flex: 1,
@@ -2066,7 +2088,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       paddingHorizontal: spacing.sm,
       paddingVertical: 8,
       borderRadius: radii.sm,
-      backgroundColor: isDark ? "rgba(87, 200, 150, 0.14)" : "rgba(23, 130, 87, 0.10)",
+      backgroundColor: isDark ? "rgba(78, 195, 140, 0.14)" : "rgba(19, 115, 51, 0.08)",
     },
     signedUpBannerText: {
       flex: 1,

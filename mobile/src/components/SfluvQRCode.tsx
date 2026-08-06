@@ -8,7 +8,39 @@ import Svg, { Circle, Rect } from "react-native-svg";
 import genMatrix from "react-native-qrcode-svg/src/genMatrix";
 import { Palette, getShadows, radii, useAppTheme } from "../theme";
 
-const SFLUV_LOGO = require("../../assets/icon.png");
+const SFLUV_LOGO = require("../../assets/qr-logo.png");
+
+/**
+ * Matrix generation is pure and costs real time on first paint, so results are
+ * kept for the life of the process. Callers can warm this before a screen is
+ * opened so the code is already computed when it appears.
+ */
+const matrixCache = new Map<string, number[][]>();
+
+export function prewarmQRCode(value: string | null | undefined): void {
+  if (!value || matrixCache.has(value)) {
+    return;
+  }
+  try {
+    matrixCache.set(value, genMatrix(value, ERROR_CORRECTION));
+  } catch {
+    // A value we cannot encode simply stays uncached.
+  }
+}
+
+function buildMatrix(value: string): number[][] {
+  const cached = matrixCache.get(value);
+  if (cached) {
+    return cached;
+  }
+  try {
+    const generated = genMatrix(value, ERROR_CORRECTION);
+    matrixCache.set(value, generated);
+    return generated;
+  } catch {
+    return [];
+  }
+}
 
 /** Matches the web wallet: near-black modules, brand coral eyes. */
 const MODULE_COLOR = "#161616";
@@ -42,16 +74,7 @@ export function SfluvQRCode({ value, size }: Props) {
 
   const resolvedSize = size ?? Math.max(0, Math.floor(frameWidth - FRAME_PADDING * 2));
 
-  const matrix = useMemo<number[][]>(() => {
-    if (!value) {
-      return [];
-    }
-    try {
-      return genMatrix(value, ERROR_CORRECTION);
-    } catch {
-      return [];
-    }
-  }, [value]);
+  const matrix = useMemo<number[][]>(() => (value ? buildMatrix(value) : []), [value]);
 
   const drawing = useMemo(() => {
     const count = matrix.length;
@@ -130,24 +153,19 @@ export function SfluvQRCode({ value, size }: Props) {
               <Circle key={dot.key} cx={dot.cx} cy={dot.cy} r={drawing.dotRadius} fill={MODULE_COLOR} />
             ))}
           </Svg>
-          <View
+          <Image
+            source={SFLUV_LOGO}
             style={[
-              styles.logoWrap,
+              styles.logoMark,
               {
                 width: logoSize,
                 height: logoSize,
-                borderRadius: logoSize / 2,
                 left: (resolvedSize - logoSize) / 2,
                 top: (resolvedSize - logoSize) / 2,
               },
             ]}
-          >
-            <Image
-              source={SFLUV_LOGO}
-              style={{ width: logoSize, height: logoSize, borderRadius: logoSize / 2 }}
-              resizeMode="cover"
-            />
-          </View>
+            resizeMode="contain"
+          />
         </View>
       ) : null}
     </View>
@@ -166,14 +184,14 @@ function createStyles(palette: Palette, isDark: boolean) {
       backgroundColor: "#ffffff",
       borderRadius: radii.lg,
       borderWidth: 1,
-      borderColor: isDark ? "rgba(239,109,102,0.35)" : "rgba(239,109,102,0.28)",
+      borderColor: isDark ? "rgba(235,108,108,0.34)" : "rgba(235,108,108,0.24)",
       padding: FRAME_PADDING,
       ...shadows.soft,
     },
-    logoWrap: {
+    // No plate behind it: the modules underneath are already cleared, so the
+    // mark sits on the card's own white, exactly as it does on the web.
+    logoMark: {
       position: "absolute",
-      overflow: "hidden",
-      backgroundColor: "#ffffff",
     },
   });
 }

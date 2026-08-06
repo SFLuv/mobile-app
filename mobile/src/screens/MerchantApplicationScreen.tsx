@@ -290,7 +290,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     title: {
       color: palette.text,
       fontSize: 24,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     subtitle: {
       color: palette.textMuted,

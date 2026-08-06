@@ -1,9 +1,21 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  Animated,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
-import { SfluvQRCode } from "../components/SfluvQRCode";
+import { SfluvQRCode, prewarmQRCode } from "../components/SfluvQRCode";
 import { ethers } from "ethers";
+import { ScannerCornerGuide } from "../components/ScannerCornerGuide";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { AppClientConfig, AppContact } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
@@ -75,6 +87,7 @@ export function ContactsScreen({
   const [contactMode, setContactMode] = useState<ContactMode>("contacts");
   const [contactSearch, setContactSearch] = useState("");
   const [addSheetOpen, setAddSheetOpen] = useState(false);
+  const addSheetAnim = useRef(new Animated.Value(0)).current;
   const [manualEntry, setManualEntry] = useState("");
   const [editingID, setEditingID] = useState<number | null>(null);
   const [editingName, setEditingName] = useState("");
@@ -118,6 +131,11 @@ export function ContactsScreen({
     return buildUniversalAddContactLink({ address: shareAddress }, clientConfig);
   }, [clientConfig, shareAddress]);
 
+  // Ready before the My QR tab is ever opened.
+  useEffect(() => {
+    prewarmQRCode(shareQRValue);
+  }, [shareQRValue]);
+
   useEffect(() => {
     if (!addSheetOpen) {
       return;
@@ -150,7 +168,7 @@ export function ContactsScreen({
     const normalizedAddress = ethers.utils.getAddress(trimmed);
     const existingContact = contacts.find((contact) => contact.address.toLowerCase() === normalizedAddress.toLowerCase());
 
-    setAddSheetOpen(true);
+    openAddSheet();
     if (existingContact) {
       setPendingScannedAddress(null);
       setPendingScannedName("");
@@ -177,11 +195,42 @@ export function ContactsScreen({
     setScanErrorMessage(null);
   };
 
+  const openAddSheet = () => {
+    setAddSheetOpen(true);
+    addSheetAnim.setValue(0);
+    Animated.timing(addSheetAnim, {
+      toValue: 1,
+      duration: 240,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const manualEntryResolved = useMemo(() => {
+    const raw = manualEntry.trim();
+    if (!raw) {
+      return null;
+    }
+    try {
+      return resolveScannedAddress(raw, clientConfig);
+    } catch {
+      return null;
+    }
+  }, [clientConfig, manualEntry]);
+
   const closeAddSheet = () => {
-    setAddSheetOpen(false);
-    setManualEntry("");
-    clearPendingScan();
-    setScanErrorMessage(null);
+    Animated.timing(addSheetAnim, {
+      toValue: 0,
+      duration: 170,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (!finished) {
+        return;
+      }
+      setAddSheetOpen(false);
+      setManualEntry("");
+      clearPendingScan();
+      setScanErrorMessage(null);
+    });
   };
 
   /**
@@ -481,7 +530,7 @@ export function ContactsScreen({
       {contactMode === "contacts" ? (
         <Pressable
           style={styles.fab}
-          onPress={() => setAddSheetOpen(true)}
+          onPress={openAddSheet}
           accessibilityRole="button"
           accessibilityLabel="Add contact"
         >
@@ -495,11 +544,26 @@ export function ContactsScreen({
         visible={addSheetOpen}
         transparent
         presentationStyle="overFullScreen"
-        animationType="slide"
+        animationType="none"
         onRequestClose={closeAddSheet}
       >
-        <View style={styles.addSheetBackdrop}>
-          <View style={styles.addSheetCard}>
+        <Animated.View style={[styles.addSheetBackdrop, { opacity: addSheetAnim }]}>
+          <Pressable style={styles.addSheetDismissArea} onPress={closeAddSheet} />
+          <Animated.View
+            style={[
+              styles.addSheetCard,
+              {
+                transform: [
+                  {
+                    translateY: addSheetAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [48, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
             <View style={styles.addSheetHeader}>
               <Text style={styles.sectionTitle}>Add contact</Text>
               <Pressable style={styles.addSheetClose} onPress={closeAddSheet} hitSlop={8}>
@@ -512,6 +576,7 @@ export function ContactsScreen({
                 <View style={styles.scannerFrame}>
                   <CameraView
                     style={StyleSheet.absoluteFillObject}
+                    facing="back"
                     barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
                     onBarcodeScanned={
                       pendingScannedAddress
@@ -521,6 +586,7 @@ export function ContactsScreen({
                           }
                     }
                   />
+                  <ScannerCornerGuide color={palette.primaryStrong} style={styles.scannerGuide} />
                 </View>
               ) : (
                 <View style={styles.permissionCard}>
@@ -596,7 +662,10 @@ export function ContactsScreen({
                 <Text style={styles.manualEntryLabel}>Or paste an address or link</Text>
                 <View style={styles.manualEntryRow}>
                   <TextInput
-                    style={styles.manualEntryInput}
+                    style={[
+                      styles.manualEntryInput,
+                      manualEntryResolved ? styles.manualEntryInputValid : undefined,
+                    ]}
                     value={manualEntry}
                     onChangeText={(next) => {
                       setManualEntry(next);
@@ -608,17 +677,27 @@ export function ContactsScreen({
                     autoCorrect={false}
                   />
                   <Pressable
-                    style={[styles.inlineButton, !manualEntry.trim() ? styles.buttonDisabled : undefined]}
-                    disabled={!manualEntry.trim()}
+                    style={[
+                      styles.manualEntryButton,
+                      manualEntryResolved ? styles.manualEntryButtonActive : undefined,
+                    ]}
+                    disabled={!manualEntryResolved}
                     onPress={() => submitManualEntry()}
                   >
-                    <Text style={styles.inlineButtonText}>Use</Text>
+                    <Text
+                      style={[
+                        styles.manualEntryButtonText,
+                        manualEntryResolved ? styles.manualEntryButtonTextActive : undefined,
+                      ]}
+                    >
+                      Add
+                    </Text>
                   </Pressable>
                 </View>
               </View>
             </ScrollView>
-          </View>
-        </View>
+          </Animated.View>
+        </Animated.View>
       </Modal>
     </View>
   );
@@ -634,10 +713,10 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     fab: {
       position: "absolute",
       right: spacing.lg,
-      bottom: 132,
-      width: 58,
-      height: 58,
-      borderRadius: 29,
+      bottom: 124,
+      width: 66,
+      height: 66,
+      borderRadius: 33,
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: palette.primaryStrong,
@@ -652,12 +731,18 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       justifyContent: "flex-end",
       backgroundColor: palette.overlay,
     },
+    addSheetDismissArea: {
+      flex: 1,
+    },
     addSheetCard: {
-      maxHeight: "88%",
+      minHeight: "76%",
+      maxHeight: "92%",
       backgroundColor: palette.background,
       borderTopLeftRadius: radii.xl,
       borderTopRightRadius: radii.xl,
-      padding: spacing.lg,
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.lg,
+      paddingBottom: spacing.xxl,
       gap: spacing.md,
     },
     addSheetHeader: {
@@ -689,14 +774,42 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     manualEntryInput: {
       flex: 1,
+      height: 46,
       borderRadius: radii.pill,
       borderWidth: 1,
       borderColor: palette.border,
       backgroundColor: palette.surface,
       paddingHorizontal: 16,
-      paddingVertical: 12,
       fontSize: 14,
       color: palette.text,
+    },
+    // A recognised address or link is confirmed by the field itself, not just
+    // by the button lighting up.
+    manualEntryInputValid: {
+      borderColor: palette.primary,
+    },
+    manualEntryButton: {
+      height: 46,
+      minWidth: 74,
+      paddingHorizontal: spacing.md,
+      borderRadius: radii.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: palette.surfaceStrong,
+      borderWidth: 1,
+      borderColor: palette.border,
+    },
+    manualEntryButtonActive: {
+      backgroundColor: palette.primaryStrong,
+      borderColor: palette.primaryStrong,
+    },
+    manualEntryButtonText: {
+      fontSize: 14,
+      fontWeight: "800",
+      color: palette.textMuted,
+    },
+    manualEntryButtonTextActive: {
+      color: palette.white,
     },
     container: {
       paddingHorizontal: spacing.lg,
@@ -734,7 +847,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     sectionTitle: {
       color: palette.text,
       fontSize: 18,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     segmentWrap: {
       flexDirection: "row",
@@ -804,11 +917,17 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       alignSelf: "stretch",
       width: "100%",
       aspectRatio: 1,
-      borderRadius: radii.lg,
+      borderRadius: radii.xl,
       overflow: "hidden",
-      backgroundColor: palette.surfaceStrong,
       borderWidth: 1,
       borderColor: palette.border,
+      backgroundColor: "#04161c",
+      alignItems: "center",
+      justifyContent: "center",
+      ...shadows.card,
+    },
+    scannerGuide: {
+      position: "absolute",
     },
     permissionCard: {
       backgroundColor: palette.surfaceStrong,
@@ -898,7 +1017,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     contactName: {
       color: palette.text,
-      fontWeight: "900",
+      fontWeight: "800",
       fontSize: 16,
     },
     favoriteChip: {

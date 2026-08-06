@@ -370,7 +370,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     title: {
       color: palette.text,
       fontSize: 24,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     badgeRow: {
       flexDirection: "row",
@@ -426,7 +426,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     amountText: {
       fontSize: 30,
-      fontWeight: "900",
+      fontWeight: "800",
       textAlign: "center",
     },
     amountReceive: {

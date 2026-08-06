@@ -95,21 +95,22 @@ export function ActivityScreen({
         }
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.walletBar}>
-          <View style={styles.walletBarCopy}>
-            <Text style={styles.walletBarLabel}>Current wallet</Text>
-            <Text style={styles.walletBarTitle}>{selectedWalletLabel || "Selected wallet"}</Text>
-            <Text style={styles.walletBarMeta}>
-              {activeAddress ? shortAddress(activeAddress) : "Wallet not loaded yet"}
-            </Text>
-          </View>
+        {/* One pill instead of a header block: it names the wallet these
+            transactions belong to, and still opens the chooser when there is
+            more than one wallet to choose from. */}
+        <Pressable
+          style={styles.walletPill}
+          disabled={!showWalletChooser || !onOpenWalletChooser}
+          onPress={onOpenWalletChooser}
+        >
+          <Ionicons name="receipt-outline" size={16} color={palette.primaryStrong} />
+          <Text style={styles.walletPillText} numberOfLines={1}>
+            {selectedWalletLabel?.trim() || (activeAddress ? shortAddress(activeAddress) : "Wallet")}
+          </Text>
           {showWalletChooser && onOpenWalletChooser ? (
-            <Pressable style={styles.chooseWalletButton} onPress={onOpenWalletChooser}>
-              <Text style={styles.chooseWalletButtonText}>Choose Wallet</Text>
-              <Ionicons name="chevron-down" size={14} color={palette.primaryStrong} />
-            </Pressable>
+            <Ionicons name="chevron-down" size={13} color={palette.textMuted} />
           ) : null}
-        </View>
+        </Pressable>
 
         {!transactionsLoaded ? (
           <View style={styles.emptyCard}>
@@ -118,7 +119,6 @@ export function ActivityScreen({
           </View>
         ) : decoratedTransactions.length === 0 ? (
           <View style={styles.emptyCard}>
-            <Ionicons name="receipt-outline" size={22} color={palette.textMuted} />
             <Text style={styles.emptyTitle}>No transactions yet</Text>
             <Text style={styles.emptyBody}>Your sends and receives will show up here after the first payment.</Text>
           </View>
@@ -185,6 +185,25 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       gap: spacing.md,
       paddingBottom: 120,
     },
+    walletPill: {
+      alignSelf: "flex-start",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      maxWidth: "100%",
+      backgroundColor: palette.surfaceStrong,
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: palette.border,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+    },
+    walletPillText: {
+      flexShrink: 1,
+      fontSize: 13,
+      fontWeight: "800",
+      color: palette.text,
+    },
     walletBar: {
       backgroundColor: palette.surface,
       borderRadius: radii.lg,
@@ -197,26 +216,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       gap: spacing.md,
       ...shadows.soft,
     },
-    walletBarCopy: {
-      flex: 1,
-      gap: 4,
-    },
-    walletBarLabel: {
-      color: palette.textMuted,
-      fontSize: 12,
-      fontWeight: "800",
-      textTransform: "uppercase",
-      letterSpacing: 0.4,
-    },
-    walletBarTitle: {
-      color: palette.text,
-      fontSize: 17,
-      fontWeight: "900",
-    },
-    walletBarMeta: {
-      color: palette.textMuted,
-      fontSize: 13,
-    },
     chooseWalletButton: {
       flexDirection: "row",
       alignItems: "center",
@@ -227,11 +226,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       backgroundColor: palette.surfaceStrong,
       borderWidth: 1,
       borderColor: palette.primary,
-    },
-    chooseWalletButtonText: {
-      color: palette.primaryStrong,
-      fontWeight: "800",
-      fontSize: 12,
     },
     emptyCard: {
       backgroundColor: palette.surface,
@@ -245,7 +239,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     },
     emptyTitle: {
       color: palette.text,
-      fontWeight: "900",
+      fontWeight: "800",
       fontSize: 18,
     },
     emptyBody: {
@@ -283,7 +277,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     },
     cardTitle: {
       color: palette.text,
-      fontWeight: "900",
+      fontWeight: "800",
       fontSize: 16,
     },
     cardMeta: {
@@ -301,7 +295,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     },
     amount: {
       fontSize: 17,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     amountSend: {
       color: palette.primaryStrong,

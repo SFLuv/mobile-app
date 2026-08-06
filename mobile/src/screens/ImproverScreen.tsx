@@ -3960,7 +3960,7 @@ function createStyles(
     title: {
       color: palette.text,
       fontSize: 28,
-      fontWeight: "900",
+      fontWeight: "800",
       letterSpacing: 0,
     },
     subtitle: {
@@ -4009,12 +4009,12 @@ function createStyles(
     sectionTitle: {
       color: palette.text,
       fontSize: 18,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     workflowTitle: {
       color: palette.text,
       fontSize: 16,
-      fontWeight: "900",
+      fontWeight: "800",
       lineHeight: 22,
     },
     body: {
@@ -4109,7 +4109,7 @@ function createStyles(
     selectorButtonText: {
       flexShrink: 1,
       color: palette.primaryStrong,
-      fontWeight: "900",
+      fontWeight: "800",
       fontSize: 14,
     },
     checkboxPill: {
@@ -4130,7 +4130,7 @@ function createStyles(
     },
     checkboxPillText: {
       color: palette.primaryStrong,
-      fontWeight: "900",
+      fontWeight: "800",
       fontSize: 12,
     },
     checkboxPillTextActive: {
@@ -4207,7 +4207,7 @@ function createStyles(
     absenceHeaderTitle: {
       color: palette.text,
       fontSize: 17,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     absenceScreenContent: {
       padding: spacing.lg,
@@ -4291,7 +4291,7 @@ function createStyles(
     },
     primaryButtonText: {
       color: palette.white,
-      fontWeight: "900",
+      fontWeight: "800",
       fontSize: 14,
     },
     secondaryButton: {
@@ -4321,7 +4321,7 @@ function createStyles(
     },
     dangerButtonText: {
       color: palette.white,
-      fontWeight: "900",
+      fontWeight: "800",
       fontSize: 14,
     },
     confirmBody: {
@@ -4354,7 +4354,7 @@ function createStyles(
     },
     deleteButtonText: {
       color: palette.white,
-      fontWeight: "900",
+      fontWeight: "800",
       fontSize: 14,
     },
     buttonDisabled: {
@@ -4392,7 +4392,7 @@ function createStyles(
     },
     statusChipText: {
       fontSize: 12,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     statusChipTextDefault: {
       color: palette.textMuted,
@@ -4668,7 +4668,7 @@ function createStyles(
     modalTitle: {
       color: palette.text,
       fontSize: 24,
-      fontWeight: "900",
+      fontWeight: "800",
       letterSpacing: 0,
     },
     modalSubtitle: {
@@ -4754,7 +4754,7 @@ function createStyles(
       backgroundColor: palette.primarySoft,
     },
     notificationIconDanger: {
-      backgroundColor: isDark ? "rgba(255, 138, 128, 0.16)" : "rgba(207, 77, 67, 0.12)",
+      backgroundColor: isDark ? "rgba(255, 138, 128, 0.16)" : "rgba(176, 0, 32, 0.08)",
     },
     notificationCopy: {
       flex: 1,
@@ -4849,7 +4849,7 @@ function createStyles(
     cameraTitle: {
       color: palette.white,
       fontSize: 22,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     cameraSubtitle: {
       color: "rgba(255,255,255,0.78)",
@@ -4895,7 +4895,7 @@ function createStyles(
     },
     cameraCaptureText: {
       color: palette.white,
-      fontWeight: "900",
+      fontWeight: "800",
       fontSize: 16,
     },
     cameraError: {
@@ -4949,7 +4949,7 @@ function createStyles(
     bulkActionTitle: {
       color: palette.text,
       fontSize: 15,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     imagePreviewCard: {
       width: "100%",

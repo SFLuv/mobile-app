@@ -371,7 +371,6 @@ export function SendScreen({
   const { height: windowHeight } = useWindowDimensions();
   const layoutMode: SendLayoutMode = windowHeight < 680 ? "dense" : windowHeight < 760 ? "compact" : "regular";
   const styles = useMemo(() => createStyles(palette, shadows, layoutMode), [layoutMode, palette, shadows]);
-  const topInset = Math.max(Constants.statusBarHeight, Platform.OS === "ios" ? spacing.sm : 0);
   const noteInputRef = useRef<TextInput | null>(null);
   const resultIconScale = useRef(new Animated.Value(0.84)).current;
   const resultIconOpacity = useRef(new Animated.Value(0)).current;
@@ -1068,7 +1067,7 @@ export function SendScreen({
         contentContainerStyle={[
           styles.recipientContainer,
           {
-            paddingTop: topInset + spacing.sm,
+            paddingTop: spacing.sm,
             paddingBottom: entryMode === "manual" ? 136 : spacing.xl,
           },
         ]}
@@ -1079,7 +1078,6 @@ export function SendScreen({
           <Pressable style={styles.iconButton} onPress={handleBack}>
             <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
           </Pressable>
-          <Text style={styles.stepHeaderTitle}>Send</Text>
         </View>
 
         {feedback ? (
@@ -1200,13 +1198,12 @@ export function SendScreen({
             }
           }}
         >
-          <View style={[styles.amountScreen, { paddingTop: topInset + spacing.sm }]}>
+          <View style={[styles.amountScreen, { paddingTop: spacing.sm }]}>
             <View style={styles.stepHeader}>
               <Pressable style={styles.iconButton} onPress={handleBack}>
                 <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
               </Pressable>
-              <Text style={styles.stepHeaderTitle}>Send</Text>
-            </View>
+                </View>
 
             {feedback ? (
               <View style={styles.feedbackCard}>
@@ -1222,7 +1219,14 @@ export function SendScreen({
                   dismissNoteEditor();
                 }}
               >
-                <Text style={styles.amountValue}>{amountInput || "0"}</Text>
+                <Text
+                  style={styles.amountValue}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.4}
+                >
+                  {amountInput || "0"}
+                </Text>
                 <Text style={styles.amountSuffix}>{clientConfig.tokenSymbol}</Text>
               </Pressable>
             </View>
@@ -1295,7 +1299,7 @@ export function SendScreen({
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
-          <View style={[styles.stateScreen, { paddingTop: topInset + spacing.xl, paddingBottom: spacing.xl }]}>
+          <View style={[styles.stateScreen, { paddingTop: spacing.lg, paddingBottom: spacing.xl }]}>
             <View style={[styles.stateInner, customTipActive ? styles.stateInnerCustomTip : undefined]}>
               <Animated.View
                 style={[
@@ -1496,7 +1500,7 @@ export function SendScreen({
 
   if (phase === "sending") {
     return (
-      <View style={[styles.stateScreen, { paddingTop: topInset + spacing.xl, paddingBottom: spacing.xl }]}>
+      <View style={[styles.stateScreen, { paddingTop: spacing.lg, paddingBottom: spacing.xl }]}>
         <View style={styles.stateInner}>
           <ThemedActivityIndicator size="large" color={palette.primaryStrong} />
           <Text style={styles.resultTitle}>Sending</Text>
@@ -1528,8 +1532,7 @@ function createStyles(
   const compactLayout = layoutMode !== "regular";
   const denseLayout = layoutMode === "dense";
   const amountDisplayMinHeight = denseLayout ? 78 : compactLayout ? 104 : 148;
-  const amountValueFontSize = denseLayout ? 42 : compactLayout ? 52 : 66;
-  const amountValueLineHeight = denseLayout ? 48 : compactLayout ? 58 : 72;
+  const amountValueFontSize = denseLayout ? 50 : compactLayout ? 62 : 78;
   const keypadGap = denseLayout ? 4 : compactLayout ? spacing.xs : spacing.sm;
   const focusedNoteGap = denseLayout ? spacing.sm : compactLayout ? spacing.md : spacing.lg;
   const keypadKeyHeight = denseLayout ? 40 : compactLayout ? 46 : 56;
@@ -1553,12 +1556,6 @@ function createStyles(
       alignItems: "center",
       gap: spacing.sm,
       minHeight: 44,
-    },
-    stepHeaderTitle: {
-      color: palette.primaryStrong,
-      fontSize: 22,
-      fontWeight: "900",
-      letterSpacing: 0,
     },
     iconButton: {
       width: 42,
@@ -1629,7 +1626,7 @@ function createStyles(
     },
     selectedRecipientAvatarText: {
       color: palette.primaryStrong,
-      fontWeight: "900",
+      fontWeight: "800",
       fontSize: 13,
     },
     selectedRecipientBody: {
@@ -1646,7 +1643,7 @@ function createStyles(
       flex: 1,
       color: palette.text,
       fontSize: 15,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     selectedRecipientMeta: {
       color: palette.textMuted,
@@ -1700,7 +1697,7 @@ function createStyles(
       overflow: "hidden",
       borderWidth: 1,
       borderColor: palette.border,
-      backgroundColor: "#05070b",
+      backgroundColor: "#04161c",
       alignItems: "center",
       justifyContent: "center",
       ...shadows.card,
@@ -1725,7 +1722,7 @@ function createStyles(
     inlinePermissionTitle: {
       color: palette.white,
       fontSize: 18,
-      fontWeight: "900",
+      fontWeight: "800",
       textAlign: "center",
     },
     inlinePermissionBody: {
@@ -1744,7 +1741,7 @@ function createStyles(
     },
     inlinePermissionButtonText: {
       color: palette.white,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     suggestionList: {
       gap: spacing.sm,
@@ -1772,7 +1769,7 @@ function createStyles(
     },
     suggestionAvatarText: {
       color: palette.primaryStrong,
-      fontWeight: "900",
+      fontWeight: "800",
       fontSize: 14,
     },
     suggestionBody: {
@@ -1788,7 +1785,7 @@ function createStyles(
     suggestionTitle: {
       color: palette.text,
       fontSize: 15,
-      fontWeight: "900",
+      fontWeight: "800",
       flex: 1,
     },
     suggestionMeta: {
@@ -1812,7 +1809,7 @@ function createStyles(
     },
     kindBadgeText: {
       fontSize: 10,
-      fontWeight: "900",
+      fontWeight: "800",
       textTransform: "uppercase",
       letterSpacing: 0.4,
     },
@@ -1842,7 +1839,7 @@ function createStyles(
     primaryButtonText: {
       color: palette.white,
       fontSize: 15,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     secondaryButton: {
       minHeight: 54,
@@ -1857,7 +1854,7 @@ function createStyles(
     secondaryButtonText: {
       color: palette.primaryStrong,
       fontSize: 15,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     amountScreen: {
       flex: 1,
@@ -1883,9 +1880,9 @@ function createStyles(
       gap: spacing.xs,
     },
     amountValue: {
+      flexShrink: 1,
       color: palette.primaryStrong,
       fontSize: amountValueFontSize,
-      lineHeight: amountValueLineHeight,
       fontWeight: "900",
       textAlign: "center",
       letterSpacing: 0,
@@ -1893,7 +1890,7 @@ function createStyles(
     amountSuffix: {
       color: palette.textMuted,
       fontSize: 12,
-      fontWeight: "900",
+      fontWeight: "800",
       letterSpacing: 0.7,
     },
     amountMetaBlock: {
@@ -1945,7 +1942,7 @@ function createStyles(
     keypadKeyText: {
       color: palette.text,
       fontSize: 24,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     sendDock: {
       paddingTop: denseLayout ? 4 : compactLayout ? spacing.xs : spacing.sm,
@@ -1968,7 +1965,7 @@ function createStyles(
       color: palette.white,
       textAlign: "center",
       fontSize: 15,
-      fontWeight: "900",
+      fontWeight: "800",
       paddingHorizontal: 72,
     },
     swipeTrackTextDisabled: {
@@ -2025,7 +2022,7 @@ function createStyles(
     resultTitle: {
       color: palette.text,
       fontSize: 28,
-      fontWeight: "900",
+      fontWeight: "800",
       textAlign: "center",
     },
     resultMessage: {
@@ -2052,7 +2049,7 @@ function createStyles(
     tipTitle: {
       color: palette.text,
       fontSize: 16,
-      fontWeight: "900",
+      fontWeight: "800",
       textAlign: "center",
     },
     tipBody: {
@@ -2087,7 +2084,7 @@ function createStyles(
     },
     tipChoiceText: {
       color: palette.text,
-      fontWeight: "900",
+      fontWeight: "800",
       fontSize: 13,
     },
     tipChoiceTextActive: {

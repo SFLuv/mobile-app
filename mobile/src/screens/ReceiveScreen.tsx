@@ -12,7 +12,7 @@ import {
 import Constants from "expo-constants";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
-import { SfluvQRCode } from "../components/SfluvQRCode";
+import { SfluvQRCode, prewarmQRCode } from "../components/SfluvQRCode";
 import * as Clipboard from "expo-clipboard";
 import { ScannerCornerGuide } from "../components/ScannerCornerGuide";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
@@ -25,6 +25,7 @@ type Props = {
   accountAddress: string;
   onRedeemCodeScanned?: (code: string) => void;
   showRedeemScanner?: boolean;
+  onBack?: () => void;
 };
 
 type ReceiveMode = "link" | "address";
@@ -65,7 +66,13 @@ function shortLink(rawValue: string): string {
   }
 }
 
-export function ReceiveScreen({ clientConfig, accountAddress, onRedeemCodeScanned, showRedeemScanner = true }: Props) {
+export function ReceiveScreen({
+  clientConfig,
+  accountAddress,
+  onRedeemCodeScanned,
+  showRedeemScanner = true,
+  onBack,
+}: Props) {
   const { palette, shadows } = useAppTheme();
   const windowFrame = useWindowDimensions();
   const compactLayout = windowFrame.height < 740;
@@ -97,6 +104,13 @@ export function ReceiveScreen({ clientConfig, accountAddress, onRedeemCodeScanne
     () => buildUniversalPayLink({ address: accountAddress }, clientConfig),
     [accountAddress, clientConfig],
   );
+  // Both codes are generated up front, so switching tabs shows a finished QR
+  // instead of a blank frame that fills in a moment later.
+  useEffect(() => {
+    prewarmQRCode(paymentLink);
+    prewarmQRCode(accountAddress);
+  }, [accountAddress, paymentLink]);
+
   const qrValue = mode === "link" ? paymentLink : accountAddress;
   const qrCaption = mode === "link" ? shortLink(paymentLink) : shortAddress(accountAddress);
 
@@ -132,7 +146,13 @@ export function ReceiveScreen({ clientConfig, accountAddress, onRedeemCodeScanne
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.content}>
-          <View style={styles.modeToggle}>
+          <View style={styles.paneHeaderRow}>
+            {onBack ? (
+              <Pressable style={styles.paneBackButton} onPress={onBack} hitSlop={8} accessibilityLabel="Back">
+                <Ionicons name="chevron-back" size={22} color={palette.primaryStrong} />
+              </Pressable>
+            ) : null}
+            <View style={[styles.modeToggle, styles.modeToggleFill]}>
             <Pressable
               style={[styles.modeButton, mode === "link" ? styles.modeButtonActive : undefined]}
               onPress={() => setMode("link")}
@@ -146,7 +166,8 @@ export function ReceiveScreen({ clientConfig, accountAddress, onRedeemCodeScanne
               <Text style={[styles.modeButtonText, mode === "address" ? styles.modeButtonTextActive : undefined]}>
                 Address
               </Text>
-            </Pressable>
+              </Pressable>
+            </View>
           </View>
 
           {scanError ? (
@@ -280,6 +301,21 @@ function createStyles(
       minHeight: 0,
       gap: compactLayout ? spacing.sm : spacing.md,
     },
+    paneHeaderRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    paneBackButton: {
+      width: 34,
+      height: 34,
+      alignItems: "center",
+      justifyContent: "center",
+      marginLeft: -6,
+    },
+    modeToggleFill: {
+      flex: 1,
+    },
     modeToggle: {
       flexDirection: "row",
       gap: spacing.xs,
@@ -347,7 +383,7 @@ function createStyles(
       flex: 1,
       color: palette.text,
       fontSize: compactLayout ? 16 : 17,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     copyButton: {
       minHeight: compactLayout ? 34 : 36,
@@ -401,7 +437,7 @@ function createStyles(
     scannerTitle: {
       color: palette.white,
       fontSize: 22,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     scannerClose: {
       width: 42,

@@ -196,7 +196,7 @@ function createStyles(palette: Palette, isDark: boolean) {
     title: {
       color: palette.text,
       fontSize: 18,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     selectedBadge: {
       flexDirection: "row",
@@ -263,7 +263,7 @@ function createStyles(palette: Palette, isDark: boolean) {
     },
     dayTextSelected: {
       color: palette.white,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     dayTextDisabled: {
       color: palette.textMuted,

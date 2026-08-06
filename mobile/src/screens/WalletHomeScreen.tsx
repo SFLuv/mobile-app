@@ -175,7 +175,6 @@ export function WalletHomeScreen({
           <View style={styles.sectionHeaderRow}>
             <View>
               <Text style={styles.sectionTitle}>Recent activity</Text>
-              <Text style={styles.sectionMeta}>Your latest {tokenSymbol} movement</Text>
             </View>
             {!merchantMode ? (
               <Pressable onPress={onOpenActivity}>
@@ -334,7 +333,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       marginTop: 4,
       color: palette.text,
       fontSize: 18,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     addressBar: {
       flexShrink: 1,
@@ -371,7 +370,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     },
     heroPrimaryActionText: {
       color: palette.white,
-      fontWeight: "900",
+      fontWeight: "800",
       fontSize: 16,
     },
     heroSecondaryAction: {
@@ -391,7 +390,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     },
     heroSecondaryActionText: {
       color: palette.primaryStrong,
-      fontWeight: "900",
+      fontWeight: "800",
       fontSize: 16,
     },
     sectionCard: {
@@ -412,7 +411,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     sectionTitle: {
       color: palette.text,
       fontSize: 20,
-      fontWeight: "900",
+      fontWeight: "800",
       letterSpacing: -0.3,
     },
     sectionMeta: {
@@ -484,7 +483,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     },
     txAmount: {
       fontSize: 17,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     txAmountSend: {
       color: palette.primaryStrong,

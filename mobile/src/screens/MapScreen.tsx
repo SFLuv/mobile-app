@@ -652,7 +652,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     modalTitle: {
       color: palette.text,
       fontSize: 28,
-      fontWeight: "900",
+      fontWeight: "800",
     },
     modalSubtitle: {
       color: palette.primary,
