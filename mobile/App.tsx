@@ -1021,6 +1021,30 @@ function isConnectivityErrorMessage(message: string | null | undefined): boolean
   );
 }
 
+/**
+ * Node-side failures that are worth retrying: a non-archive RPC asked for past
+ * state, a load-balanced node returning a bad response, a call that reverted
+ * without a reason. The raw text is still shown, but it is jargon, so the user
+ * gets a plain summary above it and an obvious way forward.
+ */
+function isRetryableNodeErrorMessage(message: string | null | undefined): boolean {
+  if (!message) {
+    return false;
+  }
+  const normalized = message.trim().toLowerCase();
+  return (
+    normalized.includes("historical state is not available") ||
+    normalized.includes("processing response error") ||
+    normalized.includes("missing trie node") ||
+    normalized.includes("header not found") ||
+    normalized.includes("reverted without a reason") ||
+    normalized.includes("call revert exception") ||
+    normalized.includes("bad result from backend") ||
+    normalized.includes("server response") ||
+    normalized.includes("could not detect network")
+  );
+}
+
 function formatDeletionDateLabel(value?: string | null): string | null {
   if (!value) {
     return null;
@@ -1695,6 +1719,7 @@ function WalletAppShellContent({
   const walletPaneGestureActiveRef = useRef(false);
   const walletOverlayPane: OverlayWalletPane | null = walletPane === "home" ? null : walletPane;
   const runtimeOffline = isConnectivityErrorMessage(runtime.error);
+  const runtimeNodeIssue = isRetryableNodeErrorMessage(runtime.error);
 
   const setWalletPaneTranslateX = React.useCallback(
     (value: number) => {
@@ -3792,6 +3817,18 @@ function WalletAppShellContent({
           ? "Contacts"
           : "Settings";
   const showBlockingWalletState = runtime.loading && !runtime.service;
+  // A boot that never finishes is indistinguishable from a crash to the user.
+  // After a grace period the blocking spinner offers the same way out the error
+  // state does, so a wedged startup can always be escaped.
+  const [bootStalled, setBootStalled] = useState(false);
+  useEffect(() => {
+    if (!showBlockingWalletState) {
+      setBootStalled(false);
+      return;
+    }
+    const timeout = setTimeout(() => setBootStalled(true), 12000);
+    return () => clearTimeout(timeout);
+  }, [showBlockingWalletState]);
   // The send pane keeps the header (it is not a separate context) but takes the
   // dock's space, since its keypad reaches the bottom of the screen.
   const sendPaneActive = tab === "wallet" && walletPane === "send";
@@ -3950,6 +3987,17 @@ function WalletAppShellContent({
               <Text style={styles.stateText}>
                 {runtime.loadingMessage || "Preparing your wallet..."}
               </Text>
+              {bootStalled ? (
+                <>
+                  <Text style={styles.stateText}>This is taking longer than usual.</Text>
+                  <Pressable style={styles.connectionStateButton} onPress={onRetryConnection}>
+                    <Text style={styles.connectionStateButtonText}>Try again</Text>
+                  </Pressable>
+                  <Pressable onPress={handleLogout}>
+                    <Text style={styles.connectionStateLogoutText}>Log out</Text>
+                  </Pressable>
+                </>
+              ) : null}
             </View>
           ) : runtime.error ? (
             <View style={styles.centerState}>
@@ -3971,7 +4019,25 @@ function WalletAppShellContent({
                 </View>
               ) : (
                 <View style={styles.connectionStateCard}>
-                  <Text style={styles.errorText}>{runtime.error}</Text>
+                  <View style={styles.connectionStateIconWrap}>
+                    <Ionicons name="alert-circle-outline" size={26} color={palette.primaryStrong} />
+                  </View>
+                  <Text style={styles.connectionStateTitle}>
+                    {runtimeNodeIssue ? "Network hiccup" : "Something went wrong"}
+                  </Text>
+                  <Text style={styles.connectionStateBody}>
+                    {runtimeNodeIssue
+                      ? "The network node had trouble responding. This usually clears up if you try again."
+                      : "We could not finish setting up your wallet."}
+                  </Text>
+                  <ScrollView
+                    style={styles.errorScroll}
+                    contentContainerStyle={styles.errorScrollContent}
+                    showsVerticalScrollIndicator
+                    nestedScrollEnabled
+                  >
+                    <Text style={styles.errorText}>{runtime.error}</Text>
+                  </ScrollView>
                   <Pressable style={styles.connectionStateButton} onPress={onRetryConnection}>
                     <Text style={styles.connectionStateButtonText}>Try again</Text>
                   </Pressable>
@@ -6273,6 +6339,13 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     fontWeight: "800",
     textAlign: "center",
   },
+  errorScroll: {
+    alignSelf: "stretch",
+    maxHeight: 200,
+  },
+  errorScrollContent: {
+    paddingVertical: 2,
+  },
   centerState: {
     flex: 1,
     alignItems: "center",
@@ -6298,6 +6371,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   connectionStateCard: {
     width: "100%",
     maxWidth: 320,
+    maxHeight: "86%",
     borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: palette.border,
