@@ -955,14 +955,22 @@ export function VolunteerScreen({
           <View style={styles.stateCard}>
             <Ionicons name="calendar-outline" size={22} color={palette.textMuted} />
             <Text style={styles.stateTitle}>
-              {feed === "mine" ? "No sign ups yet" : search ? "No matching events" : "No events scheduled"}
+              {feed === "mine"
+                ? "No sign ups yet"
+                : search
+                  ? "No matching events"
+                  : feed === "past"
+                    ? "No previous events"
+                    : "No events scheduled"}
             </Text>
             <Text style={styles.stateBody}>
               {feed === "mine"
                 ? "Events you sign up for will show up here."
                 : search
                   ? "Try a different search or clear your filters."
-                  : "New volunteer events are posted regularly. Check back soon."}
+                  : feed === "past"
+                    ? "Events that have already happened will show up here."
+                    : "New volunteer events are posted regularly. Check back soon."}
             </Text>
           </View>
         ) : (
@@ -1183,12 +1191,14 @@ function EventCard({
         </View>
 
         <View style={styles.chipRow}>
-          <View style={styles.rewardChip}>
-            <Ionicons name="gift-outline" size={12} color={palette.primaryStrong} />
-            <Text style={styles.rewardChipText}>
-              {event.rewardAmountSfluv} {tokenSymbol}
-            </Text>
-          </View>
+          {event.rewardAmountSfluv > 0 ? (
+            <View style={styles.rewardChip}>
+              <Ionicons name="gift-outline" size={12} color={palette.primaryStrong} />
+              <Text style={styles.rewardChipText}>
+                {event.rewardAmountSfluv} {tokenSymbol}
+              </Text>
+            </View>
+          ) : null}
           {event.recurrence ? (
             <View style={styles.metaChip}>
               <Ionicons name="repeat" size={12} color={palette.textMuted} />

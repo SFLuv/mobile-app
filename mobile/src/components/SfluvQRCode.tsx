@@ -211,9 +211,9 @@ export function SfluvQRCode({ value, size }: Props) {
     return { units, dots, eyes, boxLeft, boxTop, boxSide };
   }, [matrix]);
 
-  const logoPercent = `${LOGO_RATIO * 100}%`;
-  const logoLeft = drawing ? `${(drawing.boxLeft / drawing.units) * 100}%` : "0%";
-  const logoTop = drawing ? `${(drawing.boxTop / drawing.units) * 100}%` : "0%";
+  const logoPercent: `${number}%` = `${LOGO_RATIO * 100}%`;
+  const logoLeft: `${number}%` = drawing ? `${(drawing.boxLeft / drawing.units) * 100}%` : "0%";
+  const logoTop: `${number}%` = drawing ? `${(drawing.boxTop / drawing.units) * 100}%` : "0%";
 
   return (
     <View style={[styles.frame, size ? { width: size + FRAME_PADDING * 2 } : null]}>
