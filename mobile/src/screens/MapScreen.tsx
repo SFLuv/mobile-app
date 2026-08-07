@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import {
+  Animated,
+  Easing,
   Linking,
   Modal,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -231,6 +232,27 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
   const [query, setQuery] = useState("");
   const [selectedLocation, setSelectedLocation] = useState<AppLocation | null>(null);
+  const merchantSheetAnim = useRef(new Animated.Value(0)).current;
+
+  const openMerchantSheet = (location: AppLocation) => {
+    setSelectedLocation(location);
+    merchantSheetAnim.setValue(0);
+    Animated.timing(merchantSheetAnim, {
+      toValue: 1,
+      duration: 240,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const closeMerchantSheet = () => {
+    Animated.timing(merchantSheetAnim, {
+      toValue: 0,
+      duration: 170,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => setSelectedLocation(null));
+  };
   const [mapReady, setMapReady] = useState(false);
   const mapRef = useRef<MapView | null>(null);
   const { location: userLocation } = useCurrentLocation(true);
@@ -326,7 +348,7 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
                   description={entry.location.description}
                   pinColor={entry.location.payToAddress ? palette.primary : palette.textMuted}
                   tracksViewChanges={false}
-                  onPress={() => setSelectedLocation(entry.location)}
+                  onPress={() => openMerchantSheet(entry.location)}
                 />
               ))}
             </MapView>
@@ -343,7 +365,7 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
                 const distance = locationDistanceMeters(location, userLocation);
                 return (
                   <View key={location.id} style={styles.card}>
-                    <Pressable onPress={() => setSelectedLocation(location)}>
+                    <Pressable onPress={() => openMerchantSheet(location)}>
                       <Text style={styles.cardTitle}>{location.name}</Text>
                       <Text style={styles.cardSubtitle}>{formatLocationSubtitle(location)}</Text>
                       {distance !== null ? <Text style={styles.cardDistance}>{formatDistanceLabel(distance)}</Text> : null}
@@ -360,7 +382,7 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
                     <View style={styles.cardFooter}>
                       {!location.payToAddress ? <Text style={styles.cardMetaMuted}>Payment unavailable right now</Text> : null}
                       <View style={styles.cardActionRow}>
-                        <Pressable style={styles.cardSecondaryButton} onPress={() => setSelectedLocation(location)}>
+                        <Pressable style={styles.cardSecondaryButton} onPress={() => openMerchantSheet(location)}>
                           <Text style={styles.cardSecondaryButtonText}>Details</Text>
                         </Pressable>
                         <Pressable
@@ -380,82 +402,135 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
         )}
       </ScrollView>
 
-      <Modal visible={selectedLocation !== null} animationType="slide" onRequestClose={() => setSelectedLocation(null)}>
-        <SafeAreaView style={styles.modalSafeArea}>
-          <ScrollView contentContainerStyle={styles.modalContainer}>
+      <Modal
+        visible={selectedLocation !== null}
+        transparent
+        presentationStyle="overFullScreen"
+        animationType="none"
+        onRequestClose={closeMerchantSheet}
+      >
+        <Animated.View style={[styles.sheetBackdrop, { opacity: merchantSheetAnim }]}>
+          <Pressable style={styles.sheetDismissArea} onPress={closeMerchantSheet} />
+          <Animated.View
+            style={[
+              styles.sheetCard,
+              {
+                transform: [
+                  { translateY: merchantSheetAnim.interpolate({ inputRange: [0, 1], outputRange: [48, 0] }) },
+                ],
+              },
+            ]}
+          >
             {selectedLocation ? (
               <>
-                <View style={styles.modalHeader}>
-                  <View style={styles.modalHeaderCopy}>
-                    <Text style={styles.modalTitle}>{selectedLocation.name}</Text>
-                    <Text style={styles.modalSubtitle}>{selectedLocation.type}</Text>
+                <View style={styles.sheetHeader}>
+                  <View style={styles.sheetHeaderCopy}>
+                    <Text style={styles.sheetTitle}>{selectedLocation.name}</Text>
+                    <Text style={styles.sheetSubtitle}>
+                      {selectedLocation.type}
+                      {locationDistanceMeters(selectedLocation, userLocation) !== null
+                        ? ` · ${formatDistanceLabel(locationDistanceMeters(selectedLocation, userLocation) ?? 0)}`
+                        : ""}
+                    </Text>
                   </View>
-                  <Pressable style={styles.modalCloseButton} onPress={() => setSelectedLocation(null)}>
-                    <Ionicons name="close" size={20} color={palette.primaryStrong} />
+                  <Pressable style={styles.sheetClose} onPress={closeMerchantSheet} hitSlop={8}>
+                    <Ionicons name="close" size={18} color={palette.primaryStrong} />
                   </Pressable>
                 </View>
-                {locationDistanceMeters(selectedLocation, userLocation) !== null ? (
-                  <Text style={styles.modalDistance}>
-                    {formatDistanceLabel(locationDistanceMeters(selectedLocation, userLocation) ?? 0)}
-                  </Text>
-                ) : null}
-                <Text style={styles.modalBody}>{selectedLocation.description}</Text>
-                <Text style={styles.modalMeta}>
-                  {selectedLocation.street}, {selectedLocation.city}, {selectedLocation.state} {selectedLocation.zip}
-                </Text>
-                {selectedLocation.phone ? (
-                  <Pressable onPress={() => void Linking.openURL(`tel:${selectedLocation.phone}`)}>
-                    <Text style={styles.modalLink}>Call {selectedLocation.phone}</Text>
-                  </Pressable>
-                ) : null}
-                {selectedLocation.email ? (
-                  <Pressable onPress={() => void Linking.openURL(`mailto:${selectedLocation.email}`)}>
-                    <Text style={styles.modalLink}>Email {selectedLocation.email}</Text>
-                  </Pressable>
-                ) : null}
-                {selectedLocation.website ? (
-                  <Pressable onPress={() => void Linking.openURL(normalizeWebsite(selectedLocation.website))}>
-                    <Text style={styles.modalLink}>Open website</Text>
-                  </Pressable>
-                ) : null}
-                {!selectedLocation.payToAddress ? (
-                  <Text style={styles.modalMetaMuted}>Payment is not available for this merchant right now.</Text>
-                ) : null}
-                {selectedLocation.openingHours.length > 0 ? (
-                  <View style={styles.hoursCard}>
-                    {selectedLocation.openingHours.map((hours) => (
-                      <Text key={hours} style={styles.hoursText}>
-                        {hours}
-                      </Text>
-                    ))}
-                  </View>
-                ) : null}
 
-                <Pressable
-                  style={[styles.payMerchantButton, !selectedLocation.payToAddress ? styles.payMerchantButtonDisabled : undefined]}
-                  disabled={!selectedLocation.payToAddress}
-                  onPress={() => {
-                    onPayLocation?.(selectedLocation);
-                    setSelectedLocation(null);
-                  }}
+                <ScrollView
+                  style={styles.sheetScroll}
+                  contentContainerStyle={styles.sheetScrollContent}
+                  showsVerticalScrollIndicator={false}
                 >
-                  <Text style={styles.payMerchantButtonText}>Pay merchant</Text>
-                </Pressable>
+                  {selectedLocation.description ? (
+                    <Text style={styles.sheetBody}>{selectedLocation.description}</Text>
+                  ) : null}
 
-                <View style={styles.modalActions}>
+                  <Text style={styles.sheetMeta}>
+                    {selectedLocation.street}, {selectedLocation.city}, {selectedLocation.state}{" "}
+                    {selectedLocation.zip}
+                  </Text>
+
+                  {selectedLocation.phone ? (
+                    <Pressable
+                      style={styles.sheetRow}
+                      onPress={() => void Linking.openURL(`tel:${selectedLocation.phone}`)}
+                    >
+                      <Ionicons name="call-outline" size={15} color={palette.textMuted} />
+                      <Text style={styles.sheetRowText}>{selectedLocation.phone}</Text>
+                    </Pressable>
+                  ) : null}
+
+                  {selectedLocation.email ? (
+                    <Pressable
+                      style={styles.sheetRow}
+                      onPress={() => void Linking.openURL(`mailto:${selectedLocation.email}`)}
+                    >
+                      <Ionicons name="mail-outline" size={15} color={palette.textMuted} />
+                      <Text style={styles.sheetRowText}>{selectedLocation.email}</Text>
+                    </Pressable>
+                  ) : null}
+
+                  {selectedLocation.openingHours.length > 0 ? (
+                    <View style={styles.hoursCard}>
+                      {selectedLocation.openingHours.map((hours) => (
+                        <Text key={hours} style={styles.hoursText}>
+                          {hours}
+                        </Text>
+                      ))}
+                    </View>
+                  ) : null}
+
+                  {/* Directions sit with the location details rather than
+                      competing with the two actions at the bottom. */}
                   <Pressable
-                    style={styles.primaryButton}
+                    style={styles.directionsLink}
                     onPress={() => {
                       void openGoogleMaps(selectedLocation);
                     }}
                   >
-                    <Text style={styles.primaryButtonText}>Google Maps</Text>
+                    <Text style={styles.directionsLinkText}>Get directions</Text>
+                    <Ionicons name="open-outline" size={14} color={palette.primaryStrong} />
+                  </Pressable>
+
+                  {!selectedLocation.payToAddress ? (
+                    <Text style={styles.sheetMetaMuted}>
+                      Payment is not available for this merchant right now.
+                    </Text>
+                  ) : null}
+                </ScrollView>
+
+                <View style={styles.sheetActions}>
+                  {selectedLocation.website ? (
+                    <Pressable
+                      style={styles.secondaryAction}
+                      onPress={() => void Linking.openURL(normalizeWebsite(selectedLocation.website))}
+                    >
+                      <Ionicons name="globe-outline" size={16} color={palette.primaryStrong} />
+                      <Text style={styles.secondaryActionText}>Open website</Text>
+                    </Pressable>
+                  ) : null}
+                  <Pressable
+                    style={[
+                      styles.primaryAction,
+                      !selectedLocation.payToAddress ? styles.actionDisabled : undefined,
+                    ]}
+                    disabled={!selectedLocation.payToAddress}
+                    onPress={() => {
+                      const target = selectedLocation;
+                      closeMerchantSheet();
+                      onPayLocation?.(target);
+                    }}
+                  >
+                    <Ionicons name="arrow-up" size={16} color={palette.white} />
+                    <Text style={styles.primaryActionText}>Pay merchant</Text>
                   </Pressable>
                 </View>
               </>
             ) : null}
-          </ScrollView>
-        </SafeAreaView>
+          </Animated.View>
+        </Animated.View>
       </Modal>
     </View>
   );
@@ -619,66 +694,133 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       color: palette.textMuted,
       lineHeight: 20,
     },
-    modalSafeArea: {
+    sheetBackdrop: {
       flex: 1,
-      backgroundColor: palette.background,
+      justifyContent: "flex-end",
+      backgroundColor: palette.overlay,
     },
-    modalContainer: {
-      padding: spacing.lg,
+    sheetDismissArea: {
+      flex: 1,
+    },
+    sheetCard: {
+      maxHeight: "82%",
+      backgroundColor: palette.background,
+      borderTopLeftRadius: radii.xl,
+      borderTopRightRadius: radii.xl,
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.lg,
+      paddingBottom: spacing.xxl,
       gap: spacing.md,
-      backgroundColor: palette.background,
-      flexGrow: 1,
     },
-    modalHeader: {
+    sheetHeader: {
       flexDirection: "row",
-      justifyContent: "space-between",
       alignItems: "flex-start",
+      justifyContent: "space-between",
       gap: spacing.md,
     },
-    modalHeaderCopy: {
+    sheetHeaderCopy: {
       flex: 1,
-      gap: 4,
+      gap: 2,
     },
-    modalCloseButton: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
+    sheetTitle: {
+      fontSize: 20,
+      fontWeight: "800",
+      color: palette.text,
+    },
+    sheetSubtitle: {
+      fontSize: 13,
+      color: palette.textMuted,
+    },
+    sheetClose: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: palette.surface,
-      borderWidth: 1,
-      borderColor: palette.border,
+      backgroundColor: palette.primarySoft,
     },
-    modalTitle: {
+    sheetScroll: {
+      flexGrow: 0,
+    },
+    sheetScrollContent: {
+      gap: spacing.sm,
+      paddingBottom: spacing.xs,
+    },
+    sheetBody: {
+      fontSize: 14,
       color: palette.text,
-      fontSize: 28,
-      fontWeight: "800",
-    },
-    modalSubtitle: {
-      color: palette.primary,
-      fontWeight: "700",
-      textTransform: "capitalize",
-    },
-    modalDistance: {
-      color: palette.primaryStrong,
-      fontWeight: "700",
-    },
-    modalBody: {
-      color: palette.text,
-      lineHeight: 22,
-    },
-    modalMeta: {
-      color: palette.textMuted,
       lineHeight: 21,
     },
-    modalLink: {
-      color: palette.primaryStrong,
-      fontWeight: "800",
-    },
-    modalMetaMuted: {
+    sheetMeta: {
+      fontSize: 13,
       color: palette.textMuted,
-      lineHeight: 21,
+      lineHeight: 19,
+    },
+    sheetMetaMuted: {
+      fontSize: 12,
+      color: palette.textMuted,
       fontStyle: "italic",
+    },
+    sheetRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingVertical: 2,
+    },
+    sheetRowText: {
+      flex: 1,
+      fontSize: 13,
+      color: palette.text,
+    },
+    directionsLink: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      alignSelf: "flex-start",
+      paddingVertical: 4,
+    },
+    directionsLinkText: {
+      fontSize: 14,
+      fontWeight: "800",
+      color: palette.primaryStrong,
+    },
+    sheetActions: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    secondaryAction: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+      paddingVertical: 14,
+      borderRadius: radii.pill,
+      backgroundColor: palette.primarySoft,
+    },
+    secondaryActionText: {
+      fontSize: 14,
+      fontWeight: "800",
+      color: palette.primaryStrong,
+    },
+    primaryAction: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+      paddingVertical: 14,
+      borderRadius: radii.pill,
+      backgroundColor: palette.primaryStrong,
+    },
+    primaryActionText: {
+      fontSize: 14,
+      fontWeight: "800",
+      color: palette.white,
+    },
+    actionDisabled: {
+      opacity: 0.45,
     },
     hoursCard: {
       backgroundColor: palette.surface,
@@ -690,26 +832,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     hoursText: {
       color: palette.text,
-    },
-    payMerchantButton: {
-      borderRadius: radii.md,
-      backgroundColor: palette.primary,
-      paddingVertical: 14,
-      alignItems: "center",
-      marginTop: spacing.sm,
-    },
-    payMerchantButtonDisabled: {
-      backgroundColor: palette.border,
-    },
-    payMerchantButtonText: {
-      color: palette.white,
-      fontWeight: "800",
-      fontSize: 16,
-    },
-    modalActions: {
-      flexDirection: "row",
-      gap: spacing.sm,
-      marginTop: "auto",
     },
     primaryButton: {
       flex: 1,

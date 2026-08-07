@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  Easing,
   Modal,
   Platform,
   Pressable,
@@ -16,6 +17,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { SfluvQRCode, prewarmQRCode } from "../components/SfluvQRCode";
 import { ethers } from "ethers";
 import { ScannerCornerGuide } from "../components/ScannerCornerGuide";
+import { SegmentedTabs } from "../components/SegmentedTabs";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { AppClientConfig, AppContact } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
@@ -35,6 +37,11 @@ type Props = {
 };
 
 type ContactMode = "contacts" | "my-qr";
+
+const CONTACT_TABS: Array<{ value: ContactMode; label: string }> = [
+  { value: "contacts", label: "My Contacts" },
+  { value: "my-qr", label: "My QR" },
+];
 
 function shortAddress(address: string): string {
   if (address.length <= 16) return address;
@@ -88,6 +95,9 @@ export function ContactsScreen({
   const [contactSearch, setContactSearch] = useState("");
   const [addSheetOpen, setAddSheetOpen] = useState(false);
   const addSheetAnim = useRef(new Animated.Value(0)).current;
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchContentHeight, setSearchContentHeight] = useState(0);
+  const searchReveal = useRef(new Animated.Value(0)).current;
   const [manualEntry, setManualEntry] = useState("");
   const [editingID, setEditingID] = useState<number | null>(null);
   const [editingName, setEditingName] = useState("");
@@ -193,6 +203,27 @@ export function ContactsScreen({
     setPendingScannedAddress(null);
     setPendingScannedName("");
     setScanErrorMessage(null);
+  };
+
+  const searchHeight = searchReveal.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, (searchContentHeight > 0 ? searchContentHeight : 46) + spacing.md],
+  });
+
+  const toggleContactSearch = () => {
+    const next = !searchOpen;
+    setSearchOpen(next);
+    Animated.timing(searchReveal, {
+      toValue: next ? 1 : 0,
+      duration: next ? 220 : 170,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+    if (!next) {
+      // Collapsing clears the term: a filter you cannot see is one you will not
+      // remember you set.
+      setContactSearch("");
+    }
   };
 
   const openAddSheet = () => {
@@ -326,24 +357,31 @@ export function ContactsScreen({
       ) : null}
 
       <View style={styles.card}>
-        <View style={styles.segmentWrap}>
-          {([
-            ["contacts", "My Contacts"],
-            ["my-qr", "My QR"],
-          ] as Array<[ContactMode, string]>).map(([value, label]) => (
+        <View style={styles.tabHeaderRow}>
+          <SegmentedTabs
+            style={styles.tabHeaderFill}
+            segments={CONTACT_TABS}
+            value={contactMode}
+            onChange={(next) => {
+              setContactMode(next);
+              setScanErrorMessage(null);
+            }}
+          />
+          {contactMode === "contacts" ? (
             <Pressable
-              key={value}
-              style={[styles.segmentButton, contactMode === value ? styles.segmentButtonActive : undefined]}
-              onPress={() => {
-                setContactMode(value);
-                setScanErrorMessage(null);
-              }}
+              style={[styles.searchToggle, searchOpen || contactSearch ? styles.searchToggleActive : undefined]}
+              onPress={toggleContactSearch}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={searchOpen ? "Hide search" : "Search contacts"}
             >
-              <Text style={[styles.segmentText, contactMode === value ? styles.segmentTextActive : undefined]}>
-                {label}
-              </Text>
+              <Ionicons
+                name={searchOpen ? "close" : "search"}
+                size={18}
+                color={searchOpen || contactSearch ? palette.primaryStrong : palette.textMuted}
+              />
             </Pressable>
-          ))}
+          ) : null}
         </View>
 
         {shareQRValue ? (
@@ -372,23 +410,30 @@ export function ContactsScreen({
           )
         ) : (
           <View style={styles.contactsPane}>
-          <View style={styles.searchRow}>
-            <Ionicons name="search-outline" size={16} color={palette.textMuted} />
-            <TextInput
-              style={styles.searchInput}
-              value={contactSearch}
-              onChangeText={setContactSearch}
-              placeholder="Search name or address"
-              placeholderTextColor={palette.textMuted}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            {contactSearch ? (
-              <Pressable onPress={() => setContactSearch("")} hitSlop={8}>
-                <Ionicons name="close-circle" size={16} color={palette.textMuted} />
-              </Pressable>
-            ) : null}
-          </View>
+          <Animated.View
+            style={[styles.searchCollapsible, { height: searchHeight, opacity: searchReveal }]}
+            pointerEvents={searchOpen ? "auto" : "none"}
+          >
+            <View onLayout={(event) => setSearchContentHeight(event.nativeEvent.layout.height)}>
+            <View style={styles.searchRow}>
+              <Ionicons name="search-outline" size={16} color={palette.textMuted} />
+              <TextInput
+                style={styles.searchInput}
+                value={contactSearch}
+                onChangeText={setContactSearch}
+                placeholder="Search name or address"
+                placeholderTextColor={palette.textMuted}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {contactSearch ? (
+                <Pressable onPress={() => setContactSearch("")} hitSlop={8}>
+                  <Ionicons name="close-circle" size={16} color={palette.textMuted} />
+                </Pressable>
+              ) : null}
+            </View>
+            </View>
+          </Animated.View>
 
         {listErrorMessage ? <Text style={styles.errorText}>{listErrorMessage}</Text> : null}
 
@@ -718,7 +763,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     fab: {
       position: "absolute",
       right: spacing.lg,
-      bottom: 124,
+      bottom: 108,
       width: 66,
       height: 66,
       borderRadius: 33,
@@ -726,10 +771,10 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       justifyContent: "center",
       backgroundColor: palette.primaryStrong,
       shadowColor: palette.shadow,
-      shadowOpacity: 0.5,
-      shadowRadius: 12,
-      shadowOffset: { width: 0, height: 6 },
-      elevation: 8,
+      shadowOpacity: 0.22,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 3 },
+      elevation: 3,
     },
     addSheetBackdrop: {
       flex: 1,
@@ -854,30 +899,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       fontSize: 18,
       fontWeight: "800",
     },
-    segmentWrap: {
-      flexDirection: "row",
-      gap: spacing.sm,
-      backgroundColor: palette.surfaceStrong,
-      borderRadius: radii.lg,
-      padding: 6,
-    },
-    segmentButton: {
-      flex: 1,
-      borderRadius: radii.md,
-      paddingVertical: 12,
-      alignItems: "center",
-    },
-    segmentButtonActive: {
-      backgroundColor: palette.primary,
-    },
-    segmentText: {
-      color: palette.textMuted,
-      fontWeight: "800",
-      fontSize: 13,
-    },
-    segmentTextActive: {
-      color: palette.white,
-    },
     qrCard: {
       gap: spacing.md,
       alignItems: "stretch",
@@ -905,6 +926,33 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     scanCard: {
       gap: spacing.md,
+    },
+    tabHeaderRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    tabHeaderFill: {
+      flex: 1,
+    },
+    // Square, and matched to the height of the tab control beside it.
+    searchToggle: {
+      width: 48,
+      height: 48,
+      borderRadius: radii.md,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surfaceStrong,
+    },
+    searchToggleActive: {
+      borderColor: palette.primary,
+      backgroundColor: palette.primarySoft,
+    },
+    searchCollapsible: {
+      overflow: "hidden",
+      justifyContent: "flex-start",
     },
     contactsPane: {
       gap: spacing.md,

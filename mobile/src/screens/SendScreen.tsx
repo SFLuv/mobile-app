@@ -19,6 +19,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { ethers } from "ethers";
 import { ScannerCornerGuide } from "../components/ScannerCornerGuide";
+import { SegmentedTabs } from "../components/SegmentedTabs";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { useCurrentLocation } from "../hooks/useCurrentLocation";
 import { AmountUnit, SendResult } from "../services/smartWallet";
@@ -35,6 +36,11 @@ type SendStep = "recipient" | "amount";
 type SendPhase = "editing" | "sending" | "success" | "failure";
 type TipChoice = "10" | "15" | "20" | "custom";
 type RecipientEntryMode = SendFlowEntryMode;
+
+const ENTRY_MODE_TABS: Array<{ value: RecipientEntryMode; label: string }> = [
+  { value: "manual", label: "Search" },
+  { value: "scan", label: "Scan" },
+];
 type SendLayoutMode = "regular" | "compact" | "dense";
 
 type RecipientSuggestion = {
@@ -1074,31 +1080,23 @@ export function SendScreen({
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.stepHeader}>
-          <Pressable style={styles.iconButton} onPress={handleBack}>
-            <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
-          </Pressable>
-        </View>
-
         {feedback ? (
           <View style={styles.feedbackCard}>
             <Text style={styles.feedbackText}>{feedback}</Text>
           </View>
         ) : null}
 
-        <View style={styles.entryModeRow}>
-          <Pressable
-            style={[styles.entryModeButton, entryMode === "manual" ? styles.entryModeButtonActive : undefined]}
-            onPress={() => setEntryMode("manual")}
-          >
-            <Text style={[styles.entryModeText, entryMode === "manual" ? styles.entryModeTextActive : undefined]}>Search</Text>
+        <View style={styles.entryModeHeaderRow}>
+          <Pressable style={styles.iconButton} onPress={handleBack}>
+            <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
           </Pressable>
-          <Pressable
-            style={[styles.entryModeButton, entryMode === "scan" ? styles.entryModeButtonActive : undefined]}
-            onPress={() => setEntryMode("scan")}
-          >
-            <Text style={[styles.entryModeText, entryMode === "scan" ? styles.entryModeTextActive : undefined]}>Scan</Text>
-          </Pressable>
+          <SegmentedTabs
+            style={styles.entryModeRowFill}
+            segments={ENTRY_MODE_TABS}
+            value={entryMode}
+            onChange={setEntryMode}
+            hapticsEnabled={hapticsEnabled}
+          />
         </View>
 
         {entryMode === "manual" ? (
@@ -1661,32 +1659,13 @@ function createStyles(
       borderWidth: 1,
       borderColor: palette.border,
     },
-    entryModeRow: {
+    entryModeHeaderRow: {
       flexDirection: "row",
-      gap: spacing.xs,
-      backgroundColor: palette.surfaceStrong,
-      borderRadius: radii.lg,
-      borderWidth: 1,
-      borderColor: palette.border,
-      padding: 6,
-    },
-    entryModeButton: {
-      flex: 1,
-      minHeight: 44,
-      borderRadius: radii.md,
       alignItems: "center",
-      justifyContent: "center",
+      gap: spacing.sm,
     },
-    entryModeButtonActive: {
-      backgroundColor: palette.primary,
-    },
-    entryModeText: {
-      color: palette.textMuted,
-      fontWeight: "800",
-      fontSize: 13,
-    },
-    entryModeTextActive: {
-      color: palette.white,
+    entryModeRowFill: {
+      flex: 1,
     },
     inlineScannerCard: {
       gap: spacing.sm,

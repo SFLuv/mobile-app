@@ -12,6 +12,7 @@ import {
 import Constants from "expo-constants";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
+import { SegmentedTabs } from "../components/SegmentedTabs";
 import { SfluvQRCode, prewarmQRCode } from "../components/SfluvQRCode";
 import * as Clipboard from "expo-clipboard";
 import { ScannerCornerGuide } from "../components/ScannerCornerGuide";
@@ -29,6 +30,11 @@ type Props = {
 };
 
 type ReceiveMode = "link" | "address";
+
+const RECEIVE_TABS: Array<{ value: ReceiveMode; label: string }> = [
+  { value: "link", label: "Link" },
+  { value: "address", label: "Address" },
+];
 
 function shortAddress(address: string): string {
   if (!address) {
@@ -152,22 +158,12 @@ export function ReceiveScreen({
                 <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
               </Pressable>
             ) : null}
-            <View style={[styles.modeToggle, styles.modeToggleFill]}>
-            <Pressable
-              style={[styles.modeButton, mode === "link" ? styles.modeButtonActive : undefined]}
-              onPress={() => setMode("link")}
-            >
-              <Text style={[styles.modeButtonText, mode === "link" ? styles.modeButtonTextActive : undefined]}>Link</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.modeButton, mode === "address" ? styles.modeButtonActive : undefined]}
-              onPress={() => setMode("address")}
-            >
-              <Text style={[styles.modeButtonText, mode === "address" ? styles.modeButtonTextActive : undefined]}>
-                Address
-              </Text>
-              </Pressable>
-            </View>
+            <SegmentedTabs
+              style={styles.modeToggleFill}
+              segments={RECEIVE_TABS}
+              value={mode}
+              onChange={setMode}
+            />
           </View>
 
           {scanError ? (
@@ -333,33 +329,6 @@ function createStyles(
     },
     modeToggleFill: {
       flex: 1,
-    },
-    modeToggle: {
-      flexDirection: "row",
-      gap: spacing.xs,
-      backgroundColor: palette.surfaceStrong,
-      borderRadius: radii.lg,
-      padding: 6,
-      borderWidth: 1,
-      borderColor: palette.border,
-    },
-    modeButton: {
-      flex: 1,
-      minHeight: compactLayout ? 40 : 42,
-      borderRadius: radii.md,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    modeButtonActive: {
-      backgroundColor: palette.primary,
-    },
-    modeButtonText: {
-      color: palette.textMuted,
-      fontWeight: "800",
-      fontSize: 13,
-    },
-    modeButtonTextActive: {
-      color: palette.white,
     },
     scanErrorCard: {
       backgroundColor: palette.surface,

@@ -12,6 +12,7 @@ import {
   AppVolunteerReminderPreferences,
   AppWallet,
 } from "../types/app";
+import { SegmentedTabs } from "../components/SegmentedTabs";
 import {
   DEFAULT_VOLUNTEER_REMINDER_HOURS,
   VOLUNTEER_REMINDER_HOUR_OPTIONS,
@@ -988,42 +989,17 @@ export function SettingsScreen({
         </View>
       ) : null}
 
-      <View style={styles.segmentWrap}>
-        <Pressable
-          style={[styles.segmentButton, section === "general" ? styles.segmentButtonActive : undefined]}
-          onPress={() => setSection("general")}
-        >
-          <Text style={[styles.segmentText, section === "general" ? styles.segmentTextActive : undefined]}>General</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.segmentButton, section === "wallets" ? styles.segmentButtonActive : undefined]}
-          onPress={() => setSection("wallets")}
-        >
-          <Text style={[styles.segmentText, section === "wallets" ? styles.segmentTextActive : undefined]}>Wallets</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.segmentButton, section === "account" ? styles.segmentButtonActive : undefined]}
-          onPress={() => setSection("account")}
-        >
-          <Text style={[styles.segmentText, section === "account" ? styles.segmentTextActive : undefined]}>Account</Text>
-        </Pressable>
-        {hasMerchantSection ? (
-          <Pressable
-            style={[styles.segmentButton, section === "merchant" ? styles.segmentButtonActive : undefined]}
-            onPress={() => setSection("merchant")}
-          >
-            <Text style={[styles.segmentText, section === "merchant" ? styles.segmentTextActive : undefined]}>Merchant</Text>
-          </Pressable>
-        ) : null}
-        {hasImproverSection ? (
-          <Pressable
-            style={[styles.segmentButton, section === "improver" ? styles.segmentButtonActive : undefined]}
-            onPress={() => setSection("improver")}
-          >
-            <Text style={[styles.segmentText, section === "improver" ? styles.segmentTextActive : undefined]}>Improver</Text>
-          </Pressable>
-        ) : null}
-      </View>
+      <SegmentedTabs
+        segments={[
+          { value: "general" as SettingsSection, label: "General" },
+          { value: "wallets" as SettingsSection, label: "Wallets" },
+          { value: "account" as SettingsSection, label: "Account" },
+          ...(hasMerchantSection ? [{ value: "merchant" as SettingsSection, label: "Merchant" }] : []),
+          ...(hasImproverSection ? [{ value: "improver" as SettingsSection, label: "Improver" }] : []),
+        ]}
+        value={section}
+        onChange={setSection}
+      />
 
       {section === "general" ? (
         <>
@@ -1589,32 +1565,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     body: {
       color: palette.textMuted,
       lineHeight: 21,
-    },
-    segmentWrap: {
-      flexDirection: "row",
-      gap: spacing.xs,
-      backgroundColor: palette.surfaceStrong,
-      borderRadius: radii.lg,
-      padding: 6,
-      borderWidth: 1,
-      borderColor: palette.border,
-    },
-    segmentButton: {
-      flex: 1,
-      borderRadius: radii.md,
-      paddingVertical: 12,
-      alignItems: "center",
-    },
-    segmentButtonActive: {
-      backgroundColor: palette.primary,
-    },
-    segmentText: {
-      color: palette.textMuted,
-      fontWeight: "800",
-      fontSize: 12,
-    },
-    segmentTextActive: {
-      color: palette.white,
     },
     meta: {
       color: palette.textMuted,

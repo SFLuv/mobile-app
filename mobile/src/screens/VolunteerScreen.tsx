@@ -19,6 +19,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { SegmentedTabs } from "../components/SegmentedTabs";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import {
   AppBackendClient,
@@ -840,28 +841,13 @@ export function VolunteerScreen({
         }
       >
         <View style={styles.filterHeaderRow}>
-          <View style={[styles.segmentRow, styles.segmentRowFill]}>
-            {FEED_OPTIONS.map((option) => {
-              const active = feed === option.value;
-              return (
-                <Pressable
-                  key={option.value}
-                  style={[styles.segment, active ? styles.segmentActive : undefined]}
-                  onPress={() => {
-                    if (active) {
-                      return;
-                    }
-                    haptics();
-                    setFeed(option.value);
-                  }}
-                >
-                  <Text style={[styles.segmentText, active ? styles.segmentTextActive : undefined]}>
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <SegmentedTabs
+            style={styles.segmentRowFill}
+            segments={FEED_OPTIONS}
+            value={feed}
+            onChange={setFeed}
+            hapticsEnabled={hapticsEnabled}
+          />
           <Pressable
             style={[styles.searchToggle, searchOpen || search ? styles.searchToggleActive : undefined]}
             onPress={toggleSearch}
@@ -1605,36 +1591,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       fontSize: 14,
       color: palette.text,
       padding: 0,
-    },
-    segmentRow: {
-      flexDirection: "row",
-      gap: spacing.sm,
-      backgroundColor: palette.surfaceStrong,
-      borderRadius: radii.lg,
-      padding: 6,
-      borderWidth: 1,
-      borderColor: palette.border,
-    },
-    segment: {
-      flex: 1,
-      minWidth: 0,
-      flexShrink: 1,
-      alignItems: "center",
-      justifyContent: "center",
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      borderRadius: radii.md,
-    },
-    segmentActive: {
-      backgroundColor: palette.primary,
-    },
-    segmentText: {
-      fontSize: 13,
-      fontWeight: "800",
-      color: palette.textMuted,
-    },
-    segmentTextActive: {
-      color: palette.white,
     },
     filterRow: {
       flexDirection: "row",

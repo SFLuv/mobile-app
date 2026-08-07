@@ -17,6 +17,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import Constants from "expo-constants";
 import { Ionicons } from "@expo/vector-icons";
 import { DatePickerSheet } from "../components/DatePickerSheet";
+import { SegmentedTabs } from "../components/SegmentedTabs";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { AppBackendClient, AppBackendRequestError } from "../services/appBackend";
 import {
@@ -62,6 +63,11 @@ type Props = {
 };
 
 type ImproverSection = "workflows" | "credentials";
+
+const IMPROVER_SECTION_TABS: Array<{ value: ImproverSection; label: string }> = [
+  { value: "workflows", label: "Workflows" },
+  { value: "credentials", label: "Credentials" },
+];
 type WorkflowView = "my-workflows" | "workflow-board" | "unpaid-workflows";
 
 type CompletionPhoto = {
@@ -3348,22 +3354,12 @@ export function ImproverScreen({
       >
         {renderBannerStack()}
 
-        <View style={styles.segmentWrap}>
-          {([
-            ["workflows", "Workflows"],
-            ["credentials", "Credentials"],
-          ] as Array<[ImproverSection, string]>).map(([value, label]) => (
-            <Pressable
-              key={value}
-              style={[styles.segmentButton, section === value ? styles.segmentButtonActive : undefined]}
-              onPress={() => setSection(value)}
-            >
-              <Text style={[styles.segmentText, section === value ? styles.segmentTextActive : undefined]}>
-                {label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        <SegmentedTabs
+          segments={IMPROVER_SECTION_TABS}
+          value={section}
+          onChange={setSection}
+          hapticsEnabled={hapticsEnabled}
+        />
 
         {section === "workflows" ? renderWorkflowsContent() : renderCredentialsContent()}
       </ScrollView>
@@ -4059,35 +4055,6 @@ function createStyles(
       color: palette.text,
       lineHeight: 20,
       fontWeight: "700",
-    },
-    segmentWrap: {
-      flexDirection: "row",
-      gap: spacing.sm,
-      backgroundColor: palette.surfaceStrong,
-      borderRadius: radii.lg,
-      padding: 6,
-      borderWidth: 1,
-      borderColor: palette.border,
-    },
-    segmentButton: {
-      flex: 1,
-      minWidth: 0,
-      borderRadius: radii.md,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    segmentButtonActive: {
-      backgroundColor: palette.primary,
-    },
-    segmentText: {
-      color: palette.textMuted,
-      fontWeight: "800",
-      fontSize: 13,
-    },
-    segmentTextActive: {
-      color: palette.white,
     },
     headerActions: {
       flexDirection: "row",

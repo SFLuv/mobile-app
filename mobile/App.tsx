@@ -6,6 +6,7 @@ import {
   Alert,
   Dimensions,
   Keyboard,
+  LayoutChangeEvent,
   KeyboardAvoidingView,
   Modal,
   PanResponder,
@@ -1236,8 +1237,22 @@ function BottomDock({
 }) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
-  const [barWidth, setBarWidth] = useState(0);
   const [barHeight, setBarHeight] = useState(0);
+  // Each slot reports its own laid-out position. Deriving them arithmetically
+  // from the bar width drifted against Yoga's pixel rounding, and the error
+  // accumulated across the row — visible as an off-centre bubble on the last tab.
+  const [slots, setSlots] = useState<Array<{ x: number; width: number }>>([]);
+  const measureSlot = useCallback((index: number, x: number, width: number) => {
+    setSlots((current) => {
+      const existing = current[index];
+      if (existing && Math.abs(existing.x - x) < 0.5 && Math.abs(existing.width - width) < 0.5) {
+        return current;
+      }
+      const next = current.slice();
+      next[index] = { x, width };
+      return next;
+    });
+  }, []);
 
   // -1 when the active screen has no dock slot (Settings, reached from the
   // header). The bubble then holds its position and hides rather than sliding
@@ -1248,26 +1263,43 @@ function BottomDock({
     0,
     tabs.findIndex((tab) => tab.center),
   );
-  const tabWidth = tabs.length > 0 ? barWidth / tabs.length : 0;
+  const measured = slots.length === tabs.length && slots.every(Boolean);
 
   const BUBBLE_PAD = 3;
   const RECT_HEIGHT = 52;
   const CIRCLE = 54;
-  const rectWidth = Math.max(0, tabWidth - BUBBLE_PAD);
-  const centerX = centerIndex * tabWidth;
+  const activeSlot = measured ? slots[activeIndex] : undefined;
+  const centerSlot = measured ? slots[centerIndex] : undefined;
+  const tabWidth = centerSlot?.width ?? 0;
+  const rectWidth = Math.max(0, (activeSlot?.width ?? tabWidth) - BUBBLE_PAD);
+  const centerX = centerSlot?.x ?? 0;
 
   const travel = useRef(new Animated.Value(0)).current;
+  // False whenever the bubble is not currently placed on a real slot: on first
+  // measure, and while a slot-less screen (Settings) or the send pane is
+  // showing. The next placement then jumps rather than sliding across the bar,
+  // so returning to Wallet finds the indicator already there.
+  const placedRef = useRef(false);
   useEffect(() => {
-    if (tabWidth <= 0 || !hasActiveSlot) {
+    if (!activeSlot || !hasActiveSlot) {
+      if (!hasActiveSlot) {
+        placedRef.current = false;
+      }
+      return;
+    }
+    const target = activeSlot.x;
+    if (!placedRef.current) {
+      placedRef.current = true;
+      travel.setValue(target);
       return;
     }
     Animated.spring(travel, {
-      toValue: activeIndex * tabWidth,
+      toValue: target,
       useNativeDriver: false,
       friction: 11,
       tension: 95,
     }).start();
-  }, [activeIndex, hasActiveSlot, tabWidth, travel]);
+  }, [activeSlot, hasActiveSlot, travel]);
 
   // 0 = rounded rect travelling along the bar, 1 = circle sitting on the raised
   // centre button. Morphing only over the last stretch of the approach keeps the
@@ -1306,14 +1338,11 @@ function BottomDock({
   return (
     <View
       style={styles.bottomDock}
-      onLayout={(event) => {
-        setBarWidth(event.nativeEvent.layout.width - 12);
-        setBarHeight(event.nativeEvent.layout.height);
-      }}
+      onLayout={(event) => setBarHeight(event.nativeEvent.layout.height)}
     >
       <View pointerEvents="none" style={styles.bottomDockGlassLayer} />
       <View pointerEvents="none" style={styles.bottomDockGlassSheen} />
-      {barWidth > 0 ? (
+      {measured ? (
         <Animated.View
           pointerEvents="none"
           style={[
@@ -1330,12 +1359,15 @@ function BottomDock({
         />
       ) : null}
 
-      {tabs.map((tab) => {
+      {tabs.map((tab, index) => {
         const active = tab.key === activeKey;
+        const onSlotLayout = (event: LayoutChangeEvent) =>
+          measureSlot(index, event.nativeEvent.layout.x, event.nativeEvent.layout.width);
         if (tab.center) {
           return (
             <Pressable
               key={tab.key}
+              onLayout={onSlotLayout}
               style={styles.dockTab}
               accessibilityRole="button"
               accessibilityLabel={tab.label}
@@ -1361,6 +1393,7 @@ function BottomDock({
         return (
           <Pressable
             key={tab.key}
+            onLayout={onSlotLayout}
             style={styles.dockTab}
             accessibilityRole="button"
             accessibilityLabel={tab.label}
@@ -3853,7 +3886,7 @@ function WalletAppShellContent({
         clientConfig={clientConfig}
         accountAddress={smartAddress || runtime.discovery?.ownerAddress || ethers.constants.AddressZero}
         onRedeemCodeScanned={openRedeemFlowForCode}
-        onBack={closeWalletPaneToWallet}
+        onBack={() => closeWalletPaneToWallet()}
         showRedeemScanner={!merchantModeActive}
       />
     ) : null;
@@ -6403,7 +6436,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   // driven by proximity to the raised centre button.
   dockBubble: {
     position: "absolute",
-    left: 6,
+    left: 0,
     backgroundColor: palette.primarySoft,
     borderWidth: 1,
     borderColor: palette.primary,
