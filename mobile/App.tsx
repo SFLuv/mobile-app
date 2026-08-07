@@ -85,6 +85,8 @@ import {
   AppVolunteerReminderPreferences,
   AppWallet,
 } from "./src/types/app";
+import { useNotificationInbox } from "./src/hooks/useNotificationInbox";
+import { NotificationTarget, targetFromData } from "./src/services/notificationInbox";
 import { AppPreferences, defaultAppPreferences } from "./src/types/preferences";
 import { SfluvUniversalLink, parseSfluvUniversalLink } from "./src/utils/universalLinks";
 import {
@@ -2457,10 +2459,64 @@ function WalletAppShellContent({
     ]).start();
   }, [tab, tabFade, tabSlideX]);
 
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+
   const openVolunteerPanel = useCallback((eventId: string | null = null) => {
     setVolunteerRouteRequest((current) => ({ eventId, nonce: current.nonce + 1 }));
     setTab("volunteer");
   }, []);
+
+  const navigateToNotificationTarget = useCallback(
+    (target: NotificationTarget) => {
+      switch (target.kind) {
+        case "volunteer-event":
+          if (canAccessVolunteerPanel) {
+            openVolunteerPanel(target.eventId);
+          }
+          return;
+        case "volunteer":
+          if (canAccessVolunteerPanel) {
+            openVolunteerPanel();
+          }
+          return;
+        case "improver":
+          if (canAccessImproverPanel) {
+            openImproverPanel("workflows");
+          }
+          return;
+        case "activity":
+          setTab("activity");
+          return;
+        default:
+          return;
+      }
+    },
+    [canAccessImproverPanel, canAccessVolunteerPanel, openImproverPanel, openVolunteerPanel],
+  );
+
+  const {
+    items: notificationItems,
+    open: openNotification,
+    resolveTarget: resolveNotificationTarget,
+    clearAll: clearNotifications,
+  } = useNotificationInbox({ onNavigate: navigateToNotificationTarget });
+
+  // Reaching a screen under your own steam handles the notification for it just
+  // as tapping it would, so it clears from our list and the OS tray together.
+  useEffect(() => {
+    if (tab === "activity") {
+      resolveNotificationTarget({ kind: "activity" });
+    }
+    if (tab === "improver") {
+      resolveNotificationTarget({ kind: "improver" });
+    }
+  }, [resolveNotificationTarget, tab]);
+
+  useEffect(() => {
+    if (tab === "volunteer" && volunteerRouteRequest.eventId) {
+      resolveNotificationTarget({ kind: "volunteer-event", eventId: volunteerRouteRequest.eventId });
+    }
+  }, [resolveNotificationTarget, tab, volunteerRouteRequest.eventId]);
 
   // Volunteer pushes (reminders, organizer blasts) carry {type, event_id}, so a
   // tap lands on the event rather than the tab. Matching the `volunteer_event_`
@@ -2469,15 +2525,13 @@ function WalletAppShellContent({
   // notification is what launched the app.
   useEffect(() => {
     const routeFromResponse = (response: Notifications.NotificationResponse | null) => {
-      const data = response?.notification?.request?.content?.data as Record<string, unknown> | undefined;
-      const type = typeof data?.type === "string" ? data.type : "";
-      if (!type.startsWith("volunteer_event_")) {
+      if (!response) {
         return;
       }
-      const eventId = typeof data?.event_id === "string" ? data.event_id : null;
-      if (eventId && canAccessVolunteerPanel) {
-        openVolunteerPanel(eventId);
-      }
+      const data = response.notification.request.content.data as Record<string, unknown> | undefined;
+      const target = targetFromData(data);
+      navigateToNotificationTarget(target);
+      resolveNotificationTarget(target);
     };
 
     void Notifications.getLastNotificationResponseAsync()
@@ -2487,7 +2541,7 @@ function WalletAppShellContent({
       });
     const subscription = Notifications.addNotificationResponseReceivedListener(routeFromResponse);
     return () => subscription.remove();
-  }, [canAccessVolunteerPanel, openVolunteerPanel]);
+  }, [navigateToNotificationTarget, resolveNotificationTarget]);
 
   const handleImproverUpdated = useCallback((nextImprover: AppImprover) => {
     setAppImprover(nextImprover);
@@ -3957,6 +4011,27 @@ function WalletAppShellContent({
             <Text style={styles.brand}>{activeTitle}</Text>
           </View>
           <View style={styles.topActions}>
+            {!merchantModeActive ? (
+              <Pressable
+                style={styles.iconButton}
+                onPress={() => setNotificationsOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Notifications"
+              >
+                <Ionicons
+                  name={notificationItems.length > 0 ? "notifications" : "notifications-outline"}
+                  size={18}
+                  color={palette.primaryStrong}
+                />
+                {notificationItems.length > 0 ? (
+                  <View style={styles.topBadge}>
+                    <Text style={styles.topBadgeText}>
+                      {notificationItems.length > 9 ? "9+" : notificationItems.length}
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
+            ) : null}
             <Pressable
               style={[styles.iconButton, tab === "settings" ? styles.iconButtonActive : undefined]}
               onPress={() => {
@@ -4438,6 +4513,61 @@ function WalletAppShellContent({
                 );
               })}
             </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+
+      <Modal
+        visible={notificationsOpen}
+        transparent
+        presentationStyle="overFullScreen"
+        animationType="fade"
+        onRequestClose={() => setNotificationsOpen(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setNotificationsOpen(false)}>
+          <Pressable style={styles.moreMenuCard} onPress={() => {}}>
+            <View style={styles.moreMenuHeader}>
+              <View style={styles.moreMenuHeaderCopy}>
+                <Text style={styles.moreMenuTitle}>Notifications</Text>
+                <Text style={styles.moreMenuSubtitle}>
+                  {notificationItems.length > 0
+                    ? "Tap one to jump straight to it."
+                    : "You are all caught up."}
+                </Text>
+              </View>
+              <Pressable style={styles.walletChooserClose} onPress={() => setNotificationsOpen(false)}>
+                <Ionicons name="close" size={20} color={palette.primaryStrong} />
+              </Pressable>
+            </View>
+
+            {notificationItems.length > 0 ? (
+              <>
+                <ScrollView style={styles.notificationList} showsVerticalScrollIndicator={false}>
+                  {notificationItems.map((item) => (
+                    <Pressable
+                      key={item.id}
+                      style={styles.moreMenuItem}
+                      onPress={() => {
+                        setNotificationsOpen(false);
+                        openNotification(item);
+                      }}
+                    >
+                      <View style={styles.moreMenuCopy}>
+                        <Text style={styles.moreMenuLabel}>{item.title}</Text>
+                        {item.body ? <Text style={styles.moreMenuBody}>{item.body}</Text> : null}
+                      </View>
+                      {item.target.kind !== "none" ? (
+                        <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
+                      ) : null}
+                    </Pressable>
+                  ))}
+                </ScrollView>
+                <Pressable style={styles.notificationClearAll} onPress={clearNotifications}>
+                  <Text style={styles.notificationClearAllText}>Clear all</Text>
+                </Pressable>
+              </>
+            ) : null}
           </Pressable>
         </Pressable>
       </Modal>
@@ -6242,6 +6372,38 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     backgroundColor: isDark ? "rgba(239,109,102,0.08)" : "rgba(239,109,102,0.05)",
     top: 60,
     left: -40,
+  },
+  notificationList: {
+    maxHeight: 340,
+  },
+  notificationClearAll: {
+    alignSelf: "center",
+    paddingVertical: 8,
+    paddingHorizontal: spacing.md,
+  },
+  notificationClearAllText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: palette.textMuted,
+  },
+  topBadge: {
+    position: "absolute",
+    top: -3,
+    right: -3,
+    minWidth: 17,
+    height: 17,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.danger,
+    borderWidth: 1.5,
+    borderColor: palette.background,
+  },
+  topBadgeText: {
+    color: palette.white,
+    fontSize: 10,
+    fontWeight: "800",
   },
   topBar: {
     paddingHorizontal: spacing.lg,
