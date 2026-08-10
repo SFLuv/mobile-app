@@ -75,8 +75,13 @@ export const ICON_TEXT_NUDGE_EM = 0.06;
 /** A hairline so a white pin still has an edge on a pale map. */
 export const PIN_EDGE_COLOR = "rgba(11, 48, 59, 0.18)";
 
-/** Default rendered pin width in device-independent pixels. */
-export const PIN_WIDTH = 30;
+/**
+ * Default rendered pin width in device-independent pixels.
+ *
+ * Larger than the web's 30: a phone map is held further from the eye than a
+ * desktop one is looked at, and the pin is also the tap target.
+ */
+export const PIN_WIDTH = 36;
 
 
 

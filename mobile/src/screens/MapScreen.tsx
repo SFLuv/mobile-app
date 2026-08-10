@@ -23,6 +23,13 @@ import { MerchantIcon, MerchantMapPin, OpenStatusBadge, useMarkerTracking } from
 
 type MapViewMode = "map" | "list";
 
+/**
+ * Geometry of the Map/List switch, needed in both the styles and the slide
+ * maths — the indicator travels one button plus the gap between them.
+ */
+const SEGMENT_PADDING = 6;
+const SEGMENT_GAP = spacing.sm;
+
 type Props = {
   locations: AppLocation[];
   onPayLocation?: (location: AppLocation) => void;
@@ -149,8 +156,9 @@ const MerchantMarker = React.memo(function MerchantMarker({
   return (
     <Marker
       coordinate={{ latitude: entry.latitude, longitude: entry.longitude }}
-      title={entry.location.name}
-      description={entry.location.description}
+      // No title/description: those render the platform's own callout bubble
+      // above the pin, which duplicated the sheet that opens on press and
+      // covered the neighbouring pins while it was up.
       tracksViewChanges={tracking}
       anchor={{ x: 0.5, y: 1 }}
       onPress={() => onPress(entry.location)}
@@ -292,6 +300,22 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
   // same day even if the render straddles midnight.
   const todayWeekday = useMemo(() => currentWeekdayIndex(), []);
   const now = useMinuteTick();
+
+  // The selected half is marked by an indicator that slides between the two,
+  // rather than the background jumping from one button to the other.
+  const [segmentWidth, setSegmentWidth] = useState(0);
+  const segmentSlide = useRef(new Animated.Value(0)).current;
+  const segmentButtonWidth =
+    segmentWidth > 0 ? (segmentWidth - SEGMENT_PADDING * 2 - SEGMENT_GAP) / 2 : 0;
+
+  useEffect(() => {
+    Animated.spring(segmentSlide, {
+      toValue: viewMode === "list" ? 1 : 0,
+      useNativeDriver: true,
+      friction: 11,
+      tension: 95,
+    }).start();
+  }, [segmentSlide, viewMode]);
   const openStateFor = useCallback((location: AppLocation) => getOpenState(location.hours, now), [now]);
   const [query, setQuery] = useState("");
   const [selectedLocation, setSelectedLocation] = useState<AppLocation | null>(null);
@@ -364,17 +388,33 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
           placeholderTextColor={palette.textMuted}
         />
 
-        <View style={styles.segmentWrap}>
-          <Pressable
-            style={[styles.segmentButton, viewMode === "map" ? styles.segmentButtonActive : undefined]}
-            onPress={() => onChangeViewMode("map")}
-          >
+        <View
+          style={styles.segmentWrap}
+          onLayout={(event) => setSegmentWidth(event.nativeEvent.layout.width)}
+        >
+          {segmentButtonWidth > 0 ? (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.segmentIndicator,
+                {
+                  width: segmentButtonWidth,
+                  transform: [
+                    {
+                      translateX: segmentSlide.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, segmentButtonWidth + SEGMENT_GAP],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            />
+          ) : null}
+          <Pressable style={styles.segmentButton} onPress={() => onChangeViewMode("map")}>
             <Text style={[styles.segmentText, viewMode === "map" ? styles.segmentTextActive : undefined]}>Map View</Text>
           </Pressable>
-          <Pressable
-            style={[styles.segmentButton, viewMode === "list" ? styles.segmentButtonActive : undefined]}
-            onPress={() => onChangeViewMode("list")}
-          >
+          <Pressable style={styles.segmentButton} onPress={() => onChangeViewMode("list")}>
             <Text style={[styles.segmentText, viewMode === "list" ? styles.segmentTextActive : undefined]}>List View</Text>
           </Pressable>
         </View>
@@ -634,10 +674,10 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     segmentWrap: {
       flexDirection: "row",
-      gap: spacing.sm,
+      gap: SEGMENT_GAP,
       backgroundColor: palette.surfaceStrong,
       borderRadius: radii.lg,
-      padding: 6,
+      padding: SEGMENT_PADDING,
     },
     segmentButton: {
       flex: 1,
@@ -645,7 +685,14 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       paddingVertical: 12,
       alignItems: "center",
     },
-    segmentButtonActive: {
+    // Sits behind the two buttons and slides between them. Inset by the wrap's
+    // own padding so it lines up with a button exactly.
+    segmentIndicator: {
+      position: "absolute",
+      left: SEGMENT_PADDING,
+      top: SEGMENT_PADDING,
+      bottom: SEGMENT_PADDING,
+      borderRadius: radii.md,
       backgroundColor: palette.primary,
     },
     segmentText: {
