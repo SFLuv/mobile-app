@@ -35,6 +35,12 @@ type Props = {
   onPayLocation?: (location: AppLocation) => void;
   viewMode: MapViewMode;
   onChangeViewMode: (viewMode: MapViewMode) => void;
+  /**
+   * Bumped when the Map tab is tapped while already here. A counter rather than
+   * a boolean because the request is an event — two taps in a row must both
+   * land, and there is nothing to reset afterwards.
+   */
+  recenterNonce?: number;
 };
 
 type DisplayLocation = {
@@ -293,7 +299,7 @@ function coordinatesForDisplay(displayLocations: DisplayLocation[], userLocation
   return points;
 }
 
-export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode }: Props) {
+export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode, recenterNonce = 0 }: Props) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
   // Once per render rather than per row, so every line is judged against the
@@ -341,6 +347,7 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
     }).start(() => setSelectedLocation(null));
   };
   const [mapReady, setMapReady] = useState(false);
+  const [mapFrame, setMapFrame] = useState({ width: 0, height: 0 });
   const mapRef = useRef<MapView | null>(null);
   const { location: userLocation } = useCurrentLocation(true);
 
@@ -361,21 +368,114 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
   );
   const mapRegion = useMemo(() => regionForPoints(mapCoordinates), [mapCoordinates]);
 
+  /**
+   * A quarter of the frame on every side, so the pins land in the middle half
+   * rather than pressed against the edges. Falls back to a fixed inset until
+   * the map has been laid out and its real size is known.
+   */
+  const edgePadding = useMemo(() => {
+    const horizontal = mapFrame.width > 0 ? Math.round(mapFrame.width * 0.25) : 72;
+    const vertical = mapFrame.height > 0 ? Math.round(mapFrame.height * 0.25) : 72;
+    return { top: vertical, right: horizontal, bottom: vertical, left: horizontal };
+  }, [mapFrame.height, mapFrame.width]);
+
+  /** Frames every pin inside the middle of the map. */
+  const frameAllPins = useCallback(
+    (durationMs: number) => {
+      const map = mapRef.current;
+      if (!map || mapCoordinates.length === 0) {
+        return;
+      }
+      if (mapCoordinates.length === 1) {
+        map.animateToRegion(mapRegion, durationMs);
+        return;
+      }
+      map.fitToCoordinates(mapCoordinates, { edgePadding, animated: true });
+    },
+    [edgePadding, mapCoordinates, mapRegion],
+  );
+
+  /**
+   * Where tapping the Map tab again takes you.
+   *
+   * Centred on you when your position is known — that is what "where am I"
+   * means, and the span is chosen so the nearest merchant is always in shot
+   * rather than leaving you alone in the middle of an empty block. With no
+   * position to work from, it falls back to framing every pin.
+   */
+  const recenter = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    if (!userLocation) {
+      frameAllPins(350);
+      return;
+    }
+
+    let nearestMeters = Number.POSITIVE_INFINITY;
+    for (const entry of displayLocations) {
+      nearestMeters = Math.min(
+        nearestMeters,
+        distanceMeters(
+          { lat: userLocation.lat, lng: userLocation.lng },
+          { lat: entry.latitude, lng: entry.longitude },
+        ),
+      );
+    }
+
+    // Clamped: a merchant next door should not zoom to the building, and one
+    // across the bay should not zoom out to the whole region.
+    const spanMeters = Number.isFinite(nearestMeters)
+      ? Math.min(8_000, Math.max(900, nearestMeters * 2.6))
+      : 2_500;
+    const latitudeDelta = spanMeters / 111_320;
+
+    map.animateToRegion(
+      {
+        latitude: userLocation.lat,
+        longitude: userLocation.lng,
+        latitudeDelta,
+        // Degrees of longitude shrink towards the poles, so an equal ground
+        // span needs a wider delta than the latitude one.
+        longitudeDelta: latitudeDelta / Math.max(0.2, Math.cos(userLocation.lat * (Math.PI / 180))),
+      },
+      350,
+    );
+  }, [displayLocations, frameAllPins, userLocation]);
+
   useEffect(() => {
-    if (!mapRef.current || !mapReady || mapCoordinates.length === 0 || viewMode !== "map") {
+    if (!mapReady || viewMode !== "map") {
       return;
     }
+    frameAllPins(250);
+  }, [frameAllPins, mapReady, viewMode]);
 
-    if (mapCoordinates.length === 1) {
-      mapRef.current.animateToRegion(mapRegion, 250);
+  // The map unmounts while the list is showing, so its ready flag has to go
+  // with it or the next mount would be driven against a dead reference.
+  useEffect(() => {
+    if (viewMode !== "map") {
+      setMapReady(false);
+    }
+  }, [viewMode]);
+
+  // Held until the map is actually on screen and ready: the tap that asks for a
+  // recentre may also be the tap that switches back from the list view.
+  const [recenterPending, setRecenterPending] = useState(false);
+  useEffect(() => {
+    if (recenterNonce > 0) {
+      setRecenterPending(true);
+    }
+  }, [recenterNonce]);
+
+  useEffect(() => {
+    if (!recenterPending || !mapReady || viewMode !== "map") {
       return;
     }
-
-    mapRef.current.fitToCoordinates(mapCoordinates, {
-      edgePadding: { top: 72, right: 72, bottom: 72, left: 72 },
-      animated: true,
-    });
-  }, [mapCoordinates, mapReady, mapRegion, viewMode]);
+    recenter();
+    setRecenterPending(false);
+  }, [mapReady, recenter, recenterPending, viewMode]);
 
   return (
     <View style={styles.flex}>
@@ -429,7 +529,12 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
         </View>
 
         {viewMode === "map" ? (
-          <View style={styles.mapWrap}>
+          <View
+            style={styles.mapWrap}
+            onLayout={(event) =>
+              setMapFrame({ width: event.nativeEvent.layout.width, height: event.nativeEvent.layout.height })
+            }
+          >
             <MapView
               ref={(instance) => {
                 mapRef.current = instance;

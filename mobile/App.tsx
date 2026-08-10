@@ -1707,6 +1707,8 @@ function WalletAppShellContent({
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [showWalletChooser, setShowWalletChooser] = useState(false);
   const [showParticipateMenu, setShowParticipateMenu] = useState(false);
+  // Incremented to ask the map to recentre; see MapScreen's recenterNonce.
+  const [mapRecenterNonce, setMapRecenterNonce] = useState(0);
   const [merchantMapViewMode, setMerchantMapViewMode] = useState<"map" | "list">("map");
   const [pendingContactAddress, setPendingContactAddress] = useState<string | null>(null);
   const [sendDraft, setSendDraft] = useState<SendDraft | null>(null);
@@ -2443,10 +2445,16 @@ function WalletAppShellContent({
       }
       if (key === "map") {
         setMerchantMapViewMode("map");
+        // Tapping the tab you are already on means "take me back to the start":
+        // out of the list, and back to a sensible view of the map. Arriving
+        // from another tab does not need it — the map frames itself on mount.
+        if (tab === "map") {
+          setMapRecenterNonce((current) => current + 1);
+        }
       }
       setTab(key);
     },
-    [participateTargets],
+    [participateTargets, tab],
   );
 
   // Tab content slides in from the side the new screen sits on, so a tab change
@@ -4202,6 +4210,7 @@ function WalletAppShellContent({
               locations={locations}
               viewMode={merchantMapViewMode}
               onChangeViewMode={setMerchantMapViewMode}
+              recenterNonce={mapRecenterNonce}
               onPayLocation={(location) => {
                 if (!location.payToAddress) {
                   showToast("Payment is not available for this merchant right now.", "error");
