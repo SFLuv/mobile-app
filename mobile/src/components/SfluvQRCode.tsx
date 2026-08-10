@@ -101,11 +101,63 @@ function inkDistanceField() {
   const pad = Math.round(MASK_GRID * FIELD_PAD);
   const span = MASK_GRID + pad * 2;
   const field = new Float32Array(span * span).fill(span * 4);
-  for (let y = 0; y < MASK_GRID; y += 1) {
-    const row = MASK_ROWS[y];
-    for (let x = 0; x < MASK_GRID; x += 1) {
-      if (row.charCodeAt(x) === 49) {
-        field[(y + pad) * span + (x + pad)] = 0;
+
+  /*
+   * Seed from the mark's FILLED silhouette: its ink, plus everything the ink
+   * encloses.
+   *
+   * Seeding from ink alone measures distance to the nearest stroke, which is
+   * the wrong question inside a counter. The middle of an enclosed space can
+   * sit further from every stroke than the moat demands, so the dot there
+   * survives and prints inside the logo — and whether it does depends on where
+   * the module grid happens to land, which is why it only showed at some
+   * sizes. Flooding the background inwards from the border marks everything
+   * genuinely outside the mark; whatever the flood cannot reach is interior,
+   * and is cleared exactly like ink.
+   */
+  const isInk = (x: number, y: number): boolean => {
+    const maskX = x - pad;
+    const maskY = y - pad;
+    return (
+      maskX >= 0 &&
+      maskY >= 0 &&
+      maskX < MASK_GRID &&
+      maskY < MASK_GRID &&
+      MASK_ROWS[maskY].charCodeAt(maskX) === 49
+    );
+  };
+
+  // 4-connected background, the complement of 8-connected ink: a diagonal seam
+  // in a stroke must not let the flood leak into the space it encloses.
+  const outside = new Uint8Array(span * span);
+  const queue: number[] = [0];
+  outside[0] = 1;
+  while (queue.length > 0) {
+    const index = queue.pop() as number;
+    const x = index % span;
+    const y = (index - x) / span;
+    const visit = (nextX: number, nextY: number) => {
+      if (nextX < 0 || nextY < 0 || nextX >= span || nextY >= span) {
+        return;
+      }
+      const next = nextY * span + nextX;
+      if (outside[next] === 1 || isInk(nextX, nextY)) {
+        return;
+      }
+      outside[next] = 1;
+      queue.push(next);
+    };
+    visit(x + 1, y);
+    visit(x - 1, y);
+    visit(x, y + 1);
+    visit(x, y - 1);
+  }
+
+  for (let y = 0; y < span; y += 1) {
+    for (let x = 0; x < span; x += 1) {
+      const index = y * span + x;
+      if (isInk(x, y) || outside[index] === 0) {
+        field[index] = 0;
       }
     }
   }
