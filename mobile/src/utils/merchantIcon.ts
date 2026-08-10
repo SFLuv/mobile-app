@@ -11,51 +11,63 @@ import { OpenState } from "./openingHours";
 
 /** Brand red. A merchant that is open right now. */
 export const PIN_OPEN_COLOR = "#eb6c6c";
-/** Muted slate. Open/closed has to be legible without reading anything. */
-export const PIN_CLOSED_COLOR = "#8d9ba3";
+/**
+ * Closed. A muted grey, but warmed a few degrees toward the brand red rather
+ * than a neutral slate — a wholly desaturated pin reads as broken or
+ * unavailable, where these merchants are simply shut until tomorrow.
+ */
+export const PIN_CLOSED_COLOR = "#9b8a8a"
 
 /**
- * The face a generated icon is drawn on.
+ * The face a generated icon is drawn on, open or closed.
  *
- * White while open. Closed keeps a trace of brand red rather than going fully
- * grey — a wholly desaturated pin reads as broken or unavailable, where these
- * merchants are simply shut until tomorrow.
+ * Deliberately state-independent: the pin's own colour carries open/closed, and
+ * tinting the merchant's mark as well made their identity look like a status.
  */
-export const ICON_FACE_OPEN = "#ffffff";
-export const ICON_FACE_CLOSED = "#f6eaea";
+export const ICON_FACE = "#ffffff";
 
 /** Initials are black and bold: the strongest contrast against a white face. */
 export const ICON_TEXT_COLOR = "#111111";
 
 /**
- * Pin geometry, matching the web surfaces.
+ * Pin geometry, shared with the marker SVG.
  *
- * A stubbier ratio than Google's own marker (26:35 rather than 27:43), ending
- * on a small rounded arc instead of a needle point.
+ * The body is WHITE and the merchant's state is a perfect circle set inside it,
+ * rather than the whole teardrop being coloured. A pin that is mostly white
+ * reads as a marker on a map; a pin that is mostly brand red reads as an alert,
+ * and a street of them drowned out the map underneath.
+ *
+ * Google's own PinElement could not do this — its shape and its single fill are
+ * both fixed — hence the hand-drawn path. It is stubbier than Google's (26:31
+ * rather than 27:43) and finishes on a wide rounded arc rather than a point.
  */
 export const PIN_VIEWBOX_WIDTH = 26;
-export const PIN_VIEWBOX_HEIGHT = 35;
+export const PIN_VIEWBOX_HEIGHT = 31;
 export const PIN_PATH =
-  "M1.74 19.5A13 13 0 1 1 24.26 19.5C21.2 24.8 16.2 29.6 14.1 33.2a1.3 1.3 0 0 1-2.2 0C9.8 29.6 4.8 24.8 1.74 19.5Z";
-/** Head-circle centre in viewBox units — where the glyph sits. */
+  "M1.74 19.5A13 13 0 1 1 24.26 19.5C21.6 23.6 17 27 14.6 29.4a2.2 2.2 0 0 1-3.2 0C9 27 4.4 23.6 1.74 19.5Z";
+/** Head-circle centre in viewBox units — where the colour and glyph sit. */
 export const PIN_HEAD_CENTRE = { x: 13, y: 13 };
-/** Glyph diameter as a fraction of pin width. */
-export const PIN_GLYPH_RATIO = 0.6;
 /**
- * Inset of the artwork inside its circle, as a fraction of the glyph.
+ * Radius of the state-coloured circle, in viewBox units.
  *
- * Without it the icon runs to the very edge and the pin's white rim disappears
- * behind it, so the mark loses the outline that separates it from the map.
+ * Well inside the head's own radius of 13, so the white body reads as a
+ * generous border around the colour rather than a hairline.
  */
-export const PIN_GLYPH_INSET_RATIO = 0.09;
+export const PIN_RING_RADIUS = 9.6;
+/**
+ * Radius of the merchant's artwork, in viewBox units.
+ *
+ * Smaller than the coloured circle by design: the difference is what turns the
+ * colour into a visible ring around the mark instead of a disc behind it.
+ */
+export const PIN_GLYPH_RADIUS = 7.1;
+/** A hairline so a white pin still has an edge on a pale map. */
+export const PIN_EDGE_COLOR = "rgba(11, 48, 59, 0.18)";
 
 /** Default rendered pin width in device-independent pixels. */
 export const PIN_WIDTH = 30;
 
-/** The face colour behind a generated mark. */
-export function iconFaceColor(state: OpenState): string {
-  return state === "closed" ? ICON_FACE_CLOSED : ICON_FACE_OPEN;
-}
+
 
 /**
  * Up to two initials for a business name.

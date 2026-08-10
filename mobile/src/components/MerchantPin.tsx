@@ -1,18 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Easing, Image, StyleSheet, Text, View } from "react-native";
-import Svg, { Path } from "react-native-svg";
+import Svg, { Circle, Path } from "react-native-svg";
 
 import { Palette, useAppTheme } from "../theme";
 import {
   ICON_TEXT_COLOR,
-  PIN_GLYPH_INSET_RATIO,
-  PIN_GLYPH_RATIO,
+  PIN_EDGE_COLOR,
+  PIN_GLYPH_RADIUS,
+  PIN_RING_RADIUS,
   PIN_HEAD_CENTRE,
   PIN_PATH,
   PIN_VIEWBOX_HEIGHT,
   PIN_VIEWBOX_WIDTH,
   PIN_WIDTH,
-  iconFaceColor,
+  ICON_FACE,
   merchantInitials,
   pinColor,
 } from "../utils/merchantIcon";
@@ -63,7 +64,7 @@ export function MerchantIcon({ name, iconUrl, size, radius, state = "open", onRe
         overflow: "hidden",
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: iconFaceColor(state),
+        backgroundColor: ICON_FACE,
       }}
     >
       <Text
@@ -97,16 +98,18 @@ type MerchantMapPinProps = {
 export function MerchantMapPin({ name, iconUrl, state, size = PIN_WIDTH }: MerchantMapPinProps) {
   const height = Math.round((size * PIN_VIEWBOX_HEIGHT) / PIN_VIEWBOX_WIDTH);
   const unit = size / PIN_VIEWBOX_WIDTH;
-  const glyphSize = Math.round(size * PIN_GLYPH_RATIO);
-  // Keeps the pin's rim visible around the artwork; without it the icon runs to
-  // the very edge and the mark loses the outline separating it from the map.
-  const inset = Math.max(1, Math.round(glyphSize * PIN_GLYPH_INSET_RATIO));
-  const artworkSize = glyphSize - inset * 2;
+  const glyphSize = Math.round(PIN_GLYPH_RADIUS * 2 * unit);
 
   return (
     <View style={{ width: size, height }}>
       <Svg width={size} height={height} viewBox={`0 0 ${PIN_VIEWBOX_WIDTH} ${PIN_VIEWBOX_HEIGHT}`}>
-        <Path d={PIN_PATH} fill={pinColor(state)} stroke="#ffffff" strokeWidth={1.2} />
+        <Path d={PIN_PATH} fill={ICON_FACE} stroke={PIN_EDGE_COLOR} strokeWidth={0.6} />
+        <Circle
+          cx={PIN_HEAD_CENTRE.x}
+          cy={PIN_HEAD_CENTRE.y}
+          r={PIN_RING_RADIUS}
+          fill={pinColor(state)}
+        />
       </Svg>
       <View
         style={{
@@ -119,16 +122,10 @@ export function MerchantMapPin({ name, iconUrl, state, size = PIN_WIDTH }: Merch
           overflow: "hidden",
           alignItems: "center",
           justifyContent: "center",
-          backgroundColor: iconFaceColor(state),
+          backgroundColor: ICON_FACE,
         }}
       >
-        <MerchantIcon
-          name={name}
-          iconUrl={iconUrl}
-          size={artworkSize}
-          radius={artworkSize / 2}
-          state={state}
-        />
+        <MerchantIcon name={name} iconUrl={iconUrl} size={glyphSize} radius={glyphSize / 2} state={state} />
       </View>
     </View>
   );

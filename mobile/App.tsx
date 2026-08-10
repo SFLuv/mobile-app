@@ -1292,18 +1292,16 @@ function BottomDock({
   const measured = slots.length === tabs.length && slots.every(Boolean);
 
   const BUBBLE_PAD = 3;
+  const RECT_HEIGHT = 52;
   /**
-   * Gap between the indicator and the dock's edge, top and bottom.
+   * The dock's own border, which has to come out of the height before centring.
    *
-   * The indicator's height is derived from this rather than fixed, so the two
-   * gaps are equal by construction. A fixed height centred on the bar could not
-   * be: the dock's own padding is asymmetric (it makes room for the raised
-   * centre button to break the top edge), which left a visibly larger gap below
-   * the indicator than above it.
+   * `top` on an absolutely positioned child is measured from inside the border,
+   * while onLayout reports the border box — so centring against the raw
+   * measurement lands the indicator a couple of pixels high, which is exactly
+   * how it read.
    */
-  const BUBBLE_INSET = 4;
-  /** Only used before the bar has been measured, when nothing is drawn yet. */
-  const RECT_HEIGHT_FALLBACK = 52;
+  const DOCK_BORDER = 1;
   const CIRCLE = 54;
   const activeSlot = measured ? slots[activeIndex] : undefined;
   const centerSlot = measured ? slots[centerIndex] : undefined;
@@ -1349,11 +1347,10 @@ function BottomDock({
   const lerp = (from: number, to: number) =>
     circleness.interpolate({ inputRange: [0, 1], outputRange: [from, to] });
 
-  const rectHeight =
-    barHeight > 0 ? Math.max(36, barHeight - BUBBLE_INSET * 2) : RECT_HEIGHT_FALLBACK;
-  const bubbleTop = BUBBLE_INSET;
+  const bubbleTop =
+    barHeight > 0 ? Math.max(0, (barHeight - DOCK_BORDER * 2 - RECT_HEIGHT) / 2) : 3;
   const bubbleWidth = lerp(rectWidth, CIRCLE);
-  const bubbleHeight = lerp(rectHeight, CIRCLE);
+  const bubbleHeight = lerp(RECT_HEIGHT, CIRCLE);
   const bubbleRadius = lerp(radii.md, CIRCLE / 2);
   const bubbleRise = lerp(0, -8);
   const bubbleShift = Animated.add(travel, lerp(BUBBLE_PAD / 2, Math.max(0, (tabWidth - CIRCLE) / 2)));
