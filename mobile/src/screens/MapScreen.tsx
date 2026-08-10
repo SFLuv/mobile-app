@@ -30,6 +30,9 @@ type MapViewMode = "map" | "list";
 const SEGMENT_PADDING = 6;
 const SEGMENT_GAP = spacing.sm;
 
+/** List order: open, then unknown, then closed. Matches the web surfaces. */
+const openRank = (state: OpenState): number => (state === "open" ? 0 : state === "closed" ? 2 : 1);
+
 type Props = {
   locations: AppLocation[];
   onPayLocation?: (location: AppLocation) => void;
@@ -361,6 +364,23 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
     return sortLocationsByProximity(matching, userLocation);
   }, [locations, query, userLocation]);
 
+  /*
+   * The list's own order: open merchants first, shut ones last, nearest first
+   * within each band. Someone scanning this is deciding where to go now, and a
+   * closed shop is not an answer to that.
+   *
+   * Deliberately a separate memo rather than folding the rank into
+   * filteredLocations. That list feeds the map's coordinates, and making it
+   * depend on the minute tick would give the map a new coordinate array every
+   * minute — which would re-frame it on the minute and throw away whatever the
+   * user had panned to. Array.sort is stable, so ranking the already
+   * proximity-sorted list keeps distance as the tiebreak for free.
+   */
+  const listLocations = useMemo(
+    () => [...filteredLocations].sort((left, right) => openRank(openStateFor(left)) - openRank(openStateFor(right))),
+    [filteredLocations, openStateFor],
+  );
+
   const displayLocations = useMemo(() => spreadLocationsForDisplay(filteredLocations), [filteredLocations]);
   const mapCoordinates = useMemo(
     () => coordinatesForDisplay(displayLocations, userLocation),
@@ -566,7 +586,7 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
                 <Text style={styles.emptyText}>Try clearing the search and browsing the full list.</Text>
               </View>
             ) : (
-              filteredLocations.map((location) => {
+              listLocations.map((location) => {
                 const distance = locationDistanceMeters(location, userLocation);
                 return (
                   <View key={location.id} style={styles.card}>
