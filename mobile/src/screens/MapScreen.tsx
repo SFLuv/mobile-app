@@ -18,6 +18,7 @@ import { useCurrentLocation } from "../hooks/useCurrentLocation";
 import { AppLocation } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { formatDistanceLabel, locationDistanceMeters, sortLocationsByProximity, UserLocation } from "../utils/location";
+import { currentWeekdayIndex, isTodayHoursLine } from "../utils/openingHours";
 
 type MapViewMode = "map" | "list";
 
@@ -230,6 +231,9 @@ function coordinatesForDisplay(displayLocations: DisplayLocation[], userLocation
 export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode }: Props) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
+  // Once per render rather than per row, so every line is judged against the
+  // same day even if the render straddles midnight.
+  const todayWeekday = useMemo(() => currentWeekdayIndex(), []);
   const [query, setQuery] = useState("");
   const [selectedLocation, setSelectedLocation] = useState<AppLocation | null>(null);
   const merchantSheetAnim = useRef(new Animated.Value(0)).current;
@@ -474,8 +478,14 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
 
                   {selectedLocation.openingHours.length > 0 ? (
                     <View style={styles.hoursCard}>
-                      {selectedLocation.openingHours.map((hours) => (
-                        <Text key={hours} style={styles.hoursText}>
+                      {selectedLocation.openingHours.map((hours, index) => (
+                        <Text
+                          key={hours}
+                          style={[
+                            styles.hoursText,
+                            isTodayHoursLine(hours, index, todayWeekday) ? styles.hoursTextToday : null,
+                          ]}
+                        >
                           {hours}
                         </Text>
                       ))}
@@ -831,6 +841,10 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       gap: 6,
     },
     hoursText: {
+      color: palette.text,
+    },
+    hoursTextToday: {
+      fontWeight: "700",
       color: palette.text,
     },
     primaryButton: {
