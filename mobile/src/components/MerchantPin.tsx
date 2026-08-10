@@ -5,6 +5,7 @@ import Svg, { Circle, Path } from "react-native-svg";
 import { Palette, useAppTheme } from "../theme";
 import {
   ICON_TEXT_COLOR,
+  ICON_TEXT_NUDGE_EM,
   PIN_EDGE_COLOR,
   PIN_GLYPH_RADIUS,
   PIN_RING_RADIUS,
@@ -54,6 +55,7 @@ export function MerchantIcon({ name, iconUrl, size, radius, state = "open", onRe
   }
 
   const initials = merchantInitials(name);
+  const fontSize = Math.max(8, Math.round(size * (initials.length > 1 ? 0.4 : 0.5)));
 
   return (
     <View
@@ -71,7 +73,9 @@ export function MerchantIcon({ name, iconUrl, size, radius, state = "open", onRe
         style={{
           color: ICON_TEXT_COLOR,
           fontWeight: "800",
-          fontSize: Math.max(8, Math.round(size * (initials.length > 1 ? 0.4 : 0.5))),
+          fontSize,
+          // See ICON_TEXT_NUDGE_EM: capitals centre high in their own line box.
+          marginTop: fontSize * ICON_TEXT_NUDGE_EM,
         }}
       >
         {initials}
