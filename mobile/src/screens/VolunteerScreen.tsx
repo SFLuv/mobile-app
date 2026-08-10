@@ -35,6 +35,15 @@ import {
 } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
+import { ICON_FACE, ICON_TEXT_COLOR, ICON_TEXT_NUDGE_EM, merchantInitials } from "../utils/merchantIcon";
+
+/**
+ * SFLuv's own mark, bundled rather than fetched.
+ *
+ * The same asset the QR code centres on, so the brand is identical wherever it
+ * appears in the app.
+ */
+const SFLUV_MARK = require("../../assets/qr-logo.png");
 
 type Props = {
   backendClient?: AppBackendClient | null;
@@ -482,6 +491,11 @@ export function VolunteerScreen({
       setCoverIndex(0);
       setDetailError(null);
       if (!backendClient) {
+        // With nothing already known there is no pane to show, and rendering
+        // neither one reads as a broken screen rather than a failed load.
+        if (!known) {
+          setDetailError("Sign in again to open this event.");
+        }
         return;
       }
       const requestId = detailRequestRef.current + 1;
@@ -580,13 +594,29 @@ export function VolunteerScreen({
 
   const returnToOriginEvent = useCallback(() => {
     const originId = organizerReturnEventId;
+    setOrganizerReturnEventId(null);
+    setOrganizerFilter(ORGANIZER_FILTER_ALL);
+
+    /*
+     * Put both panes back at rest FIRST, and unconditionally.
+     *
+     * The gesture that calls this has just animated the list to translateX =
+     * width, i.e. entirely off screen, on the assumption that the detail is
+     * about to cover it. Whenever that assumption failed — no origin id, no
+     * backend client, an event that no longer resolves — the list stayed
+     * mounted, stayed off screen, and the user was left staring at nothing
+     * with no way back. Neither pane is visible at this instant, so resetting
+     * both is invisible when it is not needed and the difference between a
+     * blank screen and a working one when it is.
+     */
+    listSlide.setValue(0);
+    detailSlide.setValue(0);
+
     if (!originId) {
       return;
     }
-    setOrganizerReturnEventId(null);
-    setOrganizerFilter(ORGANIZER_FILTER_ALL);
     void openEvent({ id: originId }, { animate: false });
-  }, [openEvent, organizerReturnEventId]);
+  }, [detailSlide, listSlide, openEvent, organizerReturnEventId]);
 
   const listPanResponder = useMemo(
     () =>
@@ -1081,12 +1111,56 @@ function OrganizerAvatar({
   size: number;
 }) {
   const dimension = { width: size, height: size, borderRadius: size / 2 };
-  if (organizer.logoUrl) {
-    return <Image source={{ uri: organizer.logoUrl }} style={[styles.organizerLogo, dimension]} resizeMode="cover" />;
+  // A remote logo that fails to load renders as an empty circle with no way
+  // back, so a failure drops through to the generated mark below.
+  const [remoteFailed, setRemoteFailed] = useState(false);
+  const remoteLogo = (organizer.logoUrl ?? "").trim();
+
+  useEffect(() => {
+    setRemoteFailed(false);
+  }, [remoteLogo]);
+
+  /*
+   * SFLuv's own events are drawn from the bundled mark rather than the URL the
+   * API sends. That URL points at the web app's favicon, which is fine for an
+   * email but is one network hop and one deployment away from being a blank
+   * circle in the app — and our own brand is the last thing that should be
+   * missing.
+   */
+  if (organizer.type === "sfluv") {
+    return <Image source={SFLUV_MARK} style={[styles.organizerLogoBrand, dimension]} resizeMode="contain" />;
   }
+
+  if (remoteLogo !== "" && !remoteFailed) {
+    return (
+      <Image
+        source={{ uri: remoteLogo }}
+        style={[styles.organizerLogo, dimension]}
+        resizeMode="cover"
+        onError={() => setRemoteFailed(true)}
+      />
+    );
+  }
+
+  /*
+   * Everyone else gets the same generated mark a merchant without a logo gets:
+   * their initials, bold and black on white. Most organizations will never
+   * upload anything, and a row of identical building glyphs tells you nothing
+   * about which organization you are looking at.
+   */
+  const initials = merchantInitials(organizer.name);
   return (
-    <View style={[styles.organizerLogoFallback, dimension]}>
-      <Ionicons name={organizer.type === "sfluv" ? "heart" : "business"} size={size * 0.5} color={palette.primaryStrong} />
+    <View style={[styles.organizerLogoGenerated, dimension]}>
+      <Text
+        style={{
+          color: ICON_TEXT_COLOR,
+          fontWeight: "800",
+          fontSize: Math.max(8, Math.round(size * (initials.length > 1 ? 0.4 : 0.5))),
+          marginTop: Math.round(size * 0.4) * ICON_TEXT_NUDGE_EM,
+        }}
+      >
+        {initials}
+      </Text>
     </View>
   );
 }
@@ -1728,8 +1802,14 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     organizerLogo: {
       backgroundColor: palette.surfaceMuted,
     },
-    organizerLogoFallback: {
+    // SFLuv's own mark sits on its brand tint; contain rather than cover so the
+    // logo is never cropped by the circle.
+    organizerLogoBrand: {
       backgroundColor: palette.primarySoft,
+    },
+    // Matches the generated merchant icon: white face, bold black initials.
+    organizerLogoGenerated: {
+      backgroundColor: ICON_FACE,
       alignItems: "center",
       justifyContent: "center",
     },
