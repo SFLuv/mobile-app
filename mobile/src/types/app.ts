@@ -71,6 +71,23 @@ export interface AppContact {
   isFavorite: boolean;
 }
 
+/** One continuous stretch a location is open, in minutes from midnight. */
+export interface AppLocationHoursInterval {
+  openMinute: number;
+  closeMinute: number;
+}
+
+/**
+ * One day's opening times. `isClosed` and an empty `intervals` are distinct
+ * states: a shop shut on Sunday is not the same as one whose Sunday we never
+ * learned.
+ */
+export interface AppLocationDayHours {
+  weekday: number;
+  isClosed: boolean;
+  intervals: AppLocationHoursInterval[];
+}
+
 export interface AppLocation {
   id: number;
   googleId: string;
@@ -89,9 +106,13 @@ export interface AppLocation {
   email: string;
   website: string;
   imageUrl: string;
+  /** Uploaded map-pin mark. Empty when the merchant has not set one. */
+  iconUrl: string;
   rating: number;
   mapsPage: string;
   openingHours: string[];
+  /** Structured week, Monday first. Backs the open/closed indicator. */
+  hours: AppLocationDayHours[];
 }
 
 export interface AppOwnedLocation extends AppLocation {

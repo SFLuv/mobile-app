@@ -152,8 +152,13 @@ export async function getMerchantPlaceDetails(placeID: string): Promise<Merchant
     email: "",
     website: result.website || "",
     imageUrl: photoURL(result.photos?.[0]?.photo_reference),
+    // A Google listing carries no SFLuv map icon, and its weekday_text is the
+    // display form rather than the structured week — both are filled in by our
+    // own backend once the location exists.
+    iconUrl: "",
     rating: typeof result.rating === "number" ? result.rating : 0,
     mapsPage: result.url || "",
     openingHours: result.opening_hours?.weekday_text || [],
+    hours: [],
   };
 }

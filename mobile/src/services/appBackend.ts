@@ -20,6 +20,7 @@ import {
   AppImproverWorkflowListItem,
   AppImproverWorkflowSeriesUnclaimResult,
   AppLocation,
+  AppLocationDayHours,
   AppMerchantModeStatus,
   AppOwnedLocation,
   AppTransaction,
@@ -1780,10 +1781,44 @@ function mapLocation(input: Record<string, unknown>): AppLocation {
     email: asString(input.email),
     website: asString(input.website),
     imageUrl: asString(input.image_url),
+    iconUrl: asString(input.icon_url),
     rating: asNumber(input.rating),
     mapsPage: asString(input.maps_page),
     openingHours: Array.isArray(input.opening_hours) ? input.opening_hours.map((value) => asString(value)) : [],
+    hours: mapLocationHours(input.hours),
   };
+}
+
+/**
+ * Structured opening hours.
+ *
+ * Days without usable times are kept rather than dropped: "shut on Sunday" and
+ * "we never learned Sunday" are different answers, and the open/closed
+ * indicator has to tell them apart.
+ */
+function mapLocationHours(value: unknown): AppLocationDayHours[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null)
+    .map((entry) => ({
+      weekday: asNumber(entry.weekday, -1),
+      isClosed: entry.is_closed === true,
+      intervals: Array.isArray(entry.intervals)
+        ? entry.intervals
+            .filter(
+              (interval): interval is Record<string, unknown> => typeof interval === "object" && interval !== null,
+            )
+            .map((interval) => ({
+              openMinute: asNumber(interval.open_minute, -1),
+              closeMinute: asNumber(interval.close_minute, -1),
+            }))
+            .filter((interval) => interval.openMinute >= 0 && interval.closeMinute >= 0)
+        : [],
+    }))
+    .filter((day) => day.weekday >= 0 && day.weekday <= 6);
 }
 
 function mapOwnedLocation(input: Record<string, unknown>): AppOwnedLocation {

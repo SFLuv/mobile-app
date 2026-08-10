@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import {
   Animated,
@@ -18,7 +18,8 @@ import { useCurrentLocation } from "../hooks/useCurrentLocation";
 import { AppLocation } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { formatDistanceLabel, locationDistanceMeters, sortLocationsByProximity, UserLocation } from "../utils/location";
-import { currentWeekdayIndex, isTodayHoursLine } from "../utils/openingHours";
+import { currentWeekdayIndex, getOpenState, isTodayHoursLine, OpenState } from "../utils/openingHours";
+import { MerchantIcon, MerchantMapPin, OpenStatusBadge, useMarkerTracking } from "../components/MerchantPin";
 
 type MapViewMode = "map" | "list";
 
@@ -125,6 +126,62 @@ function spreadLocationsForDisplay(locations: AppLocation[]): DisplayLocation[] 
   }
 
   return output.sort((left, right) => left.location.id - right.location.id);
+}
+
+/**
+ * One map marker.
+ *
+ * Its own component so each can own its `tracksViewChanges` lifetime: a custom
+ * marker view has to keep tracking until it has painted or Android draws it
+ * blank, and has to stop afterwards or the map redraws every marker each frame.
+ */
+const MerchantMarker = React.memo(function MerchantMarker({
+  entry,
+  state,
+  onPress,
+}: {
+  entry: DisplayLocation;
+  state: OpenState;
+  onPress: (location: AppLocation) => void;
+}) {
+  const tracking = useMarkerTracking((entry.location.iconUrl ?? "").trim() !== "");
+
+  return (
+    <Marker
+      coordinate={{ latitude: entry.latitude, longitude: entry.longitude }}
+      title={entry.location.name}
+      description={entry.location.description}
+      tracksViewChanges={tracking}
+      anchor={{ x: 0.5, y: 1 }}
+      onPress={() => onPress(entry.location)}
+    >
+      <MerchantMapPin name={entry.location.name} iconUrl={entry.location.iconUrl} state={state} />
+    </Marker>
+  );
+});
+
+/** A clock that ticks once a minute, shared by every open/closed indicator. */
+function useMinuteTick(): Date {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    // Align to the next minute boundary so every indicator flips together
+    // rather than drifting apart by however long each took to mount.
+    let interval: ReturnType<typeof setInterval> | undefined;
+    const timeout = setTimeout(() => {
+      setNow(new Date());
+      interval = setInterval(() => setNow(new Date()), 60_000);
+    }, 60_000 - (Date.now() % 60_000));
+
+    return () => {
+      clearTimeout(timeout);
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, []);
+
+  return now;
 }
 
 function formatLocationSubtitle(location: AppLocation): string {
@@ -234,6 +291,8 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
   // Once per render rather than per row, so every line is judged against the
   // same day even if the render straddles midnight.
   const todayWeekday = useMemo(() => currentWeekdayIndex(), []);
+  const now = useMinuteTick();
+  const openStateFor = useCallback((location: AppLocation) => getOpenState(location.hours, now), [now]);
   const [query, setQuery] = useState("");
   const [selectedLocation, setSelectedLocation] = useState<AppLocation | null>(null);
   const merchantSheetAnim = useRef(new Animated.Value(0)).current;
@@ -345,14 +404,11 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
               showsUserLocation
             >
               {displayLocations.map((entry) => (
-                <Marker
+                <MerchantMarker
                   key={entry.location.id}
-                  coordinate={{ latitude: entry.latitude, longitude: entry.longitude }}
-                  title={entry.location.name}
-                  description={entry.location.description}
-                  pinColor={entry.location.payToAddress ? palette.primary : palette.textMuted}
-                  tracksViewChanges={false}
-                  onPress={() => openMerchantSheet(entry.location)}
+                  entry={entry}
+                  state={openStateFor(entry.location)}
+                  onPress={openMerchantSheet}
                 />
               ))}
             </MapView>
@@ -370,8 +426,14 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
                 return (
                   <View key={location.id} style={styles.card}>
                     <Pressable onPress={() => openMerchantSheet(location)}>
-                      <Text style={styles.cardTitle}>{location.name}</Text>
-                      <Text style={styles.cardSubtitle}>{formatLocationSubtitle(location)}</Text>
+                      <View style={styles.cardHeader}>
+                        <MerchantIcon name={location.name} iconUrl={location.iconUrl} size={44} />
+                        <View style={styles.cardHeaderCopy}>
+                          <Text style={styles.cardTitle}>{location.name}</Text>
+                          <Text style={styles.cardSubtitle}>{formatLocationSubtitle(location)}</Text>
+                          <OpenStatusBadge state={openStateFor(location)} />
+                        </View>
+                      </View>
                       {distance !== null ? <Text style={styles.cardDistance}>{formatDistanceLabel(distance)}</Text> : null}
                       <Text style={styles.cardAddress}>
                         {location.street}, {location.city}
@@ -428,6 +490,7 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
             {selectedLocation ? (
               <>
                 <View style={styles.sheetHeader}>
+                  <MerchantIcon name={selectedLocation.name} iconUrl={selectedLocation.iconUrl} size={48} />
                   <View style={styles.sheetHeaderCopy}>
                     <Text style={styles.sheetTitle}>{selectedLocation.name}</Text>
                     <Text style={styles.sheetSubtitle}>
@@ -436,6 +499,7 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
                         ? ` · ${formatDistanceLabel(locationDistanceMeters(selectedLocation, userLocation) ?? 0)}`
                         : ""}
                     </Text>
+                    <OpenStatusBadge state={openStateFor(selectedLocation)} />
                   </View>
                   <Pressable style={styles.sheetClose} onPress={closeMerchantSheet} hitSlop={8}>
                     <Ionicons name="close" size={18} color={palette.primaryStrong} />
@@ -623,6 +687,15 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       gap: spacing.sm,
       ...shadows.soft,
     },
+    cardHeader: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: spacing.sm,
+    },
+    cardHeaderCopy: {
+      flex: 1,
+      gap: 4,
+    },
     cardTitle: {
       color: palette.text,
       fontWeight: "800",
@@ -630,7 +703,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     cardSubtitle: {
       color: palette.primary,
-      marginTop: 4,
       textTransform: "capitalize",
     },
     cardDistance: {
