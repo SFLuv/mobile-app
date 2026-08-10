@@ -1,9 +1,21 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Easing, Image, StyleSheet, Text, View } from "react-native";
-import Svg, { Defs, LinearGradient, Path, Rect, Stop } from "react-native-svg";
+import Svg, { Path } from "react-native-svg";
 
 import { Palette, useAppTheme } from "../theme";
-import { merchantGradient, merchantInitials, pinColor } from "../utils/merchantIcon";
+import {
+  ICON_TEXT_COLOR,
+  PIN_GLYPH_INSET_RATIO,
+  PIN_GLYPH_RATIO,
+  PIN_HEAD_CENTRE,
+  PIN_PATH,
+  PIN_VIEWBOX_HEIGHT,
+  PIN_VIEWBOX_WIDTH,
+  PIN_WIDTH,
+  iconFaceColor,
+  merchantInitials,
+  pinColor,
+} from "../utils/merchantIcon";
 import { OpenState } from "../utils/openingHours";
 
 type MerchantIconProps = {
@@ -12,6 +24,8 @@ type MerchantIconProps = {
   size: number;
   /** Rounds the tile; the map pin passes half the size for a circle. */
   radius?: number;
+  /** Open state, which decides the face colour behind a generated mark. */
+  state?: OpenState;
   onReady?: () => void;
 };
 
@@ -21,9 +35,9 @@ type MerchantIconProps = {
  *
  * The generated tile is not a placeholder awaiting a real logo — most merchants
  * will never upload one, and a map of identical grey dots is worse than a map
- * of distinct, on-brand initials.
+ * of distinct initials on a clean white face.
  */
-export function MerchantIcon({ name, iconUrl, size, radius, onReady }: MerchantIconProps) {
+export function MerchantIcon({ name, iconUrl, size, radius, state = "open", onReady }: MerchantIconProps) {
   const trimmed = (iconUrl ?? "").trim();
   const corner = radius ?? Math.round(size * 0.28);
 
@@ -31,42 +45,36 @@ export function MerchantIcon({ name, iconUrl, size, radius, onReady }: MerchantI
     return (
       <Image
         source={{ uri: trimmed }}
-        style={{ width: size, height: size, borderRadius: corner }}
+        style={{ width: size, height: size, borderRadius: corner, opacity: state === "closed" ? 0.9 : 1 }}
         resizeMode="cover"
         onLoadEnd={onReady}
       />
     );
   }
 
-  const [from, to] = merchantGradient(name);
   const initials = merchantInitials(name);
-  const gradientId = `merchant-${from.replace("#", "")}-${to.replace("#", "")}`;
 
   return (
-    <View style={{ width: size, height: size, borderRadius: corner, overflow: "hidden" }}>
-      <Svg width={size} height={size}>
-        <Defs>
-          <LinearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
-            <Stop offset="0" stopColor={from} />
-            <Stop offset="1" stopColor={to} />
-          </LinearGradient>
-        </Defs>
-        <Rect width={size} height={size} fill={`url(#${gradientId})`} />
-      </Svg>
-      {/* Text is laid over the SVG rather than drawn inside it: RN's own text
-          layout centres reliably across platforms, SvgText's baseline handling
-          does not. */}
-      <View style={[StyleSheet.absoluteFill, styles.initialsWrap]}>
-        <Text
-          style={{
-            color: "#ffffff",
-            fontWeight: "800",
-            fontSize: Math.max(9, Math.round(size * (initials.length > 1 ? 0.38 : 0.48))),
-          }}
-        >
-          {initials}
-        </Text>
-      </View>
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: corner,
+        overflow: "hidden",
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: iconFaceColor(state),
+      }}
+    >
+      <Text
+        style={{
+          color: ICON_TEXT_COLOR,
+          fontWeight: "800",
+          fontSize: Math.max(8, Math.round(size * (initials.length > 1 ? 0.4 : 0.5))),
+        }}
+      >
+        {initials}
+      </Text>
     </View>
   );
 }
@@ -79,38 +87,48 @@ type MerchantMapPinProps = {
 };
 
 /**
- * The map pin: a teardrop in the merchant's state colour with their mark inset
- * at the top. Brand red while open, muted slate while shut, so the map answers
- * "can I go there now?" before anything is tapped.
+ * The map pin: a teardrop in the merchant's state colour with their mark in the
+ * head. Brand red while open, muted slate while shut, so the map answers "can I
+ * go there now?" before anything is tapped.
+ *
+ * Geometry comes from utils/merchantIcon so this stays identical to the pin the
+ * web app and the marketing site draw.
  */
-export function MerchantMapPin({ name, iconUrl, state, size = 40 }: MerchantMapPinProps) {
-  const color = pinColor(state);
-  const height = Math.round(size * 1.2);
-  const iconSize = Math.round(size * 0.68);
+export function MerchantMapPin({ name, iconUrl, state, size = PIN_WIDTH }: MerchantMapPinProps) {
+  const height = Math.round((size * PIN_VIEWBOX_HEIGHT) / PIN_VIEWBOX_WIDTH);
+  const unit = size / PIN_VIEWBOX_WIDTH;
+  const glyphSize = Math.round(size * PIN_GLYPH_RATIO);
+  // Keeps the pin's rim visible around the artwork; without it the icon runs to
+  // the very edge and the mark loses the outline separating it from the map.
+  const inset = Math.max(1, Math.round(glyphSize * PIN_GLYPH_INSET_RATIO));
+  const artworkSize = glyphSize - inset * 2;
 
   return (
     <View style={{ width: size, height }}>
-      <Svg width={size} height={height} viewBox="0 0 38 46">
-        <Path
-          d="M19 45.5C19 45.5 3.5 27.6 3.5 17.5a15.5 15.5 0 1 1 31 0C34.5 27.6 19 45.5 19 45.5Z"
-          fill={color}
-          stroke="#ffffff"
-          strokeWidth={2}
-        />
+      <Svg width={size} height={height} viewBox={`0 0 ${PIN_VIEWBOX_WIDTH} ${PIN_VIEWBOX_HEIGHT}`}>
+        <Path d={PIN_PATH} fill={pinColor(state)} stroke="#ffffff" strokeWidth={1.2} />
       </Svg>
       <View
         style={{
           position: "absolute",
-          left: (size - iconSize) / 2,
-          top: size * 0.1,
-          width: iconSize,
-          height: iconSize,
-          borderRadius: iconSize / 2,
+          left: PIN_HEAD_CENTRE.x * unit - glyphSize / 2,
+          top: PIN_HEAD_CENTRE.y * unit - glyphSize / 2,
+          width: glyphSize,
+          height: glyphSize,
+          borderRadius: glyphSize / 2,
           overflow: "hidden",
-          backgroundColor: "#ffffff",
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: iconFaceColor(state),
         }}
       >
-        <MerchantIcon name={name} iconUrl={iconUrl} size={iconSize} radius={iconSize / 2} />
+        <MerchantIcon
+          name={name}
+          iconUrl={iconUrl}
+          size={artworkSize}
+          radius={artworkSize / 2}
+          state={state}
+        />
       </View>
     </View>
   );
@@ -197,13 +215,6 @@ export function useMarkerTracking(hasRemoteIcon: boolean): boolean {
 
   return tracking;
 }
-
-const styles = StyleSheet.create({
-  initialsWrap: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-});
 
 function createBadgeStyles(palette: Palette) {
   return StyleSheet.create({

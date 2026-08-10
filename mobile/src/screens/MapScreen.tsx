@@ -427,7 +427,7 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
                   <View key={location.id} style={styles.card}>
                     <Pressable onPress={() => openMerchantSheet(location)}>
                       <View style={styles.cardHeader}>
-                        <MerchantIcon name={location.name} iconUrl={location.iconUrl} size={44} />
+                        <MerchantIcon name={location.name} iconUrl={location.iconUrl} size={44} state={openStateFor(location)} />
                         <View style={styles.cardHeaderCopy}>
                           <Text style={styles.cardTitle}>{location.name}</Text>
                           <Text style={styles.cardSubtitle}>{formatLocationSubtitle(location)}</Text>
@@ -490,7 +490,12 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
             {selectedLocation ? (
               <>
                 <View style={styles.sheetHeader}>
-                  <MerchantIcon name={selectedLocation.name} iconUrl={selectedLocation.iconUrl} size={48} />
+                  <MerchantIcon
+                    name={selectedLocation.name}
+                    iconUrl={selectedLocation.iconUrl}
+                    size={48}
+                    state={openStateFor(selectedLocation)}
+                  />
                   <View style={styles.sheetHeaderCopy}>
                     <Text style={styles.sheetTitle}>{selectedLocation.name}</Text>
                     <Text style={styles.sheetSubtitle}>

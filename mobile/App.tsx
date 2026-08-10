@@ -1292,7 +1292,18 @@ function BottomDock({
   const measured = slots.length === tabs.length && slots.every(Boolean);
 
   const BUBBLE_PAD = 3;
-  const RECT_HEIGHT = 52;
+  /**
+   * Gap between the indicator and the dock's edge, top and bottom.
+   *
+   * The indicator's height is derived from this rather than fixed, so the two
+   * gaps are equal by construction. A fixed height centred on the bar could not
+   * be: the dock's own padding is asymmetric (it makes room for the raised
+   * centre button to break the top edge), which left a visibly larger gap below
+   * the indicator than above it.
+   */
+  const BUBBLE_INSET = 4;
+  /** Only used before the bar has been measured, when nothing is drawn yet. */
+  const RECT_HEIGHT_FALLBACK = 52;
   const CIRCLE = 54;
   const activeSlot = measured ? slots[activeIndex] : undefined;
   const centerSlot = measured ? slots[centerIndex] : undefined;
@@ -1338,9 +1349,11 @@ function BottomDock({
   const lerp = (from: number, to: number) =>
     circleness.interpolate({ inputRange: [0, 1], outputRange: [from, to] });
 
-  const bubbleTop = barHeight > 0 ? Math.max(4, (barHeight - RECT_HEIGHT) / 2) : 7;
+  const rectHeight =
+    barHeight > 0 ? Math.max(36, barHeight - BUBBLE_INSET * 2) : RECT_HEIGHT_FALLBACK;
+  const bubbleTop = BUBBLE_INSET;
   const bubbleWidth = lerp(rectWidth, CIRCLE);
-  const bubbleHeight = lerp(RECT_HEIGHT, CIRCLE);
+  const bubbleHeight = lerp(rectHeight, CIRCLE);
   const bubbleRadius = lerp(radii.md, CIRCLE / 2);
   const bubbleRise = lerp(0, -8);
   const bubbleShift = Animated.add(travel, lerp(BUBBLE_PAD / 2, Math.max(0, (tabWidth - CIRCLE) / 2)));
@@ -6665,7 +6678,10 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     flex: 1,
     alignItems: "center",
     justifyContent: "flex-start",
-    paddingTop: 6,
+    // The dock's top padding is larger than its bottom to clear the raised
+    // centre button, which left the icon riding high against the indicator
+    // behind it. This puts the icon back on the indicator's centre line.
+    paddingTop: 8,
     gap: 4,
   },
   // Sits behind the tabs and slides between them; the morph to a circle is
