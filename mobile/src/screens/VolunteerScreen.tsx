@@ -598,23 +598,25 @@ export function VolunteerScreen({
     setOrganizerFilter(ORGANIZER_FILTER_ALL);
 
     /*
-     * Put both panes back at rest FIRST, and unconditionally.
-     *
      * The gesture that calls this has just animated the list to translateX =
-     * width, i.e. entirely off screen, on the assumption that the detail is
-     * about to cover it. Whenever that assumption failed — no origin id, no
-     * backend client, an event that no longer resolves — the list stayed
-     * mounted, stayed off screen, and the user was left staring at nothing
-     * with no way back. Neither pane is visible at this instant, so resetting
-     * both is invisible when it is not needed and the difference between a
-     * blank screen and a working one when it is.
+     * width — entirely off screen — on the assumption that the detail is about
+     * to cover it.
+     *
+     * When there IS an origin event, leave it there. openEvent always renders
+     * the detail pane (a known event, a spinner, or an error), and the list
+     * unmounts the moment it does. Snapping the list back to 0 here instead
+     * put it on screen for the frame or two before that happened, which is the
+     * flicker of the outgoing page.
+     *
+     * When there is not, nothing is going to cover it, so it has to come back
+     * itself or the screen is simply blank with no way out.
      */
-    listSlide.setValue(0);
-    detailSlide.setValue(0);
-
     if (!originId) {
+      listSlide.setValue(0);
+      detailSlide.setValue(0);
       return;
     }
+
     void openEvent({ id: originId }, { animate: false });
   }, [detailSlide, listSlide, openEvent, organizerReturnEventId]);
 
@@ -661,11 +663,30 @@ export function VolunteerScreen({
 
   // Edge swipe back to the list, matching the wallet panes: drag follows the
   // finger, and a decisive swipe (or a fast flick) completes the dismissal.
+  /*
+   * True while a finger is down inside the cover carousel.
+   *
+   * The carousel is a horizontal ScrollView inside the pane that owns the
+   * back-swipe. A parent PanResponder can take the responder away from a
+   * scrolling child mid-gesture, so swiping right to go back a photo — near
+   * the left edge, which is where the previous photo lives — was being read as
+   * a back-swipe and dismissing the whole screen. A ref rather than state: it
+   * is read inside the responder callbacks and must never lag a render behind
+   * the finger.
+   */
+  const coverSwipeRef = useRef(false);
+  const setCoverSwiping = useCallback((active: boolean) => {
+    coverSwipeRef.current = active;
+  }, []);
+
   const detailPanResponder = useMemo(
     () =>
       PanResponder.create({
         onMoveShouldSetPanResponder: (_, gesture) =>
-          gesture.x0 <= 28 && gesture.dx > 10 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+          !coverSwipeRef.current &&
+          gesture.x0 <= 28 &&
+          gesture.dx > 10 &&
+          Math.abs(gesture.dx) > Math.abs(gesture.dy),
         onPanResponderTerminationRequest: () => false,
         onPanResponderMove: (_, gesture) => {
           detailSlide.setValue(Math.max(0, Math.min(gesture.dx, width)));
@@ -810,12 +831,22 @@ export function VolunteerScreen({
     return match?.name || "All organizers";
   }, [organizerFilter, organizers]);
 
-  if (selectedEvent || detailLoading || detailError) {
-    return (
-      <Animated.View
-        style={[styles.detailPane, { transform: [{ translateX: detailSlide }] }]}
-        {...detailPanResponder.panHandlers}
-      >
+  /*
+   * The detail is an overlay, not a replacement.
+   *
+   * Rendering one pane OR the other meant the space the detail vacated as it
+   * slid away showed the screen background rather than the list, and the list
+   * then appeared all at once when the animation's callback finally swapped
+   * them — a blank beat followed by a pop, in both directions. Keeping the
+   * list mounted underneath means the detail slides off it and reveals it
+   * progressively, which is what a back-swipe is supposed to look like. It
+   * also keeps the list's scroll position across a visit to an event.
+   */
+  const detailPane = detailVisible ? (
+    <Animated.View
+      style={[styles.detailOverlay, { transform: [{ translateX: detailSlide }] }]}
+      {...detailPanResponder.panHandlers}
+    >
       <EventDetail
         styles={styles}
         palette={palette}
@@ -828,6 +859,7 @@ export function VolunteerScreen({
         coverIndex={coverIndex}
         signupBusy={signupBusy}
         onCoverIndexChange={setCoverIndex}
+        onCoverSwiping={setCoverSwiping}
         onBack={dismissDetail}
         onExternalSignup={openExternalSignup}
         onOpenSignupSheet={() => {
@@ -846,15 +878,15 @@ export function VolunteerScreen({
         onConfirmSignup={confirmInternalSignup}
         onCloseSignupSheet={() => setSignupSheetOpen(false)}
       />
-      </Animated.View>
-    );
-  }
+    </Animated.View>
+  ) : null;
 
   return (
-    <Animated.View
-      style={[styles.detailPane, { transform: [{ translateX: listSlide }] }]}
-      {...listPanResponder.panHandlers}
-    >
+    <View style={styles.screen}>
+      <Animated.View
+        style={[styles.detailPane, { transform: [{ translateX: listSlide }] }]}
+        {...listPanResponder.panHandlers}
+      >
       <ScrollView
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
@@ -1093,7 +1125,10 @@ export function VolunteerScreen({
           </Pressable>
         </Pressable>
       </Modal>
-    </Animated.View>
+      </Animated.View>
+
+      {detailPane}
+    </View>
   );
 }
 
@@ -1305,6 +1340,7 @@ function EventDetail({
   coverIndex,
   signupBusy,
   onCoverIndexChange,
+  onCoverSwiping,
   onBack,
   onExternalSignup,
   onOpenSignupSheet,
@@ -1328,6 +1364,8 @@ function EventDetail({
   coverIndex: number;
   signupBusy: boolean;
   onCoverIndexChange: (index: number) => void;
+  /** Tells the pane's back-swipe to stand down while the carousel is in use. */
+  onCoverSwiping: (active: boolean) => void;
   onBack: () => void;
   onExternalSignup: (event: AppVolunteerEvent) => void;
   onOpenSignupSheet: () => void;
@@ -1381,7 +1419,11 @@ function EventDetail({
           <>
             <View style={[styles.detailCard, styles.detailCardFill]}>
               {event.coverPhotos.length > 0 ? (
-                <View>
+                <View
+                  onTouchStart={() => onCoverSwiping(true)}
+                  onTouchEnd={() => onCoverSwiping(false)}
+                  onTouchCancel={() => onCoverSwiping(false)}
+                >
                   <ScrollView
                     horizontal
                     pagingEnabled
@@ -1389,6 +1431,9 @@ function EventDetail({
                     onMomentumScrollEnd={(scrollEvent) => {
                       const offset = scrollEvent.nativeEvent.contentOffset.x;
                       onCoverIndexChange(coverWidth > 0 ? Math.round(offset / coverWidth) : 0);
+                      // Momentum can outlive the finger; only clear once the
+                      // carousel has actually come to rest.
+                      onCoverSwiping(false);
                     }}
                   >
                     {event.coverPhotos.map((photo, index) => (
@@ -1990,8 +2035,18 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       gap: 12,
       ...shadows.soft,
     },
+    // The root both panes live in: the list fills it, the detail overlays it.
+    screen: {
+      flex: 1,
+    },
     detailPane: {
       flex: 1,
+    },
+    // Sits on top of the list and covers it completely: the list stays mounted
+    // underneath so the detail's slide reveals it rather than a blank frame.
+    detailOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: palette.background,
     },
     // The detail page deliberately does not scroll: everything through the sign
     // up button has to be reachable without hunting for it, so the description
