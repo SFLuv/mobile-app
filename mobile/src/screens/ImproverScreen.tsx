@@ -38,14 +38,19 @@ import {
   AppWorkflowWorkItem,
   AppWorkflowStep,
   AppWorkflowStepCompletionInput,
+  AppW9Status,
 } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
+import { W9EscrowCard } from "../components/W9EscrowCard";
 import { triggerClickHaptic } from "../utils/haptics";
 
 type Props = {
   user: AppUser | null;
   improver: AppImprover | null;
   tokenSymbol: string;
+  w9Status?: AppW9Status | null;
+  w9Busy?: boolean;
+  onStartW9?: () => void;
   backendClient?: AppBackendClient | null;
   hapticsEnabled?: boolean;
   onRefreshProfile: () => Promise<void>;
@@ -485,6 +490,9 @@ export function ImproverScreen({
   user,
   improver,
   tokenSymbol,
+  w9Status,
+  w9Busy,
+  onStartW9,
   backendClient,
   hapticsEnabled = true,
   onRefreshProfile,
@@ -2429,6 +2437,12 @@ export function ImproverScreen({
 
     return (
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        {/* Money being held sits above everything else: it is the thing that
+            needs doing, and it is the reason a bounty has not arrived. */}
+        {onStartW9 ? (
+          <W9EscrowCard status={w9Status ?? null} busy={w9Busy} onStart={onStartW9} />
+        ) : null}
+
         {renderBannerStack()}
 
         {improver ? (

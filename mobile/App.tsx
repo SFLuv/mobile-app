@@ -27,6 +27,7 @@ import { BlurView } from "expo-blur";
 import Constants from "expo-constants";
 import * as Crypto from "expo-crypto";
 import * as Device from "expo-device";
+import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
 import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
@@ -45,6 +46,8 @@ import { SendScreen } from "./src/screens/SendScreen";
 import { ReceiveScreen } from "./src/screens/ReceiveScreen";
 import { WalletHomeScreen } from "./src/screens/WalletHomeScreen";
 import { ActivityScreen } from "./src/screens/ActivityScreen";
+import { MerchantTodayScreen, formatBase } from "./src/screens/MerchantTodayScreen";
+import { PaymentReceivedOverlay, type PaymentReceipt } from "./src/components/PaymentReceivedOverlay";
 import { MapScreen } from "./src/screens/MapScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { ContactsScreen } from "./src/screens/ContactsScreen";
@@ -76,6 +79,8 @@ import {
   AppImprover,
   AppImproverNotificationFeed,
   AppLocation,
+  AppMerchantModeLocation,
+  AppW9Status,
   AppMerchantModeStatus,
   AppOwnedLocation,
   PonderSubscription,
@@ -84,6 +89,7 @@ import {
   AppUserPolicyStatus,
   AppVolunteerReminderPreferences,
   AppWallet,
+  MerchantToday,
 } from "./src/types/app";
 import { useNotificationInbox } from "./src/hooks/useNotificationInbox";
 import { NotificationTarget, targetFromData } from "./src/services/notificationInbox";
@@ -1567,6 +1573,10 @@ function WalletAppShell({
   );
 }
 
+// How long a till may sit unused before it asks which counter it is on again.
+// A device left in a drawer for a week should not silently wake up live.
+const MERCHANT_LOCATION_RECONFIRM_MS = 3 * 24 * 60 * 60 * 1000;
+
 function WalletAppShellContent({
   clientConfig,
   runtime,
@@ -1677,12 +1687,22 @@ function WalletAppShellContent({
   const [improverCredentialRequestsLoading, setImproverCredentialRequestsLoading] = useState(false);
   const [merchantModeInstallationID, setMerchantModeInstallationID] = useState<string | null>(null);
   const [merchantModeStatus, setMerchantModeStatus] = useState<AppMerchantModeStatus | null>(null);
+  const [merchantToday, setMerchantToday] = useState<MerchantToday | null>(null);
+  const [merchantTodayLoading, setMerchantTodayLoading] = useState(false);
+  const [merchantTodayRefreshing, setMerchantTodayRefreshing] = useState(false);
+  const [paymentReceipt, setPaymentReceipt] = useState<PaymentReceipt | null>(null);
   const [merchantModeBusy, setMerchantModeBusy] = useState(false);
   const [merchantModeMessage, setMerchantModeMessage] = useState<string | null>(null);
   const [merchantModeExitPin, setMerchantModeExitPin] = useState("");
   const [merchantModeExitPinVisible, setMerchantModeExitPinVisible] = useState(false);
   const [merchantModeExitOpen, setMerchantModeExitOpen] = useState(false);
   const [merchantModeExitError, setMerchantModeExitError] = useState<string | null>(null);
+  const [merchantModeLocations, setMerchantModeLocations] = useState<AppMerchantModeLocation[]>([]);
+  const [merchantLocationChooserOpen, setMerchantLocationChooserOpen] = useState(false);
+  // Shown once when the server has thrown this device out of merchant mode.
+  const [merchantForcedExitNotice, setMerchantForcedExitNotice] = useState<string | null>(null);
+  const [w9Status, setW9Status] = useState<AppW9Status | null>(null);
+  const [w9Busy, setW9Busy] = useState(false);
   const [storedPushToken, setStoredPushToken] = useState<string | null>(null);
   const [storedPushTokenLoaded, setStoredPushTokenLoaded] = useState(false);
   const [backendPushPreferenceEnabled, setBackendPushPreferenceEnabled] = useState<boolean | null>(null);
@@ -1969,18 +1989,12 @@ function WalletAppShellContent({
   const walletHistoryActive = tab === "wallet" && walletPane === "home";
   const activityHistoryActive = tab === "activity";
 
-  useEffect(() => {
-    if (!merchantModeActive || !merchantModeDevice?.walletAddress || walletCandidates.length === 0) {
-      return;
-    }
-    const normalizedMerchantWallet = merchantModeDevice.walletAddress.toLowerCase();
-    const nextCandidate = walletCandidates.find(
-      (candidate) => candidate.accountAddress.toLowerCase() === normalizedMerchantWallet,
-    );
-    if (nextCandidate && nextCandidate.key !== selectedCandidateKey) {
-      onSelectCandidate(nextCandidate.key);
-    }
-  }, [merchantModeActive, merchantModeDevice?.walletAddress, onSelectCandidate, selectedCandidateKey, walletCandidates]);
+  // The wallet used to be re-pinned here on every render while merchant mode was
+  // on, which made the selection impossible to change: selectedCandidateKey was
+  // both read inside the effect and listed as a dependency, so choosing a wallet
+  // immediately re-triggered the effect that reverted it. Merchant mode no longer
+  // shows a wallet at all — it shows the day — so there is nothing to pin. The
+  // receive QR reads the device's own wallet address directly.
 
   const notificationAddresses = useMemo(() => {
     const seen = new Set<string>();
@@ -2346,8 +2360,170 @@ function WalletAppShellContent({
     }
     const status = await backendClient.getMerchantModeStatus(installationID);
     setMerchantModeStatus(status);
+
+    // The server turns merchant mode off when the shop closes, loses approval,
+    // or loses its payment wallet. The device finds out here, on its next poll,
+    // and says so rather than just dropping back to the wallet unexplained.
+    if (status.forcedExitReason) {
+      setMerchantForcedExitNotice(status.forcedExitReason);
+      setMerchantLocationChooserOpen(false);
+      setWalletPane("home");
+      setTab("wallet");
+      return status;
+    }
+
+    // A device that has sat unused for days should not quietly wake up as a
+    // live till. It stays in merchant mode, but asks which counter it is on
+    // before the first sale. last_seen_at is read before the server stamps it,
+    // so this is the gap since the previous poll.
+    if (status.device?.merchantModeEnabled && status.device.lastSeenAt) {
+      const lastSeen = Date.parse(status.device.lastSeenAt);
+      if (Number.isFinite(lastSeen) && Date.now() - lastSeen > MERCHANT_LOCATION_RECONFIRM_MS) {
+        setMerchantLocationChooserOpen(true);
+      }
+    }
+
     return status;
   };
+
+  const refreshW9Status = async () => {
+    if (!backendClient || !appUser) {
+      setW9Status(null);
+      return;
+    }
+    try {
+      setW9Status(await backendClient.getW9Status());
+    } catch {
+      // A failed load only costs the tax card. It must never break a panel.
+      setW9Status(null);
+    }
+  };
+
+  /**
+   * Opens the vendor's tax form in the system browser.
+   *
+   * Deliberately not a WebView. The page collects a tax identification number,
+   * and an embedded browser means we could technically read it — which is
+   * exactly the liability the vendor is paid to absorb. The system browser also
+   * shows the address bar, so someone can see whose site they are typing an SSN
+   * into before they do it.
+   */
+  const handleStartW9 = async () => {
+    if (!backendClient || w9Busy) return;
+    setW9Busy(true);
+    try {
+      const formUrl = await backendClient.startW9();
+      await WebBrowser.openAuthSessionAsync(formUrl, "sfluv://w9/complete");
+
+      // The redirect is not proof of anything — the browser can be closed at
+      // any point, and only the backend knows what the vendor recorded. So the
+      // status is polled rather than assumed.
+      for (let attempt = 0; attempt < 12; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        const status = await backendClient.getW9Status().catch(() => null);
+        if (status) {
+          setW9Status(status);
+          if (status.cleared) {
+            showToast("Thanks — your rewards are on the way.", "success");
+            void refreshEverything();
+            break;
+          }
+        }
+      }
+    } catch (error) {
+      showToast((error as Error)?.message || "Could not open the tax form.", "error");
+    } finally {
+      setW9Busy(false);
+    }
+  };
+
+  const refreshMerchantModeLocations = async () => {
+    if (!backendClient || !appUser?.isMerchant) {
+      setMerchantModeLocations([]);
+      return;
+    }
+    try {
+      setMerchantModeLocations(await backendClient.listMerchantModeLocations());
+    } catch {
+      // A failed list only costs the switcher; it must never break the till.
+      setMerchantModeLocations([]);
+    }
+  };
+
+  useEffect(() => {
+    if (!appUser?.isMerchant) {
+      setMerchantModeLocations([]);
+      return;
+    }
+    void refreshMerchantModeLocations();
+    // Re-read after a switch so the toggle reflects the shop actually in use.
+  }, [appUser?.isMerchant, merchantModeStatus?.device?.locationId]);
+
+  useEffect(() => {
+    void refreshW9Status();
+  }, [appUser?.id]);
+
+  const refreshMerchantToday = async (options?: { silent?: boolean }) => {
+    if (!backendClient || !merchantModeInstallationID) {
+      return;
+    }
+    if (options?.silent) {
+      setMerchantTodayRefreshing(true);
+    } else {
+      setMerchantTodayLoading(true);
+    }
+    try {
+      setMerchantToday(await backendClient.getMerchantToday(merchantModeInstallationID));
+    } catch (error) {
+      console.warn("Unable to load today's takings", error);
+    } finally {
+      setMerchantTodayLoading(false);
+      setMerchantTodayRefreshing(false);
+    }
+  };
+
+  const merchantTodayRef = useRef(refreshMerchantToday);
+  merchantTodayRef.current = refreshMerchantToday;
+
+  // Load once when the till opens. There is no poll: the confirmation and the
+  // refresh are both driven by the incoming-payment push, so the figures move at
+  // the moment the money lands rather than at the top of some interval.
+  useEffect(() => {
+    if (!merchantModeActive || !merchantModeInstallationID) {
+      return;
+    }
+    void merchantTodayRef.current();
+  }, [merchantModeActive, merchantModeInstallationID]);
+
+  // The incoming-payment push is the trigger. Same notification the backend
+  // already sends from the ponder callback, filtered to this till's wallet, so a
+  // payment to another of the owner's wallets cannot flash a confirmation here.
+  useEffect(() => {
+    if (!merchantModeActive || !merchantModeDevice?.walletAddress) {
+      return;
+    }
+    const tillWallet = merchantModeDevice.walletAddress.toLowerCase();
+
+    const subscription = Notifications.addNotificationReceivedListener((notification) => {
+      const data = (notification.request.content.data ?? {}) as Record<string, unknown>;
+      const to = typeof data.to === "string" ? data.to.toLowerCase() : "";
+      if (to !== tillWallet) {
+        return;
+      }
+
+      const amount = typeof data.amount === "string" ? data.amount : "";
+      setPaymentReceipt({
+        amount: amount || "",
+        tokenSymbol: clientConfig.tokenSymbol,
+        detail: notification.request.content.title ?? undefined,
+      });
+      // Pull the day again so the totals and the new line are already correct
+      // behind the confirmation when it clears.
+      void merchantTodayRef.current({ silent: true });
+    });
+
+    return () => subscription.remove();
+  }, [merchantModeActive, merchantModeDevice?.walletAddress, clientConfig.tokenSymbol]);
 
   const loadAppProfile = async () => {
     if (!backendClient) {
@@ -2502,6 +2678,14 @@ function WalletAppShellContent({
             openImproverPanel("workflows");
           }
           return;
+        case "tax":
+          // Owing a W-9 is not tied to a role, so this cannot open a role
+          // panel. The wallet is where the money is and where every signed-in
+          // user can go; the escrow card refreshes with it.
+          setTab("wallet");
+          setWalletPane("home");
+          void refreshW9Status();
+          return;
         case "activity":
           setTab("activity");
           return;
@@ -2604,7 +2788,14 @@ function WalletAppShellContent({
   }, [refreshImproverCredentialRequests]);
 
   const refreshImproverNotifications = useCallback(async () => {
-    if (!backendClient || !canAccessImproverPanel) {
+    // Loaded for every signed-in user, not just improvers.
+    //
+    // The feed used to be improver-only because workflow payouts were the only
+    // thing in it. Tax notices are not role-scoped — anyone who earns past the
+    // reporting threshold gets one — and the server-side query already filters
+    // workflow rows by assignment, so a non-improver simply receives none of
+    // them rather than someone else's.
+    if (!backendClient || !appUser) {
       setImproverNotifications(null);
       return;
     }
@@ -2612,9 +2803,9 @@ function WalletAppShellContent({
       setImproverNotifications(await backendClient.getImproverNotifications());
     } catch (error) {
       // A notification feed is never worth interrupting the panel for.
-      console.warn("Unable to load improver notifications", error);
+      console.warn("Unable to load notifications", error);
     }
-  }, [backendClient, canAccessImproverPanel]);
+  }, [backendClient, appUser]);
 
   useEffect(() => {
     void refreshImproverNotifications();
@@ -3672,6 +3863,45 @@ function WalletAppShellContent({
     }
   };
 
+  /**
+   * Moves this device to another of the merchant's shops.
+   *
+   * Re-enrolling the same installation is the whole operation: the server
+   * rebinds the device to the new location and the wallet follows, because the
+   * till resolves its wallet from the shop on every poll. Deliberately no PIN —
+   * switching counters is a shift change, not a privileged act.
+   */
+  const handleSwitchMerchantLocation = async (locationID: number) => {
+    if (!backendClient || merchantModeBusy) {
+      return;
+    }
+    const installationID = merchantModeInstallationID ?? (await getOrCreateAppInstallationID());
+    if (!merchantModeInstallationID) {
+      setMerchantModeInstallationID(installationID);
+    }
+
+    setMerchantModeBusy(true);
+    try {
+      const status = await backendClient.enableMerchantMode({
+        installationID,
+        locationID,
+        displayName: Device.deviceName || Device.modelName || "Store device",
+        platform: Platform.OS,
+        appVersion: Constants.expoConfig?.version || Constants.nativeAppVersion || "",
+      });
+      setMerchantModeStatus(status);
+      setMerchantLocationChooserOpen(false);
+      // The previous shop's takings must not linger on screen next to the new
+      // shop's name, so the day is cleared and refetched rather than reused.
+      setMerchantToday(null);
+      await refreshMerchantToday();
+    } catch (error) {
+      setMerchantModeMessage((error as Error)?.message || "Unable to switch location.");
+    } finally {
+      setMerchantModeBusy(false);
+    }
+  };
+
   const handleDisableMerchantMode = async () => {
     if (!backendClient) {
       setMerchantModeExitError("Backend not configured.");
@@ -3908,6 +4138,9 @@ function WalletAppShellContent({
   const RootContainer = showStandardChrome ? SafeAreaView : View;
   const walletHomeContent = (
     <WalletHomeScreen
+      w9Status={w9Status}
+      w9Busy={w9Busy}
+      onStartW9={handleStartW9}
       balance={smartBalance === "..." ? smartBalance : formatDisplayBalance(smartBalance, clientConfig.tokenDecimals)}
       tokenSymbol={clientConfig.tokenSymbol}
       explorerURL={clientConfig.explorerURL}
@@ -3949,7 +4182,7 @@ function WalletAppShellContent({
       onOpenWalletChooser={() => {
         setShowWalletChooser(true);
       }}
-      showWalletChooser={canChooseWallet}
+      showWalletChooser={canChooseWallet && !merchantModeActive}
       merchantMode={merchantModeActive}
       merchantLocationName={merchantModeDevice?.locationName}
     />
@@ -3993,12 +4226,28 @@ function WalletAppShellContent({
     ) : walletOverlayPane === "receive" ? (
       <ReceiveScreen
         clientConfig={clientConfig}
-        accountAddress={smartAddress || runtime.discovery?.ownerAddress || ethers.constants.AddressZero}
+        accountAddress={
+          merchantModeActive && merchantModeDevice?.walletAddress
+            ? merchantModeDevice.walletAddress
+            : smartAddress || runtime.discovery?.ownerAddress || ethers.constants.AddressZero
+        }
         onRedeemCodeScanned={openRedeemFlowForCode}
         onBack={() => closeWalletPaneToWallet()}
         showRedeemScanner={!merchantModeActive}
       />
     ) : null;
+  const merchantTodayContent = (
+    <MerchantTodayScreen
+      today={merchantToday}
+      loading={merchantTodayLoading}
+      refreshing={merchantTodayRefreshing}
+      onRefresh={() => void refreshMerchantToday({ silent: true })}
+      locationName={merchantModeDevice?.locationName}
+      tokenSymbol={clientConfig.tokenSymbol}
+      canSwitchLocation={merchantModeLocations.length > 1}
+      onSwitchLocation={() => setMerchantLocationChooserOpen(true)}
+    />
+  );
   const walletTabContent =
     walletOverlayPane !== null ? (
       <View style={styles.walletPaneStack}>
@@ -4140,7 +4389,9 @@ function WalletAppShellContent({
                 </View>
               )}
             </View>
-          ) : merchantModeActive || tab === "wallet" ? (
+          ) : merchantModeActive ? (
+            merchantTodayContent
+          ) : tab === "wallet" ? (
             walletTabContent
           ) : tab === "activity" ? (
             <ActivityScreen
@@ -4194,6 +4445,14 @@ function WalletAppShellContent({
             />
           ) : tab === "volunteer" ? (
             <VolunteerScreen
+              notifications={improverNotifications}
+              onRefreshNotifications={() => {
+                void refreshImproverNotifications();
+              }}
+              onMarkNotificationsSeen={handleMarkImproverNotificationsSeen}
+              w9Status={w9Status}
+              w9Busy={w9Busy}
+              onStartW9={handleStartW9}
               backendClient={backendClient}
               tokenSymbol={clientConfig.tokenSymbol}
               hapticsEnabled={preferences.hapticsEnabled}
@@ -4278,6 +4537,7 @@ function WalletAppShellContent({
               improver={appImprover}
               wallets={settingsWallets}
               ownedLocations={ownedLocations}
+              merchantModeLocations={merchantModeLocations}
               primaryWalletAddress={appUser?.primaryWalletAddress}
               syncNotice={syncNotice}
               preferences={preferences}
@@ -4358,6 +4618,9 @@ function WalletAppShellContent({
         ) : null}
       </View>
 
+      <PaymentReceivedOverlay receipt={paymentReceipt} onDismiss={() => setPaymentReceipt(null)} />
+
+
       {showStandardChrome && !merchantModeActive && !sendPaneActive ? (
         <View pointerEvents="box-none" style={styles.bottomDockShell}>
           <BlurView
@@ -4421,6 +4684,90 @@ function WalletAppShellContent({
                 }}
               />
             </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Switching counters. No PIN: moving between a merchant's own shops is a
+          shift change, not a privileged act. The wallet follows the shop. */}
+      <Modal
+        visible={merchantLocationChooserOpen}
+        transparent
+        presentationStyle="overFullScreen"
+        animationType="none"
+        onRequestClose={() => setMerchantLocationChooserOpen(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setMerchantLocationChooserOpen(false)}>
+          <Pressable style={styles.walletChooserCard} onPress={() => {}}>
+            <View style={styles.walletChooserHeader}>
+              <View style={styles.walletChooserHeaderCopy}>
+                <Text style={styles.walletChooserTitle}>Which location?</Text>
+              </View>
+              <Pressable style={styles.walletChooserClose} onPress={() => setMerchantLocationChooserOpen(false)}>
+                <Ionicons name="close" size={20} color={palette.primaryStrong} />
+              </Pressable>
+            </View>
+
+            <ScrollView contentContainerStyle={styles.walletChooserList} showsVerticalScrollIndicator={false}>
+              {merchantModeLocations.map((location) => {
+                const active = location.id === merchantModeDevice?.locationId;
+                return (
+                  <Pressable
+                    key={`merchant-location-${location.id}`}
+                    style={[styles.walletChooserOption, active ? styles.walletChooserOptionActive : undefined]}
+                    disabled={merchantModeBusy}
+                    onPress={() => {
+                      if (active) {
+                        setMerchantLocationChooserOpen(false);
+                        return;
+                      }
+                      void handleSwitchMerchantLocation(location.id);
+                    }}
+                  >
+                    <View style={styles.walletChooserOptionHeader}>
+                      <Text style={styles.walletChooserOptionTitle}>{location.name}</Text>
+                      {active ? (
+                        <View style={styles.walletChooserActiveBadge}>
+                          <Ionicons name="checkmark" size={12} color={palette.white} />
+                        </View>
+                      ) : null}
+                    </View>
+                    {location.street ? (
+                      <Text style={styles.walletChooserBalance}>{location.street}</Text>
+                    ) : null}
+                    <Text style={styles.walletChooserAddress}>{shortAddress(location.walletAddress)}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* The server has just ended merchant mode for this device. Said plainly,
+          because whoever is at the counter needs to know the till is no longer
+          taking payments. */}
+      <Modal
+        visible={Boolean(merchantForcedExitNotice)}
+        transparent
+        presentationStyle="overFullScreen"
+        animationType="fade"
+        onRequestClose={() => setMerchantForcedExitNotice(null)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setMerchantForcedExitNotice(null)}>
+          <Pressable style={styles.walletChooserCard} onPress={() => {}}>
+            <View style={styles.walletChooserHeader}>
+              <View style={styles.walletChooserHeaderCopy}>
+                <Text style={styles.walletChooserTitle}>Merchant mode ended</Text>
+              </View>
+            </View>
+            <Text style={styles.walletChooserBalance}>{merchantForcedExitNotice}</Text>
+            <Pressable
+              style={styles.connectionStateButton}
+              onPress={() => setMerchantForcedExitNotice(null)}
+            >
+              <Text style={styles.connectionStateButtonText}>OK</Text>
+            </Pressable>
           </Pressable>
         </Pressable>
       </Modal>

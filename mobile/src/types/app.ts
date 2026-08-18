@@ -139,7 +139,10 @@ export interface AppMerchantModeDevice {
   userId: string;
   locationId: number;
   locationName: string;
+  /** The location's payment wallet as it stands now, not as it stood at enrolment. */
   walletAddress: string;
+  locationActive: boolean;
+  locationApproved: boolean;
   displayName: string;
   platform: string;
   appVersion: string;
@@ -156,6 +159,22 @@ export interface AppMerchantModeStatus {
   isMerchant: boolean;
   passcodeSet: boolean;
   device?: AppMerchantModeDevice | null;
+  /**
+   * Set when the server has just turned merchant mode off for this device —
+   * the shop closed, lost approval, or lost its payment wallet. Shown once,
+   * then the app returns to the normal wallet.
+   */
+  forcedExitReason?: string;
+}
+
+/** A shop this device can be put to work at. */
+export interface AppMerchantModeLocation {
+  id: number;
+  name: string;
+  street: string;
+  city: string;
+  walletAddress: string;
+  tippingWalletAddress: string;
 }
 
 export interface AppWalletOwnerLookup {
@@ -807,4 +826,74 @@ export interface MerchantApplicationDraft {
   tabletModel: string;
   messagingService: string;
   reference: string;
+}
+
+/** One line of the merchant-mode day: a payment, its tip, or one without the other. */
+export type MerchantDayRow = {
+  at: number;
+  /** Base units. Negative on a refund. */
+  paymentBase: string;
+  tipBase: string;
+  from: string;
+  paymentHash?: string;
+  tipHash?: string;
+  refund: boolean;
+};
+
+/**
+ * The merchant-mode home screen in one payload. Totals are computed server-side
+ * so every till agrees, and so the figures cannot drift with the app version.
+ */
+export type MerchantToday = {
+  businessDate: string;
+  timeZone: string;
+  paymentsBase: string;
+  tipsBase: string;
+  tokenDecimals: number;
+  transactions: MerchantDayRow[];
+  /** False when no tipping wallet is configured, or it failed the ownership check. */
+  tipsWalletConfigured: boolean;
+};
+
+
+/**
+ * What happened when a reward QR was scanned.
+ *
+ * "escrowed" is a success, not a failure: the code was consumed and the money
+ * is the volunteer's, but it waits on a W-9. Treating it as an error would tell
+ * someone their reward failed when it did not.
+ */
+export type RedeemOutcome =
+  | { status: "paid" }
+  | { status: "escrowed"; amountSfluv: string; taxYear: number; message: string };
+
+/** One held or owed payout, as shown in the tax panel. */
+export interface AppW9Item {
+  source: string;
+  sourceLabel: string;
+  amountSfluv: string;
+  state: string;
+  escrowedAt?: string | null;
+  expiresAt?: string | null;
+}
+
+/**
+ * A person's tax position: whether a form is owed, how much is waiting on it,
+ * and how long the automatic window has left.
+ */
+export interface AppW9Status {
+  taxYear: number;
+  required: boolean;
+  filingStatus: string;
+  cleared: boolean;
+  thresholdSfluv: string;
+  earnedSfluv: string;
+  escrowedSfluv: string;
+  escrowedCount: number;
+  /** When the oldest hold leaves the automatic window. After it, releasing needs an admin. */
+  escrowExpiresAt?: string | null;
+  backPaySfluv: string;
+  backPayCount: number;
+  formUrl?: string;
+  items: AppW9Item[];
 }

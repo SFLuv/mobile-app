@@ -13,6 +13,10 @@ export type NotificationTarget =
   | { kind: "volunteer-event"; eventId: string }
   | { kind: "volunteer" }
   | { kind: "improver" }
+  // Tax is not a role, so it cannot route to a role panel: a merchant, a
+  // volunteer and an improver can all owe a W-9. It opens the wallet, which
+  // every signed-in user can reach.
+  | { kind: "tax" }
   | { kind: "activity" }
   | { kind: "none" };
 
@@ -44,6 +48,9 @@ export function targetFromData(data: Record<string, unknown> | undefined): Notif
   }
   if (type.startsWith("workflow_") || type.startsWith("improver_")) {
     return { kind: "improver" };
+  }
+  if (type.startsWith("w9_") || type.startsWith("tax_")) {
+    return { kind: "tax" };
   }
   if (type === "transaction" || type === "wallet_activity" || type === "reward") {
     return { kind: "activity" };
