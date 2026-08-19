@@ -23,6 +23,7 @@ import {
   AppLocationDayHours,
   AppMerchantModeLocation,
   AppW9Status,
+  AppW9Tier,
   RedeemOutcome,
   AppMerchantModeStatus,
   AppOwnedLocation,
@@ -688,6 +689,23 @@ function volunteerSignupMessage(reason?: string): string {
 const POLICY_REQUIRED_HEADER = "X-SFLUV-Auth-Reason";
 const POLICY_REQUIRED_REASON = "privacy-policy-required";
 const APP_BACKEND_REQUEST_TIMEOUT_MS = 25_000;
+
+/**
+ * An unrecognised tier is treated as no tier rather than rendered blindly: a
+ * backend that grows a fifth rung must not make an older app draw a modal it
+ * has no copy for.
+ */
+function normalizeW9Tier(tier: string): AppW9Tier | null {
+  switch (tier) {
+    case "notice_400":
+    case "warning_500":
+    case "escrow_600":
+    case "blocked":
+      return tier;
+    default:
+      return null;
+  }
+}
 
 function endpoint(path: string): string {
   return `${mobileConfig.appBackendURL.replace(/\/+$/, "")}${path}`;
@@ -3141,6 +3159,30 @@ export class AppBackendClient {
       };
     }
 
+    if (response.status === 409) {
+      // Refused for want of a tax form. The backend has already handed the code
+      // back, so the only thing left to do is explain it — never tell them to
+      // rescan a QR that is already gone, because this one is not.
+      const refused = (await response.json().catch(() => ({}))) as {
+        status?: string;
+        reason?: string;
+        amount_sfluv?: string;
+        tax_year?: number;
+        message?: string;
+      };
+      if (refused.status === "blocked" || refused.reason === "w9_required") {
+        return {
+          status: "blocked",
+          amountSfluv: asString(refused.amount_sfluv),
+          taxYear: asNumber(refused.tax_year),
+          message:
+            asString(refused.message) ||
+            "We couldn't send this reward yet. Complete your W-9, then scan this code again.",
+        };
+      }
+      throw new Error("Unable to redeem this QR code right now.");
+    }
+
     if (response.ok) {
       return { status: "paid" };
     }
@@ -3441,6 +3483,11 @@ export class AppBackendClient {
       backPaySfluv: asString(body.back_pay_sfluv),
       backPayCount: asNumber(body.back_pay_count),
       formUrl: asString(body.form_url) || undefined,
+      tier: normalizeW9Tier(asString(body.tier)),
+      tierAcknowledged: body.tier_acknowledged === true,
+      blocked: body.blocked === true,
+      earnedBase: asString(body.earned_base) || "0",
+      thresholdBase: asString(body.threshold_base) || "0",
       items: Array.isArray(body.items)
         ? (body.items as Array<Record<string, unknown>>).map((item) => ({
             source: asString(item.source),
@@ -3471,6 +3518,16 @@ export class AppBackendClient {
       throw new Error("The tax form is unavailable right now. Please try again shortly.");
     }
     return url;
+  }
+
+  /**
+   * Records that a tier's modal has been answered.
+   *
+   * Best effort by design: failing to record a dismissal shows the warning once
+   * more, which is much the better of the two ways this can go wrong.
+   */
+  async acknowledgeW9Tier(tier: AppW9Tier): Promise<void> {
+    await this.authFetch(`/w9/tier/${encodeURIComponent(tier)}/ack`, { method: "POST" });
   }
 
 }

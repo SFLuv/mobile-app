@@ -865,7 +865,13 @@ export type MerchantToday = {
  */
 export type RedeemOutcome =
   | { status: "paid" }
-  | { status: "escrowed"; amountSfluv: string; taxYear: number; message: string };
+  | { status: "escrowed"; amountSfluv: string; taxYear: number; message: string }
+  /**
+   * Refused, not failed. Past the limit with a hold already open, the backend
+   * hands the redemption code back — so this is "do this, then scan again"
+   * rather than a lost reward.
+   */
+  | { status: "blocked"; amountSfluv: string; taxYear: number; message: string };
 
 /** One held or owed payout, as shown in the tax panel. */
 export interface AppW9Item {
@@ -896,4 +902,26 @@ export interface AppW9Status {
   backPayCount: number;
   formUrl?: string;
   items: AppW9Item[];
+
+  /**
+   * The warning this person has reached and not yet answered, if any. Drives
+   * which tier modal shows. Null once they file, because clearing a filing
+   * deletes the notices behind it.
+   */
+  tier: AppW9Tier | null;
+  tierAcknowledged: boolean;
+  /** A payout was actually refused — not merely held. */
+  blocked: boolean;
+  /**
+   * Raw base units, so the progress meter never has to parse a formatted
+   * amount back into a number to draw it.
+   */
+  earnedBase: string;
+  thresholdBase: string;
 }
+
+/**
+ * The four rungs of the escalation. The first two arrive while money is still
+ * being paid; the last two arrive after it has stopped.
+ */
+export type AppW9Tier = "notice_400" | "warning_500" | "escrow_600" | "blocked";

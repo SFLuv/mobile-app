@@ -54,6 +54,7 @@ import { ContactsScreen } from "./src/screens/ContactsScreen";
 import { ImproverScreen } from "./src/screens/ImproverScreen";
 import { VolunteerScreen } from "./src/screens/VolunteerScreen";
 import { ThemedActivityIndicator } from "./src/components/ThemedActivityIndicator";
+import { W9TierModal } from "./src/components/W9TierModal";
 import { mobileConfig } from "./src/config";
 import {
   clearCachedRouteDiscovery,
@@ -81,6 +82,7 @@ import {
   AppLocation,
   AppMerchantModeLocation,
   AppW9Status,
+  AppW9Tier,
   AppMerchantModeStatus,
   AppOwnedLocation,
   PonderSubscription,
@@ -1703,6 +1705,11 @@ function WalletAppShellContent({
   const [merchantForcedExitNotice, setMerchantForcedExitNotice] = useState<string | null>(null);
   const [w9Status, setW9Status] = useState<AppW9Status | null>(null);
   const [w9Busy, setW9Busy] = useState(false);
+  // Dismissing a tier is recorded on the backend, but that record does not come
+  // back until the next poll — and for the blocked tier it deliberately never
+  // sticks. This holds the dismissal in the meantime, and is cleared on
+  // foreground so a blocked person is asked again.
+  const [w9TierDismissed, setW9TierDismissed] = useState<AppW9Tier | null>(null);
   const [storedPushToken, setStoredPushToken] = useState<string | null>(null);
   const [storedPushTokenLoaded, setStoredPushTokenLoaded] = useState(false);
   const [backendPushPreferenceEnabled, setBackendPushPreferenceEnabled] = useState<boolean | null>(null);
@@ -2400,6 +2407,34 @@ function WalletAppShellContent({
   };
 
   /**
+   * Which tier modal to show, if any.
+   *
+   * The first three tiers are answered once: dismissing records an
+   * acknowledgement and they do not return that year. Blocked is the exception
+   * and deliberately so — money is already held and there is still no form, so
+   * the modal is the only thing standing between this person and being paid. It
+   * ignores the stored acknowledgement and comes back on the next foreground
+   * and on every refused payout.
+   */
+  const visibleW9Tier: AppW9Tier | null = (() => {
+    if (!w9Status || w9Status.cleared) return null;
+    const tier = w9Status.tier;
+    if (!tier || tier === w9TierDismissed) return null;
+    if (tier === "blocked") return tier;
+    return w9Status.tierAcknowledged ? null : tier;
+  })();
+
+  /**
+   * Records that the outstanding tier has been answered — by dismissing it, or
+   * by opening the form.
+   */
+  const acknowledgeW9Tier = (tier: AppW9Tier | null) => {
+    if (!tier) return;
+    setW9TierDismissed(tier);
+    void backendClient?.acknowledgeW9Tier(tier).catch(() => undefined);
+  };
+
+  /**
    * Opens the vendor's tax form in the system browser.
    *
    * Deliberately not a WebView. The page collects a tax identification number,
@@ -2413,7 +2448,12 @@ function WalletAppShellContent({
     setW9Busy(true);
     try {
       const formUrl = await backendClient.startW9();
+      // Answered only once the form is actually in front of them. Acknowledging
+      // on the tap would let a failure to mint a link quietly retire the
+      // warning for the rest of the year.
+      const outstanding = visibleW9Tier;
       await WebBrowser.openAuthSessionAsync(formUrl, "sfluv://w9/complete");
+      acknowledgeW9Tier(outstanding);
 
       // The redirect is not proof of anything — the browser can be closed at
       // any point, and only the backend knows what the vendor recorded. So the
@@ -2684,6 +2724,10 @@ function WalletAppShellContent({
           // user can go; the escrow card refreshes with it.
           setTab("wallet");
           setWalletPane("home");
+          // Clearing the dismissal is what makes the modal reopen. Someone who
+          // tapped this notification is asking about the form, so putting it
+          // back in front of them is the whole point of the tap.
+          setW9TierDismissed(null);
           void refreshW9Status();
           return;
         case "activity":
@@ -3103,10 +3147,37 @@ function WalletAppShellContent({
     const payoutAddress = redeemFlow.walletAddress;
     const redeem = async () => {
       try {
-        await publicBackendClient.redeemCode(code, payoutAddress);
+        const outcome = await publicBackendClient.redeemCode(code, payoutAddress);
         if (cancelled) {
           return;
         }
+
+        // The outcome was previously discarded, so a held reward told people it
+        // had been sent. It has not been — say what actually happened.
+        if (outcome.status === "blocked") {
+          // Refused, and the code was handed back. Clearing the dismissal makes
+          // the blocked modal appear at the moment of the failure rather than
+          // some time after it.
+          setW9TierDismissed(null);
+          setRedeemFlow((current) =>
+            current && current.code === code && current.stage === "redeeming"
+              ? { code, stage: "error", walletAddress: payoutAddress, message: outcome.message }
+              : current,
+          );
+          void refreshW9Status();
+          return;
+        }
+
+        if (outcome.status === "escrowed") {
+          setRedeemFlow((current) =>
+            current && current.code === code && current.stage === "redeeming"
+              ? { code, stage: "success", walletAddress: payoutAddress, message: outcome.message }
+              : current,
+          );
+          void refreshW9Status();
+          return;
+        }
+
         setRedeemFlow((current) =>
           current && current.code === code && current.stage === "redeeming"
             ? {
@@ -3393,6 +3464,11 @@ function WalletAppShellContent({
       appIsActiveRef.current = isActive;
 
       if (!wasActive && isActive) {
+        // Blocked is re-asked every time the app is opened. The first three
+        // tiers are protected by the acknowledgement the backend stores, so
+        // clearing this does not resurrect them.
+        setW9TierDismissed(null);
+        void refreshW9Status();
         void refreshWalletSurface();
         if (smartAddressRef.current) {
           if (walletHistoryActive) {
@@ -4997,6 +5073,26 @@ function WalletAppShellContent({
           </View>
         </View>
       </Modal>
+
+      {/*
+        Queued behind the redemption result rather than stacked on it: at the
+        crossing both fire at once, and two overlaid modals read as a glitch.
+        Closing the redemption result reveals this one immediately.
+      */}
+      <W9TierModal
+        visible={Boolean(visibleW9Tier) && !redeemFlow && !merchantModeActive}
+        tier={visibleW9Tier}
+        earnedSfluv={w9Status?.earnedSfluv ?? "0"}
+        thresholdSfluv={w9Status?.thresholdSfluv ?? "0"}
+        earnedBase={w9Status?.earnedBase ?? "0"}
+        thresholdBase={w9Status?.thresholdBase ?? "0"}
+        tokenSymbol={clientConfig.tokenSymbol}
+        busy={w9Busy}
+        onStartForm={() => {
+          void handleStartW9();
+        }}
+        onDismiss={() => acknowledgeW9Tier(visibleW9Tier)}
+      />
     </RootContainer>
   );
 }
