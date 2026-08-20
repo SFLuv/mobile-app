@@ -47,6 +47,12 @@ import { ReceiveScreen } from "./src/screens/ReceiveScreen";
 import { WalletHomeScreen } from "./src/screens/WalletHomeScreen";
 import { ActivityScreen } from "./src/screens/ActivityScreen";
 import { MerchantTodayScreen, formatBase } from "./src/screens/MerchantTodayScreen";
+import { MerchantDeviceSetupScreen } from "./src/screens/MerchantDeviceSetupScreen";
+import {
+  MerchantPinDisplay,
+  MerchantPinKeypad,
+  MerchantPinSlider,
+} from "./src/components/MerchantPinEntry";
 import { PaymentReceivedOverlay, type PaymentReceipt } from "./src/components/PaymentReceivedOverlay";
 import { MapScreen } from "./src/screens/MapScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
@@ -495,159 +501,6 @@ function shortAddress(value: string | undefined): string {
   if (!value) return "";
   if (value.length <= 16) return value;
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
-}
-
-function MerchantExitPinInput({
-  value,
-  visible,
-  onToggleVisible,
-}: {
-  value: string;
-  visible: boolean;
-  onToggleVisible: () => void;
-}) {
-  const { palette, shadows, isDark } = useAppTheme();
-  const styles = useMemo(() => createStyles(palette, shadows, isDark), [isDark, palette, shadows]);
-  const empty = value.length === 0;
-  return (
-    <View style={styles.merchantExitPinDisplay}>
-      <Text style={[styles.merchantExitPinDisplayText, empty ? styles.merchantExitPinPlaceholder : undefined]}>
-        {empty ? "Enter PIN" : visible ? value : "•".repeat(value.length)}
-      </Text>
-      <Pressable style={styles.merchantExitPinEye} onPress={onToggleVisible}>
-        <Ionicons name={visible ? "eye-off-outline" : "eye-outline"} size={20} color={palette.primaryStrong} />
-      </Pressable>
-    </View>
-  );
-}
-
-function MerchantExitPinPad({
-  onDigit,
-  onBackspace,
-}: {
-  onDigit: (digit: string) => void;
-  onBackspace: () => void;
-}) {
-  const { palette, shadows, isDark } = useAppTheme();
-  const styles = useMemo(() => createStyles(palette, shadows, isDark), [isDark, palette, shadows]);
-  const rows = [
-    ["1", "2", "3"],
-    ["4", "5", "6"],
-    ["7", "8", "9"],
-    ["blank", "0", "backspace"],
-  ];
-  return (
-    <View style={styles.merchantExitKeypad}>
-      {rows.map((row, rowIndex) => (
-        <View key={`merchant-exit-row-${rowIndex}`} style={styles.merchantExitKeypadRow}>
-          {row.map((key) =>
-            key === "blank" ? (
-              <View key={key} style={styles.merchantExitKeypadKey} />
-            ) : (
-              <Pressable
-                key={key}
-                style={[styles.merchantExitKeypadKey, key === "backspace" ? styles.merchantExitKeypadAction : undefined]}
-                onPress={() => {
-                  if (key === "backspace") {
-                    onBackspace();
-                    return;
-                  }
-                  onDigit(key);
-                }}
-              >
-                {key === "backspace" ? (
-                  <Ionicons name="backspace-outline" size={22} color={palette.primaryStrong} />
-                ) : (
-                  <Text style={styles.merchantExitKeypadText}>{key}</Text>
-                )}
-              </Pressable>
-            ),
-          )}
-        </View>
-      ))}
-    </View>
-  );
-}
-
-function MerchantExitSwipe({
-  disabled,
-  loading,
-  onComplete,
-}: {
-  disabled: boolean;
-  loading: boolean;
-  onComplete: () => void;
-}) {
-  const { palette, shadows, isDark } = useAppTheme();
-  const styles = useMemo(() => createStyles(palette, shadows, isDark), [isDark, palette, shadows]);
-  const translateX = useRef(new Animated.Value(0)).current;
-  const [trackWidth, setTrackWidth] = useState(0);
-  const thumbWidth = 54;
-  const swipeDistance = Math.max(trackWidth - thumbWidth - 8, 0);
-
-  useEffect(() => {
-    if (!loading) {
-      Animated.spring(translateX, {
-        toValue: 0,
-        useNativeDriver: true,
-        speed: 18,
-        bounciness: 0,
-      }).start();
-    }
-  }, [loading, translateX]);
-
-  const resetSwipe = React.useCallback(() => {
-    Animated.spring(translateX, {
-      toValue: 0,
-      useNativeDriver: true,
-      speed: 18,
-      bounciness: 0,
-    }).start();
-  }, [translateX]);
-
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => !disabled && !loading && swipeDistance > 0,
-        onMoveShouldSetPanResponder: (_, gesture) =>
-          !disabled && !loading && swipeDistance > 0 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
-        onPanResponderMove: (_, gesture) => {
-          translateX.setValue(Math.max(0, Math.min(gesture.dx, swipeDistance)));
-        },
-        onPanResponderRelease: (_, gesture) => {
-          if (gesture.dx >= swipeDistance * 0.72) {
-            Animated.timing(translateX, {
-              toValue: swipeDistance,
-              duration: 120,
-              useNativeDriver: true,
-            }).start(({ finished }) => {
-              if (finished) onComplete();
-            });
-            return;
-          }
-          resetSwipe();
-        },
-        onPanResponderTerminate: resetSwipe,
-      }),
-    [disabled, loading, onComplete, resetSwipe, swipeDistance, translateX],
-  );
-
-  return (
-    <View
-      style={[styles.merchantExitSwipeTrack, disabled ? styles.merchantExitSwipeTrackDisabled : undefined]}
-      onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
-    >
-      <Text style={[styles.merchantExitSwipeText, disabled ? styles.merchantExitSwipeTextDisabled : undefined]}>
-        {loading ? "Checking" : "Slide to exit"}
-      </Text>
-      <Animated.View
-        style={[styles.merchantExitSwipeThumb, disabled ? styles.merchantExitSwipeThumbDisabled : undefined, { transform: [{ translateX }] }]}
-        {...panResponder.panHandlers}
-      >
-        <Ionicons name={loading ? "hourglass-outline" : "arrow-forward"} size={18} color={palette.primaryStrong} />
-      </Animated.View>
-    </View>
-  );
 }
 
 function walletBalanceCacheKey(address: string): string {
@@ -1700,7 +1553,16 @@ function WalletAppShellContent({
   const [merchantModeExitOpen, setMerchantModeExitOpen] = useState(false);
   const [merchantModeExitError, setMerchantModeExitError] = useState<string | null>(null);
   const [merchantModeLocations, setMerchantModeLocations] = useState<AppMerchantModeLocation[]>([]);
+  // An empty list before the first fetch answers and an empty list after it are
+  // different situations: the second one means nothing is approved yet, and the
+  // setup screen has to be able to say so instead of implying it.
+  const [merchantModeLocationsLoaded, setMerchantModeLocationsLoaded] = useState(false);
   const [merchantLocationChooserOpen, setMerchantLocationChooserOpen] = useState(false);
+  // The shop a switch is heading for, held while the PIN is asked for.
+  const [merchantSwitchLocationID, setMerchantSwitchLocationID] = useState<number | null>(null);
+  const [merchantSwitchPin, setMerchantSwitchPin] = useState("");
+  const [merchantSwitchPinVisible, setMerchantSwitchPinVisible] = useState(false);
+  const [merchantSwitchError, setMerchantSwitchError] = useState<string | null>(null);
   // Shown once when the server has thrown this device out of merchant mode.
   const [merchantForcedExitNotice, setMerchantForcedExitNotice] = useState<string | null>(null);
   const [w9Status, setW9Status] = useState<AppW9Status | null>(null);
@@ -1992,6 +1854,26 @@ function WalletAppShellContent({
   const canChooseWallet = walletChooserCandidates.length > 1;
   const merchantModeDevice = merchantModeStatus?.device?.merchantModeEnabled ? merchantModeStatus.device : null;
   const merchantModeActive = Boolean(merchantModeDevice);
+  // A merchant account is always in merchant mode. The signup answer decides
+  // it, not isMerchant, which only says a shop of theirs is live — the two come
+  // apart while a first location is being reviewed, and that gap is exactly the
+  // case this screen has to handle rather than fall through to the wallet.
+  const merchantAccount = appUser?.accountType === "merchant";
+  const merchantDeviceSetupPending = merchantAccount && !merchantModeActive;
+  // Kept true while the list is still loading so the chrome does not flash the
+  // consumer dock on the way to the setup screen.
+  const merchantDeviceEnrollable =
+    merchantDeviceSetupPending && (!merchantModeLocationsLoaded || merchantModeLocations.length > 0);
+  // No approved shop to sync to, so there is no till to lock down. They keep the
+  // dock and can look around the app; the wallet tab explains the wait.
+  const merchantAwaitingApproval = merchantDeviceSetupPending && !merchantDeviceEnrollable;
+  // Till chrome: no dock, no tabs, no notifications. Covers both a live till and
+  // the short first-run flow that turns this device into one.
+  const merchantKiosk = merchantModeActive || merchantDeviceEnrollable;
+  // A null status means the merchant-mode calls have not answered yet, which is
+  // a different thing from a merchant with no PIN. Non-merchants never get one.
+  const merchantSetupReady =
+    merchantModeLocationsLoaded && (merchantModeStatus !== null || !appUser?.isMerchant);
   const walletSyncReady = backendBootstrapReady && Boolean(appUser) && Boolean(runtime.discovery);
   const walletHistoryActive = tab === "wallet" && walletPane === "home";
   const activityHistoryActive = tab === "activity";
@@ -2383,6 +2265,11 @@ function WalletAppShellContent({
     // live till. It stays in merchant mode, but asks which counter it is on
     // before the first sale. last_seen_at is read before the server stamps it,
     // so this is the gap since the previous poll.
+    //
+    // Deliberately still PIN-free. Switching counters now costs the PIN, but
+    // this prompt is answered by tapping the shop the device is already on,
+    // which is not a switch. A tablet that spent the weekend in a drawer is back
+    // to taking payments in one tap, and nobody has to find the owner.
     if (status.device?.merchantModeEnabled && status.device.lastSeenAt) {
       const lastSeen = Date.parse(status.device.lastSeenAt);
       if (Number.isFinite(lastSeen) && Date.now() - lastSeen > MERCHANT_LOCATION_RECONFIRM_MS) {
@@ -2480,6 +2367,7 @@ function WalletAppShellContent({
   const refreshMerchantModeLocations = async () => {
     if (!backendClient || !appUser?.isMerchant) {
       setMerchantModeLocations([]);
+      setMerchantModeLocationsLoaded(true);
       return;
     }
     try {
@@ -2487,17 +2375,20 @@ function WalletAppShellContent({
     } catch {
       // A failed list only costs the switcher; it must never break the till.
       setMerchantModeLocations([]);
+    } finally {
+      setMerchantModeLocationsLoaded(true);
     }
   };
 
   useEffect(() => {
     if (!appUser?.isMerchant) {
       setMerchantModeLocations([]);
+      setMerchantModeLocationsLoaded(Boolean(appUser?.id));
       return;
     }
     void refreshMerchantModeLocations();
     // Re-read after a switch so the toggle reflects the shop actually in use.
-  }, [appUser?.isMerchant, merchantModeStatus?.device?.locationId]);
+  }, [appUser?.id, appUser?.isMerchant, merchantModeStatus?.device?.locationId]);
 
   useEffect(() => {
     void refreshW9Status();
@@ -3903,7 +3794,12 @@ function WalletAppShellContent({
     setMerchantModeMessage(null);
     try {
       const status = await backendClient.setMerchantModePin(pin, currentPin);
-      setMerchantModeStatus(status);
+      // The PIN endpoint answers without an installation ID, so its status
+      // carries no device. Keeping the one already in hand stops a PIN change
+      // from looking like this till has just dropped out of merchant mode.
+      setMerchantModeStatus((current) =>
+        current?.device && !status.device ? { ...status, device: current.device } : status,
+      );
       setMerchantModeMessage("Merchant Mode PIN saved.");
     } finally {
       setMerchantModeBusy(false);
@@ -3940,15 +3836,35 @@ function WalletAppShellContent({
   };
 
   /**
-   * Moves this device to another of the merchant's shops.
+   * Moves this device to another of the merchant's shops, behind the PIN.
    *
    * Re-enrolling the same installation is the whole operation: the server
    * rebinds the device to the new location and the wallet follows, because the
-   * till resolves its wallet from the shop on every poll. Deliberately no PIN —
-   * switching counters is a shift change, not a privileged act.
+   * till resolves its wallet from the shop on every poll.
+   *
+   * The PIN reverses the original call that switching counters is "a shift
+   * change, not a privileged act" — the product owner has confirmed the reversal
+   * with the team, so read this as a decision and not a regression. The argument
+   * that changed it: the shop the device is bound to decides where its payments
+   * land, so anyone holding the tablet could redirect a day's takings into
+   * another of the owner's businesses. Choosing that is the owner's, not the
+   * shift's. Re-confirming the counter the device is already on is not a change
+   * and still costs nothing — see the idle re-confirm in
+   * refreshMerchantModeStatus.
    */
-  const handleSwitchMerchantLocation = async (locationID: number) => {
+  const handleSwitchMerchantLocation = async (locationID: number, pin: string) => {
     if (!backendClient || merchantModeBusy) {
+      return;
+    }
+    // Without a stored PIN the confirm call below would be taken as setting a
+    // first one, and would accept anything typed. A device in merchant mode
+    // always has one, so this is a guard against a state that should not exist.
+    if (!merchantModeStatus?.passcodeSet) {
+      setMerchantSwitchError("No Merchant Mode PIN is set for this account.");
+      return;
+    }
+    if (!/^\d{6}$/.test(pin)) {
+      setMerchantSwitchError("Enter the 6 digit Merchant Mode PIN.");
       return;
     }
     const installationID = merchantModeInstallationID ?? (await getOrCreateAppInstallationID());
@@ -3957,7 +3873,9 @@ function WalletAppShellContent({
     }
 
     setMerchantModeBusy(true);
+    setMerchantSwitchError(null);
     try {
+      await backendClient.confirmMerchantModePin(pin);
       const status = await backendClient.enableMerchantMode({
         installationID,
         locationID,
@@ -3966,13 +3884,43 @@ function WalletAppShellContent({
         appVersion: Constants.expoConfig?.version || Constants.nativeAppVersion || "",
       });
       setMerchantModeStatus(status);
+      setMerchantSwitchLocationID(null);
+      setMerchantSwitchPin("");
       setMerchantLocationChooserOpen(false);
       // The previous shop's takings must not linger on screen next to the new
       // shop's name, so the day is cleared and refetched rather than reused.
       setMerchantToday(null);
       await refreshMerchantToday();
     } catch (error) {
-      setMerchantModeMessage((error as Error)?.message || "Unable to switch location.");
+      setMerchantSwitchError((error as Error)?.message || "Unable to switch location.");
+    } finally {
+      setMerchantModeBusy(false);
+    }
+  };
+
+  // Abandoning the prompt clears the digits: a half-typed PIN left on a counter
+  // tablet is a PIN someone else gets to finish.
+  const closeMerchantSwitchPrompt = () => {
+    setMerchantSwitchLocationID(null);
+    setMerchantSwitchPin("");
+    setMerchantSwitchError(null);
+  };
+
+  /**
+   * First run on a device for a merchant account: prove the PIN, then pick a
+   * counter. The PIN is checked before the location list is offered so a device
+   * cannot be pointed at a shop by whoever happens to be holding it.
+   */
+  const handleConfirmMerchantModePin = async (pin: string) => {
+    if (!backendClient) {
+      throw new Error("Backend not configured.");
+    }
+    if (!merchantModeStatus?.passcodeSet) {
+      throw new Error("No Merchant Mode PIN is set for this account.");
+    }
+    setMerchantModeBusy(true);
+    try {
+      await backendClient.confirmMerchantModePin(pin);
     } finally {
       setMerchantModeBusy(false);
     }
@@ -3981,6 +3929,12 @@ function WalletAppShellContent({
   const handleDisableMerchantMode = async () => {
     if (!backendClient) {
       setMerchantModeExitError("Backend not configured.");
+      return;
+    }
+    // A merchant account has no consumer app to be let out into, so the exit is
+    // not offered to one and must not be reachable by any other route either.
+    if (merchantAccount) {
+      setMerchantModeExitError("Merchant accounts stay in Merchant Mode.");
       return;
     }
     if (!/^\d{6}$/.test(merchantModeExitPin)) {
@@ -4160,10 +4114,21 @@ function WalletAppShellContent({
       await loadAppProfile();
     }
     await loadPublicLocations();
+
+    // The merchant's location list has to be re-fetched explicitly, not left to
+    // the effect that normally maintains it.
+    //
+    // That effect is keyed on the user id, the merchant flag and the bound
+    // device's location — none of which change when support attaches a missing
+    // wallet, or when a failed request earlier left the list empty. Without
+    // this, the "Check again" button on the device setup screen was a no-op
+    // forever: an approved merchant waiting on a wallet could only escape by
+    // restarting the app.
+    await refreshMerchantModeLocations();
   };
 
   useEffect(() => {
-    if (!merchantModeActive) {
+    if (!merchantKiosk) {
       return;
     }
     if (tab !== "wallet") {
@@ -4172,11 +4137,13 @@ function WalletAppShellContent({
     if (walletPane === "send") {
       setWalletPane("home");
     }
-  }, [merchantModeActive, tab, walletPane]);
+  }, [merchantKiosk, tab, walletPane]);
 
   const activeTitle =
     merchantModeActive
       ? "Merchant Mode"
+      : merchantDeviceSetupPending
+      ? "Merchant Setup"
       : tab === "wallet"
       ? walletPane === "send"
         ? "Send"
@@ -4312,6 +4279,20 @@ function WalletAppShellContent({
         showRedeemScanner={!merchantModeActive}
       />
     ) : null;
+  const merchantSetupContent = (
+    <MerchantDeviceSetupScreen
+      locations={merchantModeLocations}
+      ready={merchantSetupReady}
+      passcodeSet={merchantModeStatus?.passcodeSet === true}
+      hasApprovedLocation={appUser?.isMerchant === true}
+      busy={merchantModeBusy}
+      onCreatePin={handleSetMerchantModePin}
+      onConfirmPin={handleConfirmMerchantModePin}
+      onSelectLocation={handleEnableMerchantMode}
+      onRefresh={refreshEverything}
+      onLogout={handleLogout}
+    />
+  );
   const merchantTodayContent = (
     <MerchantTodayScreen
       today={merchantToday}
@@ -4321,7 +4302,10 @@ function WalletAppShellContent({
       locationName={merchantModeDevice?.locationName}
       tokenSymbol={clientConfig.tokenSymbol}
       canSwitchLocation={merchantModeLocations.length > 1}
-      onSwitchLocation={() => setMerchantLocationChooserOpen(true)}
+      onSwitchLocation={() => {
+        setMerchantSwitchError(null);
+        setMerchantLocationChooserOpen(true);
+      }}
     />
   );
   const walletTabContent =
@@ -4354,7 +4338,7 @@ function WalletAppShellContent({
             <Text style={styles.brand}>{activeTitle}</Text>
           </View>
           <View style={styles.topActions}>
-            {!merchantModeActive ? (
+            {!merchantKiosk ? (
               <Pressable
                 style={styles.iconButton}
                 onPress={() => setNotificationsOpen(true)}
@@ -4375,22 +4359,28 @@ function WalletAppShellContent({
                 ) : null}
               </Pressable>
             ) : null}
-            <Pressable
-              style={[styles.iconButton, tab === "settings" ? styles.iconButtonActive : undefined]}
-              onPress={() => {
-                if (merchantModeActive) {
-                  setMerchantModeExitOpen(true);
-                  return;
-                }
-                setTab("settings");
-              }}
-            >
-              <Ionicons
-                name={merchantModeActive ? "lock-closed-outline" : tab === "settings" ? "settings" : "settings-outline"}
-                size={18}
-                color={palette.primaryStrong}
-              />
-            </Pressable>
+            {/* Nothing to reach during first-run setup: there is no till to
+                lock and no settings a half-enrolled device should open. */}
+            {!merchantDeviceEnrollable ? (
+              <Pressable
+                style={[styles.iconButton, tab === "settings" ? styles.iconButtonActive : undefined]}
+                onPress={() => {
+                  if (merchantModeActive) {
+                    setMerchantModeExitOpen(true);
+                    return;
+                  }
+                  setTab("settings");
+                }}
+              >
+                <Ionicons
+                  name={
+                    merchantModeActive ? "lock-closed-outline" : tab === "settings" ? "settings" : "settings-outline"
+                  }
+                  size={18}
+                  color={palette.primaryStrong}
+                />
+              </Pressable>
+            ) : null}
           </View>
         </View>
       ) : null}
@@ -4465,10 +4455,15 @@ function WalletAppShellContent({
                 </View>
               )}
             </View>
+          ) : merchantDeviceEnrollable ? (
+            merchantSetupContent
           ) : merchantModeActive ? (
             merchantTodayContent
           ) : tab === "wallet" ? (
-            walletTabContent
+            // A merchant still waiting on approval keeps the rest of the app but
+            // gets no wallet: there is nothing for them to spend from yet, and a
+            // live send screen would be the one real action they must not have.
+            merchantAwaitingApproval ? merchantSetupContent : walletTabContent
           ) : tab === "activity" ? (
             <ActivityScreen
               transactions={activityTransactions}
@@ -4697,7 +4692,7 @@ function WalletAppShellContent({
       <PaymentReceivedOverlay receipt={paymentReceipt} onDismiss={() => setPaymentReceipt(null)} />
 
 
-      {showStandardChrome && !merchantModeActive && !sendPaneActive ? (
+      {showStandardChrome && !merchantKiosk && !sendPaneActive ? (
         <View pointerEvents="box-none" style={styles.bottomDockShell}>
           <BlurView
             pointerEvents="none"
@@ -4731,41 +4726,97 @@ function WalletAppShellContent({
               </Pressable>
             </View>
 
-            <View style={styles.merchantExitCard}>
-              <Text style={styles.merchantExitTitle}>Exit Merchant Mode</Text>
-              <Text style={styles.merchantExitBody}>
-                Enter the 6 digit merchant PIN on this device to return to the full app.
-              </Text>
-              <MerchantExitPinInput
-                value={merchantModeExitPin}
-                visible={merchantModeExitPinVisible}
-                onToggleVisible={() => setMerchantModeExitPinVisible((current) => !current)}
-              />
-              <MerchantExitPinPad
-                onDigit={(digit) => {
-                  setMerchantModeExitPin((value) => `${value}${digit}`.replace(/\D/g, "").slice(0, 6));
-                  setMerchantModeExitError(null);
-                }}
-                onBackspace={() => {
-                  setMerchantModeExitPin((value) => value.slice(0, -1));
-                  setMerchantModeExitError(null);
-                }}
-              />
-              {merchantModeExitError ? <Text style={styles.merchantExitError}>{merchantModeExitError}</Text> : null}
-              <MerchantExitSwipe
-                disabled={merchantModeBusy || !/^\d{6}$/.test(merchantModeExitPin)}
-                loading={merchantModeBusy}
-                onComplete={() => {
-                  void handleDisableMerchantMode();
-                }}
-              />
-            </View>
+            {merchantAccount ? (
+              // Merchant accounts have nowhere to exit to. The sheet still opens,
+              // because staff press the lock expecting something, but the only
+              // thing behind it is moving the device to another counter.
+              <View style={styles.merchantExitCard}>
+                <Text style={styles.merchantExitTitle}>This device stays a till</Text>
+                <Text style={styles.merchantExitBody}>
+                  Merchant accounts do not have a personal wallet to switch back to. Payments taken here go to this
+                  location.
+                </Text>
+                {merchantModeLocations.length > 1 ? (
+                  <Pressable
+                    style={styles.connectionStateButton}
+                    onPress={() => {
+                      setMerchantModeExitOpen(false);
+                      setMerchantSwitchError(null);
+                      setMerchantLocationChooserOpen(true);
+                    }}
+                  >
+                    <Text style={styles.connectionStateButtonText}>Switch location</Text>
+                  </Pressable>
+                ) : null}
+                {/* Settings are unreachable from a till, so this is the only way
+                    to hand the device to another business or another owner.
+                    Confirmed rather than PIN-gated: nothing leaks and no money
+                    moves, and a PIN nobody can remember must not be able to
+                    strand a tablet. */}
+                <Pressable
+                  onPress={() => {
+                    Alert.alert(
+                      "Sign out of this till?",
+                      "This device will stop taking payments for this location until someone signs in again.",
+                      [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                          text: "Sign out",
+                          style: "destructive",
+                          onPress: () => {
+                            setMerchantModeExitOpen(false);
+                            handleLogout();
+                          },
+                        },
+                      ],
+                    );
+                  }}
+                >
+                  <Text style={styles.merchantExitSignOut}>Sign out</Text>
+                </Pressable>
+              </View>
+            ) : (
+              // The opt-in merchant mode a personal account can turn on, and so
+              // must be able to turn off again.
+              <View style={styles.merchantExitCard}>
+                <Text style={styles.merchantExitTitle}>Exit Merchant Mode</Text>
+                <Text style={styles.merchantExitBody}>
+                  Enter the 6 digit merchant PIN on this device to return to the full app.
+                </Text>
+                <MerchantPinDisplay
+                  value={merchantModeExitPin}
+                  visible={merchantModeExitPinVisible}
+                  onToggleVisible={() => setMerchantModeExitPinVisible((current) => !current)}
+                />
+                <MerchantPinKeypad
+                  onDigit={(digit) => {
+                    setMerchantModeExitPin((value) => `${value}${digit}`.replace(/\D/g, "").slice(0, 6));
+                    setMerchantModeExitError(null);
+                  }}
+                  onBackspace={() => {
+                    setMerchantModeExitPin((value) => value.slice(0, -1));
+                    setMerchantModeExitError(null);
+                  }}
+                />
+                {merchantModeExitError ? <Text style={styles.merchantExitError}>{merchantModeExitError}</Text> : null}
+                <MerchantPinSlider
+                  disabled={merchantModeBusy || !/^\d{6}$/.test(merchantModeExitPin)}
+                  loading={merchantModeBusy}
+                  label="Slide to exit"
+                  onComplete={() => {
+                    void handleDisableMerchantMode();
+                  }}
+                />
+              </View>
+            )}
           </Pressable>
         </Pressable>
       </Modal>
 
-      {/* Switching counters. No PIN: moving between a merchant's own shops is a
-          shift change, not a privileged act. The wallet follows the shop. */}
+      {/* Which counter this device is. Picking the one it is already on closes
+          and costs nothing — that is the case the idle re-confirm hits, and it
+          is a confirmation, not a change. Picking a different one redirects
+          where the money lands, so it goes on to ask for the PIN. */}
       <Modal
         visible={merchantLocationChooserOpen}
         transparent
@@ -4797,7 +4848,10 @@ function WalletAppShellContent({
                         setMerchantLocationChooserOpen(false);
                         return;
                       }
-                      void handleSwitchMerchantLocation(location.id);
+                      setMerchantSwitchPin("");
+                      setMerchantSwitchError(null);
+                      setMerchantSwitchLocationID(location.id);
+                      setMerchantLocationChooserOpen(false);
                     }}
                   >
                     <View style={styles.walletChooserOptionHeader}>
@@ -4816,6 +4870,70 @@ function WalletAppShellContent({
                 );
               })}
             </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* The PIN behind a counter change. Separate from the chooser so the list
+          stays a list: whoever is switching picks the shop first and is then
+          told what it costs. */}
+      <Modal
+        visible={merchantSwitchLocationID !== null}
+        transparent
+        presentationStyle="overFullScreen"
+        animationType="none"
+        onRequestClose={closeMerchantSwitchPrompt}
+      >
+        <Pressable style={styles.modalOverlay} onPress={closeMerchantSwitchPrompt}>
+          <Pressable style={styles.moreMenuCard} onPress={() => {}}>
+            <View style={styles.moreMenuHeader}>
+              <View style={styles.moreMenuHeaderCopy}>
+                <Text style={styles.moreMenuTitle}>Merchant PIN</Text>
+                <Text style={styles.moreMenuSubtitle}>
+                  Moving this device to{" "}
+                  {merchantModeLocations.find((location) => location.id === merchantSwitchLocationID)?.name ||
+                    "another location"}
+                  .
+                </Text>
+              </View>
+              <Pressable style={styles.walletChooserClose} onPress={closeMerchantSwitchPrompt}>
+                <Ionicons name="close" size={20} color={palette.primaryStrong} />
+              </Pressable>
+            </View>
+
+            <View style={styles.merchantExitCard}>
+              <Text style={styles.merchantExitBody}>
+                Payments taken on this device will go to the new location from now on.
+              </Text>
+              <MerchantPinDisplay
+                value={merchantSwitchPin}
+                visible={merchantSwitchPinVisible}
+                onToggleVisible={() => setMerchantSwitchPinVisible((current) => !current)}
+              />
+              <MerchantPinKeypad
+                onDigit={(digit) => {
+                  setMerchantSwitchPin((value) => `${value}${digit}`.replace(/\D/g, "").slice(0, 6));
+                  setMerchantSwitchError(null);
+                }}
+                onBackspace={() => {
+                  setMerchantSwitchPin((value) => value.slice(0, -1));
+                  setMerchantSwitchError(null);
+                }}
+              />
+              {merchantSwitchError ? <Text style={styles.merchantExitError}>{merchantSwitchError}</Text> : null}
+              <MerchantPinSlider
+                disabled={merchantModeBusy || !/^\d{6}$/.test(merchantSwitchPin)}
+                loading={merchantModeBusy}
+                label="Slide to switch"
+                loadingLabel="Switching"
+                onComplete={() => {
+                  if (merchantSwitchLocationID === null) {
+                    return;
+                  }
+                  void handleSwitchMerchantLocation(merchantSwitchLocationID, merchantSwitchPin);
+                }}
+              />
+            </View>
           </Pressable>
         </Pressable>
       </Modal>
@@ -5080,7 +5198,7 @@ function WalletAppShellContent({
         Closing the redemption result reveals this one immediately.
       */}
       <W9TierModal
-        visible={Boolean(visibleW9Tier) && !redeemFlow && !merchantModeActive}
+        visible={Boolean(visibleW9Tier) && !redeemFlow && !merchantKiosk}
         tier={visibleW9Tier}
         earnedSfluv={w9Status?.earnedSfluv ?? "0"}
         thresholdSfluv={w9Status?.thresholdSfluv ?? "0"}
@@ -7570,125 +7688,16 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     color: palette.textMuted,
     lineHeight: 20,
   },
-  merchantExitInput: {
-    minHeight: 52,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: palette.primary,
-    backgroundColor: palette.surface,
-    color: palette.text,
-    fontSize: 18,
-    fontWeight: "800",
-    letterSpacing: 4,
-    textAlign: "center",
-    paddingHorizontal: spacing.md,
-  },
-  merchantExitPinDisplay: {
-    minHeight: 54,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: palette.primary,
-    backgroundColor: palette.surface,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingLeft: spacing.md,
-  },
-  merchantExitPinDisplayText: {
-    flex: 1,
-    color: palette.text,
-    fontSize: 20,
-    fontWeight: "800",
-    letterSpacing: 4,
-    textAlign: "center",
-  },
-  merchantExitPinPlaceholder: {
-    color: palette.textMuted,
-    fontSize: 15,
-    letterSpacing: 0,
-    textAlign: "left",
-  },
-  merchantExitPinEye: {
-    width: 48,
-    minHeight: 52,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  merchantExitKeypad: {
-    gap: spacing.xs,
-  },
-  merchantExitKeypadRow: {
-    flexDirection: "row",
-    gap: spacing.xs,
-  },
-  merchantExitKeypadKey: {
-    flex: 1,
-    minHeight: 48,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: palette.border,
-    backgroundColor: palette.surface,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  merchantExitKeypadAction: {
-    backgroundColor: palette.primarySoft,
-  },
-  merchantExitKeypadText: {
-    color: palette.text,
-    fontSize: 22,
-    fontWeight: "800",
-  },
   merchantExitError: {
     color: palette.danger,
     lineHeight: 20,
     fontWeight: "700",
   },
-  merchantExitButton: {
-    minHeight: 50,
-    borderRadius: radii.md,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: palette.danger,
-  },
-  merchantExitButtonText: {
-    color: palette.white,
-    fontWeight: "800",
-  },
-  merchantExitSwipeTrack: {
-    minHeight: 58,
-    borderRadius: radii.pill,
-    backgroundColor: palette.primaryStrong,
-    justifyContent: "center",
-    paddingHorizontal: 8,
-    position: "relative",
-    overflow: "hidden",
-  },
-  merchantExitSwipeTrackDisabled: {
-    backgroundColor: palette.borderStrong,
-  },
-  merchantExitSwipeText: {
-    color: palette.white,
+  merchantExitSignOut: {
+    color: palette.textMuted,
     textAlign: "center",
-    fontSize: 15,
-    fontWeight: "800",
-    paddingHorizontal: 72,
-  },
-  merchantExitSwipeTextDisabled: {
-    color: palette.surface,
-  },
-  merchantExitSwipeThumb: {
-    position: "absolute",
-    left: 4,
-    top: 4,
-    bottom: 4,
-    width: 54,
-    borderRadius: radii.pill,
-    backgroundColor: palette.surface,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  merchantExitSwipeThumbDisabled: {
-    backgroundColor: palette.surfaceStrong,
+    fontWeight: "700",
+    paddingVertical: spacing.xs,
   },
   buttonDisabled: {
     opacity: 0.55,

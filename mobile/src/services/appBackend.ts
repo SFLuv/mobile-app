@@ -117,6 +117,7 @@ type GetUserResponse = {
     mailing_list_opt_in_at?: string | null;
     mailing_list_policy_version: string;
     volunteer_list_opt_in?: boolean;
+    account_type?: string;
   };
   wallets: Array<{
     id?: number;
@@ -806,6 +807,11 @@ function mapUser(input: GetUserResponse["user"]): AppUser {
         ? input.mailing_list_opt_in_at
         : undefined,
     mailingListPolicyVersion: asString(input.mailing_list_policy_version),
+    // Only the two values the backend writes are honoured. Anything else —
+    // including the empty string an older backend sends — is left undefined
+    // rather than guessed at, because the merchant path is the locked-down one.
+    accountType:
+      input.account_type === "merchant" || input.account_type === "regular" ? input.account_type : undefined,
     // Separate from the account-level mailing list. Undefined means the backend
     // has not told us yet, which is not the same as "opted out".
     volunteerListOptIn:
@@ -2322,6 +2328,25 @@ export class AppBackendClient {
     }
     const body = (await response.json()) as MerchantModeStatusResponse;
     return mapMerchantModeStatus(body);
+  }
+
+  /**
+   * Checks a PIN without ending the shift.
+   *
+   * There is no verify endpoint. The only other server-side check lives on
+   * /merchant-mode/disable, which drops the device out of merchant mode as the
+   * price of asking, and this app has to keep working against the backend that
+   * is already deployed to the tills in the field. Re-setting the PIN to itself
+   * runs the same bcrypt comparison, counts the same failed attempts and honours
+   * the same lockout; rotating the stored hash to an identical PIN is the entire
+   * side effect. If a /merchant-mode/pin/verify ever lands, this is the one line
+   * that changes.
+   *
+   * The caller must already know a PIN exists: with none set the server treats
+   * this as a first PIN and stores whatever was typed.
+   */
+  async confirmMerchantModePin(pin: string): Promise<void> {
+    await this.setMerchantModePin(pin, pin);
   }
 
   /**

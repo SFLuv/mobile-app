@@ -21,6 +21,14 @@ export interface AppUser {
   mailingListOptIn: boolean;
   mailingListOptInAt?: string | null;
   mailingListPolicyVersion: string;
+  /**
+   * What this person said they were signing up as, answered once at signup.
+   * Not interchangeable with `isMerchant`, which is recomputed from approved
+   * listings: a merchant whose first location is still being reviewed is
+   * `accountType: "merchant"` with `isMerchant: false`. Undefined on a backend
+   * that predates the question, which is why nothing keys off "not merchant".
+   */
+  accountType?: "regular" | "merchant";
   /** Volunteer email list — distinct from `mailingListOptIn`. Undefined = unknown. */
   volunteerListOptIn?: boolean;
 }

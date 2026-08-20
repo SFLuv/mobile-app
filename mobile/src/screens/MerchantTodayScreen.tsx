@@ -89,8 +89,9 @@ export function MerchantTodayScreen({
         <Text style={styles.paymentsSymbol}>{tokenSymbol}</Text>
         {locationName ? (
           canSwitchLocation && onSwitchLocation ? (
-            // Sits where the wallet chooser used to be. Switching counters is a
-            // shift change, not a privileged act, so it asks for no PIN.
+            // Sits where the wallet chooser used to be. Opens the counter list;
+            // actually moving to a different one asks for the merchant PIN,
+            // because the shop decides where the money lands.
             <Pressable style={styles.locationSwitch} onPress={onSwitchLocation}>
               <Text style={styles.locationName}>{locationName}</Text>
               <Ionicons name="swap-horizontal" size={14} color={palette.textMuted} />
