@@ -17,11 +17,23 @@ maestro test .maestro/
 
 ## Building the app under test
 
-**Build Release, not Debug.** Maestro restarts the app to attach to it, and an
-Expo *development* build cannot reattach to Metro when that happens — it comes
-up on "Unable to Start SFLUV / Aborted" and eventually needs a reinstall. A
-Release build carries its JS bundle inside the app (`main.jsbundle`, ~8MB) and
-has no bundler dependency at all, so restarts are free.
+**Build Release, not Debug.** A Release build carries its JS bundle inside the
+app (`main.jsbundle`, ~8MB), so there is no Metro process to keep alive and no
+second network dependency during a run. Maestro does background and relaunch the
+app between flows, and a Release build has nothing to reconnect to. It is also
+what ships, which is what the suite should be asserting against.
+
+Expo Go is not an alternative at any point: `@privy-io/expo-native-extensions`
+and `react-native-passkeys` are custom native modules, and Expo Go only contains
+the prebuilt Expo SDK set. The app cannot launch there at all.
+
+A note on a claim that used to be here: an earlier version of this file said a
+development build "cannot reattach to Metro" under Maestro and comes up on
+"Unable to Start SFLUV / Aborted". That was never verified. Every one of those
+failures happened while EXPO_PUBLIC_APP_BACKEND_URL pointed at a stale LAN IP,
+and the Release build failed identically until the address was fixed — the
+address was the cause. The dev client was never retried against a working
+backend, so it may well be fine. Do not let that line talk you out of trying it.
 
 ```bash
 cd ios
