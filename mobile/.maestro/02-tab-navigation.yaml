@@ -1,0 +1,22 @@
+# Each tab opens its own screen.
+#
+# Kept separate from the shell check because "the tab bar is drawn" and "the
+# tabs work" are different claims, and only the second one would catch a
+# navigation regression.
+appId: org.sanchezoleary.sfluvwallet.dev
+---
+- runFlow: 00-boot.yaml
+- tapOn: "Activity"
+- extendedWaitUntil:
+    visible: "Activity"
+    timeout: 20000
+- tapOn: "Contacts"
+- waitForAnimationToEnd:
+    timeout: 8000
+- tapOn: "Map"
+- waitForAnimationToEnd:
+    timeout: 8000
+- tapOn: "Wallet"
+- extendedWaitUntil:
+    visible: "SFLUV available"
+    timeout: 20000

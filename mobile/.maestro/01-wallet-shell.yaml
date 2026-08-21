@@ -1,0 +1,23 @@
+# The signed-in shell: a balance, both money actions, and every tab.
+#
+# This is the flow that proves the app is genuinely talking to the backend
+# rather than merely rendering — "Recent activity" is populated from indexed
+# on-chain transfers, so it cannot appear if the API is unreachable. An earlier
+# round spent a long time chasing "Unable to Start SFLUV / Aborted", which was
+# the app's own compatibility gate timing out against a backend address that
+# had gone stale. A flow that only checked for chrome would have passed
+# throughout that.
+appId: org.sanchezoleary.sfluvwallet.dev
+---
+- runFlow: 00-boot.yaml
+- assertVisible: "SFLUV available"
+- assertVisible: ".*Send"
+- assertVisible: ".*Receive"
+- assertVisible: "Recent activity"
+# The tab bar, which is also where merchant mode shows itself: a merchant
+# account is locked to merchant surfaces and should NOT see Participate.
+- assertVisible: "Participate"
+- assertVisible: "Map"
+- assertVisible: "Wallet"
+- assertVisible: "Activity"
+- assertVisible: "Contacts"

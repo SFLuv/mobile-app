@@ -1,47 +1,25 @@
-# Gets a dev build to the app's first real screen, from a known-clean state.
+# Brings the app up and leaves it on the Wallet tab, signed in.
 #
-# clearState is what makes the suite re-runnable. Without it Maestro leaves the
-# last flow's screen up AND its form state: backing out of the email step does
-# not clear the address field, so a second run appends to it and the field ends
-# up holding "...oleary.comsanchezsanchez@oleary.com". eraseText is not a
-# reliable substitute — it deletes from the cursor, which is not always at the
-# end.
+# Built for a RELEASE simulator build, which carries its JS bundle inside the
+# app. A development build is the wrong target for this suite: Maestro restarts
+# the app to attach, and a dev client cannot reattach to Metro when that
+# happens. See README for the build command.
 #
-# The cost is that clearing state drops a development build back to Expo's own
-# launcher, so this flow has to re-enter through it. A release build shows none
-# of that chrome, which is why every step below is conditional rather than
+# The privacy-policy gate only appears when the signed-in account has not
+# accepted the current policy, so it is handled conditionally rather than
 # asserted.
-#
-# The final wait keys on the tagline, NOT on "SFLUV": Expo's developer menu is
-# itself titled "SFLuv" and Maestro matches case-insensitively, so asserting
-# "SFLUV" passes while the app is still hidden behind the menu.
 appId: org.sanchezoleary.sfluvwallet.dev
 ---
-- launchApp:
-    clearState: true
-- runFlow:
-    when:
-      visible: "Open"
-    commands:
-      - tapOn: "Open"
-# Expo's launcher: connect to the running Metro server.
-- runFlow:
-    when:
-      visible: "DEVELOPMENT SERVERS"
-    commands:
-      - tapOn: ".*localhost:8081"
-- runFlow:
-    when:
-      visible: "Continue"
-    commands:
-      - tapOn: "Continue"
-# Dismiss the developer menu by tapping the backdrop above the sheet.
-- runFlow:
-    when:
-      visible: "Toggle performance monitor"
-    commands:
-      - tapOn:
-          point: "50%,10%"
+- launchApp
 - extendedWaitUntil:
-    visible: "A community currency for San Francisco"
-    timeout: 120000
+    visible: "SFLUV"
+    timeout: 90000
+- runFlow:
+    when:
+      visible: "I have read and accept the Privacy Policy."
+    commands:
+      - tapOn: "I have read and accept the Privacy Policy."
+      - tapOn: "Continue"
+- extendedWaitUntil:
+    visible: "SFLUV available"
+    timeout: 60000

@@ -1,13 +1,13 @@
 # Maestro suite (iOS simulator)
 
-Three flows. Two pass; one is blocked on a Privy dashboard setting that cannot
-be changed from a terminal. Details below — the blocker is the reason there is
-no merchant-mode or W-9 coverage here yet.
+Three flows, all passing, ~38s for the set. They cover the signed-in shell and
+tab navigation. Merchant mode, the PIN, device setup and the W-9 tier modal are
+NOT covered yet — see "What is missing".
 
 ## Running
 
-Maestro needs a JVM and the machine has no system Java, so the Homebrew one has
-to be on PATH:
+Maestro needs a JVM and this machine has no system Java, so put the Homebrew one
+on PATH:
 
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk
@@ -15,71 +15,79 @@ export PATH="$JAVA_HOME/bin:$PATH:$HOME/.maestro/bin"
 maestro test .maestro/
 ```
 
-The app must already be installed and Metro running:
+## Building the app under test
+
+**Build Release, not Debug.** Maestro restarts the app to attach to it, and an
+Expo *development* build cannot reattach to Metro when that happens — it comes
+up on "Unable to Start SFLUV / Aborted" and eventually needs a reinstall. A
+Release build carries its JS bundle inside the app (`main.jsbundle`, ~8MB) and
+has no bundler dependency at all, so restarts are free.
 
 ```bash
-# Metro
-npx expo start --port 8081
-
-# Build + install. NOT `expo run:ios` — its device detection is broken here
-# ("Unexpected devicectl JSON version output"), so it takes the physical-device
-# path and dies on "No code signing certificates are available", even with a
-# simulator UDID passed to --device.
 cd ios
 xcodebuild -workspace SFLuv.xcworkspace -scheme SFLuv \
-  -configuration Debug -sdk iphonesimulator \
-  -destination 'id=<SIMULATOR_UDID>' -derivedDataPath /tmp/dd \
+  -configuration Release -sdk iphonesimulator \
+  -destination 'id=<SIMULATOR_UDID>' -derivedDataPath /tmp/ddr \
   CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO \
   PRODUCT_BUNDLE_IDENTIFIER=org.sanchezoleary.sfluvwallet.dev
-xcrun simctl install booted /tmp/dd/Build/Products/Debug-iphonesimulator/SFLuv.app
+xcrun simctl install booted /tmp/ddr/Build/Products/Release-iphonesimulator/SFLuv.app
 ```
 
-Two things about that command are load-bearing:
+Four things about that command are load-bearing:
 
-- **`CODE_SIGNING_ALLOWED=NO` must not be used.** It produces an unsigned app
-  with no entitlements, iOS then refuses every keychain call, and expo-secure-store
-  fails with `Calling the 'getValueWithKeyAsync' function has failed`. Privy
-  stores its client ID there, so the app hangs forever on "Initializing Privy…"
-  with nothing on screen to say why. `CODE_SIGN_IDENTITY="-"` ad-hoc signs it and
-  the keychain works.
-- **The bundle identifier must be the dev one.** Privy allowlists app
-  identifiers, and a build carrying `org.sfluv.wallet` is refused at login.
+- **`CODE_SIGNING_ALLOWED=NO` must not be used.** It produces an app with no
+  entitlements, iOS then refuses every keychain call, and expo-secure-store fails
+  with `Calling the 'getValueWithKeyAsync' function has failed`. Privy stores its
+  client ID there, so the app hangs forever on "Initializing Privy…" with nothing
+  on screen to say why. `CODE_SIGN_IDENTITY="-"` ad-hoc signs it and the keychain
+  works.
+- **The bundle identifier must be the dev one.** Privy allowlists app identifiers
+  per client, and `org.sanchezoleary.sfluvwallet.dev` is registered where the
+  production identifier may not be.
+- **`EXPO_PUBLIC_*` values are baked in at build time.** Changing `.env` — the
+  backend URL, the Privy app — means rebuilding, not just relaunching.
+- **Do not use `expo run:ios`.** Its device detection fails here ("Unexpected
+  devicectl JSON version output from devicectl"), so it takes the physical-device
+  path and dies on "No code signing certificates are available", even when handed
+  a simulator UDID.
+
+## Point the app at localhost, not the LAN IP
+
+`EXPO_PUBLIC_APP_BACKEND_URL=http://localhost:8080`.
+
+The simulator shares the host's network stack, so localhost reaches the dev
+backend and never goes stale. A LAN IP does: it is DHCP-assigned and moved twice
+in a single session (`.45` → `.25` → `.26`). When it goes stale the symptom is
+not a network error — the app's own startup gate cannot reach `/config`, and it
+sits on "Starting SFLUV / Checking app compatibility…" and then fails with
+**"Unable to Start SFLUV / Aborted"**, which looks like a bundler or dev-client
+problem and is not. That cost most of a session. Use the LAN IP only when testing
+from a physical phone.
 
 ## Flows
 
-| Flow | State | Covers |
-|---|---|---|
-| `00-boot.yaml` | passes | Clears state, re-enters through Expo's launcher and dev menu, waits for the first app screen. Every other flow starts with it. |
-| `01-login-options.yaml` | passes | All three sign-in methods and both policy links are on the signed-out screen. |
-| `02-email-code-request.yaml` | **blocked** | Requesting a login code. Gets as far as submitting the address, then hits the Privy allowlist error. |
+| Flow | Covers |
+|---|---|
+| `00-boot.yaml` | Launch, clear the privacy-policy gate if present, land on Wallet. Every other flow starts with it. |
+| `01-wallet-shell.yaml` | Balance, Send/Receive, populated Recent activity, all five tabs. |
+| `02-tab-navigation.yaml` | Each tab opens its own screen and Wallet is reachable again. |
 
-### Why 02 is blocked
+`01` deliberately asserts on **Recent activity**, which is drawn from indexed
+on-chain transfers. It cannot render if the backend is unreachable, so it is the
+step that distinguishes "the app is running" from "the app is working". A flow
+that only checked for chrome would have passed through the entire outage above.
 
-```
-Native app ID org.sanchezoleary.sfluvwallet.dev has not been set as an
-allowed app identifier in the Privy dashboard.
-```
+## What is missing
 
-`.dev.env` points the whole local stack — backend, web and mobile — at Privy app
-`cmnhyyeda00sv0cjmsrrcpuiv`, and is right to: the backend rejects any token whose
-`aud` differs from its own `PRIVY_APP_ID`, and dev-up.sh warns when the three
-disagree. But that Privy app has no iOS app identifier allowlisted, so the app
-cannot log in at all.
+The signed-in account is a personal one, so the app shows the volunteer layout.
+**Merchant mode, the merchant PIN, device setup and the W-9 tier modal have no
+coverage**, and they are the surfaces the merchant refactor changed. Writing
+those needs a signed-in merchant account — one that owns an approved location —
+against the local stack.
 
-The other Privy app in the repo — `cmlidct3t00pql50du730rr3o`, named in
-`eas.json`, `backend/.env` and `frontend/.env` — does allowlist
-`org.sanchezoleary.sfluvwallet.dev`. Pointing the app at it logs in fine (verified:
-code delivered, session established, app shell rendered). But then every backend
-call 403s, because the running backend trusts the other app. So the app can log
-in or reach the backend, not both.
-
-**The fix is one dashboard change**: add `org.sanchezoleary.sfluvwallet.dev` to
-the allowed app identifiers of Privy app `cmnhyyeda00sv0cjmsrrcpuiv`. Nothing in
-this repo needs to change. Once that is done, 02 should pass unchanged, and
-merchant-mode and W-9 flows become writable.
-
-Entering a code still needs the inbox, so a fully unattended login is a separate
-problem from this one.
+`01` already asserts `Participate` is visible, which is the seam: a merchant
+account is locked to merchant surfaces and should not see that tab, so the same
+flow run as a merchant should fail there. That is the natural place to start.
 
 ## Notes for whoever writes the next flow
 
@@ -88,22 +96,24 @@ problem from this one.
   "element not found". Worth adding testIDs to the merchant surfaces before
   writing flows against them.
 
-- **The social login buttons need a leading `.*`.** iOS composes each button's
-  accessibility label from its children — an unlabelled icon slot, the text, and
-  an empty spacer `View` — so what reaches Maestro is `", Continue with Email"`,
-  with a leading comma. Plain `"Continue with Email"` matches nothing.
+- **Some buttons need a leading `.*`** — e.g. `.*Send`, `.*Receive`. iOS composes
+  a button's accessibility label from its children, so an unlabelled icon and an
+  empty spacer `View` turn "Send" into ", Send". On the signed-out screen the
+  same thing produces ", Continue with Email". A plain `"Send"` matches nothing.
 
-- **Do not assert on `"SFLUV"`.** Expo's developer menu is itself titled "SFLuv"
-  and Maestro matches case-insensitively as a substring, so that assertion passes
-  while the app is still hidden behind the menu. `00-boot` originally did this and
-  reported green against the wrong screen.
+- **Do not assert on `"SFLUV"` to mean "the app loaded"** unless you also know the
+  app is in the foreground. Expo's developer menu is itself titled "SFLuv" and
+  Maestro matches case-insensitively as a substring, so on a dev build that
+  assertion passes while the app is hidden behind the menu. `00-boot` gets away
+  with it only because a Release build has no such menu; it then waits for
+  "SFLUV available", which is app content.
 
-- **Assert that typed text came back.** `inputText` after a missed tap silently
-  types into nothing; the only symptom is a validation error further down. `02`
-  asserts the address is visible before submitting, which is what caught it.
+- **Assert that typed text came back.** `inputText` after a missed tap types into
+  nothing and the step still reports COMPLETED; the only symptom is a validation
+  error further down.
 
-- **`clearState` is doing real work in `00-boot`.** Maestro does not reset
-  between flows, and the email field keeps its value across in-app navigation, so
-  repeat runs append into `"...oleary.comsanchezsanchez@oleary.com"`. `eraseText`
-  is not a reliable substitute — it deletes from the cursor, which is not always
-  at the end.
+- **Maestro does not reset between flows.** Screens and form state persist. A
+  relaunch clears React state, which is enough; `clearState` is not needed and on
+  a dev build actively breaks things. `eraseText` is a poor way to clear a field —
+  it deletes from the cursor, and tapping a field puts the cursor at the START, so
+  it does nothing and new text lands in front of the old.
