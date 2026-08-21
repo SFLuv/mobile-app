@@ -160,6 +160,11 @@ export function W9TierModal({
             onPress={onStartForm}
             disabled={busy}
             accessibilityRole="button"
+            // Role alone is not enough: the button wraps an unlabelled icon and
+            // the text, and iOS builds the name by concatenating them, so this
+            // announces as ", Fill out my W-9" — leading comma — without an
+            // explicit label.
+            accessibilityLabel={busy ? "Opening your form" : "Fill out my W-9"}
           >
             <Ionicons name="open-outline" size={16} color={palette.white} />
             <Text style={styles.primaryButtonText}>{busy ? "Opening your form…" : "Fill out my W-9"}</Text>
@@ -172,7 +177,12 @@ export function W9TierModal({
           */}
           <Text style={styles.footnote}>Opens the secure tax form outside the app.</Text>
 
-          <Pressable style={styles.secondaryButton} onPress={onDismiss} accessibilityRole="button">
+          <Pressable
+            style={styles.secondaryButton}
+            onPress={onDismiss}
+            accessibilityRole="button"
+            accessibilityLabel={presentation.dismiss}
+          >
             <Text style={styles.secondaryButtonText}>{presentation.dismiss}</Text>
           </Pressable>
         </View>
