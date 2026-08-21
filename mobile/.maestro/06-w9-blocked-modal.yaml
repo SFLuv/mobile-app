@@ -35,19 +35,22 @@ tags:
 # A different dismiss word from tiers 1-3 ("Later"), because this is not a
 # "remind me" — it buys quiet, not silence.
 - assertVisible: "Not now"
+- tapOn: "Not now"
+- extendedWaitUntil:
+    notVisible: "We can't send your rewards yet"
+    timeout: 15000
 
-# NOT asserted here, because it currently fails: dismissing this modal and then
-# returning to the app should bring it back. App.tsx visibleW9Tier checks the
-# session dismissal BEFORE the blocked exception —
+# The point of this tier: dismissing must not make it go away for good. Leave
+# the app the way anyone would, come back, and it has to be here — money is
+# still held and no form has been filed, so nothing has changed.
 #
-#   if (!tier || tier === w9TierDismissed) return null;   // session, checked first
-#   if (tier === "blocked") return tier;                   // never reached once dismissed
-#
-# and w9TierDismissed is useState, so it survives background/foreground and only
-# clears on a cold start. Verified on device: dismiss, Home, reopen — the modal
-# does not return, leaving only the inline escrow card. The comment above that
-# code says it should "come back on the next foreground".
-#
-# The flow stops before dismissing so the suite stays honest and repeatable
-# rather than carrying a known failure. Add the re-arm assertion once the
-# dismissal is cleared on foreground.
+# This failed until GetOutstandingW9Tier stopped filtering acknowledged rows for
+# this tier. Acknowledging retired the tier server-side, so the status response
+# carried no tier at all and every client-side re-arm path had nothing to act on.
+- pressKey: Home
+- waitForAnimationToEnd:
+    timeout: 4000
+- openLink: "sfluv://"
+- extendedWaitUntil:
+    visible: "We can't send your rewards yet"
+    timeout: 30000

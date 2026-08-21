@@ -87,12 +87,30 @@ mutually exclusive kinds of account, so it is run by tag, not all at once.
 | `01-wallet-shell.yaml` | `volunteer` | a plain account |
 | `02-tab-navigation.yaml` | `volunteer` | a plain account |
 | `03-merchant-pin-setup.yaml` | `merchant-setup` | a merchant account on a device that has NOT been set up yet |
-| `04-merchant-mode.yaml` | `merchant` | a merchant account on a device that HAS been set up |
+| `04-merchant-mode.yaml` | `merchant` | a merchant account with TWO approved locations, device already set up |
+| `05-w9-tier-modal.yaml` | `w9` | a plain account seeded at `notice_400` |
+| `06-w9-blocked-modal.yaml` | `w9` | a plain account seeded at `blocked` |
 
 ```bash
 maestro test .maestro/ --include-tags volunteer
 maestro test .maestro/ --include-tags merchant
 ```
+
+The two `w9` flows want DIFFERENT seeds and cannot both pass in one pass of the
+tag — an account is at one tier at a time. Run them individually, re-seeding
+between:
+
+```bash
+./testing/scripts/seed-w9-tier.sh 0x<address> notice_400
+maestro test .maestro/05-w9-tier-modal.yaml
+
+./testing/scripts/seed-w9-tier.sh 0x<address> blocked
+maestro test .maestro/06-w9-blocked-modal.yaml
+```
+
+05 also needs re-seeding between its own runs: dismissing acknowledges the tier
+and tiers 1-3 are meant to stay answered for the year. 06 does not — that tier
+is re-armed by design, which is what it tests.
 
 Switch the signed-in account between the two with the backend repo's seed
 script, passing the address from Wallet -> Receive:
