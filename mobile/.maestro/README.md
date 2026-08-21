@@ -64,13 +64,37 @@ sits on "Starting SFLUV / Checking app compatibility…" and then fails with
 problem and is not. That cost most of a session. Use the LAN IP only when testing
 from a physical phone.
 
-## Flows
+## Flows, and the account state each needs
 
-| Flow | Covers |
-|---|---|
-| `00-boot.yaml` | Launch, clear the privacy-policy gate if present, land on Wallet. Every other flow starts with it. |
-| `01-wallet-shell.yaml` | Balance, Send/Receive, populated Recent activity, all five tabs. |
-| `02-tab-navigation.yaml` | Each tab opens its own screen and Wallet is reachable again. |
+**`maestro test .maestro/` will not pass as a set.** The suite covers two
+mutually exclusive kinds of account, so it is run by tag, not all at once.
+
+| Flow | Tag | Needs |
+|---|---|---|
+| `00-boot.yaml` | `volunteer` | a plain account |
+| `01-wallet-shell.yaml` | `volunteer` | a plain account |
+| `02-tab-navigation.yaml` | `volunteer` | a plain account |
+| `03-merchant-pin-setup.yaml` | `merchant-setup` | a merchant account on a device that has NOT been set up yet |
+| `04-merchant-mode.yaml` | `merchant` | a merchant account on a device that HAS been set up |
+
+```bash
+maestro test .maestro/ --include-tags volunteer
+maestro test .maestro/ --include-tags merchant
+```
+
+Switch the signed-in account between the two with the backend repo's seed
+script, passing the address from Wallet -> Receive:
+
+```bash
+./testing/scripts/seed-merchant.sh 0x<address>            # make it a merchant
+./testing/scripts/seed-merchant.sh --revert 0x<address>   # put it back
+```
+
+`03` is the odd one out: it only passes on a device that has never been set up,
+because once a PIN is saved and a shop chosen the app goes straight to the till
+and never shows Merchant Setup again. That is correct behaviour, so `03` is a
+first-run test rather than a repeatable one. `04` is the repeatable merchant
+check and is green on consecutive runs.
 
 `01` deliberately asserts on **Recent activity**, which is drawn from indexed
 on-chain transfers. It cannot render if the backend is unreachable, so it is the
@@ -79,15 +103,12 @@ that only checked for chrome would have passed through the entire outage above.
 
 ## What is missing
 
-The signed-in account is a personal one, so the app shows the volunteer layout.
-**Merchant mode, the merchant PIN, device setup and the W-9 tier modal have no
-coverage**, and they are the surfaces the merchant refactor changed. Writing
-those needs a signed-in merchant account — one that owns an approved location —
-against the local stack.
+**The W-9 tier modal has no coverage.** It needs an account pushed past the
+notice threshold, which means real payouts on the local chain rather than a row
+edit.
 
-`01` already asserts `Participate` is visible, which is the seam: a merchant
-account is locked to merchant surfaces and should not see that tab, so the same
-flow run as a merchant should fail there. That is the natural place to start.
+Merchant mode is covered now, but only the till's resting state. Taking an
+actual payment — the thing the till exists for — is not tested.
 
 ## Notes for whoever writes the next flow
 
@@ -96,10 +117,18 @@ flow run as a merchant should fail there. That is the natural place to start.
   "element not found". Worth adding testIDs to the merchant surfaces before
   writing flows against them.
 
-- **Some buttons need a leading `.*`** — e.g. `.*Send`, `.*Receive`. iOS composes
-  a button's accessibility label from its children, so an unlabelled icon and an
-  empty spacer `View` turn "Send" into ", Send". On the signed-out screen the
-  same thing produces ", Continue with Email". A plain `"Send"` matches nothing.
+- **Composite views arrive as ONE accessibility element, so most selectors have
+  to be regexes.** iOS concatenates a container's children into a single label,
+  and this app leans on containers heavily. It shows up at three scales:
+  a button (`", Send"`, `", Continue with Email"` — note the leading comma from
+  an unlabelled icon), a form row (`"Confirm PIN, Enter it again, "`), and an
+  entire modal (the merchant lock sheet is one string containing its title, body
+  and Sign out link). A plain `"Confirm PIN"` matches nothing.
+
+  This is worth fixing at the source rather than working around forever: it also
+  means VoiceOver reads a whole card as one utterance, and that nothing inside is
+  individually focusable. The merchant-mode header lock is worse — a bare icon
+  with no label at all, and the only control on that screen.
 
 - **Do not assert on `"SFLUV"` to mean "the app loaded"** unless you also know the
   app is in the foreground. Expo's developer menu is itself titled "SFLuv" and

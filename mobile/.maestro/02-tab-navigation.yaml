@@ -4,6 +4,8 @@
 # tabs work" are different claims, and only the second one would catch a
 # navigation regression.
 appId: org.sanchezoleary.sfluvwallet.dev
+tags:
+  - volunteer
 ---
 - runFlow: 00-boot.yaml
 - tapOn: "Activity"

@@ -8,6 +8,8 @@
 # had gone stale. A flow that only checked for chrome would have passed
 # throughout that.
 appId: org.sanchezoleary.sfluvwallet.dev
+tags:
+  - volunteer
 ---
 - runFlow: 00-boot.yaml
 - assertVisible: "SFLUV available"

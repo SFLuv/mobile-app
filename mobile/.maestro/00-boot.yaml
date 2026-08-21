@@ -9,6 +9,8 @@
 # accepted the current policy, so it is handled conditionally rather than
 # asserted.
 appId: org.sanchezoleary.sfluvwallet.dev
+tags:
+  - volunteer
 ---
 - launchApp
 - extendedWaitUntil:

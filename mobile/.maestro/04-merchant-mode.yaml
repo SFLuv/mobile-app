@@ -1,0 +1,58 @@
+# Merchant mode steady state, and what the header lock actually offers.
+#
+# This is where a set-up till lives: today's takings for ONE shop, and no way
+# into the volunteer app.
+#
+# Requires a merchant account that has already completed 03 on this device.
+appId: org.sanchezoleary.sfluvwallet.dev
+tags:
+  - merchant
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Merchant Mode"
+    timeout: 90000
+
+# A till shows one shop's day, and nothing of the volunteer app.
+- assertVisible: "TODAY'S PAYMENTS"
+- assertVisible: "Maestro Test Shop"
+- assertVisible: "Tips today"
+- assertNotVisible: "Participate"
+- assertNotVisible: "SFLUV available"
+- assertNotVisible: ".*Send"
+
+# The header lock, tapped by position because it is an icon with no
+# accessibilityLabel — it reaches Maestro as a bare glyph, so there is no text
+# to select on. Worth labelling: it is the only control on this screen, and a
+# VoiceOver user currently has no idea what it is.
+- tapOn:
+    point: "90%,11%"
+# The whole sheet arrives as ONE accessibility element — title, body, the
+# "stays a till" panel and the Sign out link are concatenated into a single
+# label. Nothing inside it is individually addressable, so every assertion here
+# is a regex against that one string. It also means VoiceOver reads the entire
+# card as one utterance, which is worth fixing at the source.
+- extendedWaitUntil:
+    visible: ".*This device is locked to receiving SFLuv for Maestro Test Shop.*"
+    timeout: 20000
+- assertVisible: ".*This device stays a till.*"
+- assertVisible: ".*Merchant accounts do not have a personal wallet to switch back to.*"
+
+# What this sheet does NOT offer is worth pinning down, because the PIN screen
+# says the PIN "is asked for again whenever this device moves to another
+# location" — but there is no control here that moves it. Signing out is the
+# only way off this shop, and that goes back through the whole setup. If a
+# "change location" affordance is added later, this assertion should fail and
+# be replaced by a test of the PIN gate behind it.
+- assertNotVisible: ".*Change location.*"
+- assertNotVisible: "Which location is this device?"
+- assertVisible: ".*Sign out.*"
+
+# Close the sheet rather than signing out, so the flow leaves the device set up
+# and can run again.
+- tapOn:
+    point: "85%,38%"
+- extendedWaitUntil:
+    notVisible: ".*This device stays a till.*"
+    timeout: 20000
+- assertVisible: "TODAY'S PAYMENTS"
