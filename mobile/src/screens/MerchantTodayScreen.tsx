@@ -92,7 +92,18 @@ export function MerchantTodayScreen({
             // Sits where the wallet chooser used to be. Opens the counter list;
             // actually moving to a different one asks for the merchant PIN,
             // because the shop decides where the money lands.
-            <Pressable style={styles.locationSwitch} onPress={onSwitchLocation}>
+            //
+            // Labelled explicitly because the chip wraps the name and a swap
+            // icon: without it iOS announces "Maestro Test Shop, " — the name
+            // with a trailing comma where the icon is, and no clue it does
+            // anything.
+            <Pressable
+              style={styles.locationSwitch}
+              accessibilityRole="button"
+              accessibilityLabel={locationName}
+              accessibilityHint="Move this device to another location"
+              onPress={onSwitchLocation}
+            >
               <Text style={styles.locationName}>{locationName}</Text>
               <Ionicons name="swap-horizontal" size={14} color={palette.textMuted} />
             </Pressable>

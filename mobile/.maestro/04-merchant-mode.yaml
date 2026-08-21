@@ -1,9 +1,19 @@
-# Merchant mode steady state, and what the header lock actually offers.
+# Merchant mode steady state, and the PIN that guards moving a till.
 #
-# This is where a set-up till lives: today's takings for ONE shop, and no way
-# into the volunteer app.
+# Requires a merchant account with TWO approved locations that has completed 03
+# on this device. The backend repo's seed script does that:
+#   ./testing/scripts/seed-merchant.sh --second-shop 0x<address>
+# With one shop there is nowhere to switch to and the control is correctly
+# hidden — which also means this flow cannot run.
 #
-# Requires a merchant account that has already completed 03 on this device.
+# The flow normalises where the till starts before testing anything, because
+# picking the shop a device is already on is a deliberate no-op ("a confirmation,
+# not a change") and raises no PIN. Without that step this passes or fails
+# depending on where the previous run left the device.
+#
+# Chooser rows are selected by STREET, not name. The till's own shop chip is
+# labelled with the shop name, so a name selector matches both it and the row
+# behind it, and Maestro picks one without saying which.
 appId: org.sanchezoleary.sfluvwallet.dev
 tags:
   - merchant
@@ -15,44 +25,94 @@ tags:
 
 # A till shows one shop's day, and nothing of the volunteer app.
 - assertVisible: "TODAY'S PAYMENTS"
-- assertVisible: "Maestro Test Shop"
 - assertVisible: "Tips today"
 - assertNotVisible: "Participate"
 - assertNotVisible: "SFLUV available"
-- assertNotVisible: ".*Send"
+- assertNotVisible: "Send"
 
-# The header lock, tapped by position because it is an icon with no
-# accessibilityLabel — it reaches Maestro as a bare glyph, so there is no text
-# to select on. Worth labelling: it is the only control on this screen, and a
-# VoiceOver user currently has no idea what it is.
-- tapOn:
-    point: "90%,11%"
-# The whole sheet arrives as ONE accessibility element — title, body, the
-# "stays a till" panel and the Sign out link are concatenated into a single
-# label. Nothing inside it is individually addressable, so every assertion here
-# is a regex against that one string. It also means VoiceOver reads the entire
-# card as one utterance, which is worth fixing at the source.
+# The lock sheet. Plain-text selectors work because its contents are
+# individually addressable; they were one concatenated label until the backdrop
+# and card Pressables were marked accessible={false}. If this ever needs ".*"
+# wrappers again, that is the regression.
+- tapOn: "Merchant mode options"
 - extendedWaitUntil:
-    visible: ".*This device is locked to receiving SFLuv for Maestro Test Shop.*"
+    visible: "This device is a till"
     timeout: 20000
-- assertVisible: ".*This device stays a till.*"
-- assertVisible: ".*Merchant accounts do not have a personal wallet to switch back to.*"
+- assertVisible: "Merchant accounts do not have a personal wallet to switch back to, but you can move this device to another of your locations."
+- assertVisible: "Sign out"
 
-# What this sheet does NOT offer is worth pinning down, because the PIN screen
-# says the PIN "is asked for again whenever this device moves to another
-# location" — but there is no control here that moves it. Signing out is the
-# only way off this shop, and that goes back through the whole setup. If a
-# "change location" affordance is added later, this assertion should fail and
-# be replaced by a test of the PIN gate behind it.
-- assertNotVisible: ".*Change location.*"
-- assertNotVisible: "Which location is this device?"
-- assertVisible: ".*Sign out.*"
-
-# Close the sheet rather than signing out, so the flow leaves the device set up
-# and can run again.
-- tapOn:
-    point: "85%,38%"
+# --- normalise: end up on the second shop whichever one we started on ---
+- tapOn: "Switch location"
 - extendedWaitUntil:
-    notVisible: ".*This device stays a till.*"
+    visible: "Which location?"
     timeout: 20000
+- tapOn: ".*2 Test St.*"
+- runFlow:
+    when:
+      visible: "Merchant PIN"
+    commands:
+      - tapOn: "1"
+      - tapOn: "2"
+      - tapOn: "3"
+      - tapOn: "4"
+      - tapOn: "5"
+      - tapOn: "6"
+      - swipe:
+          start: "22%,74%"
+          end: "90%,74%"
+          duration: 700
+- extendedWaitUntil:
+    visible: "TODAY'S PAYMENTS"
+    timeout: 30000
+
+# --- the actual test: moving to a DIFFERENT shop must demand the PIN ---
+- tapOn: "Merchant mode options"
+- tapOn: "Switch location"
+- extendedWaitUntil:
+    visible: "Which location?"
+    timeout: 20000
+- tapOn: ".*1 Test St.*"
+- extendedWaitUntil:
+    visible: "Merchant PIN"
+    timeout: 20000
+- assertVisible: "Payments taken on this device will go to the new location from now on."
+- tapOn: "1"
+- tapOn: "2"
+- tapOn: "3"
+- tapOn: "4"
+- tapOn: "5"
+- tapOn: "6"
+# A slider, not a button: tapping does nothing, and swiping from the element's
+# centre does not travel far enough. The drag starts on the knob.
+- swipe:
+    start: "22%,74%"
+    end: "90%,74%"
+    duration: 700
+- extendedWaitUntil:
+    visible: "Maestro Test Shop"
+    timeout: 30000
 - assertVisible: "TODAY'S PAYMENTS"
+
+# --- put it back, so the next run starts where this one did ---
+- tapOn: "Merchant mode options"
+- tapOn: "Switch location"
+- extendedWaitUntil:
+    visible: "Which location?"
+    timeout: 20000
+- tapOn: ".*2 Test St.*"
+- extendedWaitUntil:
+    visible: "Merchant PIN"
+    timeout: 20000
+- tapOn: "1"
+- tapOn: "2"
+- tapOn: "3"
+- tapOn: "4"
+- tapOn: "5"
+- tapOn: "6"
+- swipe:
+    start: "22%,74%"
+    end: "90%,74%"
+    duration: 700
+- extendedWaitUntil:
+    visible: "Maestro Second Shop"
+    timeout: 30000

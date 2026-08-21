@@ -13,8 +13,12 @@ tags:
 ---
 - runFlow: 00-boot.yaml
 - assertVisible: "SFLUV available"
-- assertVisible: ".*Send"
-- assertVisible: ".*Receive"
+# Plain text, not ".*Send": these buttons used to reach Maestro as ", Send" —
+# iOS concatenating an unlabelled icon with the text — and now carry proper
+# accessibilityLabels. If a ".*" wrapper becomes necessary again, that label has
+# been lost.
+- assertVisible: "Send"
+- assertVisible: "Receive"
 - assertVisible: "Recent activity"
 # The tab bar, which is also where merchant mode shows itself: a merchant
 # account is locked to merchant surfaces and should NOT see Participate.

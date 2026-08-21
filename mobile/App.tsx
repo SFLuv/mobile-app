@@ -4364,6 +4364,13 @@ function WalletAppShellContent({
             {!merchantDeviceEnrollable ? (
               <Pressable
                 style={[styles.iconButton, tab === "settings" ? styles.iconButtonActive : undefined]}
+                // Icon-only, and in merchant mode it is the ONLY control on the
+                // screen — without a label it reaches VoiceOver as a bare glyph.
+                accessibilityRole="button"
+                accessibilityLabel={merchantModeActive ? "Merchant mode options" : "Settings"}
+                accessibilityHint={
+                  merchantModeActive ? "Move this device to another location, or sign out" : undefined
+                }
                 onPress={() => {
                   if (merchantModeActive) {
                     setMerchantModeExitOpen(true);
@@ -4712,8 +4719,8 @@ function WalletAppShellContent({
         animationType="none"
         onRequestClose={() => setMerchantModeExitOpen(false)}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setMerchantModeExitOpen(false)}>
-          <Pressable style={styles.moreMenuCard} onPress={() => {}}>
+        <Pressable style={styles.modalOverlay} onPress={() => setMerchantModeExitOpen(false)} accessible={false}>
+          <Pressable style={styles.moreMenuCard} onPress={() => {}} accessible={false}>
             <View style={styles.moreMenuHeader}>
               <View style={styles.moreMenuHeaderCopy}>
                 <Text style={styles.moreMenuTitle}>Merchant Mode</Text>
@@ -4730,11 +4737,20 @@ function WalletAppShellContent({
               // Merchant accounts have nowhere to exit to. The sheet still opens,
               // because staff press the lock expecting something, but the only
               // thing behind it is moving the device to another counter.
+              //
+              // The copy has to say that plainly. It previously read "This device
+              // stays a till" above a Switch location button, which contradicts
+              // itself, and for an owner with a single shop that was the entire
+              // sheet — so the honest reading was that a till can never be moved.
+              // Both halves are now conditional on there being somewhere to go.
               <View style={styles.merchantExitCard}>
-                <Text style={styles.merchantExitTitle}>This device stays a till</Text>
+                <Text style={styles.merchantExitTitle}>
+                  {merchantModeLocations.length > 1 ? "This device is a till" : "This device stays a till"}
+                </Text>
                 <Text style={styles.merchantExitBody}>
-                  Merchant accounts do not have a personal wallet to switch back to. Payments taken here go to this
-                  location.
+                  {merchantModeLocations.length > 1
+                    ? "Merchant accounts do not have a personal wallet to switch back to, but you can move this device to another of your locations."
+                    : "Merchant accounts do not have a personal wallet to switch back to. Payments taken here go to this location."}
                 </Text>
                 {merchantModeLocations.length > 1 ? (
                   <Pressable
@@ -4824,8 +4840,8 @@ function WalletAppShellContent({
         animationType="none"
         onRequestClose={() => setMerchantLocationChooserOpen(false)}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setMerchantLocationChooserOpen(false)}>
-          <Pressable style={styles.walletChooserCard} onPress={() => {}}>
+        <Pressable style={styles.modalOverlay} onPress={() => setMerchantLocationChooserOpen(false)} accessible={false}>
+          <Pressable style={styles.walletChooserCard} onPress={() => {}} accessible={false}>
             <View style={styles.walletChooserHeader}>
               <View style={styles.walletChooserHeaderCopy}>
                 <Text style={styles.walletChooserTitle}>Which location?</Text>
@@ -4884,8 +4900,8 @@ function WalletAppShellContent({
         animationType="none"
         onRequestClose={closeMerchantSwitchPrompt}
       >
-        <Pressable style={styles.modalOverlay} onPress={closeMerchantSwitchPrompt}>
-          <Pressable style={styles.moreMenuCard} onPress={() => {}}>
+        <Pressable style={styles.modalOverlay} onPress={closeMerchantSwitchPrompt} accessible={false}>
+          <Pressable style={styles.moreMenuCard} onPress={() => {}} accessible={false}>
             <View style={styles.moreMenuHeader}>
               <View style={styles.moreMenuHeaderCopy}>
                 <Text style={styles.moreMenuTitle}>Merchant PIN</Text>
@@ -4948,8 +4964,8 @@ function WalletAppShellContent({
         animationType="fade"
         onRequestClose={() => setMerchantForcedExitNotice(null)}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setMerchantForcedExitNotice(null)}>
-          <Pressable style={styles.walletChooserCard} onPress={() => {}}>
+        <Pressable style={styles.modalOverlay} onPress={() => setMerchantForcedExitNotice(null)} accessible={false}>
+          <Pressable style={styles.walletChooserCard} onPress={() => {}} accessible={false}>
             <View style={styles.walletChooserHeader}>
               <View style={styles.walletChooserHeaderCopy}>
                 <Text style={styles.walletChooserTitle}>Merchant mode ended</Text>
@@ -4973,8 +4989,8 @@ function WalletAppShellContent({
         animationType="none"
         onRequestClose={() => setShowWalletChooser(false)}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setShowWalletChooser(false)}>
-          <Pressable style={styles.walletChooserCard} onPress={() => {}}>
+        <Pressable style={styles.modalOverlay} onPress={() => setShowWalletChooser(false)} accessible={false}>
+          <Pressable style={styles.walletChooserCard} onPress={() => {}} accessible={false}>
             <View style={styles.walletChooserHeader}>
               <View style={styles.walletChooserHeaderCopy}>
                 <Text style={styles.walletChooserTitle}>Choose Wallet</Text>
@@ -5031,8 +5047,8 @@ function WalletAppShellContent({
         animationType="none"
         onRequestClose={() => setShowParticipateMenu(false)}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setShowParticipateMenu(false)}>
-          <Pressable style={styles.moreMenuCard} onPress={() => {}}>
+        <Pressable style={styles.modalOverlay} onPress={() => setShowParticipateMenu(false)} accessible={false}>
+          <Pressable style={styles.moreMenuCard} onPress={() => {}} accessible={false}>
             <View style={styles.moreMenuHeader}>
               <View style={styles.moreMenuHeaderCopy}>
                 <Text style={styles.moreMenuTitle}>Participate</Text>
@@ -5085,8 +5101,8 @@ function WalletAppShellContent({
         animationType="fade"
         onRequestClose={() => setNotificationsOpen(false)}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setNotificationsOpen(false)}>
-          <Pressable style={styles.moreMenuCard} onPress={() => {}}>
+        <Pressable style={styles.modalOverlay} onPress={() => setNotificationsOpen(false)} accessible={false}>
+          <Pressable style={styles.moreMenuCard} onPress={() => {}} accessible={false}>
             <View style={styles.moreMenuHeader}>
               <View style={styles.moreMenuHeaderCopy}>
                 <Text style={styles.moreMenuTitle}>Notifications</Text>
@@ -6365,6 +6381,8 @@ function PrivyWalletApp({
                 ) : (
                   <>
                     <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Continue with Google"
                       style={[
                         styles.loginOptionButton,
                         styles.loginOptionButtonLight,
@@ -6386,6 +6404,8 @@ function PrivyWalletApp({
                       </View>
                     </Pressable>
                     <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Continue with Email"
                       style={[
                         styles.loginOptionButton,
                         styles.loginOptionButtonOutline,
@@ -6407,6 +6427,8 @@ function PrivyWalletApp({
                       </View>
                     </Pressable>
                     <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Continue with Apple"
                       style={[
                         styles.loginOptionButton,
                         styles.loginOptionButtonDark,

@@ -177,7 +177,16 @@ export function MerchantDeviceSetupScreen({
               : "6 digits, shared by everyone who sets up a device for this business. Keep it away from the counter."}
           </Text>
 
-          <Pressable onPress={() => setField("pin")}>
+          {/* One accessibility element on purpose — it is a single control that
+              focuses this field — but it needs its own label, or iOS builds one
+              by concatenating the children into "New PIN, ••••••, " and the
+              digits are read out as part of the name. */}
+          <Pressable
+            onPress={() => setField("pin")}
+            accessibilityRole="button"
+            accessibilityLabel={passcodeSet ? "PIN" : "New PIN"}
+            accessibilityState={{ selected: field === "pin" }}
+          >
             <Text style={styles.fieldLabel}>{passcodeSet ? "PIN" : "New PIN"}</Text>
             <View style={field === "pin" ? styles.fieldActive : undefined}>
               <MerchantPinDisplay
@@ -189,7 +198,12 @@ export function MerchantDeviceSetupScreen({
           </Pressable>
 
           {!passcodeSet ? (
-            <Pressable onPress={() => setField("confirm")}>
+            <Pressable
+              onPress={() => setField("confirm")}
+              accessibilityRole="button"
+              accessibilityLabel="Confirm PIN"
+              accessibilityState={{ selected: field === "confirm" }}
+            >
               <Text style={styles.fieldLabel}>Confirm PIN</Text>
               <View style={field === "confirm" ? styles.fieldActive : undefined}>
                 <MerchantPinDisplay

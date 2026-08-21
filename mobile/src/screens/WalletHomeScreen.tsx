@@ -173,12 +173,22 @@ export function WalletHomeScreen({
 
           <View style={styles.heroActionRow}>
             {!merchantMode ? (
-              <Pressable style={styles.heroPrimaryAction} onPress={onOpenSend}>
+              <Pressable
+                style={styles.heroPrimaryAction}
+                accessibilityRole="button"
+                accessibilityLabel="Send"
+                onPress={onOpenSend}
+              >
                 <Ionicons name="arrow-up" size={16} color={palette.white} />
                 <Text style={styles.heroPrimaryActionText}>Send</Text>
               </Pressable>
             ) : null}
-            <Pressable style={[styles.heroSecondaryAction, merchantMode ? styles.heroFullWidthAction : undefined]} onPress={onOpenReceive}>
+            <Pressable
+              style={[styles.heroSecondaryAction, merchantMode ? styles.heroFullWidthAction : undefined]}
+              accessibilityRole="button"
+              accessibilityLabel="Receive"
+              onPress={onOpenReceive}
+            >
               <Ionicons name="arrow-down" size={16} color={palette.primaryStrong} />
               <Text style={styles.heroSecondaryActionText}>Receive</Text>
             </Pressable>
