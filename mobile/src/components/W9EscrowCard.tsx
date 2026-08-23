@@ -36,15 +36,14 @@ export function W9EscrowCard({ status, busy, onStart }: Props) {
 
       {hasEscrow ? (
         <>
-          <Text style={styles.amount}>{status.escrowedSfluv} SFLUV</Text>
           {/*
-            No countdown any more. Escrow used to expire into an admin queue, so
-            a deadline was owed to people; it cannot expire now, and inventing
+            The amount, and nothing qualifying it. No countdown, because escrow
+            used to expire into an admin queue and cannot now — inventing
             urgency that no longer exists would be a lie told for conversion.
+            No count of rewards either: how the total is divided up is our
+            bookkeeping, not something the person waiting on it has to parse.
           */}
-          <Text style={styles.body}>
-            waiting across {status.escrowedCount} reward{status.escrowedCount === 1 ? "" : "s"}
-          </Text>
+          <Text style={styles.amount}>{status.escrowedSfluv} SFLUV</Text>
         </>
       ) : null}
 

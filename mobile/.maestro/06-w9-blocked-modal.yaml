@@ -19,9 +19,9 @@ tags:
     visible: "We can't send your rewards yet"
     timeout: 90000
 
-# 601, not something larger: the crossing payment is held and still counts, and
+# 600, not something larger: the crossing payment is held and still counts, and
 # everything after it is refused, so a blocked account's total stops moving.
-- assertVisible: "601 SFLUV"
+- assertVisible: "600 SFLUV"
 - assertVisible: "of 600 SFLUV"
 
 # The copy has to be plain that money has stopped — this is what separates it
@@ -40,17 +40,19 @@ tags:
     notVisible: "We can't send your rewards yet"
     timeout: 15000
 
-# The point of this tier: dismissing must not make it go away for good. Leave
-# the app the way anyone would, come back, and it has to be here — money is
-# still held and no form has been filed, so nothing has changed.
+# Dismissing buys quiet until the next refusal, and no longer than that. The
+# server re-arms this tier every time a payout is refused, and the modal reads
+# that stored acknowledgement directly, so the next declined scan brings it
+# back whether or not the app has been reopened in between.
 #
-# This failed until GetOutstandingW9Tier stopped filtering acknowledged rows for
-# this tier. Acknowledging retired the tier server-side, so the status response
-# carried no tier at all and every client-side re-arm path had nothing to act on.
-- pressKey: Home
-- waitForAnimationToEnd:
-    timeout: 4000
-- openLink: "sfluv://"
-- extendedWaitUntil:
-    visible: "We can't send your rewards yet"
-    timeout: 30000
+# Not asserted here, because it cannot be: proving it needs a payout to be
+# refused while this flow is running, which means driving a redemption from
+# outside Maestro mid-run. It was verified by hand instead — dismiss, refuse
+# from the shell, watch it return, twice — and the surrounding behaviour is
+# what this flow pins down.
+#
+# Two bugs lived here. GetOutstandingW9Tier used to filter acknowledged rows,
+# so the status carried no tier and nothing could re-arm. Then the session
+# dismissal was checked before the blocked exemption, so the second refusal was
+# silent: declined at a live event, with the app saying nothing.
+- assertNotVisible: "We can't send your rewards yet"

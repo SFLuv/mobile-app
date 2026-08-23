@@ -2324,8 +2324,18 @@ function WalletAppShellContent({
     if (!tier) return null;
     // Asked for, so shown — regardless of what has been acknowledged before.
     if (w9TierRequested) return tier;
+    // Blocked is decided by the stored acknowledgement alone, and checked
+    // before the session flag rather than after it.
+    //
+    // The server re-arms this tier on every refused payout, so an
+    // unacknowledged blocked tier means a refusal has happened since the last
+    // time somebody put the modal away. Letting the session flag win meant the
+    // second refusal was silent: the reward was declined at a live event and
+    // the app said nothing, which is the one outcome that costs a person money
+    // without telling them. A refusal nobody sees is worse than a repeated
+    // modal, however often it repeats.
+    if (tier === "blocked") return w9Status.tierAcknowledged ? null : tier;
     if (tier === w9TierDismissed) return null;
-    if (tier === "blocked") return tier;
     return w9Status.tierAcknowledged ? null : tier;
   })();
 
@@ -2337,6 +2347,11 @@ function WalletAppShellContent({
     setW9TierRequested(false);
     if (!tier) return;
     setW9TierDismissed(tier);
+    // Recorded locally as well as sent, because blocked now reads the stored
+    // acknowledgement directly: without this the next poll lands before the
+    // POST does, still says unacknowledged, and reopens the modal that was
+    // just closed.
+    setW9Status((current) => (current ? { ...current, tierAcknowledged: true } : current));
     void backendClient?.acknowledgeW9Tier(tier).catch(() => undefined);
     // Putting the modal away is exactly when the badge has to start carrying
     // it, so the feed is re-read now rather than on its own timer a minute
@@ -5329,7 +5344,7 @@ function WalletAppShellContent({
                         <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
                       ) : null}
                     </Pressable>
-                    {/* Drawn over the bubble's top-left corner rather than
+                    {/* Drawn over the bubble's top-right corner rather than
                         inside it. A Pressable that sets its own label merges
                         its children into one accessibility element, so nesting
                         this put the dismiss out of reach of a screen reader
@@ -7192,7 +7207,7 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   notificationDismiss: {
     position: "absolute",
     top: 6,
-    left: 6,
+    right: 6,
     width: 22,
     height: 22,
     borderRadius: 11,
@@ -7200,10 +7215,12 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     justifyContent: "center",
     zIndex: 1,
   },
-  // Clears the corner the dismiss occupies. Without it the first line of a
-  // title sits under the control and reads as a typo.
+  // Clears the corner the dismiss occupies. Without it a title's last line
+  // runs under the control, and on a one-line entry the chevron sits under it
+  // too — two tap targets in the same few pixels, one of which discards what
+  // the other opens.
   notificationCopyInset: {
-    paddingLeft: 22,
+    paddingRight: 22,
   },
   notificationClearAll: {
     alignSelf: "center",
