@@ -6,6 +6,9 @@
 # server's `action`, so a destination can be added — including an external
 # link — without shipping a new build.
 #
+# The badge counts what is outstanding rather than what is unread, so opening
+# the panel does not empty it. Reading a notification is not dealing with it.
+#
 # The W-9 entry is the case worth pinning down. It is the only route back to
 # the tier modal once that modal has been dismissed, and the modal is the only
 # screen carrying the link to the form. So an explicit tap has to reopen it
@@ -19,7 +22,9 @@ appId: org.sanchezoleary.sfluvwallet.dev
 ---
 - runFlow: 00-boot.yaml
 
-- tapOn: "Notifications"
+# ".*" because the bell's label carries the count when there is one
+# ("Notifications, 1 outstanding"), and this flow runs in both states.
+- tapOn: ".*Notifications.*"
 - waitForAnimationToEnd:
     timeout: 8000
 
@@ -38,3 +43,23 @@ appId: org.sanchezoleary.sfluvwallet.dev
 
 # The modal is back, and with it the only link to the form.
 - assertVisible: "Fill out my W-9"
+- tapOn: "Later"
+- waitForAnimationToEnd:
+    timeout: 6000
+
+# The count is of things outstanding, not things unread. Putting the modal away
+# does not settle the form, and neither does having opened the panel a moment
+# ago, so the badge is still showing.
+- assertVisible: ".*1 outstanding.*"
+- tapOn: ".*outstanding.*"
+- waitForAnimationToEnd:
+    timeout: 8000
+
+# Each row dismisses on its own. For a derived entry there is nothing to
+# delete -- the server rebuilds it from live state every request -- so this is
+# recorded as a seen mark against its key and filtered out on the way back.
+- tapOn: ".*Dismiss A W-9 is coming up.*"
+- waitForAnimationToEnd:
+    timeout: 8000
+- assertVisible: "You are all caught up."
+- assertNotVisible: ".*A W-9 is coming up.*"

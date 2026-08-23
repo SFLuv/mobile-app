@@ -243,6 +243,10 @@ const MERCHANT_MODE_STATUS_POLL_INTERVAL_MS = 15_000;
 const WALLET_TRANSACTION_LIMIT = 10;
 const ACTIVITY_TRANSACTION_PAGE_SIZE = 10;
 const IMPROVER_NOTIFICATION_POLL_MS = 60_000;
+// Faster than the notification poll: this one decides whether a modal
+// interrupts somebody, and a reward that was just held should say so while the
+// person is still looking at the screen that told them it arrived.
+const W9_STATUS_POLL_MS = 15_000;
 const LINK_DEDUPE_WINDOW_MS = 4_000;
 const BACKEND_BOOTSTRAP_TIMEOUT_MS = 20_000;
 const WALLET_CREATE_TIMEOUT_MS = 30_000;
@@ -2409,6 +2413,29 @@ function WalletAppShellContent({
     void refreshW9Status();
   }, [appUser?.id]);
 
+  // Polled, because most money does not arrive through this app.
+  //
+  // The status was only re-read on mount, on foreground, and after a redeem
+  // this app performed itself. Every other way a payout lands -- somebody else
+  // scanning the QR, a workflow bounty, an affiliate run -- left the app
+  // holding a stale status, so the tier modal could not appear until the
+  // person happened to background and reopen. That is exactly the moment the
+  // modal exists for: the reward that just crossed a line, or was just held.
+  //
+  // Foreground only, matching the notification feed beside it: a background
+  // timer spends battery on a modal nobody can be shown.
+  useEffect(() => {
+    if (!backendClient || !appUser) {
+      return;
+    }
+    const interval = setInterval(() => {
+      if (appIsActiveRef.current) {
+        void refreshW9Status();
+      }
+    }, W9_STATUS_POLL_MS);
+    return () => clearInterval(interval);
+  }, [appUser, backendClient]);
+
   const refreshMerchantToday = async (options?: { silent?: boolean }) => {
     if (!backendClient || !merchantModeInstallationID) {
       return;
@@ -2662,6 +2689,7 @@ function WalletAppShellContent({
   const {
     items: notificationItems,
     open: openNotification,
+    dismiss: dismissPushNotification,
     resolveTarget: resolveNotificationTarget,
     clearAll: clearNotifications,
   } = useNotificationInbox({ onNavigate: navigateToNotificationTarget });
@@ -2674,7 +2702,12 @@ function WalletAppShellContent({
   // the other's rules.
   const serverNotificationItems = useMemo<InboxNotification[]>(
     () =>
-      (improverNotifications?.notifications ?? []).map((entry) => ({
+      (improverNotifications?.notifications ?? [])
+        // Seen means dismissed here. The server keeps deriving the entry for as
+        // long as its condition holds, so this is the only record that somebody
+        // has put it away, and hiding it is what stops the count nagging.
+        .filter((entry) => !entry.seen)
+        .map((entry) => ({
         // Namespaced so a feed key can never collide with a push id and
         // resolve the wrong item out of the inbox.
         id: `feed:${entry.key}`,
@@ -2692,10 +2725,12 @@ function WalletAppShellContent({
     [notificationItems, serverNotificationItems],
   );
 
-  // The badge counts what is unread, not what is listed. A derived entry stays
-  // in the list until its condition clears, so counting the list would leave a
-  // number nobody can dismiss short of filing a tax form.
-  const panelUnseenCount = notificationItems.length + (improverNotifications?.unseenCount ?? 0);
+  // The badge counts everything outstanding, not everything unread, and it does
+  // not clear just because the panel was opened. Reading a notification is not
+  // the same as dealing with it: a W-9 that still needs filing is still owed
+  // whether or not somebody has glanced at the row. The count comes down when
+  // an entry is dismissed or its condition resolves, and not before.
+  const panelNotificationCount = panelNotificationItems.length;
 
   // Reaching a screen under your own steam handles the notification for it just
   // as tapping it would, so it clears from our list and the OS tray together.
@@ -2838,19 +2873,54 @@ function WalletAppShellContent({
     }
   }, [appUser, backendClient]);
 
-  // Opening the panel is what "seen" means, so the badge clears on open while
-  // the entries stay put — the same bargain the old improver bell struck.
+  // Opening the panel only refreshes it. Marking everything seen on open would
+  // empty the badge for someone who did nothing but look, which is the opposite
+  // of what a count of outstanding things is for.
   const openNotificationPanel = useCallback(() => {
     setNotificationsOpen(true);
     void refreshImproverNotifications();
-    if ((improverNotifications?.unseenCount ?? 0) > 0) {
-      void handleMarkImproverNotificationsSeen();
-    }
-  }, [handleMarkImproverNotificationsSeen, improverNotifications, refreshImproverNotifications]);
+  }, [refreshImproverNotifications]);
 
-  // "Clear all" empties the tray, but a derived entry has nothing to clear —
-  // the condition behind it is still true. Marking the feed seen is the most
-  // it can honestly do, so the list keeps those entries and drops the rest.
+  /**
+   * Dismisses one entry, from whichever source it came.
+   *
+   * A push is dropped from the tray and the local mirror. A derived entry has
+   * no tray and cannot be deleted — the server rebuilds it from live state on
+   * every request — so dismissal is recorded as a seen mark against its key,
+   * which the feed then filters out. Either way the row goes and the count
+   * comes down by one.
+   */
+  const handleDismissNotification = useCallback(
+    (item: InboxNotification) => {
+      const feedKey = item.id.startsWith("feed:") ? item.id.slice("feed:".length) : null;
+      if (!feedKey) {
+        dismissPushNotification(item);
+        return;
+      }
+      // Optimistic: the row disappears on the tap rather than after a round
+      // trip, and the response replaces the feed either way.
+      setImproverNotifications((current) =>
+        current
+          ? {
+              ...current,
+              notifications: current.notifications.map((entry) =>
+                entry.key === feedKey ? { ...entry, seen: true } : entry,
+              ),
+            }
+          : current,
+      );
+      void backendClient
+        ?.markImproverNotificationsSeen({ keys: [feedKey] })
+        .then(setImproverNotifications)
+        .catch(() => {
+          // Put it back rather than leave a row that is gone here and present
+          // on every other device.
+          void refreshImproverNotifications();
+        });
+    },
+    [backendClient, dismissPushNotification, refreshImproverNotifications],
+  );
+
   const handleClearNotifications = useCallback(() => {
     clearNotifications();
     void handleMarkImproverNotificationsSeen();
@@ -4425,7 +4495,9 @@ function WalletAppShellContent({
                 onPress={openNotificationPanel}
                 accessibilityRole="button"
                 accessibilityLabel={
-                  panelUnseenCount > 0 ? `Notifications, ${panelUnseenCount} unread` : "Notifications"
+                  panelNotificationCount > 0
+                    ? `Notifications, ${panelNotificationCount} outstanding`
+                    : "Notifications"
                 }
               >
                 <Ionicons
@@ -4433,10 +4505,10 @@ function WalletAppShellContent({
                   size={18}
                   color={palette.primaryStrong}
                 />
-                {panelUnseenCount > 0 ? (
+                {panelNotificationCount > 0 ? (
                   <View style={styles.topBadge}>
                     <Text style={styles.topBadgeText}>
-                      {panelUnseenCount > 9 ? "9+" : panelUnseenCount}
+                      {panelNotificationCount > 9 ? "9+" : panelNotificationCount}
                     </Text>
                   </View>
                 ) : null}
@@ -5194,9 +5266,9 @@ function WalletAppShellContent({
               <>
                 <ScrollView style={styles.notificationList} showsVerticalScrollIndicator={false}>
                   {panelNotificationItems.map((item) => (
+                    <View key={item.id} style={styles.notificationRow}>
                     <Pressable
-                      key={item.id}
-                      style={styles.moreMenuItem}
+                      style={[styles.moreMenuItem, styles.notificationRowMain]}
                       accessibilityRole="button"
                       // Title and body read as one announcement; left to merge
                       // on their own they arrive as two unrelated fragments.
@@ -5217,6 +5289,19 @@ function WalletAppShellContent({
                         <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
                       ) : null}
                     </Pressable>
+                    {/* Its own control, outside the row's Pressable: nesting it
+                        would make the whole row dismiss on any stray tap near
+                        the edge, and the row's job is to take you somewhere. */}
+                    <Pressable
+                      style={styles.notificationDismiss}
+                      onPress={() => handleDismissNotification(item)}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Dismiss ${item.title}`}
+                    >
+                      <Ionicons name="close" size={14} color={palette.textMuted} />
+                    </Pressable>
+                    </View>
                   ))}
                 </ScrollView>
                 <Pressable style={styles.notificationClearAll} onPress={handleClearNotifications}>
@@ -7057,6 +7142,21 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   },
   notificationList: {
     maxHeight: 340,
+  },
+  notificationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  // The row takes the space; the dismiss keeps its own, so a long title never
+  // squeezes the control down to something unhittable.
+  notificationRowMain: {
+    flex: 1,
+  },
+  notificationDismiss: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+    alignItems: "center",
+    justifyContent: "center",
   },
   notificationClearAll: {
     alignSelf: "center",
