@@ -20,7 +20,22 @@
 #   ./testing/scripts/seed-w9-tier.sh --revert 0x<address>
 appId: org.sanchezoleary.sfluvwallet.dev
 ---
-- runFlow: 00-boot.yaml
+- launchApp
+- extendedWaitUntil:
+    visible: ".*Notifications.*"
+    timeout: 60000
+
+# Deliberately not runFlow: 00-boot.yaml. That asserts the wallet balance is
+# visible, and an outstanding tier now raises its modal over it without being
+# asked -- the status is polled, so the modal arrives on its own. Put it away
+# first: this flow is about the panel, and the modal has flows of its own.
+- runFlow:
+    when:
+      visible: "Later"
+    commands:
+      - tapOn: "Later"
+      - waitForAnimationToEnd:
+          timeout: 5000
 
 # ".*" because the bell's label carries the count when there is one
 # ("Notifications, 1 outstanding"), and this flow runs in both states.

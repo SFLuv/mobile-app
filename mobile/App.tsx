@@ -246,7 +246,7 @@ const IMPROVER_NOTIFICATION_POLL_MS = 60_000;
 // Faster than the notification poll: this one decides whether a modal
 // interrupts somebody, and a reward that was just held should say so while the
 // person is still looking at the screen that told them it arrived.
-const W9_STATUS_POLL_MS = 15_000;
+const W9_STATUS_POLL_MS = 8_000;
 const LINK_DEDUPE_WINDOW_MS = 4_000;
 const BACKEND_BOOTSTRAP_TIMEOUT_MS = 20_000;
 const WALLET_CREATE_TIMEOUT_MS = 30_000;
@@ -2338,6 +2338,10 @@ function WalletAppShellContent({
     if (!tier) return;
     setW9TierDismissed(tier);
     void backendClient?.acknowledgeW9Tier(tier).catch(() => undefined);
+    // Putting the modal away is exactly when the badge has to start carrying
+    // it, so the feed is re-read now rather than on its own timer a minute
+    // later. Without this the count arrives long after the thing it counts.
+    void refreshImproverNotifications();
   };
 
   /**
@@ -2412,6 +2416,42 @@ function WalletAppShellContent({
   useEffect(() => {
     void refreshW9Status();
   }, [appUser?.id]);
+
+  // Money arriving is the event both the modal and the badge care about, so
+  // neither waits for its own timer. The balance is already polled every couple
+  // of seconds for the wallet, and a change in it is the same instant a tier is
+  // crossed -- which is when the modal should appear, not up to a poll later.
+  //
+  // Not sufficient on its own, which is why the poll below stays: the crossing
+  // payment is *held*, so the balance does not move for the one tier that
+  // matters most. That case still needs asking.
+  const lastSeenBalanceRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!backendClient || !appUser || smartBalance === "...") {
+      return;
+    }
+    const previous = lastSeenBalanceRef.current;
+    lastSeenBalanceRef.current = smartBalance;
+    if (previous === null || previous === smartBalance) {
+      return;
+    }
+    void refreshW9Status();
+    void refreshImproverNotifications();
+  }, [appUser, backendClient, smartBalance]);
+
+  // A new tier is news the badge should carry at once, rather than whenever the
+  // feed next happens to poll.
+  const lastSeenTierRef = useRef<string | null>(null);
+  useEffect(() => {
+    const tier = w9Status?.tier ?? null;
+    if (lastSeenTierRef.current === tier) {
+      return;
+    }
+    lastSeenTierRef.current = tier;
+    if (tier) {
+      void refreshImproverNotifications();
+    }
+  }, [w9Status?.tier]);
 
   // Polled, because most money does not arrive through this app.
   //
@@ -5268,7 +5308,7 @@ function WalletAppShellContent({
                   {panelNotificationItems.map((item) => (
                     <View key={item.id} style={styles.notificationRow}>
                     <Pressable
-                      style={[styles.moreMenuItem, styles.notificationRowMain]}
+                      style={styles.moreMenuItem}
                       accessibilityRole="button"
                       // Title and body read as one announcement; left to merge
                       // on their own they arrive as two unrelated fragments.
@@ -5281,7 +5321,7 @@ function WalletAppShellContent({
                         openNotification(item);
                       }}
                     >
-                      <View style={styles.moreMenuCopy}>
+                      <View style={[styles.moreMenuCopy, styles.notificationCopyInset]}>
                         <Text style={styles.moreMenuLabel}>{item.title}</Text>
                         {item.body ? <Text style={styles.moreMenuBody}>{item.body}</Text> : null}
                       </View>
@@ -5289,13 +5329,16 @@ function WalletAppShellContent({
                         <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
                       ) : null}
                     </Pressable>
-                    {/* Its own control, outside the row's Pressable: nesting it
-                        would make the whole row dismiss on any stray tap near
-                        the edge, and the row's job is to take you somewhere. */}
+                    {/* Drawn over the bubble's top-left corner rather than
+                        inside it. A Pressable that sets its own label merges
+                        its children into one accessibility element, so nesting
+                        this put the dismiss out of reach of a screen reader
+                        entirely. As a sibling it keeps its own element and
+                        still lands where it should. */}
                     <Pressable
                       style={styles.notificationDismiss}
                       onPress={() => handleDismissNotification(item)}
-                      hitSlop={8}
+                      hitSlop={10}
                       accessibilityRole="button"
                       accessibilityLabel={`Dismiss ${item.title}`}
                     >
@@ -7144,19 +7187,23 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     maxHeight: 340,
   },
   notificationRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  // The row takes the space; the dismiss keeps its own, so a long title never
-  // squeezes the control down to something unhittable.
-  notificationRowMain: {
-    flex: 1,
+    position: "relative",
   },
   notificationDismiss: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
+    position: "absolute",
+    top: 6,
+    left: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     alignItems: "center",
     justifyContent: "center",
+    zIndex: 1,
+  },
+  // Clears the corner the dismiss occupies. Without it the first line of a
+  // title sits under the control and reads as a typo.
+  notificationCopyInset: {
+    paddingLeft: 22,
   },
   notificationClearAll: {
     alignSelf: "center",
