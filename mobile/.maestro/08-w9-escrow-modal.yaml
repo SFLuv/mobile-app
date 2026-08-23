@@ -1,0 +1,34 @@
+# The crossing: the payment that reaches the limit is held, and this is the
+# modal that says so.
+#
+# Distinct from the two warnings before it (05) and the refusal after it (06).
+# Those are about money still arriving or already stopped; this one is the
+# moment it stops, and the copy has to carry that the reward exists and is
+# theirs — "The money is yours" — or a held payment reads as a lost one.
+#
+# Worth its own flow because this tier was unreachable for a while. decidePayout
+# returned escrow_600 correctly, but the escrow branch of the dispatch recorded
+# no tier notice, so GetOutstandingW9Tier kept answering with warning_500 and
+# somebody whose money was actually held saw "you're on your way to a tax form"
+# instead. Nothing in the unit tests could see it: the decision was right and
+# the caller threw it away. This asserts the modal a person actually gets.
+#
+# Requires an account sitting exactly on the crossing. From the backend repo:
+#   ./testing/scripts/reset-w9.sh <address|did>
+#   ./testing/scripts/w9-earn.sh  <address|did> 600
+appId: org.sanchezoleary.sfluvwallet.dev
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Your reward is being held"
+    timeout: 60000
+
+# The meter reads the real annual total against the real limit.
+- assertVisible: "600 SFLUV"
+- assertVisible: "of 600 SFLUV"
+- assertVisible: "Earned so far this year"
+
+# The reassurance is the whole difference between this tier and being blocked.
+- assertVisible: "The money is yours. Complete the form and we'll send it straight over."
+- assertVisible: "Fill out my W-9"
+- assertVisible: "Later"
