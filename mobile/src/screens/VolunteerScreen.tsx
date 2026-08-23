@@ -32,11 +32,9 @@ import {
   AppVolunteerLocation,
   AppVolunteerOrganizerFacet,
   AppVolunteerSignupResult,
-  AppImproverNotificationFeed,
   AppW9Status,
 } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
-import { NotificationBell } from "../components/NotificationBell";
 import { W9EscrowCard } from "../components/W9EscrowCard";
 import { triggerClickHaptic } from "../utils/haptics";
 import { ICON_FACE, ICON_TEXT_COLOR, ICON_TEXT_NUDGE_EM, merchantInitials } from "../utils/merchantIcon";
@@ -50,9 +48,6 @@ import { ICON_FACE, ICON_TEXT_COLOR, ICON_TEXT_NUDGE_EM, merchantInitials } from
 const SFLUV_MARK = require("../../assets/qr-logo.png");
 
 type Props = {
-  notifications?: AppImproverNotificationFeed | null;
-  onRefreshNotifications?: () => void;
-  onMarkNotificationsSeen?: () => Promise<void>;
   w9Status?: AppW9Status | null;
   w9Busy?: boolean;
   onStartW9?: () => void;
@@ -238,9 +233,6 @@ function signupClosedLabel(event: AppVolunteerEvent): string | null {
 }
 
 export function VolunteerScreen({
-  notifications,
-  onRefreshNotifications,
-  onMarkNotificationsSeen,
   w9Status,
   w9Busy,
   onStartW9,
@@ -924,14 +916,6 @@ export function VolunteerScreen({
         ) : null}
 
         <View style={styles.filterHeaderRow}>
-          {/* Tax notices are not role-scoped, so a volunteer who has never
-              touched a workflow still needs a bell to read them in. */}
-          <NotificationBell
-            notifications={notifications}
-            hapticsEnabled={hapticsEnabled}
-            onRefresh={onRefreshNotifications}
-            onMarkSeen={onMarkNotificationsSeen}
-          />
           <SegmentedTabs
             style={styles.segmentRowFill}
             segments={FEED_OPTIONS}

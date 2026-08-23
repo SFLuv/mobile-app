@@ -100,7 +100,12 @@ import {
   MerchantToday,
 } from "./src/types/app";
 import { useNotificationInbox } from "./src/hooks/useNotificationInbox";
-import { NotificationTarget, targetFromData } from "./src/services/notificationInbox";
+import {
+  InboxNotification,
+  NotificationTarget,
+  targetFromAction,
+  targetFromData,
+} from "./src/services/notificationInbox";
 import { AppPreferences, defaultAppPreferences } from "./src/types/preferences";
 import { SfluvUniversalLink, parseSfluvUniversalLink } from "./src/utils/universalLinks";
 import {
@@ -1572,6 +1577,12 @@ function WalletAppShellContent({
   // sticks. This holds the dismissal in the meantime, and is cleared on
   // foreground so a blocked person is asked again.
   const [w9TierDismissed, setW9TierDismissed] = useState<AppW9Tier | null>(null);
+  // Set when someone explicitly asks to see the form, which right now means
+  // tapping the W-9 notification. That request outranks both the stored
+  // acknowledgement and this session's dismissal: the tier modal is the only
+  // screen carrying the form link, so honouring "seen once" here would leave
+  // the tap with nowhere to go and the notification permanently inert.
+  const [w9TierRequested, setW9TierRequested] = useState(false);
   const [storedPushToken, setStoredPushToken] = useState<string | null>(null);
   const [storedPushTokenLoaded, setStoredPushTokenLoaded] = useState(false);
   const [backendPushPreferenceEnabled, setBackendPushPreferenceEnabled] = useState<boolean | null>(null);
@@ -2306,7 +2317,10 @@ function WalletAppShellContent({
   const visibleW9Tier: AppW9Tier | null = (() => {
     if (!w9Status || w9Status.cleared) return null;
     const tier = w9Status.tier;
-    if (!tier || tier === w9TierDismissed) return null;
+    if (!tier) return null;
+    // Asked for, so shown — regardless of what has been acknowledged before.
+    if (w9TierRequested) return tier;
+    if (tier === w9TierDismissed) return null;
     if (tier === "blocked") return tier;
     return w9Status.tierAcknowledged ? null : tier;
   })();
@@ -2316,6 +2330,7 @@ function WalletAppShellContent({
    * by opening the form.
    */
   const acknowledgeW9Tier = (tier: AppW9Tier | null) => {
+    setW9TierRequested(false);
     if (!tier) return;
     setW9TierDismissed(tier);
     void backendClient?.acknowledgeW9Tier(tier).catch(() => undefined);
@@ -2619,16 +2634,29 @@ function WalletAppShellContent({
           // tapped this notification is asking about the form, so putting it
           // back in front of them is the whole point of the tap.
           setW9TierDismissed(null);
+          setW9TierRequested(true);
           void refreshW9Status();
           return;
         case "activity":
           setTab("activity");
           return;
+        case "url":
+          // Leaving the app is the point here, so there is no in-app state to
+          // set. A link the OS refuses to open fails silently rather than
+          // throwing into a tap handler.
+          void Linking.openURL(target.url).catch(() => {});
+          return;
         default:
           return;
       }
     },
-    [canAccessImproverPanel, canAccessVolunteerPanel, openImproverPanel, openVolunteerPanel],
+    [
+      canAccessImproverPanel,
+      canAccessVolunteerPanel,
+      openImproverPanel,
+      openVolunteerPanel,
+      refreshW9Status,
+    ],
   );
 
   const {
@@ -2637,6 +2665,37 @@ function WalletAppShellContent({
     resolveTarget: resolveNotificationTarget,
     clearAll: clearNotifications,
   } = useNotificationInbox({ onNavigate: navigateToNotificationTarget });
+
+  // The top bar shows two sources of notification, and they have different
+  // lifetimes. A push is a past event: it sits in the tray until cleared. A
+  // server-derived entry describes a condition that is true right now — an
+  // unfiled W-9, a payout waiting — and disappears on its own when that stops
+  // being true. Merging them is a display decision only; neither one adopts
+  // the other's rules.
+  const serverNotificationItems = useMemo<InboxNotification[]>(
+    () =>
+      (improverNotifications?.notifications ?? []).map((entry) => ({
+        // Namespaced so a feed key can never collide with a push id and
+        // resolve the wrong item out of the inbox.
+        id: `feed:${entry.key}`,
+        title: entry.title,
+        body: entry.body,
+        receivedAt: entry.createdAt * 1000,
+        target: targetFromAction(entry.action),
+      })),
+    [improverNotifications],
+  );
+
+  // Live conditions first: they are the ones still asking for something.
+  const panelNotificationItems = useMemo(
+    () => [...serverNotificationItems, ...notificationItems],
+    [notificationItems, serverNotificationItems],
+  );
+
+  // The badge counts what is unread, not what is listed. A derived entry stays
+  // in the list until its condition clears, so counting the list would leave a
+  // number nobody can dismiss short of filing a tax form.
+  const panelUnseenCount = notificationItems.length + (improverNotifications?.unseenCount ?? 0);
 
   // Reaching a screen under your own steam handles the notification for it just
   // as tapping it would, so it clears from our list and the OS tray together.
@@ -2752,7 +2811,9 @@ function WalletAppShellContent({
   // backgrounded timer burns battery and network for a badge nobody can see,
   // and the AppState listener re-syncs on the way back in anyway.
   useEffect(() => {
-    if (!backendClient || !canAccessImproverPanel) {
+    // Polled for every signed-in user, matching the fetch above: a merchant who
+    // owes a W-9 needs the badge to keep up just as much as an improver does.
+    if (!backendClient || !appUser) {
       return;
     }
     const interval = setInterval(() => {
@@ -2761,10 +2822,12 @@ function WalletAppShellContent({
       }
     }, IMPROVER_NOTIFICATION_POLL_MS);
     return () => clearInterval(interval);
-  }, [backendClient, canAccessImproverPanel, refreshImproverNotifications]);
+  }, [appUser, backendClient, refreshImproverNotifications]);
 
   const handleMarkImproverNotificationsSeen = useCallback(async () => {
-    if (!backendClient || !canAccessImproverPanel) {
+    // Ungated for the same reason the fetch is: a non-improver can hold a tax
+    // notice, and a badge that will not clear is worse than no badge.
+    if (!backendClient || !appUser) {
       return;
     }
     try {
@@ -2773,7 +2836,25 @@ function WalletAppShellContent({
     } catch (error) {
       console.warn("Unable to mark improver notifications seen", error);
     }
-  }, [backendClient, canAccessImproverPanel]);
+  }, [appUser, backendClient]);
+
+  // Opening the panel is what "seen" means, so the badge clears on open while
+  // the entries stay put — the same bargain the old improver bell struck.
+  const openNotificationPanel = useCallback(() => {
+    setNotificationsOpen(true);
+    void refreshImproverNotifications();
+    if ((improverNotifications?.unseenCount ?? 0) > 0) {
+      void handleMarkImproverNotificationsSeen();
+    }
+  }, [handleMarkImproverNotificationsSeen, improverNotifications, refreshImproverNotifications]);
+
+  // "Clear all" empties the tray, but a derived entry has nothing to clear —
+  // the condition behind it is still true. Marking the feed seen is the most
+  // it can honestly do, so the list keeps those entries and drops the rest.
+  const handleClearNotifications = useCallback(() => {
+    clearNotifications();
+    void handleMarkImproverNotificationsSeen();
+  }, [clearNotifications, handleMarkImproverNotificationsSeen]);
 
   // Reminder settings live on the backend, not in device preferences, because
   // the backend is what sends the push at a time this app may not be running.
@@ -4341,19 +4422,21 @@ function WalletAppShellContent({
             {!merchantKiosk ? (
               <Pressable
                 style={styles.iconButton}
-                onPress={() => setNotificationsOpen(true)}
+                onPress={openNotificationPanel}
                 accessibilityRole="button"
-                accessibilityLabel="Notifications"
+                accessibilityLabel={
+                  panelUnseenCount > 0 ? `Notifications, ${panelUnseenCount} unread` : "Notifications"
+                }
               >
                 <Ionicons
-                  name={notificationItems.length > 0 ? "notifications" : "notifications-outline"}
+                  name={panelNotificationItems.length > 0 ? "notifications" : "notifications-outline"}
                   size={18}
                   color={palette.primaryStrong}
                 />
-                {notificationItems.length > 0 ? (
+                {panelUnseenCount > 0 ? (
                   <View style={styles.topBadge}>
                     <Text style={styles.topBadgeText}>
-                      {notificationItems.length > 9 ? "9+" : notificationItems.length}
+                      {panelUnseenCount > 9 ? "9+" : panelUnseenCount}
                     </Text>
                   </View>
                 ) : null}
@@ -4514,20 +4597,10 @@ function WalletAppShellContent({
               onImproverUpdated={handleImproverUpdated}
               requestedSection={improverRouteRequest.section}
               requestedSectionNonce={improverRouteRequest.nonce}
-              notifications={improverNotifications}
-              onRefreshNotifications={() => {
-                void refreshImproverNotifications();
-              }}
-              onMarkNotificationsSeen={handleMarkImproverNotificationsSeen}
               onCredentialDataUpdated={handleImproverCredentialDataUpdated}
             />
           ) : tab === "volunteer" ? (
             <VolunteerScreen
-              notifications={improverNotifications}
-              onRefreshNotifications={() => {
-                void refreshImproverNotifications();
-              }}
-              onMarkNotificationsSeen={handleMarkImproverNotificationsSeen}
               w9Status={w9Status}
               w9Busy={w9Busy}
               onStartW9={handleStartW9}
@@ -5107,7 +5180,7 @@ function WalletAppShellContent({
               <View style={styles.moreMenuHeaderCopy}>
                 <Text style={styles.moreMenuTitle}>Notifications</Text>
                 <Text style={styles.moreMenuSubtitle}>
-                  {notificationItems.length > 0
+                  {panelNotificationItems.length > 0
                     ? "Tap one to jump straight to it."
                     : "You are all caught up."}
                 </Text>
@@ -5117,13 +5190,20 @@ function WalletAppShellContent({
               </Pressable>
             </View>
 
-            {notificationItems.length > 0 ? (
+            {panelNotificationItems.length > 0 ? (
               <>
                 <ScrollView style={styles.notificationList} showsVerticalScrollIndicator={false}>
-                  {notificationItems.map((item) => (
+                  {panelNotificationItems.map((item) => (
                     <Pressable
                       key={item.id}
                       style={styles.moreMenuItem}
+                      accessibilityRole="button"
+                      // Title and body read as one announcement; left to merge
+                      // on their own they arrive as two unrelated fragments.
+                      accessibilityLabel={item.body ? `${item.title}. ${item.body}` : item.title}
+                      accessibilityHint={
+                        item.target.kind === "none" ? undefined : "Opens what this is about"
+                      }
                       onPress={() => {
                         setNotificationsOpen(false);
                         openNotification(item);
@@ -5139,7 +5219,7 @@ function WalletAppShellContent({
                     </Pressable>
                   ))}
                 </ScrollView>
-                <Pressable style={styles.notificationClearAll} onPress={clearNotifications}>
+                <Pressable style={styles.notificationClearAll} onPress={handleClearNotifications}>
                   <Text style={styles.notificationClearAllText}>Clear all</Text>
                 </Pressable>
               </>

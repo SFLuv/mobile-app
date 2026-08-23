@@ -27,8 +27,6 @@ import {
   AppImprover,
   AppImproverAbsencePeriod,
   AppImproverAbsencePeriodCreateResult,
-  AppImproverNotification,
-  AppImproverNotificationFeed,
   AppImproverWorkflowListItem,
   AppImproverWorkflowStepSummary,
   AppUser,
@@ -57,10 +55,6 @@ type Props = {
   onImproverUpdated?: (improver: AppImprover) => void;
   requestedSection?: ImproverSection;
   requestedSectionNonce?: number;
-  notifications?: AppImproverNotificationFeed | null;
-  onRefreshNotifications?: () => void;
-  /** Resolves to the updated feed; opening the bell marks everything seen. */
-  onMarkNotificationsSeen?: () => Promise<void>;
   onCredentialDataUpdated?: (payload: {
     credentialTypes: AppGlobalCredentialType[];
     credentialRequests: AppCredentialRequest[];
@@ -499,9 +493,6 @@ export function ImproverScreen({
   onImproverUpdated,
   requestedSection,
   requestedSectionNonce,
-  notifications,
-  onRefreshNotifications,
-  onMarkNotificationsSeen,
   onCredentialDataUpdated,
 }: Props) {
   const { palette, shadows, isDark } = useAppTheme();
@@ -524,7 +515,6 @@ export function ImproverScreen({
   const [workflowView, setWorkflowView] = useState<WorkflowView>(initialCache.workflowView);
   const [includePastWorkflows, setIncludePastWorkflows] = useState(initialCache.includePastWorkflows);
   const [workflowSelectorVisible, setWorkflowSelectorVisible] = useState(false);
-  const [notificationsVisible, setNotificationsVisible] = useState(false);
   const [workflowEditMode, setWorkflowEditMode] = useState(false);
   const [selectedWorkflowKeys, setSelectedWorkflowKeys] = useState<string[]>([]);
   const [badgesVisible, setBadgesVisible] = useState(false);
@@ -2302,81 +2292,6 @@ export function ImproverScreen({
     );
   };
 
-  const unseenCount = notifications?.unseenCount ?? 0;
-
-  const openNotifications = useCallback(() => {
-    triggerClickHaptic(hapticsEnabled === true);
-    setNotificationsVisible(true);
-    onRefreshNotifications?.();
-    // Opening the bell is what "seeing" means: the badge clears, but the
-    // entries stay in the list until the underlying condition resolves.
-    if (unseenCount > 0) {
-      void onMarkNotificationsSeen?.();
-    }
-  }, [hapticsEnabled, onMarkNotificationsSeen, onRefreshNotifications, unseenCount]);
-
-  const renderNotificationBell = () => (
-    <Pressable style={styles.bellButton} onPress={openNotifications} hitSlop={6}>
-      <Ionicons
-        name={unseenCount > 0 ? "notifications" : "notifications-outline"}
-        size={18}
-        color={palette.primaryStrong}
-      />
-      {unseenCount > 0 ? (
-        <View style={styles.bellBadge}>
-          <Text style={styles.bellBadgeText}>{unseenCount > 99 ? "99+" : unseenCount}</Text>
-        </View>
-      ) : null}
-    </Pressable>
-  );
-
-  const renderNotificationRow = (notification: AppImproverNotification) => {
-    const amount = typeof notification.amountSfluv === "number" ? notification.amountSfluv : null;
-    const failed = Boolean(notification.payoutError?.trim());
-    // A future notification kind must not inherit the payout icon, so anything
-    // unrecognised falls back to a neutral one.
-    const icon: keyof typeof Ionicons.glyphMap = failed
-      ? "alert-circle-outline"
-      : notification.type.startsWith("workflow_payout")
-        ? "cash-outline"
-        : "notifications-outline";
-    return (
-      <View
-        key={notification.key}
-        style={[styles.notificationRow, notification.seen ? styles.notificationRowSeen : undefined]}
-      >
-        <View style={[styles.notificationIcon, failed ? styles.notificationIconDanger : undefined]}>
-          <Ionicons name={icon} size={16} color={failed ? palette.danger : palette.primaryStrong} />
-        </View>
-        <View style={styles.notificationCopy}>
-          <View style={styles.notificationTitleRow}>
-            <Text style={styles.notificationTitle} numberOfLines={2}>
-              {notification.title}
-            </Text>
-            {!notification.seen ? <View style={styles.notificationUnseenDot} /> : null}
-          </View>
-          {/* Unknown types render from title + body alone so the backend can add
-              kinds without waiting on an app release. */}
-          {notification.body ? <Text style={styles.notificationBody}>{notification.body}</Text> : null}
-          <View style={styles.notificationMetaRow}>
-            {notification.workflowTitle ? (
-              <Text style={styles.notificationMeta} numberOfLines={1}>
-                {notification.workflowTitle}
-                {notification.stepTitle ? ` · ${notification.stepTitle}` : ""}
-              </Text>
-            ) : null}
-            {amount !== null ? (
-              <Text style={styles.notificationAmount}>
-                {amount} {tokenSymbol}
-              </Text>
-            ) : null}
-          </View>
-          {failed ? <Text style={styles.notificationError}>{notification.payoutError}</Text> : null}
-        </View>
-      </View>
-    );
-  };
-
   const renderBannerStack = () => (
     <>
       {error ? (
@@ -2712,7 +2627,6 @@ export function ImproverScreen({
                   <Text style={styles.compactActionButtonText}>{workflowEditMode ? "Done" : "Edit"}</Text>
                 </Pressable>
               ) : null}
-              {renderNotificationBell()}
             </View>
           </View>
 
@@ -3534,44 +3448,6 @@ export function ImproverScreen({
         />
       </Modal>
 
-      <Modal
-        visible={notificationsVisible}
-        transparent
-        presentationStyle="overFullScreen"
-        animationType="fade"
-        onRequestClose={() => setNotificationsVisible(false)}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => setNotificationsVisible(false)}>
-          <Pressable style={styles.selectorSheetCard} onPress={() => {}}>
-            <View style={styles.notificationHeader}>
-              <Text style={styles.sectionTitle}>Notifications</Text>
-              <Pressable
-                style={styles.notificationClose}
-                onPress={() => setNotificationsVisible(false)}
-                hitSlop={8}
-              >
-                <Ionicons name="close" size={18} color={palette.primaryStrong} />
-              </Pressable>
-            </View>
-
-            {!notifications ? (
-              <View style={styles.notificationEmpty}>
-                <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
-                <Text style={styles.notificationEmptyText}>Loading notifications...</Text>
-              </View>
-            ) : notifications.notifications.length === 0 ? (
-              <View style={styles.notificationEmpty}>
-                <Ionicons name="checkmark-circle-outline" size={22} color={palette.textMuted} />
-                <Text style={styles.notificationEmptyText}>You are all caught up.</Text>
-              </View>
-            ) : (
-              <ScrollView style={styles.notificationList} showsVerticalScrollIndicator={false}>
-                {notifications.notifications.map((notification) => renderNotificationRow(notification))}
-              </ScrollView>
-            )}
-          </Pressable>
-        </Pressable>
-      </Modal>
 
       {/* Styled bulk-revoke confirmation (replaces the native alert). */}
       <Modal

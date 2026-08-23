@@ -723,7 +723,21 @@ export interface AppImproverNotification {
   isManager: boolean;
   amountSfluv?: number | null;
   payoutError?: string | null;
+  /**
+   * Where tapping this notification goes, decided server-side. Absent means
+   * the notification is text only. `url` exists because some destinations —
+   * a partner's signup page, a form we do not host — cannot be mapped from
+   * `type` by any client build.
+   */
+  action?: AppNotificationAction | null;
 }
+
+export type AppNotificationAction =
+  | { kind: "tax" }
+  | { kind: "improver" }
+  | { kind: "volunteer" }
+  | { kind: "volunteer-event"; eventId: string }
+  | { kind: "url"; url: string };
 
 export interface AppImproverNotificationFeed {
   notifications: AppImproverNotification[];

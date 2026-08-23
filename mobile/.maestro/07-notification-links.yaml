@@ -1,0 +1,40 @@
+# Notifications in the top-bar panel are links.
+#
+# The panel merges two sources with different lifetimes: push notifications
+# mirrored from the OS tray, and conditions the server derives from live state.
+# Tapping either has to land somewhere, and where it lands is decided by the
+# server's `action`, so a destination can be added — including an external
+# link — without shipping a new build.
+#
+# The W-9 entry is the case worth pinning down. It is the only route back to
+# the tier modal once that modal has been dismissed, and the modal is the only
+# screen carrying the link to the form. So an explicit tap has to reopen it
+# even though the tier was already acknowledged, which is the opposite of what
+# acknowledgement means everywhere else.
+#
+# Requires an account holding an outstanding tier. From the backend repo:
+#   ./testing/scripts/seed-w9-tier.sh 0x<address> notice_400
+#   ./testing/scripts/seed-w9-tier.sh --revert 0x<address>
+appId: org.sanchezoleary.sfluvwallet.dev
+---
+- runFlow: 00-boot.yaml
+
+- tapOn: "Notifications"
+- waitForAnimationToEnd:
+    timeout: 8000
+
+# The subtitle is the promise the rows have to keep.
+- assertVisible: "Tap one to jump straight to it."
+
+# ".*" here is not a lost label, which is what it usually means in this suite —
+# it is the opposite. A notification row carries one accessibilityLabel built
+# from its title and body, so a screen reader announces it as a single sentence
+# rather than two loose fragments. That merged string is what Maestro matches,
+# so the title alone is a substring of it and never an element of its own.
+- assertVisible: ".*A W-9 is coming up.*"
+- tapOn: ".*A W-9 is coming up.*"
+- waitForAnimationToEnd:
+    timeout: 12000
+
+# The modal is back, and with it the only link to the form.
+- assertVisible: "Fill out my W-9"

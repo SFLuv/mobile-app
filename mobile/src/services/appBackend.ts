@@ -15,6 +15,7 @@ import {
   AppImproverAbsencePeriodCreateResult,
   AppImproverAbsencePeriodDeleteResult,
   AppImproverNotification,
+  AppNotificationAction,
   AppImproverNotificationFeed,
   AppImproverWorkflowFeed,
   AppImproverWorkflowListItem,
@@ -1747,7 +1748,37 @@ function mapImproverNotification(input: unknown): AppImproverNotification | null
     isManager: record.is_manager === true,
     amountSfluv: readOptionalNumber(record.amount_sfluv) ?? null,
     payoutError: readOptionalString(record.payout_error) ?? null,
+    action: mapNotificationAction(record.action),
   };
+}
+
+/**
+ * An unrecognised kind returns null rather than a guess, which renders the
+ * notification as plain text. That is the correct degradation: sending a user
+ * to the wrong screen is worse than sending them nowhere.
+ */
+function mapNotificationAction(input: unknown): AppNotificationAction | null {
+  if (!input) {
+    return null;
+  }
+  const record = readRecord(input);
+  const kind = readOptionalString(record.kind);
+  switch (kind) {
+    case "tax":
+    case "improver":
+    case "volunteer":
+      return { kind };
+    case "volunteer-event": {
+      const eventId = readOptionalString(record.event_id);
+      return eventId ? { kind, eventId } : null;
+    }
+    case "url": {
+      const url = readOptionalString(record.url);
+      return url ? { kind, url } : null;
+    }
+    default:
+      return null;
+  }
 }
 
 function mapImproverNotificationFeed(input: unknown): AppImproverNotificationFeed {
