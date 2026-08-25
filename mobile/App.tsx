@@ -60,6 +60,7 @@ import { ContactsScreen } from "./src/screens/ContactsScreen";
 import { ImproverScreen } from "./src/screens/ImproverScreen";
 import { VolunteerScreen } from "./src/screens/VolunteerScreen";
 import { ThemedActivityIndicator } from "./src/components/ThemedActivityIndicator";
+import { W9CompleteModal } from "./src/components/W9CompleteModal";
 import { W9TierModal } from "./src/components/W9TierModal";
 import { mobileConfig } from "./src/config";
 import {
@@ -1585,6 +1586,14 @@ function WalletAppShellContent({
   // screen carrying the form link, so honouring "seen once" here would leave
   // the tap with nowhere to go and the notification permanently inert.
   const [w9TierRequested, setW9TierRequested] = useState(false);
+  // What was on hold when the form was opened, so the confirmation can say how
+  // much came back. Read before rather than after: by the time the filing
+  // clears the escrow has already been released and the figure is zero.
+  const [w9Released, setW9Released] = useState<string | null>(null);
+  // The last figure seen while money was still held, and whether the filing was
+  // already cleared on the previous read.
+  const w9HeldBeforeClearingRef = useRef("");
+  const w9WasClearedRef = useRef<boolean | null>(null);
   const [storedPushToken, setStoredPushToken] = useState<string | null>(null);
   const [storedPushTokenLoaded, setStoredPushTokenLoaded] = useState(false);
   const [backendPushPreferenceEnabled, setBackendPushPreferenceEnabled] = useState<boolean | null>(null);
@@ -2338,6 +2347,34 @@ function WalletAppShellContent({
   })();
 
   /**
+   * Congratulates on the filing clearing, however it happened.
+   *
+   * Driven by the status rather than by the button, because the button is not
+   * the only way to get here: somebody can file on another device, or close
+   * the sheet before the callback lands, or be released by an admin. Tying the
+   * confirmation to one code path means the people who took a different route
+   * watch their money reappear with no explanation.
+   *
+   * The held figure is captured while it is still held. By the time the filing
+   * clears the escrow has already been released and the amount reads zero,
+   * which is exactly the number nobody wants to be shown.
+   */
+  useEffect(() => {
+    if (!w9Status) return;
+    if (!w9Status.cleared) {
+      w9HeldBeforeClearingRef.current = w9Status.escrowedSfluv ?? "";
+    }
+    const was = w9WasClearedRef.current;
+    w9WasClearedRef.current = w9Status.cleared;
+    // The first reading establishes a baseline. Only a change is news — without
+    // this, opening the app with a filing already on file would congratulate
+    // somebody for something they did last week.
+    if (was === null || was || !w9Status.cleared) return;
+    setW9Released(w9HeldBeforeClearingRef.current);
+    void refreshEverything();
+  }, [w9Status?.cleared, w9Status?.escrowedSfluv]);
+
+  /**
    * Records that the outstanding tier has been answered — by dismissing it, or
    * by opening the form.
    */
@@ -2375,24 +2412,39 @@ function WalletAppShellContent({
       // on the tap would let a failure to mint a link quietly retire the
       // warning for the rest of the year.
       const outstanding = visibleW9Tier;
-      await WebBrowser.openAuthSessionAsync(formUrl, "sfluv://w9/complete");
-      acknowledgeW9Tier(outstanding);
 
-      // The redirect is not proof of anything — the browser can be closed at
-      // any point, and only the backend knows what the vendor recorded. So the
-      // status is polled rather than assumed.
-      for (let attempt = 0; attempt < 12; attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-        const status = await backendClient.getW9Status().catch(() => null);
-        if (status) {
+      // A plain browser, not an auth session.
+      //
+      // openAuthSessionAsync closes itself on a redirect, which is convenient,
+      // but iOS puts a consent sheet in front of it first — «"SFLuv" Wants to
+      // Use "localhost" to Sign In» — and that is both an extra tap and a lie:
+      // nobody is signing in, they are filing a tax form. Worse, it is the
+      // system dialog people have learned to refuse.
+      //
+      // So the sheet is opened plainly and closed from here instead, when the
+      // backend says the filing actually cleared. That is a better signal than
+      // a redirect anyway: a redirect proves the page navigated, not that the
+      // vendor recorded anything.
+      const watch = (async () => {
+        // Quick at first, because the callback clears the filing in about a
+        // second and the sheet should not outlive the thing it was showing.
+        for (let attempt = 0; attempt < 40; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, attempt < 12 ? 1000 : 3000));
+          const status = await backendClient.getW9Status().catch(() => null);
+          if (!status) continue;
           setW9Status(status);
           if (status.cleared) {
-            showToast("Thanks — your rewards are on the way.", "success");
-            void refreshEverything();
-            break;
+            await WebBrowser.dismissBrowser().catch(() => undefined);
+            return;
           }
         }
-      }
+      })();
+
+      await WebBrowser.openBrowserAsync(formUrl);
+      acknowledgeW9Tier(outstanding);
+      // Deliberately not awaited: it keeps running if somebody closes the
+      // sheet themselves, because they may well have signed the form first.
+      void watch;
     } catch (error) {
       showToast((error as Error)?.message || "Could not open the tax form.", "error");
     } finally {
@@ -5448,6 +5500,17 @@ function WalletAppShellContent({
           void handleStartW9();
         }}
         onDismiss={() => acknowledgeW9Tier(visibleW9Tier)}
+      />
+
+      {/* Shown after the form clears, and only then. Kept separate from the
+          tier modal rather than added as a fifth presentation: that one is a
+          ladder of warnings sharing a meter, and this is the one screen in the
+          whole flow that is not asking for anything. */}
+      <W9CompleteModal
+        visible={w9Released !== null && !redeemFlow && !merchantKiosk}
+        releasedSfluv={w9Released ?? ""}
+        tokenSymbol={clientConfig.tokenSymbol}
+        onDismiss={() => setW9Released(null)}
       />
     </RootContainer>
   );
