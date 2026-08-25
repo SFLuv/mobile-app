@@ -2413,6 +2413,17 @@ function WalletAppShellContent({
       // warning for the rest of the year.
       const outstanding = visibleW9Tier;
 
+      // Pin what the confirmation will need, now, while it is still true.
+      //
+      // Somebody tapping this is by definition not cleared yet and may have
+      // money held. Both facts are recorded here rather than inferred later,
+      // because the sheet is about to take the app into the background and
+      // whatever happens while it is there — a foreground refresh, a deep
+      // link, a status arriving out of order — must not be able to make the
+      // confirmation look like it has already been shown.
+      w9WasClearedRef.current = false;
+      w9HeldBeforeClearingRef.current = w9Status?.escrowedSfluv ?? "";
+
       // A plain browser, not an auth session.
       //
       // openAuthSessionAsync closes itself on a redirect, which is convenient,
