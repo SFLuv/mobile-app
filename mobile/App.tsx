@@ -1111,7 +1111,6 @@ type DockTab = {
   icon: keyof typeof Ionicons.glyphMap;
   /** The raised, always-centered action button. Exactly one tab carries this. */
   center?: boolean;
-  showDot?: boolean;
 };
 
 /**
@@ -1311,7 +1310,6 @@ function BottomDock({
                 size={20}
                 color={active ? palette.primaryStrong : palette.textMuted}
               />
-              {tab.showDot ? <View style={styles.bottomTabDot} /> : null}
             </View>
             <Text
               numberOfLines={1}
@@ -2606,11 +2604,14 @@ function WalletAppShellContent({
   const dockTabs = useMemo<DockTab[]>(() => {
     const tabs: DockTab[] = [];
     if (participateTargets.length > 0) {
+      // No unread dot. Notifications are counted in exactly one place — the
+      // bell — and a second indicator elsewhere either says the same thing
+      // twice or, worse, disagrees with it: this one was improver-only, so a
+      // volunteer's tax notice lit nothing here while the bell showed one.
       tabs.push({
         key: "participate",
         label: "Participate",
         icon: participateActive ? "people-circle" : "people-circle-outline",
-        showDot: improverNotifications?.hasUnseen === true && participateTargets.includes("improver"),
       });
     }
     tabs.push({ key: "map", label: "Map", icon: tab === "map" ? "map" : "map-outline" });
@@ -2618,7 +2619,7 @@ function WalletAppShellContent({
     tabs.push({ key: "activity", label: "Activity", icon: tab === "activity" ? "pulse" : "pulse-outline" });
     tabs.push({ key: "contacts", label: "Contacts", icon: tab === "contacts" ? "people" : "people-outline" });
     return tabs;
-  }, [improverNotifications?.hasUnseen, participateActive, participateTargets, tab]);
+  }, [participateActive, participateTargets, tab]);
 
   const activeDockKey = useMemo<DockTabKey | null>(() => {
     if (participateActive) {
@@ -5263,7 +5264,6 @@ function WalletAppShellContent({
               {participateTargets.map((target) => {
                 const entry = PARTICIPATE_ENTRIES[target];
                 const active = tab === target;
-                const showDot = target === "improver" && improverNotifications?.hasUnseen === true;
                 return (
                   <Pressable
                     key={target}
@@ -5283,7 +5283,6 @@ function WalletAppShellContent({
                         size={18}
                         color={active ? palette.primaryStrong : palette.textMuted}
                       />
-                      {showDot ? <View style={styles.bottomTabDot} /> : null}
                     </View>
                   </Pressable>
                 );
@@ -7549,17 +7548,6 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   },
   bottomTabTextActive: {
     color: palette.primaryStrong,
-  },
-  bottomTabDot: {
-    position: "absolute",
-    top: -2,
-    right: -3,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: palette.danger,
-    borderWidth: 1.5,
-    borderColor: palette.surface,
   },
   loginWrap: {
     flex: 1,
