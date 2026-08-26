@@ -248,6 +248,11 @@ const IMPROVER_NOTIFICATION_POLL_MS = 60_000;
 // interrupts somebody, and a reward that was just held should say so while the
 // person is still looking at the screen that told them it arrived.
 const W9_STATUS_POLL_MS = 8_000;
+// How long the tier prompt stays out of the way after the tax form closes.
+// Long enough for a completion to land and the confirmation to take over,
+// short enough that backing out of the form does not leave somebody without
+// the prompt that sent them there.
+const W9_FORM_CLOSE_GRACE_MS = 6_000;
 const LINK_DEDUPE_WINDOW_MS = 4_000;
 const BACKEND_BOOTSTRAP_TIMEOUT_MS = 20_000;
 const WALLET_CREATE_TIMEOUT_MS = 30_000;
@@ -1609,6 +1614,11 @@ function WalletAppShellContent({
   // effect's dependencies, so that a filing already cleared by the time this is
   // set still counts.
   const [w9AwaitingConfirmation, setW9AwaitingConfirmation] = useState(false);
+  // True while the tax form is on screen, and briefly after it closes — long
+  // enough for a completion to come back, short enough that somebody who backed
+  // out is not left staring at a screen that has stopped asking them for
+  // anything.
+  const [w9FormOpen, setW9FormOpen] = useState(false);
   const [storedPushToken, setStoredPushToken] = useState<string | null>(null);
   const [storedPushTokenLoaded, setStoredPushTokenLoaded] = useState(false);
   const [backendPushPreferenceEnabled, setBackendPushPreferenceEnabled] = useState<boolean | null>(null);
@@ -2344,6 +2354,25 @@ function WalletAppShellContent({
     if (!w9Status || w9Status.cleared) return null;
     const tier = w9Status.tier;
     if (!tier) return null;
+    // The confirmation owns the screen once it is up. It renders in the view
+    // tree while this is a UIKit presentation, so a tier modal left visible
+    // would sit on top of it — the congratulation hidden behind the warning it
+    // replaces.
+    if (w9Released !== null) return null;
+
+    // Away filling the form in, so nothing to nag about.
+    //
+    // The tier modal is behind the browser sheet rather than replaced by it, so
+    // closing the sheet reveals it again and it stays up until the cleared
+    // status arrives a second or so later. Somebody who has just finished a tax
+    // form is told in red that they need to fill out a tax form, and then
+    // congratulated for it.
+    //
+    // Deliberately NOT tied to having opened the form at all. Somebody can open
+    // it, not understand it, and close it again without filing — and they must
+    // get the prompt back, or the one route to the form is gone. So this lasts
+    // while the sheet is up and for a breath afterwards, and no longer.
+    if (w9FormOpen) return null;
     // Asked for, so shown — regardless of what has been acknowledged before.
     if (w9TierRequested) return tier;
     // Blocked is decided by the stored acknowledgement alone, and checked
@@ -2452,6 +2481,7 @@ function WalletAppShellContent({
       w9WasClearedRef.current = false;
       w9HeldBeforeClearingRef.current = w9Status?.escrowedSfluv ?? "";
       setW9AwaitingConfirmation(true);
+      setW9FormOpen(true);
 
       // A plain browser, not an auth session.
       //
@@ -2498,6 +2528,12 @@ function WalletAppShellContent({
       // by the person. Either way there is nothing left to dismiss.
       sheetOpen = false;
       acknowledgeW9Tier(outstanding);
+
+      // A grace period, not a state. Somebody who submitted has a completion
+      // arriving within a second or two, and the confirmation takes over from
+      // here. Somebody who closed the form without filing it gets the prompt
+      // back — a few seconds late, rather than never.
+      setTimeout(() => setW9FormOpen(false), W9_FORM_CLOSE_GRACE_MS);
       // Deliberately not awaited: it keeps running if somebody closes the
       // sheet themselves, because they may well have signed the form first.
       void watch;
