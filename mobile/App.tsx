@@ -2432,8 +2432,10 @@ function WalletAppShellContent({
   }, [w9Status?.cleared, w9Status?.escrowedSfluv, w9AwaitingConfirmation]);
 
   /**
-   * Records that the outstanding tier has been answered — by dismissing it, or
-   * by opening the form.
+   * Records that the outstanding tier has been answered — by explicitly
+   * dismissing it. Opening the form is deliberately NOT an answer: the only
+   * other thing that retires a tier is the filing actually clearing, at which
+   * point the server stops reporting one.
    */
   const acknowledgeW9Tier = (tier: AppW9Tier | null) => {
     setW9TierRequested(false);
@@ -2465,11 +2467,6 @@ function WalletAppShellContent({
     setW9Busy(true);
     try {
       const formUrl = await backendClient.startW9();
-      // Answered only once the form is actually in front of them. Acknowledging
-      // on the tap would let a failure to mint a link quietly retire the
-      // warning for the rest of the year.
-      const outstanding = visibleW9Tier;
-
       // Pin what the confirmation will need, now, while it is still true.
       //
       // Somebody tapping this is by definition not cleared yet and may have
@@ -2555,8 +2552,14 @@ function WalletAppShellContent({
       // Resolves however the sheet went away — dismissed from here, or closed
       // by the person. Either way there is nothing left to dismiss.
       sheetOpen = false;
-      acknowledgeW9Tier(outstanding);
 
+      // Deliberately NOT acknowledged here. The sheet closing proves nothing —
+      // the person may have backed out of the form without filing, and a
+      // warning retired on a back-out is a warning they never see again while
+      // still being unfiled. Acknowledgement is contingent on a completed
+      // filing: either they dismiss the modal themselves, or the filing clears
+      // and the server stops reporting a tier at all.
+      //
       // A grace period, not a state. Somebody who submitted has a completion
       // arriving within a second or two, and the confirmation takes over from
       // here. Somebody who closed the form without filing it gets the prompt
