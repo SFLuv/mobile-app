@@ -18,6 +18,13 @@ type Props = {
   busy?: boolean;
   onStartForm: () => void;
   onDismiss: () => void;
+  /**
+   * Fired when the modal has actually left the screen — the platform's own
+   * dismissal callback, not a guess. The form flow presents the browser from
+   * here, because presenting over a modal that is still animating out is what
+   * froze the app three different ways.
+   */
+  onClosed?: () => void;
 };
 
 type Presentation = {
@@ -105,6 +112,7 @@ export function W9TierModal({
   busy = false,
   onStartForm,
   onDismiss,
+  onClosed,
 }: Props) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
@@ -126,7 +134,7 @@ export function W9TierModal({
   const percent = Math.round(progressFraction(earnedBase, thresholdBase) * 100);
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onDismiss}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onDismiss} onDismiss={onClosed}>
       <View style={styles.overlay}>
         <View style={styles.card}>
           <View style={[styles.iconWrap, { backgroundColor: `${accent}1f` }]}>

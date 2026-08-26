@@ -2372,9 +2372,12 @@ function WalletAppShellContent({
     // it, not understand it, and close it again without filing — and they must
     // get the prompt back, or the one route to the form is gone. So this lasts
     // while the sheet is up and for a breath afterwards, and no longer.
-    if (w9FormOpen) return null;
-    // Asked for, so shown — regardless of what has been acknowledged before.
+    // Asked for, so shown — regardless of what has been acknowledged before,
+    // and checked ahead of the form-open suppression deliberately: the
+    // notification-bell entry is then an unconditional way back to this
+    // modal, whatever state the form flow was left in.
     if (w9TierRequested) return tier;
+    if (w9FormOpen) return null;
     // Blocked is decided by the stored acknowledgement alone, and checked
     // before the session flag rather than after it.
     //
@@ -2454,6 +2457,109 @@ function WalletAppShellContent({
   };
 
   /**
+   * The minted form URL waiting for the tier modal to leave the screen, and
+   * the fallback that presents anyway if no dismissal is ever reported.
+   */
+  const w9PendingFormUrlRef = useRef<string | null>(null);
+  const w9PresentFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /**
+   * Presents the vendor's tax form, once the way is clear.
+   *
+   * Called from the tier modal's own dismissal callback — the point at which
+   * the platform is provably done animating — with a timer as fallback for
+   * the cases that never report one. Guarded by the stashed URL, so whichever
+   * of the two fires first presents and the other finds nothing to do.
+   *
+   * History, because this exact seam has now produced three distinct
+   * failures: presenting a Safari sheet while the tier modal is still
+   * mid-dismissal either leaves the sheet presented-but-invisible over a
+   * frozen app (the accessibility tree showed the whole browser chrome
+   * rendering nothing), or UIKit refuses it and openBrowserAsync never
+   * settles — killing everything sequenced after the await, which is how the
+   * modal once vanished with no way back to the form. A timed guess at the
+   * dismissal merely shrank the window. So: no guessing, and nothing vital
+   * sequenced after an await that may never settle.
+   */
+  const presentW9Form = async () => {
+    const formUrl = w9PendingFormUrlRef.current;
+    if (!formUrl) return;
+    w9PendingFormUrlRef.current = null;
+    if (w9PresentFallbackRef.current) {
+      clearTimeout(w9PresentFallbackRef.current);
+      w9PresentFallbackRef.current = null;
+    }
+    if (!backendClient) return;
+
+    // Whether the sheet we opened is still the one on screen.
+    //
+    // dismissBrowser tears down a presented view controller. Asking it to
+    // close one that has already gone — because the person closed it
+    // themselves, which is the common case once the vendor shows its own
+    // confirmation — is a request to dismantle something that is not there,
+    // and it is the only thing in this flow that touches UIKit's presentation
+    // stack.
+    let sheetOpen = true;
+
+    const watch = (async () => {
+      // Quick at first, because the callback clears the filing in about a
+      // second and the sheet should not outlive the thing it was showing.
+      for (let attempt = 0; attempt < 40; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, attempt < 12 ? 1000 : 3000));
+        const status = await backendClient.getW9Status().catch(() => null);
+        if (!status) continue;
+        setW9Status(status);
+        if (status.cleared) {
+          if (sheetOpen) {
+            sheetOpen = false;
+            await WebBrowser.dismissBrowser().catch(() => undefined);
+          }
+          return;
+        }
+      }
+    })();
+
+    try {
+      try {
+        await WebBrowser.openBrowserAsync(formUrl);
+      } catch {
+        // A single refusal is usually a presentation transition that had not
+        // quite finished. Give it a beat and try once more; a second refusal
+        // is real.
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        await WebBrowser.openBrowserAsync(formUrl);
+      }
+      // Resolves however the sheet went away — dismissed from here, or closed
+      // by the person. Either way there is nothing left to dismiss.
+      sheetOpen = false;
+
+      // Deliberately NOT acknowledged here. The sheet closing proves nothing —
+      // the person may have backed out of the form without filing, and a
+      // warning retired on a back-out is a warning they never see again while
+      // still being unfiled. Acknowledgement is contingent on a completed
+      // filing: either they dismiss the modal themselves, or the filing clears
+      // and the server stops reporting a tier at all.
+      //
+      // A grace period, not a state. Somebody who submitted has a completion
+      // arriving within a second or two, and the confirmation takes over from
+      // here. Somebody who closed the form without filing it gets the prompt
+      // back — a few seconds late, rather than never.
+      setTimeout(() => setW9FormOpen(false), W9_FORM_CLOSE_GRACE_MS);
+    } catch {
+      // The form never presented. Put everything back the way it was — most
+      // importantly the tier modal, which returns the moment w9FormOpen
+      // drops, so the way to the form is never lost.
+      sheetOpen = false;
+      setW9FormOpen(false);
+      setW9AwaitingConfirmation(false);
+      showToast("Could not open the tax form. Please try again.", "error");
+    }
+    // Deliberately not awaited: it keeps running if somebody closes the sheet
+    // themselves, because they may well have signed the form first.
+    void watch;
+  };
+
+  /**
    * Opens the vendor's tax form in the system browser.
    *
    * Deliberately not a WebView. The page collects a tax identification number,
@@ -2461,6 +2567,16 @@ function WalletAppShellContent({
    * exactly the liability the vendor is paid to absorb. The system browser also
    * shows the address bar, so someone can see whose site they are typing an SSN
    * into before they do it.
+   *
+   * A plain browser, not an auth session. openAuthSessionAsync closes itself
+   * on a redirect, which is convenient, but iOS puts a consent sheet in front
+   * of it first — «"SFLuv" Wants to Use "localhost" to Sign In» — and that is
+   * both an extra tap and a lie: nobody is signing in, they are filing a tax
+   * form. Worse, it is the system dialog people have learned to refuse. So the
+   * sheet is opened plainly and closed by the status watcher instead, when the
+   * backend says the filing actually cleared — a better signal than a redirect
+   * anyway, because a redirect proves the page navigated, not that the vendor
+   * recorded anything.
    */
   const handleStartW9 = async () => {
     if (!backendClient || w9Busy) return;
@@ -2478,99 +2594,19 @@ function WalletAppShellContent({
       w9WasClearedRef.current = false;
       w9HeldBeforeClearingRef.current = w9Status?.escrowedSfluv ?? "";
       setW9AwaitingConfirmation(true);
+
+      // Stash the URL and start the tier modal's dismissal. Presentation
+      // happens in presentW9Form when the modal reports itself gone; the
+      // timer exists only for a dismissal that is never reported.
+      w9PendingFormUrlRef.current = formUrl;
       setW9FormOpen(true);
-
-      // A plain browser, not an auth session.
-      //
-      // openAuthSessionAsync closes itself on a redirect, which is convenient,
-      // but iOS puts a consent sheet in front of it first — «"SFLuv" Wants to
-      // Use "localhost" to Sign In» — and that is both an extra tap and a lie:
-      // nobody is signing in, they are filing a tax form. Worse, it is the
-      // system dialog people have learned to refuse.
-      //
-      // So the sheet is opened plainly and closed from here instead, when the
-      // backend says the filing actually cleared. That is a better signal than
-      // a redirect anyway: a redirect proves the page navigated, not that the
-      // vendor recorded anything.
-      // Whether the sheet we opened is still the one on screen.
-      //
-      // dismissBrowser tears down a presented view controller. Asking it to
-      // close one that has already gone — because the person closed it
-      // themselves, which is the common case once the vendor shows its own
-      // confirmation — is a request to dismantle something that is not there,
-      // and it is the only thing in this flow that touches UIKit's presentation
-      // stack. Nothing else here can leave the interface unable to draw.
-      let sheetOpen = true;
-
-      const watch = (async () => {
-        // Quick at first, because the callback clears the filing in about a
-        // second and the sheet should not outlive the thing it was showing.
-        for (let attempt = 0; attempt < 40; attempt++) {
-          await new Promise((resolve) => setTimeout(resolve, attempt < 12 ? 1000 : 3000));
-          const status = await backendClient.getW9Status().catch(() => null);
-          if (!status) continue;
-          setW9Status(status);
-          if (status.cleared) {
-            if (sheetOpen) {
-              sheetOpen = false;
-              await WebBrowser.dismissBrowser().catch(() => undefined);
-            }
-            return;
-          }
-        }
-      })();
-
-      // Let the tier modal finish going away before presenting the browser.
-      //
-      // This button lives inside that modal, so without the wait we ask UIKit
-      // to present a Safari sheet while it is mid-dismissal of another
-      // presentation. It does not refuse: the sheet ends up presented and
-      // never drawn — invisible, on top, swallowing every touch. The app
-      // underneath keeps its last frame and carries on polling, which is what
-      // "the simulator froze" was every time.
-      //
-      // Confirmed from the accessibility tree while it was stuck: Safari, Done,
-      // Address, Reload — the whole browser chrome present and rendering
-      // nothing, with the wallet visible behind it.
-      //
-      // setW9FormOpen(true) above is what starts the dismissal; this waits out
-      // the fade rather than guessing at it from the far side.
-      await new Promise((resolve) => setTimeout(resolve, 400));
-
-      // Released before the sheet opens, not after it closes.
-      //
-      // This flag only exists to stop a second tap while the link is being
-      // minted; once the form is on screen the button is behind it and cannot
-      // be tapped anyway. Holding it until the sheet closed meant relying on
-      // openBrowserAsync to resolve — and it does not always. Opening a sheet
-      // while the previous one is still dismissing leaves a promise that never
-      // settles, so the `finally` never ran and the button span forever, with
-      // no way back to the form.
-      setW9Busy(false);
-
-      await WebBrowser.openBrowserAsync(formUrl);
-      // Resolves however the sheet went away — dismissed from here, or closed
-      // by the person. Either way there is nothing left to dismiss.
-      sheetOpen = false;
-
-      // Deliberately NOT acknowledged here. The sheet closing proves nothing —
-      // the person may have backed out of the form without filing, and a
-      // warning retired on a back-out is a warning they never see again while
-      // still being unfiled. Acknowledgement is contingent on a completed
-      // filing: either they dismiss the modal themselves, or the filing clears
-      // and the server stops reporting a tier at all.
-      //
-      // A grace period, not a state. Somebody who submitted has a completion
-      // arriving within a second or two, and the confirmation takes over from
-      // here. Somebody who closed the form without filing it gets the prompt
-      // back — a few seconds late, rather than never.
-      setTimeout(() => setW9FormOpen(false), W9_FORM_CLOSE_GRACE_MS);
-      // Deliberately not awaited: it keeps running if somebody closes the
-      // sheet themselves, because they may well have signed the form first.
-      void watch;
+      w9PresentFallbackRef.current = setTimeout(() => {
+        void presentW9Form();
+      }, 1200);
     } catch (error) {
       showToast((error as Error)?.message || "Could not open the tax form.", "error");
     } finally {
+      // Only ever guarded the mint; presentation has its own failure path.
       setW9Busy(false);
     }
   };
@@ -5631,6 +5667,9 @@ function WalletAppShellContent({
           void handleStartW9();
         }}
         onDismiss={() => acknowledgeW9Tier(visibleW9Tier)}
+        onClosed={() => {
+          void presentW9Form();
+        }}
       />
 
       {/* Shown after the form clears, and only then. Kept separate from the
