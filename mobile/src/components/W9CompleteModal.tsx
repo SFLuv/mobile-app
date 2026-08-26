@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 
@@ -24,6 +24,13 @@ type Props = {
  * failure: they are left wondering whether it took, and whether the money that
  * was stuck is still stuck.
  *
+ * Rendered in the view tree rather than as a Modal, and that is load-bearing.
+ * A React Native Modal is a UIKit modal presentation, and iOS will present only
+ * one at a time from the same view controller. This one arrives exactly as the
+ * tier modal is dismissing — the filing clearing is what removes the tier —
+ * so presenting it was silently refused, every time, through the button. The
+ * state was correct and nothing was drawn.
+ *
  * So this says three things, in order of what people actually want to know:
  * the form is in, the money that was held is on its way, and rewards work
  * normally again. The middle one is omitted rather than reworded when nothing
@@ -37,8 +44,12 @@ export function W9CompleteModal({ visible, releasedSfluv, tokenSymbol, onDismiss
   const released = releasedSfluv.trim();
   const hadEscrow = released !== "" && released !== "0";
 
+  if (!visible) {
+    return null;
+  }
+
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onDismiss}>
+    <View style={styles.host} pointerEvents="box-none">
       <Pressable style={styles.overlay} onPress={onDismiss} accessible={false}>
         <Pressable style={styles.card} onPress={() => {}} accessible={false}>
           <View style={[styles.iconWrap, { backgroundColor: `${palette.success}1f` }]}>
@@ -74,12 +85,18 @@ export function W9CompleteModal({ visible, releasedSfluv, tokenSymbol, onDismiss
           </Pressable>
         </Pressable>
       </Pressable>
-    </Modal>
+    </View>
   );
 }
 
 function createStyles(palette: Palette) {
   return StyleSheet.create({
+    // Covers the window and sits above the app's own chrome. zIndex rather
+    // than elevation: this only ever runs on iOS's renderer.
+    host: {
+      ...StyleSheet.absoluteFillObject,
+      zIndex: 1000,
+    },
     overlay: {
       flex: 1,
       backgroundColor: palette.overlay,
