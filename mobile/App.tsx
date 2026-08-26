@@ -2523,6 +2523,17 @@ function WalletAppShellContent({
         }
       })();
 
+      // Released before the sheet opens, not after it closes.
+      //
+      // This flag only exists to stop a second tap while the link is being
+      // minted; once the form is on screen the button is behind it and cannot
+      // be tapped anyway. Holding it until the sheet closed meant relying on
+      // openBrowserAsync to resolve — and it does not always. Opening a sheet
+      // while the previous one is still dismissing leaves a promise that never
+      // settles, so the `finally` never ran and the button span forever, with
+      // no way back to the form.
+      setW9Busy(false);
+
       await WebBrowser.openBrowserAsync(formUrl);
       // Resolves however the sheet went away — dismissed from here, or closed
       // by the person. Either way there is nothing left to dismiss.
@@ -3706,6 +3717,14 @@ function WalletAppShellContent({
       appIsActiveRef.current = isActive;
 
       if (!wasActive && isActive) {
+        // Back in the app, so the tax form is not on screen — whatever
+        // openBrowserAsync did or did not report.
+        //
+        // A safety net rather than the main path: the form opens in an in-app
+        // sheet, which does not background the app, so this only fires when
+        // somebody genuinely left. It costs nothing and it is the one signal
+        // that cannot be lost to a promise that never settles.
+        setW9FormOpen(false);
         // Blocked is re-asked every time the app is opened. The first three
         // tiers are protected by the acknowledgement the backend stores, so
         // clearing this does not resurrect them.
