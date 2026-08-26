@@ -2523,6 +2523,23 @@ function WalletAppShellContent({
         }
       })();
 
+      // Let the tier modal finish going away before presenting the browser.
+      //
+      // This button lives inside that modal, so without the wait we ask UIKit
+      // to present a Safari sheet while it is mid-dismissal of another
+      // presentation. It does not refuse: the sheet ends up presented and
+      // never drawn — invisible, on top, swallowing every touch. The app
+      // underneath keeps its last frame and carries on polling, which is what
+      // "the simulator froze" was every time.
+      //
+      // Confirmed from the accessibility tree while it was stuck: Safari, Done,
+      // Address, Reload — the whole browser chrome present and rendering
+      // nothing, with the wallet visible behind it.
+      //
+      // setW9FormOpen(true) above is what starts the dismissal; this waits out
+      // the fade rather than guessing at it from the far side.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+
       // Released before the sheet opens, not after it closes.
       //
       // This flag only exists to stop a second tap while the link is being
