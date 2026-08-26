@@ -2465,6 +2465,16 @@ function WalletAppShellContent({
       // backend says the filing actually cleared. That is a better signal than
       // a redirect anyway: a redirect proves the page navigated, not that the
       // vendor recorded anything.
+      // Whether the sheet we opened is still the one on screen.
+      //
+      // dismissBrowser tears down a presented view controller. Asking it to
+      // close one that has already gone — because the person closed it
+      // themselves, which is the common case once the vendor shows its own
+      // confirmation — is a request to dismantle something that is not there,
+      // and it is the only thing in this flow that touches UIKit's presentation
+      // stack. Nothing else here can leave the interface unable to draw.
+      let sheetOpen = true;
+
       const watch = (async () => {
         // Quick at first, because the callback clears the filing in about a
         // second and the sheet should not outlive the thing it was showing.
@@ -2474,13 +2484,19 @@ function WalletAppShellContent({
           if (!status) continue;
           setW9Status(status);
           if (status.cleared) {
-            await WebBrowser.dismissBrowser().catch(() => undefined);
+            if (sheetOpen) {
+              sheetOpen = false;
+              await WebBrowser.dismissBrowser().catch(() => undefined);
+            }
             return;
           }
         }
       })();
 
       await WebBrowser.openBrowserAsync(formUrl);
+      // Resolves however the sheet went away — dismissed from here, or closed
+      // by the person. Either way there is nothing left to dismiss.
+      sheetOpen = false;
       acknowledgeW9Tier(outstanding);
       // Deliberately not awaited: it keeps running if somebody closes the
       // sheet themselves, because they may well have signed the form first.
