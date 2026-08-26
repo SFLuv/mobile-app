@@ -1594,6 +1594,21 @@ function WalletAppShellContent({
   // already cleared on the previous read.
   const w9HeldBeforeClearingRef = useRef("");
   const w9WasClearedRef = useRef<boolean | null>(null);
+  // Set when somebody opens the form from here, and the reason this no longer
+  // depends on catching a transition.
+  //
+  // Inferring "they just filed" from a false→true change means being awake for
+  // the change. Opening the form backgrounds the app for as long as it takes to
+  // fill in a tax form, and on the way back a foreground refresh, a resumed
+  // poll and an acknowledgement all set the status within a tick of each other.
+  // Miss the edge and the confirmation is simply never shown — which is what
+  // happened on the first real filing, on the one screen that tells somebody
+  // their money is coming back.
+  //
+  // State rather than a ref: it has to survive re-renders and take part in the
+  // effect's dependencies, so that a filing already cleared by the time this is
+  // set still counts.
+  const [w9AwaitingConfirmation, setW9AwaitingConfirmation] = useState(false);
   const [storedPushToken, setStoredPushToken] = useState<string | null>(null);
   const [storedPushTokenLoaded, setStoredPushTokenLoaded] = useState(false);
   const [backendPushPreferenceEnabled, setBackendPushPreferenceEnabled] = useState<boolean | null>(null);
@@ -2361,18 +2376,31 @@ function WalletAppShellContent({
    */
   useEffect(() => {
     if (!w9Status) return;
+
     if (!w9Status.cleared) {
+      // Held figures are only true while they are held; by the time the filing
+      // clears the escrow has drained and the amount reads zero.
       w9HeldBeforeClearingRef.current = w9Status.escrowedSfluv ?? "";
+      w9WasClearedRef.current = false;
+      return;
     }
+
     const was = w9WasClearedRef.current;
-    w9WasClearedRef.current = w9Status.cleared;
-    // The first reading establishes a baseline. Only a change is news — without
-    // this, opening the app with a filing already on file would congratulate
-    // somebody for something they did last week.
-    if (was === null || was || !w9Status.cleared) return;
+    w9WasClearedRef.current = true;
+
+    // Two ways to deserve this. Either they opened the form from here, whatever
+    // the app went through afterwards — or the filing cleared while we were
+    // watching, which covers filing on another device or an admin release.
+    //
+    // `was === null` is the app opening with a filing already on file, and gets
+    // nothing: congratulating somebody for something they did last week is how
+    // this kind of message stops meaning anything.
+    if (!w9AwaitingConfirmation && was !== false) return;
+
+    setW9AwaitingConfirmation(false);
     setW9Released(w9HeldBeforeClearingRef.current);
     void refreshEverything();
-  }, [w9Status?.cleared, w9Status?.escrowedSfluv]);
+  }, [w9Status?.cleared, w9Status?.escrowedSfluv, w9AwaitingConfirmation]);
 
   /**
    * Records that the outstanding tier has been answered — by dismissing it, or
@@ -2423,6 +2451,7 @@ function WalletAppShellContent({
       // confirmation look like it has already been shown.
       w9WasClearedRef.current = false;
       w9HeldBeforeClearingRef.current = w9Status?.escrowedSfluv ?? "";
+      setW9AwaitingConfirmation(true);
 
       // A plain browser, not an auth session.
       //
