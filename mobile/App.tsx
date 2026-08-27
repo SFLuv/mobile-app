@@ -23,6 +23,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { resilientPrivyStorage } from "./src/services/resilientPrivyStorage";
 import { BlurView } from "expo-blur";
 import Constants from "expo-constants";
 import * as Crypto from "expo-crypto";
@@ -7376,6 +7377,7 @@ export default function App() {
         <PrivyProvider
           appId={mobileConfig.privyAppId}
           clientId={mobileConfig.privyClientId || undefined}
+          storage={resilientPrivyStorage}
           supportedChains={[supportedChain]}
           config={{
             embedded: {
