@@ -2482,6 +2482,7 @@ function WalletAppShellContent({
    */
   const presentW9Form = async () => {
     const formUrl = w9PendingFormUrlRef.current;
+    console.log("[w9] presentW9Form:", formUrl ? "have url" : "nothing pending");
     if (!formUrl) return;
     w9PendingFormUrlRef.current = null;
     if (w9PresentFallbackRef.current) {
@@ -2503,11 +2504,13 @@ function WalletAppShellContent({
     // bar, which is the point of using a real browser for an SSN form.
     try {
       await Linking.openURL(formUrl);
+      console.log("[w9] Safari handoff succeeded");
       // Off filing in Safari; the app is about to background. The grace keeps
       // the tier modal down through the handoff, and somebody who comes back
       // without filing finds the prompt up again — deliberately.
       setTimeout(() => setW9FormOpen(false), W9_FORM_CLOSE_GRACE_MS);
-    } catch {
+    } catch (error) {
+      console.log("[w9] Safari handoff FAILED:", (error as Error)?.message);
       // Safari never opened. Put everything back — most importantly the tier
       // modal, which returns the moment w9FormOpen drops, so the way to the
       // form is never lost.
@@ -2553,9 +2556,11 @@ function WalletAppShellContent({
    */
   const handleStartW9 = async () => {
     if (!backendClient || w9Busy) return;
+    console.log("[w9] start: minting form link");
     setW9Busy(true);
     try {
       const formUrl = await backendClient.startW9();
+      console.log("[w9] start: minted", formUrl);
       // Pin what the confirmation will need, now, while it is still true.
       //
       // Somebody tapping this is by definition not cleared yet and may have
@@ -2574,6 +2579,7 @@ function WalletAppShellContent({
       w9PendingFormUrlRef.current = formUrl;
       setW9FormOpen(true);
       w9PresentFallbackRef.current = setTimeout(() => {
+        console.log("[w9] presenting via fallback timer");
         void presentW9Form();
       }, 1200);
     } catch (error) {
@@ -2868,6 +2874,24 @@ function WalletAppShellContent({
 
   const [notificationsOpen, setNotificationsOpen] = useState(false);
 
+  /**
+   * What a tapped notification wants to do, held until the panel is gone.
+   *
+   * The panel is a UIKit modal. Navigating in the same breath as closing it
+   * asks iOS to present the next thing — the tier modal, most importantly —
+   * while the panel is still mid-dismissal, and iOS silently drops that
+   * presentation and never retries. So the tap stashes its intent, and it
+   * runs from the panel's own dismissal callback, with a timer as fallback
+   * for the platforms that never report one. Whichever fires first drains;
+   * the other finds nothing.
+   */
+  const pendingPanelActionRef = useRef<(() => void) | null>(null);
+  const drainPanelAction = useCallback(() => {
+    const action = pendingPanelActionRef.current;
+    pendingPanelActionRef.current = null;
+    if (action) action();
+  }, []);
+
   const openVolunteerPanel = useCallback((eventId: string | null = null) => {
     setVolunteerRouteRequest((current) => ({ eventId, nonce: current.nonce + 1 }));
     setTab("volunteer");
@@ -2892,6 +2916,7 @@ function WalletAppShellContent({
           }
           return;
         case "tax":
+          console.log("[w9] tax target: requesting tier modal");
           // Owing a W-9 is not tied to a role, so this cannot open a role
           // panel. The wallet is where the money is and where every signed-in
           // user can go; the escrow card refreshes with it.
@@ -5491,6 +5516,7 @@ function WalletAppShellContent({
         presentationStyle="overFullScreen"
         animationType="fade"
         onRequestClose={() => setNotificationsOpen(false)}
+        onDismiss={drainPanelAction}
       >
         <Pressable style={styles.modalOverlay} onPress={() => setNotificationsOpen(false)} accessible={false}>
           <Pressable style={styles.moreMenuCard} onPress={() => {}} accessible={false}>
@@ -5523,8 +5549,10 @@ function WalletAppShellContent({
                         item.target.kind === "none" ? undefined : "Opens what this is about"
                       }
                       onPress={() => {
+                        console.log("[w9] notification tapped:", item.target.kind);
+                        pendingPanelActionRef.current = () => openNotification(item);
                         setNotificationsOpen(false);
-                        openNotification(item);
+                        setTimeout(drainPanelAction, 600);
                       }}
                     >
                       <View style={[styles.moreMenuCopy, styles.notificationCopyInset]}>
@@ -5641,6 +5669,7 @@ function WalletAppShellContent({
         }}
         onDismiss={() => acknowledgeW9Tier(visibleW9Tier)}
         onClosed={() => {
+          console.log("[w9] tier modal reported dismissed");
           void presentW9Form();
         }}
       />
