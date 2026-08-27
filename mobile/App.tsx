@@ -27,7 +27,6 @@ import { BlurView } from "expo-blur";
 import Constants from "expo-constants";
 import * as Crypto from "expo-crypto";
 import * as Device from "expo-device";
-import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
 import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
@@ -2491,72 +2490,46 @@ function WalletAppShellContent({
     }
     if (!backendClient) return;
 
-    // Whether the sheet we opened is still the one on screen.
+    // The form opens in the EXTERNAL Safari app, not an in-app sheet.
     //
-    // dismissBrowser tears down a presented view controller. Asking it to
-    // close one that has already gone — because the person closed it
-    // themselves, which is the common case once the vendor shows its own
-    // confirmation — is a request to dismantle something that is not there,
-    // and it is the only thing in this flow that touches UIKit's presentation
-    // stack.
-    let sheetOpen = true;
+    // expo-web-browser's in-app SFSafariViewController failed three distinct
+    // ways on this stack, all traced to presenting a sheet inside the app's
+    // own window: presented-but-invisible over a frozen app; refused by UIKit
+    // with a promise that never settles; and stalled mid-presentation in a
+    // state that silently blocked every LATER present — including the tier
+    // modal itself, which is how "the bell won't reopen it" happened. Handing
+    // the URL to the system leaves nothing to present in-app, so there is
+    // nothing to stall, freeze, or lose. Safari also shows the full address
+    // bar, which is the point of using a real browser for an SSN form.
+    try {
+      await Linking.openURL(formUrl);
+      // Off filing in Safari; the app is about to background. The grace keeps
+      // the tier modal down through the handoff, and somebody who comes back
+      // without filing finds the prompt up again — deliberately.
+      setTimeout(() => setW9FormOpen(false), W9_FORM_CLOSE_GRACE_MS);
+    } catch {
+      // Safari never opened. Put everything back — most importantly the tier
+      // modal, which returns the moment w9FormOpen drops, so the way to the
+      // form is never lost.
+      setW9FormOpen(false);
+      setW9AwaitingConfirmation(false);
+      showToast("Could not open the tax form. Please try again.", "error");
+      return;
+    }
 
-    const watch = (async () => {
-      // Quick at first, because the callback clears the filing in about a
-      // second and the sheet should not outlive the thing it was showing.
+    // Poll while they file, so the cleared status — and the confirmation that
+    // hangs off it — lands moments after the vendor's callback rather than on
+    // the next scheduled refresh. Timers pause while the app is backgrounded
+    // and resume on return, which is exactly the moment the answer matters.
+    void (async () => {
       for (let attempt = 0; attempt < 40; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, attempt < 12 ? 1000 : 3000));
         const status = await backendClient.getW9Status().catch(() => null);
         if (!status) continue;
         setW9Status(status);
-        if (status.cleared) {
-          if (sheetOpen) {
-            sheetOpen = false;
-            await WebBrowser.dismissBrowser().catch(() => undefined);
-          }
-          return;
-        }
+        if (status.cleared) return;
       }
     })();
-
-    try {
-      try {
-        await WebBrowser.openBrowserAsync(formUrl);
-      } catch {
-        // A single refusal is usually a presentation transition that had not
-        // quite finished. Give it a beat and try once more; a second refusal
-        // is real.
-        await new Promise((resolve) => setTimeout(resolve, 600));
-        await WebBrowser.openBrowserAsync(formUrl);
-      }
-      // Resolves however the sheet went away — dismissed from here, or closed
-      // by the person. Either way there is nothing left to dismiss.
-      sheetOpen = false;
-
-      // Deliberately NOT acknowledged here. The sheet closing proves nothing —
-      // the person may have backed out of the form without filing, and a
-      // warning retired on a back-out is a warning they never see again while
-      // still being unfiled. Acknowledgement is contingent on a completed
-      // filing: either they dismiss the modal themselves, or the filing clears
-      // and the server stops reporting a tier at all.
-      //
-      // A grace period, not a state. Somebody who submitted has a completion
-      // arriving within a second or two, and the confirmation takes over from
-      // here. Somebody who closed the form without filing it gets the prompt
-      // back — a few seconds late, rather than never.
-      setTimeout(() => setW9FormOpen(false), W9_FORM_CLOSE_GRACE_MS);
-    } catch {
-      // The form never presented. Put everything back the way it was — most
-      // importantly the tier modal, which returns the moment w9FormOpen
-      // drops, so the way to the form is never lost.
-      sheetOpen = false;
-      setW9FormOpen(false);
-      setW9AwaitingConfirmation(false);
-      showToast("Could not open the tax form. Please try again.", "error");
-    }
-    // Deliberately not awaited: it keeps running if somebody closes the sheet
-    // themselves, because they may well have signed the form first.
-    void watch;
   };
 
   /**
@@ -2573,9 +2546,9 @@ function WalletAppShellContent({
    * of it first — «"SFLuv" Wants to Use "localhost" to Sign In» — and that is
    * both an extra tap and a lie: nobody is signing in, they are filing a tax
    * form. Worse, it is the system dialog people have learned to refuse. So the
-   * sheet is opened plainly and closed by the status watcher instead, when the
-   * backend says the filing actually cleared — a better signal than a redirect
-   * anyway, because a redirect proves the page navigated, not that the vendor
+   * form goes to the system browser plainly, and the app takes its answer from
+   * the backend's status instead — a better signal than a redirect anyway,
+   * because a redirect proves the page navigated, not that the vendor
    * recorded anything.
    */
   const handleStartW9 = async () => {
