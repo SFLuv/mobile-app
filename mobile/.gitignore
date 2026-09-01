@@ -1,0 +1,9 @@
+
+# Generated native project from `expo prebuild`. 3GB, rebuilt on demand, and it
+# conflicts constantly when two people commit it.
+/ios/
+/android/
+
+# dev-up.sh stashes the previous .env here when it rewrites one for local
+# testing. It carries real API keys.
+.env.dev-up-backup

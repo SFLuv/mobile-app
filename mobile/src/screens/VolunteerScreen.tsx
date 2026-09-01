@@ -32,8 +32,10 @@ import {
   AppVolunteerLocation,
   AppVolunteerOrganizerFacet,
   AppVolunteerSignupResult,
+  AppW9Status,
 } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
+import { W9EscrowCard } from "../components/W9EscrowCard";
 import { triggerClickHaptic } from "../utils/haptics";
 import { ICON_FACE, ICON_TEXT_COLOR, ICON_TEXT_NUDGE_EM, merchantInitials } from "../utils/merchantIcon";
 
@@ -46,6 +48,9 @@ import { ICON_FACE, ICON_TEXT_COLOR, ICON_TEXT_NUDGE_EM, merchantInitials } from
 const SFLUV_MARK = require("../../assets/qr-logo.png");
 
 type Props = {
+  w9Status?: AppW9Status | null;
+  w9Busy?: boolean;
+  onStartW9?: () => void;
   backendClient?: AppBackendClient | null;
   tokenSymbol: string;
   hapticsEnabled?: boolean;
@@ -228,6 +233,9 @@ function signupClosedLabel(event: AppVolunteerEvent): string | null {
 }
 
 export function VolunteerScreen({
+  w9Status,
+  w9Busy,
+  onStartW9,
   backendClient,
   tokenSymbol,
   hapticsEnabled,
@@ -902,6 +910,11 @@ export function VolunteerScreen({
           />
         }
       >
+        {/* Held rewards go first: this is why a reward has not arrived. */}
+        {onStartW9 ? (
+          <W9EscrowCard status={w9Status ?? null} busy={w9Busy} onStart={onStartW9} />
+        ) : null}
+
         <View style={styles.filterHeaderRow}>
           <SegmentedTabs
             style={styles.segmentRowFill}

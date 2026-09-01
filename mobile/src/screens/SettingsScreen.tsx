@@ -7,6 +7,7 @@ import {
   AppGlobalCredentialType,
   AppImprover,
   AppMerchantModeStatus,
+  AppMerchantModeLocation,
   AppOwnedLocation,
   AppUser,
   AppVolunteerReminderPreferences,
@@ -26,6 +27,8 @@ type Props = {
   improver?: AppImprover | null;
   wallets: AppWallet[];
   ownedLocations?: AppOwnedLocation[];
+  /** Shops this device may be enrolled at — approved and with a payment wallet. */
+  merchantModeLocations?: AppMerchantModeLocation[];
   primaryWalletAddress?: string;
   syncNotice?: string | null;
   preferences: AppPreferences;
@@ -628,6 +631,7 @@ function MerchantModeSettingsCard({
   message,
   onSetPin,
   onEnable,
+  enrollableLocations,
 }: {
   locations: AppOwnedLocation[];
   status?: AppMerchantModeStatus | null;
@@ -635,12 +639,30 @@ function MerchantModeSettingsCard({
   message?: string | null;
   onSetPin?: (pin: string, currentPin?: string) => Promise<void>;
   onEnable?: (locationID: number) => Promise<void>;
+  enrollableLocations?: AppMerchantModeLocation[];
 }) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
+  // The server's list is authoritative: it only contains shops that are
+  // approved and have somewhere for money to land, so anything in it can
+  // actually be enrolled. The local filter is the fallback for when that
+  // request failed — offering a shop that errors on enable beats offering none.
   const approvedLocations = useMemo(
-    () => locations.filter((location) => location.approval !== false),
-    [locations],
+    () =>
+      enrollableLocations && enrollableLocations.length > 0
+        ? enrollableLocations.map((location) => ({
+            id: location.id,
+            name: location.name,
+            street: location.street,
+          }))
+        : locations
+            .filter((location) => location.approval !== false)
+            .map((location) => ({
+              id: location.id,
+              name: location.name,
+              street: location.street,
+            })),
+    [enrollableLocations, locations],
   );
   const [selectedLocationID, setSelectedLocationID] = useState<number | null>(approvedLocations[0]?.id ?? null);
   const [currentPin, setCurrentPin] = useState("");
@@ -832,6 +854,7 @@ export function SettingsScreen({
   improver,
   wallets,
   ownedLocations = [],
+  merchantModeLocations = [],
   primaryWalletAddress,
   syncNotice,
   preferences,
@@ -1263,6 +1286,7 @@ export function SettingsScreen({
       {section === "merchant" ? (
         <MerchantModeSettingsCard
           locations={ownedLocations}
+          enrollableLocations={merchantModeLocations}
           status={merchantModeStatus}
           busy={merchantModeBusy}
           message={merchantModeMessage}

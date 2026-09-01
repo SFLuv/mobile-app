@@ -23,6 +23,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { resilientPrivyStorage } from "./src/services/resilientPrivyStorage";
 import { BlurView } from "expo-blur";
 import Constants from "expo-constants";
 import * as Crypto from "expo-crypto";
@@ -45,12 +46,22 @@ import { SendScreen } from "./src/screens/SendScreen";
 import { ReceiveScreen } from "./src/screens/ReceiveScreen";
 import { WalletHomeScreen } from "./src/screens/WalletHomeScreen";
 import { ActivityScreen } from "./src/screens/ActivityScreen";
+import { MerchantTodayScreen, formatBase } from "./src/screens/MerchantTodayScreen";
+import { MerchantDeviceSetupScreen } from "./src/screens/MerchantDeviceSetupScreen";
+import {
+  MerchantPinDisplay,
+  MerchantPinKeypad,
+  MerchantPinSlider,
+} from "./src/components/MerchantPinEntry";
+import { PaymentReceivedOverlay, type PaymentReceipt } from "./src/components/PaymentReceivedOverlay";
 import { MapScreen } from "./src/screens/MapScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { ContactsScreen } from "./src/screens/ContactsScreen";
 import { ImproverScreen } from "./src/screens/ImproverScreen";
 import { VolunteerScreen } from "./src/screens/VolunteerScreen";
 import { ThemedActivityIndicator } from "./src/components/ThemedActivityIndicator";
+import { W9CompleteModal } from "./src/components/W9CompleteModal";
+import { W9TierModal } from "./src/components/W9TierModal";
 import { mobileConfig } from "./src/config";
 import {
   clearCachedRouteDiscovery,
@@ -76,6 +87,9 @@ import {
   AppImprover,
   AppImproverNotificationFeed,
   AppLocation,
+  AppMerchantModeLocation,
+  AppW9Status,
+  AppW9Tier,
   AppMerchantModeStatus,
   AppOwnedLocation,
   PonderSubscription,
@@ -84,9 +98,15 @@ import {
   AppUserPolicyStatus,
   AppVolunteerReminderPreferences,
   AppWallet,
+  MerchantToday,
 } from "./src/types/app";
 import { useNotificationInbox } from "./src/hooks/useNotificationInbox";
-import { NotificationTarget, targetFromData } from "./src/services/notificationInbox";
+import {
+  InboxNotification,
+  NotificationTarget,
+  targetFromAction,
+  targetFromData,
+} from "./src/services/notificationInbox";
 import { AppPreferences, defaultAppPreferences } from "./src/types/preferences";
 import { SfluvUniversalLink, parseSfluvUniversalLink } from "./src/utils/universalLinks";
 import {
@@ -224,6 +244,15 @@ const MERCHANT_MODE_STATUS_POLL_INTERVAL_MS = 15_000;
 const WALLET_TRANSACTION_LIMIT = 10;
 const ACTIVITY_TRANSACTION_PAGE_SIZE = 10;
 const IMPROVER_NOTIFICATION_POLL_MS = 60_000;
+// Faster than the notification poll: this one decides whether a modal
+// interrupts somebody, and a reward that was just held should say so while the
+// person is still looking at the screen that told them it arrived.
+const W9_STATUS_POLL_MS = 8_000;
+// How long the tier prompt stays out of the way after the tax form closes.
+// Long enough for a completion to land and the confirmation to take over,
+// short enough that backing out of the form does not leave somebody without
+// the prompt that sent them there.
+const W9_FORM_CLOSE_GRACE_MS = 6_000;
 const LINK_DEDUPE_WINDOW_MS = 4_000;
 const BACKEND_BOOTSTRAP_TIMEOUT_MS = 20_000;
 const WALLET_CREATE_TIMEOUT_MS = 30_000;
@@ -487,159 +516,6 @@ function shortAddress(value: string | undefined): string {
   if (!value) return "";
   if (value.length <= 16) return value;
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
-}
-
-function MerchantExitPinInput({
-  value,
-  visible,
-  onToggleVisible,
-}: {
-  value: string;
-  visible: boolean;
-  onToggleVisible: () => void;
-}) {
-  const { palette, shadows, isDark } = useAppTheme();
-  const styles = useMemo(() => createStyles(palette, shadows, isDark), [isDark, palette, shadows]);
-  const empty = value.length === 0;
-  return (
-    <View style={styles.merchantExitPinDisplay}>
-      <Text style={[styles.merchantExitPinDisplayText, empty ? styles.merchantExitPinPlaceholder : undefined]}>
-        {empty ? "Enter PIN" : visible ? value : "•".repeat(value.length)}
-      </Text>
-      <Pressable style={styles.merchantExitPinEye} onPress={onToggleVisible}>
-        <Ionicons name={visible ? "eye-off-outline" : "eye-outline"} size={20} color={palette.primaryStrong} />
-      </Pressable>
-    </View>
-  );
-}
-
-function MerchantExitPinPad({
-  onDigit,
-  onBackspace,
-}: {
-  onDigit: (digit: string) => void;
-  onBackspace: () => void;
-}) {
-  const { palette, shadows, isDark } = useAppTheme();
-  const styles = useMemo(() => createStyles(palette, shadows, isDark), [isDark, palette, shadows]);
-  const rows = [
-    ["1", "2", "3"],
-    ["4", "5", "6"],
-    ["7", "8", "9"],
-    ["blank", "0", "backspace"],
-  ];
-  return (
-    <View style={styles.merchantExitKeypad}>
-      {rows.map((row, rowIndex) => (
-        <View key={`merchant-exit-row-${rowIndex}`} style={styles.merchantExitKeypadRow}>
-          {row.map((key) =>
-            key === "blank" ? (
-              <View key={key} style={styles.merchantExitKeypadKey} />
-            ) : (
-              <Pressable
-                key={key}
-                style={[styles.merchantExitKeypadKey, key === "backspace" ? styles.merchantExitKeypadAction : undefined]}
-                onPress={() => {
-                  if (key === "backspace") {
-                    onBackspace();
-                    return;
-                  }
-                  onDigit(key);
-                }}
-              >
-                {key === "backspace" ? (
-                  <Ionicons name="backspace-outline" size={22} color={palette.primaryStrong} />
-                ) : (
-                  <Text style={styles.merchantExitKeypadText}>{key}</Text>
-                )}
-              </Pressable>
-            ),
-          )}
-        </View>
-      ))}
-    </View>
-  );
-}
-
-function MerchantExitSwipe({
-  disabled,
-  loading,
-  onComplete,
-}: {
-  disabled: boolean;
-  loading: boolean;
-  onComplete: () => void;
-}) {
-  const { palette, shadows, isDark } = useAppTheme();
-  const styles = useMemo(() => createStyles(palette, shadows, isDark), [isDark, palette, shadows]);
-  const translateX = useRef(new Animated.Value(0)).current;
-  const [trackWidth, setTrackWidth] = useState(0);
-  const thumbWidth = 54;
-  const swipeDistance = Math.max(trackWidth - thumbWidth - 8, 0);
-
-  useEffect(() => {
-    if (!loading) {
-      Animated.spring(translateX, {
-        toValue: 0,
-        useNativeDriver: true,
-        speed: 18,
-        bounciness: 0,
-      }).start();
-    }
-  }, [loading, translateX]);
-
-  const resetSwipe = React.useCallback(() => {
-    Animated.spring(translateX, {
-      toValue: 0,
-      useNativeDriver: true,
-      speed: 18,
-      bounciness: 0,
-    }).start();
-  }, [translateX]);
-
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => !disabled && !loading && swipeDistance > 0,
-        onMoveShouldSetPanResponder: (_, gesture) =>
-          !disabled && !loading && swipeDistance > 0 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
-        onPanResponderMove: (_, gesture) => {
-          translateX.setValue(Math.max(0, Math.min(gesture.dx, swipeDistance)));
-        },
-        onPanResponderRelease: (_, gesture) => {
-          if (gesture.dx >= swipeDistance * 0.72) {
-            Animated.timing(translateX, {
-              toValue: swipeDistance,
-              duration: 120,
-              useNativeDriver: true,
-            }).start(({ finished }) => {
-              if (finished) onComplete();
-            });
-            return;
-          }
-          resetSwipe();
-        },
-        onPanResponderTerminate: resetSwipe,
-      }),
-    [disabled, loading, onComplete, resetSwipe, swipeDistance, translateX],
-  );
-
-  return (
-    <View
-      style={[styles.merchantExitSwipeTrack, disabled ? styles.merchantExitSwipeTrackDisabled : undefined]}
-      onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
-    >
-      <Text style={[styles.merchantExitSwipeText, disabled ? styles.merchantExitSwipeTextDisabled : undefined]}>
-        {loading ? "Checking" : "Slide to exit"}
-      </Text>
-      <Animated.View
-        style={[styles.merchantExitSwipeThumb, disabled ? styles.merchantExitSwipeThumbDisabled : undefined, { transform: [{ translateX }] }]}
-        {...panResponder.panHandlers}
-      >
-        <Ionicons name={loading ? "hourglass-outline" : "arrow-forward"} size={18} color={palette.primaryStrong} />
-      </Animated.View>
-    </View>
-  );
 }
 
 function walletBalanceCacheKey(address: string): string {
@@ -1241,7 +1117,6 @@ type DockTab = {
   icon: keyof typeof Ionicons.glyphMap;
   /** The raised, always-centered action button. Exactly one tab carries this. */
   center?: boolean;
-  showDot?: boolean;
 };
 
 /**
@@ -1441,7 +1316,6 @@ function BottomDock({
                 size={20}
                 color={active ? palette.primaryStrong : palette.textMuted}
               />
-              {tab.showDot ? <View style={styles.bottomTabDot} /> : null}
             </View>
             <Text
               numberOfLines={1}
@@ -1567,6 +1441,10 @@ function WalletAppShell({
   );
 }
 
+// How long a till may sit unused before it asks which counter it is on again.
+// A device left in a drawer for a week should not silently wake up live.
+const MERCHANT_LOCATION_RECONFIRM_MS = 3 * 24 * 60 * 60 * 1000;
+
 function WalletAppShellContent({
   clientConfig,
   runtime,
@@ -1677,12 +1555,70 @@ function WalletAppShellContent({
   const [improverCredentialRequestsLoading, setImproverCredentialRequestsLoading] = useState(false);
   const [merchantModeInstallationID, setMerchantModeInstallationID] = useState<string | null>(null);
   const [merchantModeStatus, setMerchantModeStatus] = useState<AppMerchantModeStatus | null>(null);
+  const [merchantToday, setMerchantToday] = useState<MerchantToday | null>(null);
+  const [merchantTodayLoading, setMerchantTodayLoading] = useState(false);
+  const [merchantTodayRefreshing, setMerchantTodayRefreshing] = useState(false);
+  const [paymentReceipt, setPaymentReceipt] = useState<PaymentReceipt | null>(null);
   const [merchantModeBusy, setMerchantModeBusy] = useState(false);
   const [merchantModeMessage, setMerchantModeMessage] = useState<string | null>(null);
   const [merchantModeExitPin, setMerchantModeExitPin] = useState("");
   const [merchantModeExitPinVisible, setMerchantModeExitPinVisible] = useState(false);
   const [merchantModeExitOpen, setMerchantModeExitOpen] = useState(false);
   const [merchantModeExitError, setMerchantModeExitError] = useState<string | null>(null);
+  const [merchantModeLocations, setMerchantModeLocations] = useState<AppMerchantModeLocation[]>([]);
+  // An empty list before the first fetch answers and an empty list after it are
+  // different situations: the second one means nothing is approved yet, and the
+  // setup screen has to be able to say so instead of implying it.
+  const [merchantModeLocationsLoaded, setMerchantModeLocationsLoaded] = useState(false);
+  const [merchantLocationChooserOpen, setMerchantLocationChooserOpen] = useState(false);
+  // The shop a switch is heading for, held while the PIN is asked for.
+  const [merchantSwitchLocationID, setMerchantSwitchLocationID] = useState<number | null>(null);
+  const [merchantSwitchPin, setMerchantSwitchPin] = useState("");
+  const [merchantSwitchPinVisible, setMerchantSwitchPinVisible] = useState(false);
+  const [merchantSwitchError, setMerchantSwitchError] = useState<string | null>(null);
+  // Shown once when the server has thrown this device out of merchant mode.
+  const [merchantForcedExitNotice, setMerchantForcedExitNotice] = useState<string | null>(null);
+  const [w9Status, setW9Status] = useState<AppW9Status | null>(null);
+  const [w9Busy, setW9Busy] = useState(false);
+  // Dismissing a tier is recorded on the backend, but that record does not come
+  // back until the next poll — and for the blocked tier it deliberately never
+  // sticks. This holds the dismissal in the meantime, and is cleared on
+  // foreground so a blocked person is asked again.
+  const [w9TierDismissed, setW9TierDismissed] = useState<AppW9Tier | null>(null);
+  // Set when someone explicitly asks to see the form, which right now means
+  // tapping the W-9 notification. That request outranks both the stored
+  // acknowledgement and this session's dismissal: the tier modal is the only
+  // screen carrying the form link, so honouring "seen once" here would leave
+  // the tap with nowhere to go and the notification permanently inert.
+  const [w9TierRequested, setW9TierRequested] = useState(false);
+  // What was on hold when the form was opened, so the confirmation can say how
+  // much came back. Read before rather than after: by the time the filing
+  // clears the escrow has already been released and the figure is zero.
+  const [w9Released, setW9Released] = useState<string | null>(null);
+  // The last figure seen while money was still held, and whether the filing was
+  // already cleared on the previous read.
+  const w9HeldBeforeClearingRef = useRef("");
+  const w9WasClearedRef = useRef<boolean | null>(null);
+  // Set when somebody opens the form from here, and the reason this no longer
+  // depends on catching a transition.
+  //
+  // Inferring "they just filed" from a false→true change means being awake for
+  // the change. Opening the form backgrounds the app for as long as it takes to
+  // fill in a tax form, and on the way back a foreground refresh, a resumed
+  // poll and an acknowledgement all set the status within a tick of each other.
+  // Miss the edge and the confirmation is simply never shown — which is what
+  // happened on the first real filing, on the one screen that tells somebody
+  // their money is coming back.
+  //
+  // State rather than a ref: it has to survive re-renders and take part in the
+  // effect's dependencies, so that a filing already cleared by the time this is
+  // set still counts.
+  const [w9AwaitingConfirmation, setW9AwaitingConfirmation] = useState(false);
+  // True while the tax form is on screen, and briefly after it closes — long
+  // enough for a completion to come back, short enough that somebody who backed
+  // out is not left staring at a screen that has stopped asking them for
+  // anything.
+  const [w9FormOpen, setW9FormOpen] = useState(false);
   const [storedPushToken, setStoredPushToken] = useState<string | null>(null);
   const [storedPushTokenLoaded, setStoredPushTokenLoaded] = useState(false);
   const [backendPushPreferenceEnabled, setBackendPushPreferenceEnabled] = useState<boolean | null>(null);
@@ -1965,22 +1901,36 @@ function WalletAppShellContent({
   const canChooseWallet = walletChooserCandidates.length > 1;
   const merchantModeDevice = merchantModeStatus?.device?.merchantModeEnabled ? merchantModeStatus.device : null;
   const merchantModeActive = Boolean(merchantModeDevice);
+  // A merchant account is always in merchant mode. The signup answer decides
+  // it, not isMerchant, which only says a shop of theirs is live — the two come
+  // apart while a first location is being reviewed, and that gap is exactly the
+  // case this screen has to handle rather than fall through to the wallet.
+  const merchantAccount = appUser?.accountType === "merchant";
+  const merchantDeviceSetupPending = merchantAccount && !merchantModeActive;
+  // Kept true while the list is still loading so the chrome does not flash the
+  // consumer dock on the way to the setup screen.
+  const merchantDeviceEnrollable =
+    merchantDeviceSetupPending && (!merchantModeLocationsLoaded || merchantModeLocations.length > 0);
+  // No approved shop to sync to, so there is no till to lock down. They keep the
+  // dock and can look around the app; the wallet tab explains the wait.
+  const merchantAwaitingApproval = merchantDeviceSetupPending && !merchantDeviceEnrollable;
+  // Till chrome: no dock, no tabs, no notifications. Covers both a live till and
+  // the short first-run flow that turns this device into one.
+  const merchantKiosk = merchantModeActive || merchantDeviceEnrollable;
+  // A null status means the merchant-mode calls have not answered yet, which is
+  // a different thing from a merchant with no PIN. Non-merchants never get one.
+  const merchantSetupReady =
+    merchantModeLocationsLoaded && (merchantModeStatus !== null || !appUser?.isMerchant);
   const walletSyncReady = backendBootstrapReady && Boolean(appUser) && Boolean(runtime.discovery);
   const walletHistoryActive = tab === "wallet" && walletPane === "home";
   const activityHistoryActive = tab === "activity";
 
-  useEffect(() => {
-    if (!merchantModeActive || !merchantModeDevice?.walletAddress || walletCandidates.length === 0) {
-      return;
-    }
-    const normalizedMerchantWallet = merchantModeDevice.walletAddress.toLowerCase();
-    const nextCandidate = walletCandidates.find(
-      (candidate) => candidate.accountAddress.toLowerCase() === normalizedMerchantWallet,
-    );
-    if (nextCandidate && nextCandidate.key !== selectedCandidateKey) {
-      onSelectCandidate(nextCandidate.key);
-    }
-  }, [merchantModeActive, merchantModeDevice?.walletAddress, onSelectCandidate, selectedCandidateKey, walletCandidates]);
+  // The wallet used to be re-pinned here on every render while merchant mode was
+  // on, which made the selection impossible to change: selectedCandidateKey was
+  // both read inside the effect and listed as a dependency, so choosing a wallet
+  // immediately re-triggered the effect that reverted it. Merchant mode no longer
+  // shows a wallet at all — it shows the day — so there is nothing to pin. The
+  // receive QR reads the device's own wallet address directly.
 
   const notificationAddresses = useMemo(() => {
     const seen = new Set<string>();
@@ -2346,8 +2296,451 @@ function WalletAppShellContent({
     }
     const status = await backendClient.getMerchantModeStatus(installationID);
     setMerchantModeStatus(status);
+
+    // The server turns merchant mode off when the shop closes, loses approval,
+    // or loses its payment wallet. The device finds out here, on its next poll,
+    // and says so rather than just dropping back to the wallet unexplained.
+    if (status.forcedExitReason) {
+      setMerchantForcedExitNotice(status.forcedExitReason);
+      setMerchantLocationChooserOpen(false);
+      setWalletPane("home");
+      setTab("wallet");
+      return status;
+    }
+
+    // A device that has sat unused for days should not quietly wake up as a
+    // live till. It stays in merchant mode, but asks which counter it is on
+    // before the first sale. last_seen_at is read before the server stamps it,
+    // so this is the gap since the previous poll.
+    //
+    // Deliberately still PIN-free. Switching counters now costs the PIN, but
+    // this prompt is answered by tapping the shop the device is already on,
+    // which is not a switch. A tablet that spent the weekend in a drawer is back
+    // to taking payments in one tap, and nobody has to find the owner.
+    if (status.device?.merchantModeEnabled && status.device.lastSeenAt) {
+      const lastSeen = Date.parse(status.device.lastSeenAt);
+      if (Number.isFinite(lastSeen) && Date.now() - lastSeen > MERCHANT_LOCATION_RECONFIRM_MS) {
+        setMerchantLocationChooserOpen(true);
+      }
+    }
+
     return status;
   };
+
+  const refreshW9Status = async () => {
+    if (!backendClient || !appUser) {
+      setW9Status(null);
+      return;
+    }
+    try {
+      setW9Status(await backendClient.getW9Status());
+    } catch {
+      // A failed load only costs the tax card. It must never break a panel.
+      setW9Status(null);
+    }
+  };
+
+  /**
+   * Which tier modal to show, if any.
+   *
+   * The first three tiers are answered once: dismissing records an
+   * acknowledgement and they do not return that year. Blocked is the exception
+   * and deliberately so — money is already held and there is still no form, so
+   * the modal is the only thing standing between this person and being paid. It
+   * ignores the stored acknowledgement and comes back on the next foreground
+   * and on every refused payout.
+   */
+  const visibleW9Tier: AppW9Tier | null = (() => {
+    if (!w9Status || w9Status.cleared) return null;
+    const tier = w9Status.tier;
+    if (!tier) return null;
+    // The confirmation owns the screen once it is up. It renders in the view
+    // tree while this is a UIKit presentation, so a tier modal left visible
+    // would sit on top of it — the congratulation hidden behind the warning it
+    // replaces.
+    if (w9Released !== null) return null;
+
+    // Away filling the form in, so nothing to nag about.
+    //
+    // The tier modal is behind the browser sheet rather than replaced by it, so
+    // closing the sheet reveals it again and it stays up until the cleared
+    // status arrives a second or so later. Somebody who has just finished a tax
+    // form is told in red that they need to fill out a tax form, and then
+    // congratulated for it.
+    //
+    // Deliberately NOT tied to having opened the form at all. Somebody can open
+    // it, not understand it, and close it again without filing — and they must
+    // get the prompt back, or the one route to the form is gone. So this lasts
+    // while the sheet is up and for a breath afterwards, and no longer.
+    // Asked for, so shown — regardless of what has been acknowledged before,
+    // and checked ahead of the form-open suppression deliberately: the
+    // notification-bell entry is then an unconditional way back to this
+    // modal, whatever state the form flow was left in.
+    if (w9TierRequested) return tier;
+    if (w9FormOpen) return null;
+    // Blocked is decided by the stored acknowledgement alone, and checked
+    // before the session flag rather than after it.
+    //
+    // The server re-arms this tier on every refused payout, so an
+    // unacknowledged blocked tier means a refusal has happened since the last
+    // time somebody put the modal away. Letting the session flag win meant the
+    // second refusal was silent: the reward was declined at a live event and
+    // the app said nothing, which is the one outcome that costs a person money
+    // without telling them. A refusal nobody sees is worse than a repeated
+    // modal, however often it repeats.
+    if (tier === "blocked") return w9Status.tierAcknowledged ? null : tier;
+    if (tier === w9TierDismissed) return null;
+    return w9Status.tierAcknowledged ? null : tier;
+  })();
+
+  /**
+   * Congratulates on the filing clearing, however it happened.
+   *
+   * Driven by the status rather than by the button, because the button is not
+   * the only way to get here: somebody can file on another device, or close
+   * the sheet before the callback lands, or be released by an admin. Tying the
+   * confirmation to one code path means the people who took a different route
+   * watch their money reappear with no explanation.
+   *
+   * The held figure is captured while it is still held. By the time the filing
+   * clears the escrow has already been released and the amount reads zero,
+   * which is exactly the number nobody wants to be shown.
+   */
+  useEffect(() => {
+    if (!w9Status) return;
+
+    if (!w9Status.cleared) {
+      // Held figures are only true while they are held; by the time the filing
+      // clears the escrow has drained and the amount reads zero.
+      w9HeldBeforeClearingRef.current = w9Status.escrowedSfluv ?? "";
+      w9WasClearedRef.current = false;
+      return;
+    }
+
+    const was = w9WasClearedRef.current;
+    w9WasClearedRef.current = true;
+
+    // Two ways to deserve this. Either they opened the form from here, whatever
+    // the app went through afterwards — or the filing cleared while we were
+    // watching, which covers filing on another device or an admin release.
+    //
+    // `was === null` is the app opening with a filing already on file, and gets
+    // nothing: congratulating somebody for something they did last week is how
+    // this kind of message stops meaning anything.
+    if (!w9AwaitingConfirmation && was !== false) return;
+
+    setW9AwaitingConfirmation(false);
+    setW9Released(w9HeldBeforeClearingRef.current);
+    void refreshEverything();
+  }, [w9Status?.cleared, w9Status?.escrowedSfluv, w9AwaitingConfirmation]);
+
+  /**
+   * Records that the outstanding tier has been answered — by explicitly
+   * dismissing it. Opening the form is deliberately NOT an answer: the only
+   * other thing that retires a tier is the filing actually clearing, at which
+   * point the server stops reporting one.
+   */
+  const acknowledgeW9Tier = (tier: AppW9Tier | null) => {
+    setW9TierRequested(false);
+    if (!tier) return;
+    setW9TierDismissed(tier);
+    // Recorded locally as well as sent, because blocked now reads the stored
+    // acknowledgement directly: without this the next poll lands before the
+    // POST does, still says unacknowledged, and reopens the modal that was
+    // just closed.
+    setW9Status((current) => (current ? { ...current, tierAcknowledged: true } : current));
+    void backendClient?.acknowledgeW9Tier(tier).catch(() => undefined);
+    // Putting the modal away is exactly when the badge has to start carrying
+    // it, so the feed is re-read now rather than on its own timer a minute
+    // later. Without this the count arrives long after the thing it counts.
+    void refreshImproverNotifications();
+  };
+
+  /**
+   * The minted form URL waiting for the tier modal to leave the screen, and
+   * the fallback that presents anyway if no dismissal is ever reported.
+   */
+  const w9PendingFormUrlRef = useRef<string | null>(null);
+  const w9PresentFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /**
+   * Presents the vendor's tax form, once the way is clear.
+   *
+   * Called from the tier modal's own dismissal callback — the point at which
+   * the platform is provably done animating — with a timer as fallback for
+   * the cases that never report one. Guarded by the stashed URL, so whichever
+   * of the two fires first presents and the other finds nothing to do.
+   *
+   * History, because this exact seam has now produced three distinct
+   * failures: presenting a Safari sheet while the tier modal is still
+   * mid-dismissal either leaves the sheet presented-but-invisible over a
+   * frozen app (the accessibility tree showed the whole browser chrome
+   * rendering nothing), or UIKit refuses it and openBrowserAsync never
+   * settles — killing everything sequenced after the await, which is how the
+   * modal once vanished with no way back to the form. A timed guess at the
+   * dismissal merely shrank the window. So: no guessing, and nothing vital
+   * sequenced after an await that may never settle.
+   */
+  const presentW9Form = async () => {
+    const formUrl = w9PendingFormUrlRef.current;
+    console.error("[w9] presentW9Form:", formUrl ? "have url" : "nothing pending");
+    if (!formUrl) return;
+    w9PendingFormUrlRef.current = null;
+    if (w9PresentFallbackRef.current) {
+      clearTimeout(w9PresentFallbackRef.current);
+      w9PresentFallbackRef.current = null;
+    }
+    if (!backendClient) return;
+
+    // The form opens in the EXTERNAL Safari app, not an in-app sheet.
+    //
+    // expo-web-browser's in-app SFSafariViewController failed three distinct
+    // ways on this stack, all traced to presenting a sheet inside the app's
+    // own window: presented-but-invisible over a frozen app; refused by UIKit
+    // with a promise that never settles; and stalled mid-presentation in a
+    // state that silently blocked every LATER present — including the tier
+    // modal itself, which is how "the bell won't reopen it" happened. Handing
+    // the URL to the system leaves nothing to present in-app, so there is
+    // nothing to stall, freeze, or lose. Safari also shows the full address
+    // bar, which is the point of using a real browser for an SSN form.
+    try {
+      await Linking.openURL(formUrl);
+      console.error("[w9] Safari handoff succeeded");
+      // Off filing in Safari; the app is about to background. The grace keeps
+      // the tier modal down through the handoff, and somebody who comes back
+      // without filing finds the prompt up again — deliberately.
+      setTimeout(() => setW9FormOpen(false), W9_FORM_CLOSE_GRACE_MS);
+    } catch (error) {
+      console.error("[w9] Safari handoff FAILED:", (error as Error)?.message);
+      // Safari never opened. Put everything back — most importantly the tier
+      // modal, which returns the moment w9FormOpen drops, so the way to the
+      // form is never lost.
+      setW9FormOpen(false);
+      setW9AwaitingConfirmation(false);
+      showToast("Could not open the tax form. Please try again.", "error");
+      return;
+    }
+
+    // Poll while they file, so the cleared status — and the confirmation that
+    // hangs off it — lands moments after the vendor's callback rather than on
+    // the next scheduled refresh. Timers pause while the app is backgrounded
+    // and resume on return, which is exactly the moment the answer matters.
+    void (async () => {
+      for (let attempt = 0; attempt < 40; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, attempt < 12 ? 1000 : 3000));
+        const status = await backendClient.getW9Status().catch(() => null);
+        if (!status) continue;
+        setW9Status(status);
+        if (status.cleared) return;
+      }
+    })();
+  };
+
+  /**
+   * Opens the vendor's tax form in the system browser.
+   *
+   * Deliberately not a WebView. The page collects a tax identification number,
+   * and an embedded browser means we could technically read it — which is
+   * exactly the liability the vendor is paid to absorb. The system browser also
+   * shows the address bar, so someone can see whose site they are typing an SSN
+   * into before they do it.
+   *
+   * A plain browser, not an auth session. openAuthSessionAsync closes itself
+   * on a redirect, which is convenient, but iOS puts a consent sheet in front
+   * of it first — «"SFLuv" Wants to Use "localhost" to Sign In» — and that is
+   * both an extra tap and a lie: nobody is signing in, they are filing a tax
+   * form. Worse, it is the system dialog people have learned to refuse. So the
+   * form goes to the system browser plainly, and the app takes its answer from
+   * the backend's status instead — a better signal than a redirect anyway,
+   * because a redirect proves the page navigated, not that the vendor
+   * recorded anything.
+   */
+  const handleStartW9 = async () => {
+    if (!backendClient || w9Busy) return;
+    console.error("[w9] start: minting form link");
+    setW9Busy(true);
+    try {
+      const formUrl = await backendClient.startW9();
+      console.error("[w9] start: minted", formUrl);
+      // Pin what the confirmation will need, now, while it is still true.
+      //
+      // Somebody tapping this is by definition not cleared yet and may have
+      // money held. Both facts are recorded here rather than inferred later,
+      // because the sheet is about to take the app into the background and
+      // whatever happens while it is there — a foreground refresh, a deep
+      // link, a status arriving out of order — must not be able to make the
+      // confirmation look like it has already been shown.
+      w9WasClearedRef.current = false;
+      w9HeldBeforeClearingRef.current = w9Status?.escrowedSfluv ?? "";
+      setW9AwaitingConfirmation(true);
+
+      // Stash the URL and start the tier modal's dismissal. Presentation
+      // happens in presentW9Form when the modal reports itself gone; the
+      // timer exists only for a dismissal that is never reported.
+      w9PendingFormUrlRef.current = formUrl;
+      setW9FormOpen(true);
+      w9PresentFallbackRef.current = setTimeout(() => {
+        console.error("[w9] presenting via fallback timer");
+        void presentW9Form();
+      }, 1200);
+    } catch (error) {
+      showToast((error as Error)?.message || "Could not open the tax form.", "error");
+    } finally {
+      // Only ever guarded the mint; presentation has its own failure path.
+      setW9Busy(false);
+    }
+  };
+
+  const refreshMerchantModeLocations = async () => {
+    if (!backendClient || !appUser?.isMerchant) {
+      setMerchantModeLocations([]);
+      setMerchantModeLocationsLoaded(true);
+      return;
+    }
+    try {
+      setMerchantModeLocations(await backendClient.listMerchantModeLocations());
+    } catch {
+      // A failed list only costs the switcher; it must never break the till.
+      setMerchantModeLocations([]);
+    } finally {
+      setMerchantModeLocationsLoaded(true);
+    }
+  };
+
+  useEffect(() => {
+    if (!appUser?.isMerchant) {
+      setMerchantModeLocations([]);
+      setMerchantModeLocationsLoaded(Boolean(appUser?.id));
+      return;
+    }
+    void refreshMerchantModeLocations();
+    // Re-read after a switch so the toggle reflects the shop actually in use.
+  }, [appUser?.id, appUser?.isMerchant, merchantModeStatus?.device?.locationId]);
+
+  useEffect(() => {
+    void refreshW9Status();
+  }, [appUser?.id]);
+
+  // Money arriving is the event both the modal and the badge care about, so
+  // neither waits for its own timer. The balance is already polled every couple
+  // of seconds for the wallet, and a change in it is the same instant a tier is
+  // crossed -- which is when the modal should appear, not up to a poll later.
+  //
+  // Not sufficient on its own, which is why the poll below stays: the crossing
+  // payment is *held*, so the balance does not move for the one tier that
+  // matters most. That case still needs asking.
+  const lastSeenBalanceRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!backendClient || !appUser || smartBalance === "...") {
+      return;
+    }
+    const previous = lastSeenBalanceRef.current;
+    lastSeenBalanceRef.current = smartBalance;
+    if (previous === null || previous === smartBalance) {
+      return;
+    }
+    void refreshW9Status();
+    void refreshImproverNotifications();
+  }, [appUser, backendClient, smartBalance]);
+
+  // A new tier is news the badge should carry at once, rather than whenever the
+  // feed next happens to poll.
+  const lastSeenTierRef = useRef<string | null>(null);
+  useEffect(() => {
+    const tier = w9Status?.tier ?? null;
+    if (lastSeenTierRef.current === tier) {
+      return;
+    }
+    lastSeenTierRef.current = tier;
+    if (tier) {
+      void refreshImproverNotifications();
+    }
+  }, [w9Status?.tier]);
+
+  // Polled, because most money does not arrive through this app.
+  //
+  // The status was only re-read on mount, on foreground, and after a redeem
+  // this app performed itself. Every other way a payout lands -- somebody else
+  // scanning the QR, a workflow bounty, an affiliate run -- left the app
+  // holding a stale status, so the tier modal could not appear until the
+  // person happened to background and reopen. That is exactly the moment the
+  // modal exists for: the reward that just crossed a line, or was just held.
+  //
+  // Foreground only, matching the notification feed beside it: a background
+  // timer spends battery on a modal nobody can be shown.
+  useEffect(() => {
+    if (!backendClient || !appUser) {
+      return;
+    }
+    const interval = setInterval(() => {
+      if (appIsActiveRef.current) {
+        void refreshW9Status();
+      }
+    }, W9_STATUS_POLL_MS);
+    return () => clearInterval(interval);
+  }, [appUser, backendClient]);
+
+  const refreshMerchantToday = async (options?: { silent?: boolean }) => {
+    if (!backendClient || !merchantModeInstallationID) {
+      return;
+    }
+    if (options?.silent) {
+      setMerchantTodayRefreshing(true);
+    } else {
+      setMerchantTodayLoading(true);
+    }
+    try {
+      setMerchantToday(await backendClient.getMerchantToday(merchantModeInstallationID));
+    } catch (error) {
+      console.warn("Unable to load today's takings", error);
+    } finally {
+      setMerchantTodayLoading(false);
+      setMerchantTodayRefreshing(false);
+    }
+  };
+
+  const merchantTodayRef = useRef(refreshMerchantToday);
+  merchantTodayRef.current = refreshMerchantToday;
+
+  // Load once when the till opens. There is no poll: the confirmation and the
+  // refresh are both driven by the incoming-payment push, so the figures move at
+  // the moment the money lands rather than at the top of some interval.
+  useEffect(() => {
+    if (!merchantModeActive || !merchantModeInstallationID) {
+      return;
+    }
+    void merchantTodayRef.current();
+  }, [merchantModeActive, merchantModeInstallationID]);
+
+  // The incoming-payment push is the trigger. Same notification the backend
+  // already sends from the ponder callback, filtered to this till's wallet, so a
+  // payment to another of the owner's wallets cannot flash a confirmation here.
+  useEffect(() => {
+    if (!merchantModeActive || !merchantModeDevice?.walletAddress) {
+      return;
+    }
+    const tillWallet = merchantModeDevice.walletAddress.toLowerCase();
+
+    const subscription = Notifications.addNotificationReceivedListener((notification) => {
+      const data = (notification.request.content.data ?? {}) as Record<string, unknown>;
+      const to = typeof data.to === "string" ? data.to.toLowerCase() : "";
+      if (to !== tillWallet) {
+        return;
+      }
+
+      const amount = typeof data.amount === "string" ? data.amount : "";
+      setPaymentReceipt({
+        amount: amount || "",
+        tokenSymbol: clientConfig.tokenSymbol,
+        detail: notification.request.content.title ?? undefined,
+      });
+      // Pull the day again so the totals and the new line are already correct
+      // behind the confirmation when it clears.
+      void merchantTodayRef.current({ silent: true });
+    });
+
+    return () => subscription.remove();
+  }, [merchantModeActive, merchantModeDevice?.walletAddress, clientConfig.tokenSymbol]);
 
   const loadAppProfile = async () => {
     if (!backendClient) {
@@ -2402,11 +2795,14 @@ function WalletAppShellContent({
   const dockTabs = useMemo<DockTab[]>(() => {
     const tabs: DockTab[] = [];
     if (participateTargets.length > 0) {
+      // No unread dot. Notifications are counted in exactly one place — the
+      // bell — and a second indicator elsewhere either says the same thing
+      // twice or, worse, disagrees with it: this one was improver-only, so a
+      // volunteer's tax notice lit nothing here while the bell showed one.
       tabs.push({
         key: "participate",
         label: "Participate",
         icon: participateActive ? "people-circle" : "people-circle-outline",
-        showDot: improverNotifications?.hasUnseen === true && participateTargets.includes("improver"),
       });
     }
     tabs.push({ key: "map", label: "Map", icon: tab === "map" ? "map" : "map-outline" });
@@ -2414,7 +2810,7 @@ function WalletAppShellContent({
     tabs.push({ key: "activity", label: "Activity", icon: tab === "activity" ? "pulse" : "pulse-outline" });
     tabs.push({ key: "contacts", label: "Contacts", icon: tab === "contacts" ? "people" : "people-outline" });
     return tabs;
-  }, [improverNotifications?.hasUnseen, participateActive, participateTargets, tab]);
+  }, [participateActive, participateTargets, tab]);
 
   const activeDockKey = useMemo<DockTabKey | null>(() => {
     if (participateActive) {
@@ -2479,6 +2875,24 @@ function WalletAppShellContent({
 
   const [notificationsOpen, setNotificationsOpen] = useState(false);
 
+  /**
+   * What a tapped notification wants to do, held until the panel is gone.
+   *
+   * The panel is a UIKit modal. Navigating in the same breath as closing it
+   * asks iOS to present the next thing — the tier modal, most importantly —
+   * while the panel is still mid-dismissal, and iOS silently drops that
+   * presentation and never retries. So the tap stashes its intent, and it
+   * runs from the panel's own dismissal callback, with a timer as fallback
+   * for the platforms that never report one. Whichever fires first drains;
+   * the other finds nothing.
+   */
+  const pendingPanelActionRef = useRef<(() => void) | null>(null);
+  const drainPanelAction = useCallback(() => {
+    const action = pendingPanelActionRef.current;
+    pendingPanelActionRef.current = null;
+    if (action) action();
+  }, []);
+
   const openVolunteerPanel = useCallback((eventId: string | null = null) => {
     setVolunteerRouteRequest((current) => ({ eventId, nonce: current.nonce + 1 }));
     setTab("volunteer");
@@ -2502,22 +2916,87 @@ function WalletAppShellContent({
             openImproverPanel("workflows");
           }
           return;
+        case "tax":
+          console.error("[w9] tax target: requesting tier modal");
+          // Owing a W-9 is not tied to a role, so this cannot open a role
+          // panel. The wallet is where the money is and where every signed-in
+          // user can go; the escrow card refreshes with it.
+          setTab("wallet");
+          setWalletPane("home");
+          // Clearing the dismissal is what makes the modal reopen. Someone who
+          // tapped this notification is asking about the form, so putting it
+          // back in front of them is the whole point of the tap.
+          setW9TierDismissed(null);
+          setW9TierRequested(true);
+          void refreshW9Status();
+          return;
         case "activity":
           setTab("activity");
+          return;
+        case "url":
+          // Leaving the app is the point here, so there is no in-app state to
+          // set. A link the OS refuses to open fails silently rather than
+          // throwing into a tap handler.
+          void Linking.openURL(target.url).catch(() => {});
           return;
         default:
           return;
       }
     },
-    [canAccessImproverPanel, canAccessVolunteerPanel, openImproverPanel, openVolunteerPanel],
+    [
+      canAccessImproverPanel,
+      canAccessVolunteerPanel,
+      openImproverPanel,
+      openVolunteerPanel,
+      refreshW9Status,
+    ],
   );
 
   const {
     items: notificationItems,
     open: openNotification,
+    dismiss: dismissPushNotification,
     resolveTarget: resolveNotificationTarget,
     clearAll: clearNotifications,
   } = useNotificationInbox({ onNavigate: navigateToNotificationTarget });
+
+  // The top bar shows two sources of notification, and they have different
+  // lifetimes. A push is a past event: it sits in the tray until cleared. A
+  // server-derived entry describes a condition that is true right now — an
+  // unfiled W-9, a payout waiting — and disappears on its own when that stops
+  // being true. Merging them is a display decision only; neither one adopts
+  // the other's rules.
+  const serverNotificationItems = useMemo<InboxNotification[]>(
+    () =>
+      (improverNotifications?.notifications ?? [])
+        // Seen means dismissed here. The server keeps deriving the entry for as
+        // long as its condition holds, so this is the only record that somebody
+        // has put it away, and hiding it is what stops the count nagging.
+        .filter((entry) => !entry.seen)
+        .map((entry) => ({
+        // Namespaced so a feed key can never collide with a push id and
+        // resolve the wrong item out of the inbox.
+        id: `feed:${entry.key}`,
+        title: entry.title,
+        body: entry.body,
+        receivedAt: entry.createdAt * 1000,
+        target: targetFromAction(entry.action),
+      })),
+    [improverNotifications],
+  );
+
+  // Live conditions first: they are the ones still asking for something.
+  const panelNotificationItems = useMemo(
+    () => [...serverNotificationItems, ...notificationItems],
+    [notificationItems, serverNotificationItems],
+  );
+
+  // The badge counts everything outstanding, not everything unread, and it does
+  // not clear just because the panel was opened. Reading a notification is not
+  // the same as dealing with it: a W-9 that still needs filing is still owed
+  // whether or not somebody has glanced at the row. The count comes down when
+  // an entry is dismissed or its condition resolves, and not before.
+  const panelNotificationCount = panelNotificationItems.length;
 
   // Reaching a screen under your own steam handles the notification for it just
   // as tapping it would, so it clears from our list and the OS tray together.
@@ -2604,7 +3083,14 @@ function WalletAppShellContent({
   }, [refreshImproverCredentialRequests]);
 
   const refreshImproverNotifications = useCallback(async () => {
-    if (!backendClient || !canAccessImproverPanel) {
+    // Loaded for every signed-in user, not just improvers.
+    //
+    // The feed used to be improver-only because workflow payouts were the only
+    // thing in it. Tax notices are not role-scoped — anyone who earns past the
+    // reporting threshold gets one — and the server-side query already filters
+    // workflow rows by assignment, so a non-improver simply receives none of
+    // them rather than someone else's.
+    if (!backendClient || !appUser) {
       setImproverNotifications(null);
       return;
     }
@@ -2612,9 +3098,9 @@ function WalletAppShellContent({
       setImproverNotifications(await backendClient.getImproverNotifications());
     } catch (error) {
       // A notification feed is never worth interrupting the panel for.
-      console.warn("Unable to load improver notifications", error);
+      console.warn("Unable to load notifications", error);
     }
-  }, [backendClient, canAccessImproverPanel]);
+  }, [backendClient, appUser]);
 
   useEffect(() => {
     void refreshImproverNotifications();
@@ -2626,7 +3112,9 @@ function WalletAppShellContent({
   // backgrounded timer burns battery and network for a badge nobody can see,
   // and the AppState listener re-syncs on the way back in anyway.
   useEffect(() => {
-    if (!backendClient || !canAccessImproverPanel) {
+    // Polled for every signed-in user, matching the fetch above: a merchant who
+    // owes a W-9 needs the badge to keep up just as much as an improver does.
+    if (!backendClient || !appUser) {
       return;
     }
     const interval = setInterval(() => {
@@ -2635,10 +3123,12 @@ function WalletAppShellContent({
       }
     }, IMPROVER_NOTIFICATION_POLL_MS);
     return () => clearInterval(interval);
-  }, [backendClient, canAccessImproverPanel, refreshImproverNotifications]);
+  }, [appUser, backendClient, refreshImproverNotifications]);
 
   const handleMarkImproverNotificationsSeen = useCallback(async () => {
-    if (!backendClient || !canAccessImproverPanel) {
+    // Ungated for the same reason the fetch is: a non-improver can hold a tax
+    // notice, and a badge that will not clear is worse than no badge.
+    if (!backendClient || !appUser) {
       return;
     }
     try {
@@ -2647,7 +3137,60 @@ function WalletAppShellContent({
     } catch (error) {
       console.warn("Unable to mark improver notifications seen", error);
     }
-  }, [backendClient, canAccessImproverPanel]);
+  }, [appUser, backendClient]);
+
+  // Opening the panel only refreshes it. Marking everything seen on open would
+  // empty the badge for someone who did nothing but look, which is the opposite
+  // of what a count of outstanding things is for.
+  const openNotificationPanel = useCallback(() => {
+    setNotificationsOpen(true);
+    void refreshImproverNotifications();
+  }, [refreshImproverNotifications]);
+
+  /**
+   * Dismisses one entry, from whichever source it came.
+   *
+   * A push is dropped from the tray and the local mirror. A derived entry has
+   * no tray and cannot be deleted — the server rebuilds it from live state on
+   * every request — so dismissal is recorded as a seen mark against its key,
+   * which the feed then filters out. Either way the row goes and the count
+   * comes down by one.
+   */
+  const handleDismissNotification = useCallback(
+    (item: InboxNotification) => {
+      const feedKey = item.id.startsWith("feed:") ? item.id.slice("feed:".length) : null;
+      if (!feedKey) {
+        dismissPushNotification(item);
+        return;
+      }
+      // Optimistic: the row disappears on the tap rather than after a round
+      // trip, and the response replaces the feed either way.
+      setImproverNotifications((current) =>
+        current
+          ? {
+              ...current,
+              notifications: current.notifications.map((entry) =>
+                entry.key === feedKey ? { ...entry, seen: true } : entry,
+              ),
+            }
+          : current,
+      );
+      void backendClient
+        ?.markImproverNotificationsSeen({ keys: [feedKey] })
+        .then(setImproverNotifications)
+        .catch(() => {
+          // Put it back rather than leave a row that is gone here and present
+          // on every other device.
+          void refreshImproverNotifications();
+        });
+    },
+    [backendClient, dismissPushNotification, refreshImproverNotifications],
+  );
+
+  const handleClearNotifications = useCallback(() => {
+    clearNotifications();
+    void handleMarkImproverNotificationsSeen();
+  }, [clearNotifications, handleMarkImproverNotificationsSeen]);
 
   // Reminder settings live on the backend, not in device preferences, because
   // the backend is what sends the push at a time this app may not be running.
@@ -2912,10 +3455,37 @@ function WalletAppShellContent({
     const payoutAddress = redeemFlow.walletAddress;
     const redeem = async () => {
       try {
-        await publicBackendClient.redeemCode(code, payoutAddress);
+        const outcome = await publicBackendClient.redeemCode(code, payoutAddress);
         if (cancelled) {
           return;
         }
+
+        // The outcome was previously discarded, so a held reward told people it
+        // had been sent. It has not been — say what actually happened.
+        if (outcome.status === "blocked") {
+          // Refused, and the code was handed back. Clearing the dismissal makes
+          // the blocked modal appear at the moment of the failure rather than
+          // some time after it.
+          setW9TierDismissed(null);
+          setRedeemFlow((current) =>
+            current && current.code === code && current.stage === "redeeming"
+              ? { code, stage: "error", walletAddress: payoutAddress, message: outcome.message }
+              : current,
+          );
+          void refreshW9Status();
+          return;
+        }
+
+        if (outcome.status === "escrowed") {
+          setRedeemFlow((current) =>
+            current && current.code === code && current.stage === "redeeming"
+              ? { code, stage: "success", walletAddress: payoutAddress, message: outcome.message }
+              : current,
+          );
+          void refreshW9Status();
+          return;
+        }
+
         setRedeemFlow((current) =>
           current && current.code === code && current.stage === "redeeming"
             ? {
@@ -3202,6 +3772,19 @@ function WalletAppShellContent({
       appIsActiveRef.current = isActive;
 
       if (!wasActive && isActive) {
+        // Back in the app, so the tax form is not on screen — whatever
+        // openBrowserAsync did or did not report.
+        //
+        // A safety net rather than the main path: the form opens in an in-app
+        // sheet, which does not background the app, so this only fires when
+        // somebody genuinely left. It costs nothing and it is the one signal
+        // that cannot be lost to a promise that never settles.
+        setW9FormOpen(false);
+        // Blocked is re-asked every time the app is opened. The first three
+        // tiers are protected by the acknowledgement the backend stores, so
+        // clearing this does not resurrect them.
+        setW9TierDismissed(null);
+        void refreshW9Status();
         void refreshWalletSurface();
         if (smartAddressRef.current) {
           if (walletHistoryActive) {
@@ -3636,7 +4219,12 @@ function WalletAppShellContent({
     setMerchantModeMessage(null);
     try {
       const status = await backendClient.setMerchantModePin(pin, currentPin);
-      setMerchantModeStatus(status);
+      // The PIN endpoint answers without an installation ID, so its status
+      // carries no device. Keeping the one already in hand stops a PIN change
+      // from looking like this till has just dropped out of merchant mode.
+      setMerchantModeStatus((current) =>
+        current?.device && !status.device ? { ...status, device: current.device } : status,
+      );
       setMerchantModeMessage("Merchant Mode PIN saved.");
     } finally {
       setMerchantModeBusy(false);
@@ -3672,9 +4260,106 @@ function WalletAppShellContent({
     }
   };
 
+  /**
+   * Moves this device to another of the merchant's shops, behind the PIN.
+   *
+   * Re-enrolling the same installation is the whole operation: the server
+   * rebinds the device to the new location and the wallet follows, because the
+   * till resolves its wallet from the shop on every poll.
+   *
+   * The PIN reverses the original call that switching counters is "a shift
+   * change, not a privileged act" — the product owner has confirmed the reversal
+   * with the team, so read this as a decision and not a regression. The argument
+   * that changed it: the shop the device is bound to decides where its payments
+   * land, so anyone holding the tablet could redirect a day's takings into
+   * another of the owner's businesses. Choosing that is the owner's, not the
+   * shift's. Re-confirming the counter the device is already on is not a change
+   * and still costs nothing — see the idle re-confirm in
+   * refreshMerchantModeStatus.
+   */
+  const handleSwitchMerchantLocation = async (locationID: number, pin: string) => {
+    if (!backendClient || merchantModeBusy) {
+      return;
+    }
+    // Without a stored PIN the confirm call below would be taken as setting a
+    // first one, and would accept anything typed. A device in merchant mode
+    // always has one, so this is a guard against a state that should not exist.
+    if (!merchantModeStatus?.passcodeSet) {
+      setMerchantSwitchError("No Merchant Mode PIN is set for this account.");
+      return;
+    }
+    if (!/^\d{6}$/.test(pin)) {
+      setMerchantSwitchError("Enter the 6 digit Merchant Mode PIN.");
+      return;
+    }
+    const installationID = merchantModeInstallationID ?? (await getOrCreateAppInstallationID());
+    if (!merchantModeInstallationID) {
+      setMerchantModeInstallationID(installationID);
+    }
+
+    setMerchantModeBusy(true);
+    setMerchantSwitchError(null);
+    try {
+      await backendClient.confirmMerchantModePin(pin);
+      const status = await backendClient.enableMerchantMode({
+        installationID,
+        locationID,
+        displayName: Device.deviceName || Device.modelName || "Store device",
+        platform: Platform.OS,
+        appVersion: Constants.expoConfig?.version || Constants.nativeAppVersion || "",
+      });
+      setMerchantModeStatus(status);
+      setMerchantSwitchLocationID(null);
+      setMerchantSwitchPin("");
+      setMerchantLocationChooserOpen(false);
+      // The previous shop's takings must not linger on screen next to the new
+      // shop's name, so the day is cleared and refetched rather than reused.
+      setMerchantToday(null);
+      await refreshMerchantToday();
+    } catch (error) {
+      setMerchantSwitchError((error as Error)?.message || "Unable to switch location.");
+    } finally {
+      setMerchantModeBusy(false);
+    }
+  };
+
+  // Abandoning the prompt clears the digits: a half-typed PIN left on a counter
+  // tablet is a PIN someone else gets to finish.
+  const closeMerchantSwitchPrompt = () => {
+    setMerchantSwitchLocationID(null);
+    setMerchantSwitchPin("");
+    setMerchantSwitchError(null);
+  };
+
+  /**
+   * First run on a device for a merchant account: prove the PIN, then pick a
+   * counter. The PIN is checked before the location list is offered so a device
+   * cannot be pointed at a shop by whoever happens to be holding it.
+   */
+  const handleConfirmMerchantModePin = async (pin: string) => {
+    if (!backendClient) {
+      throw new Error("Backend not configured.");
+    }
+    if (!merchantModeStatus?.passcodeSet) {
+      throw new Error("No Merchant Mode PIN is set for this account.");
+    }
+    setMerchantModeBusy(true);
+    try {
+      await backendClient.confirmMerchantModePin(pin);
+    } finally {
+      setMerchantModeBusy(false);
+    }
+  };
+
   const handleDisableMerchantMode = async () => {
     if (!backendClient) {
       setMerchantModeExitError("Backend not configured.");
+      return;
+    }
+    // A merchant account has no consumer app to be let out into, so the exit is
+    // not offered to one and must not be reachable by any other route either.
+    if (merchantAccount) {
+      setMerchantModeExitError("Merchant accounts stay in Merchant Mode.");
       return;
     }
     if (!/^\d{6}$/.test(merchantModeExitPin)) {
@@ -3854,10 +4539,21 @@ function WalletAppShellContent({
       await loadAppProfile();
     }
     await loadPublicLocations();
+
+    // The merchant's location list has to be re-fetched explicitly, not left to
+    // the effect that normally maintains it.
+    //
+    // That effect is keyed on the user id, the merchant flag and the bound
+    // device's location — none of which change when support attaches a missing
+    // wallet, or when a failed request earlier left the list empty. Without
+    // this, the "Check again" button on the device setup screen was a no-op
+    // forever: an approved merchant waiting on a wallet could only escape by
+    // restarting the app.
+    await refreshMerchantModeLocations();
   };
 
   useEffect(() => {
-    if (!merchantModeActive) {
+    if (!merchantKiosk) {
       return;
     }
     if (tab !== "wallet") {
@@ -3866,11 +4562,13 @@ function WalletAppShellContent({
     if (walletPane === "send") {
       setWalletPane("home");
     }
-  }, [merchantModeActive, tab, walletPane]);
+  }, [merchantKiosk, tab, walletPane]);
 
   const activeTitle =
     merchantModeActive
       ? "Merchant Mode"
+      : merchantDeviceSetupPending
+      ? "Merchant Setup"
       : tab === "wallet"
       ? walletPane === "send"
         ? "Send"
@@ -3908,6 +4606,9 @@ function WalletAppShellContent({
   const RootContainer = showStandardChrome ? SafeAreaView : View;
   const walletHomeContent = (
     <WalletHomeScreen
+      w9Status={w9Status}
+      w9Busy={w9Busy}
+      onStartW9={handleStartW9}
       balance={smartBalance === "..." ? smartBalance : formatDisplayBalance(smartBalance, clientConfig.tokenDecimals)}
       tokenSymbol={clientConfig.tokenSymbol}
       explorerURL={clientConfig.explorerURL}
@@ -3949,7 +4650,7 @@ function WalletAppShellContent({
       onOpenWalletChooser={() => {
         setShowWalletChooser(true);
       }}
-      showWalletChooser={canChooseWallet}
+      showWalletChooser={canChooseWallet && !merchantModeActive}
       merchantMode={merchantModeActive}
       merchantLocationName={merchantModeDevice?.locationName}
     />
@@ -3993,12 +4694,45 @@ function WalletAppShellContent({
     ) : walletOverlayPane === "receive" ? (
       <ReceiveScreen
         clientConfig={clientConfig}
-        accountAddress={smartAddress || runtime.discovery?.ownerAddress || ethers.constants.AddressZero}
+        accountAddress={
+          merchantModeActive && merchantModeDevice?.walletAddress
+            ? merchantModeDevice.walletAddress
+            : smartAddress || runtime.discovery?.ownerAddress || ethers.constants.AddressZero
+        }
         onRedeemCodeScanned={openRedeemFlowForCode}
         onBack={() => closeWalletPaneToWallet()}
         showRedeemScanner={!merchantModeActive}
       />
     ) : null;
+  const merchantSetupContent = (
+    <MerchantDeviceSetupScreen
+      locations={merchantModeLocations}
+      ready={merchantSetupReady}
+      passcodeSet={merchantModeStatus?.passcodeSet === true}
+      hasApprovedLocation={appUser?.isMerchant === true}
+      busy={merchantModeBusy}
+      onCreatePin={handleSetMerchantModePin}
+      onConfirmPin={handleConfirmMerchantModePin}
+      onSelectLocation={handleEnableMerchantMode}
+      onRefresh={refreshEverything}
+      onLogout={handleLogout}
+    />
+  );
+  const merchantTodayContent = (
+    <MerchantTodayScreen
+      today={merchantToday}
+      loading={merchantTodayLoading}
+      refreshing={merchantTodayRefreshing}
+      onRefresh={() => void refreshMerchantToday({ silent: true })}
+      locationName={merchantModeDevice?.locationName}
+      tokenSymbol={clientConfig.tokenSymbol}
+      canSwitchLocation={merchantModeLocations.length > 1}
+      onSwitchLocation={() => {
+        setMerchantSwitchError(null);
+        setMerchantLocationChooserOpen(true);
+      }}
+    />
+  );
   const walletTabContent =
     walletOverlayPane !== null ? (
       <View style={styles.walletPaneStack}>
@@ -4029,43 +4763,60 @@ function WalletAppShellContent({
             <Text style={styles.brand}>{activeTitle}</Text>
           </View>
           <View style={styles.topActions}>
-            {!merchantModeActive ? (
+            {!merchantKiosk ? (
               <Pressable
                 style={styles.iconButton}
-                onPress={() => setNotificationsOpen(true)}
+                onPress={openNotificationPanel}
                 accessibilityRole="button"
-                accessibilityLabel="Notifications"
+                accessibilityLabel={
+                  panelNotificationCount > 0
+                    ? `Notifications, ${panelNotificationCount} outstanding`
+                    : "Notifications"
+                }
               >
                 <Ionicons
-                  name={notificationItems.length > 0 ? "notifications" : "notifications-outline"}
+                  name={panelNotificationItems.length > 0 ? "notifications" : "notifications-outline"}
                   size={18}
                   color={palette.primaryStrong}
                 />
-                {notificationItems.length > 0 ? (
+                {panelNotificationCount > 0 ? (
                   <View style={styles.topBadge}>
                     <Text style={styles.topBadgeText}>
-                      {notificationItems.length > 9 ? "9+" : notificationItems.length}
+                      {panelNotificationCount > 9 ? "9+" : panelNotificationCount}
                     </Text>
                   </View>
                 ) : null}
               </Pressable>
             ) : null}
-            <Pressable
-              style={[styles.iconButton, tab === "settings" ? styles.iconButtonActive : undefined]}
-              onPress={() => {
-                if (merchantModeActive) {
-                  setMerchantModeExitOpen(true);
-                  return;
+            {/* Nothing to reach during first-run setup: there is no till to
+                lock and no settings a half-enrolled device should open. */}
+            {!merchantDeviceEnrollable ? (
+              <Pressable
+                style={[styles.iconButton, tab === "settings" ? styles.iconButtonActive : undefined]}
+                // Icon-only, and in merchant mode it is the ONLY control on the
+                // screen — without a label it reaches VoiceOver as a bare glyph.
+                accessibilityRole="button"
+                accessibilityLabel={merchantModeActive ? "Merchant mode options" : "Settings"}
+                accessibilityHint={
+                  merchantModeActive ? "Move this device to another location, or sign out" : undefined
                 }
-                setTab("settings");
-              }}
-            >
-              <Ionicons
-                name={merchantModeActive ? "lock-closed-outline" : tab === "settings" ? "settings" : "settings-outline"}
-                size={18}
-                color={palette.primaryStrong}
-              />
-            </Pressable>
+                onPress={() => {
+                  if (merchantModeActive) {
+                    setMerchantModeExitOpen(true);
+                    return;
+                  }
+                  setTab("settings");
+                }}
+              >
+                <Ionicons
+                  name={
+                    merchantModeActive ? "lock-closed-outline" : tab === "settings" ? "settings" : "settings-outline"
+                  }
+                  size={18}
+                  color={palette.primaryStrong}
+                />
+              </Pressable>
+            ) : null}
           </View>
         </View>
       ) : null}
@@ -4140,8 +4891,15 @@ function WalletAppShellContent({
                 </View>
               )}
             </View>
-          ) : merchantModeActive || tab === "wallet" ? (
-            walletTabContent
+          ) : merchantDeviceEnrollable ? (
+            merchantSetupContent
+          ) : merchantModeActive ? (
+            merchantTodayContent
+          ) : tab === "wallet" ? (
+            // A merchant still waiting on approval keeps the rest of the app but
+            // gets no wallet: there is nothing for them to spend from yet, and a
+            // live send screen would be the one real action they must not have.
+            merchantAwaitingApproval ? merchantSetupContent : walletTabContent
           ) : tab === "activity" ? (
             <ActivityScreen
               transactions={activityTransactions}
@@ -4185,15 +4943,13 @@ function WalletAppShellContent({
               onImproverUpdated={handleImproverUpdated}
               requestedSection={improverRouteRequest.section}
               requestedSectionNonce={improverRouteRequest.nonce}
-              notifications={improverNotifications}
-              onRefreshNotifications={() => {
-                void refreshImproverNotifications();
-              }}
-              onMarkNotificationsSeen={handleMarkImproverNotificationsSeen}
               onCredentialDataUpdated={handleImproverCredentialDataUpdated}
             />
           ) : tab === "volunteer" ? (
             <VolunteerScreen
+              w9Status={w9Status}
+              w9Busy={w9Busy}
+              onStartW9={handleStartW9}
               backendClient={backendClient}
               tokenSymbol={clientConfig.tokenSymbol}
               hapticsEnabled={preferences.hapticsEnabled}
@@ -4278,6 +5034,7 @@ function WalletAppShellContent({
               improver={appImprover}
               wallets={settingsWallets}
               ownedLocations={ownedLocations}
+              merchantModeLocations={merchantModeLocations}
               primaryWalletAddress={appUser?.primaryWalletAddress}
               syncNotice={syncNotice}
               preferences={preferences}
@@ -4358,7 +5115,10 @@ function WalletAppShellContent({
         ) : null}
       </View>
 
-      {showStandardChrome && !merchantModeActive && !sendPaneActive ? (
+      <PaymentReceivedOverlay receipt={paymentReceipt} onDismiss={() => setPaymentReceipt(null)} />
+
+
+      {showStandardChrome && !merchantKiosk && !sendPaneActive ? (
         <View pointerEvents="box-none" style={styles.bottomDockShell}>
           <BlurView
             pointerEvents="none"
@@ -4378,8 +5138,8 @@ function WalletAppShellContent({
         animationType="none"
         onRequestClose={() => setMerchantModeExitOpen(false)}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setMerchantModeExitOpen(false)}>
-          <Pressable style={styles.moreMenuCard} onPress={() => {}}>
+        <Pressable style={styles.modalOverlay} onPress={() => setMerchantModeExitOpen(false)} accessible={false}>
+          <Pressable style={styles.moreMenuCard} onPress={() => {}} accessible={false}>
             <View style={styles.moreMenuHeader}>
               <View style={styles.moreMenuHeaderCopy}>
                 <Text style={styles.moreMenuTitle}>Merchant Mode</Text>
@@ -4392,35 +5152,251 @@ function WalletAppShellContent({
               </Pressable>
             </View>
 
+            {merchantAccount ? (
+              // Merchant accounts have nowhere to exit to. The sheet still opens,
+              // because staff press the lock expecting something, but the only
+              // thing behind it is moving the device to another counter.
+              //
+              // The copy has to say that plainly. It previously read "This device
+              // stays a till" above a Switch location button, which contradicts
+              // itself, and for an owner with a single shop that was the entire
+              // sheet — so the honest reading was that a till can never be moved.
+              // Both halves are now conditional on there being somewhere to go.
+              <View style={styles.merchantExitCard}>
+                <Text style={styles.merchantExitTitle}>
+                  {merchantModeLocations.length > 1 ? "This device is a till" : "This device stays a till"}
+                </Text>
+                <Text style={styles.merchantExitBody}>
+                  {merchantModeLocations.length > 1
+                    ? "Merchant accounts do not have a personal wallet to switch back to, but you can move this device to another of your locations."
+                    : "Merchant accounts do not have a personal wallet to switch back to. Payments taken here go to this location."}
+                </Text>
+                {merchantModeLocations.length > 1 ? (
+                  <Pressable
+                    style={styles.connectionStateButton}
+                    onPress={() => {
+                      setMerchantModeExitOpen(false);
+                      setMerchantSwitchError(null);
+                      setMerchantLocationChooserOpen(true);
+                    }}
+                  >
+                    <Text style={styles.connectionStateButtonText}>Switch location</Text>
+                  </Pressable>
+                ) : null}
+                {/* Settings are unreachable from a till, so this is the only way
+                    to hand the device to another business or another owner.
+                    Confirmed rather than PIN-gated: nothing leaks and no money
+                    moves, and a PIN nobody can remember must not be able to
+                    strand a tablet. */}
+                <Pressable
+                  onPress={() => {
+                    Alert.alert(
+                      "Sign out of this till?",
+                      "This device will stop taking payments for this location until someone signs in again.",
+                      [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                          text: "Sign out",
+                          style: "destructive",
+                          onPress: () => {
+                            setMerchantModeExitOpen(false);
+                            handleLogout();
+                          },
+                        },
+                      ],
+                    );
+                  }}
+                >
+                  <Text style={styles.merchantExitSignOut}>Sign out</Text>
+                </Pressable>
+              </View>
+            ) : (
+              // The opt-in merchant mode a personal account can turn on, and so
+              // must be able to turn off again.
+              <View style={styles.merchantExitCard}>
+                <Text style={styles.merchantExitTitle}>Exit Merchant Mode</Text>
+                <Text style={styles.merchantExitBody}>
+                  Enter the 6 digit merchant PIN on this device to return to the full app.
+                </Text>
+                <MerchantPinDisplay
+                  value={merchantModeExitPin}
+                  visible={merchantModeExitPinVisible}
+                  onToggleVisible={() => setMerchantModeExitPinVisible((current) => !current)}
+                />
+                <MerchantPinKeypad
+                  onDigit={(digit) => {
+                    setMerchantModeExitPin((value) => `${value}${digit}`.replace(/\D/g, "").slice(0, 6));
+                    setMerchantModeExitError(null);
+                  }}
+                  onBackspace={() => {
+                    setMerchantModeExitPin((value) => value.slice(0, -1));
+                    setMerchantModeExitError(null);
+                  }}
+                />
+                {merchantModeExitError ? <Text style={styles.merchantExitError}>{merchantModeExitError}</Text> : null}
+                <MerchantPinSlider
+                  disabled={merchantModeBusy || !/^\d{6}$/.test(merchantModeExitPin)}
+                  loading={merchantModeBusy}
+                  label="Slide to exit"
+                  onComplete={() => {
+                    void handleDisableMerchantMode();
+                  }}
+                />
+              </View>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Which counter this device is. Picking the one it is already on closes
+          and costs nothing — that is the case the idle re-confirm hits, and it
+          is a confirmation, not a change. Picking a different one redirects
+          where the money lands, so it goes on to ask for the PIN. */}
+      <Modal
+        visible={merchantLocationChooserOpen}
+        transparent
+        presentationStyle="overFullScreen"
+        animationType="none"
+        onRequestClose={() => setMerchantLocationChooserOpen(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setMerchantLocationChooserOpen(false)} accessible={false}>
+          <Pressable style={styles.walletChooserCard} onPress={() => {}} accessible={false}>
+            <View style={styles.walletChooserHeader}>
+              <View style={styles.walletChooserHeaderCopy}>
+                <Text style={styles.walletChooserTitle}>Which location?</Text>
+              </View>
+              <Pressable style={styles.walletChooserClose} onPress={() => setMerchantLocationChooserOpen(false)}>
+                <Ionicons name="close" size={20} color={palette.primaryStrong} />
+              </Pressable>
+            </View>
+
+            <ScrollView contentContainerStyle={styles.walletChooserList} showsVerticalScrollIndicator={false}>
+              {merchantModeLocations.map((location) => {
+                const active = location.id === merchantModeDevice?.locationId;
+                return (
+                  <Pressable
+                    key={`merchant-location-${location.id}`}
+                    style={[styles.walletChooserOption, active ? styles.walletChooserOptionActive : undefined]}
+                    disabled={merchantModeBusy}
+                    onPress={() => {
+                      if (active) {
+                        setMerchantLocationChooserOpen(false);
+                        return;
+                      }
+                      setMerchantSwitchPin("");
+                      setMerchantSwitchError(null);
+                      setMerchantSwitchLocationID(location.id);
+                      setMerchantLocationChooserOpen(false);
+                    }}
+                  >
+                    <View style={styles.walletChooserOptionHeader}>
+                      <Text style={styles.walletChooserOptionTitle}>{location.name}</Text>
+                      {active ? (
+                        <View style={styles.walletChooserActiveBadge}>
+                          <Ionicons name="checkmark" size={12} color={palette.white} />
+                        </View>
+                      ) : null}
+                    </View>
+                    {location.street ? (
+                      <Text style={styles.walletChooserBalance}>{location.street}</Text>
+                    ) : null}
+                    <Text style={styles.walletChooserAddress}>{shortAddress(location.walletAddress)}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* The PIN behind a counter change. Separate from the chooser so the list
+          stays a list: whoever is switching picks the shop first and is then
+          told what it costs. */}
+      <Modal
+        visible={merchantSwitchLocationID !== null}
+        transparent
+        presentationStyle="overFullScreen"
+        animationType="none"
+        onRequestClose={closeMerchantSwitchPrompt}
+      >
+        <Pressable style={styles.modalOverlay} onPress={closeMerchantSwitchPrompt} accessible={false}>
+          <Pressable style={styles.moreMenuCard} onPress={() => {}} accessible={false}>
+            <View style={styles.moreMenuHeader}>
+              <View style={styles.moreMenuHeaderCopy}>
+                <Text style={styles.moreMenuTitle}>Merchant PIN</Text>
+                <Text style={styles.moreMenuSubtitle}>
+                  Moving this device to{" "}
+                  {merchantModeLocations.find((location) => location.id === merchantSwitchLocationID)?.name ||
+                    "another location"}
+                  .
+                </Text>
+              </View>
+              <Pressable style={styles.walletChooserClose} onPress={closeMerchantSwitchPrompt}>
+                <Ionicons name="close" size={20} color={palette.primaryStrong} />
+              </Pressable>
+            </View>
+
             <View style={styles.merchantExitCard}>
-              <Text style={styles.merchantExitTitle}>Exit Merchant Mode</Text>
               <Text style={styles.merchantExitBody}>
-                Enter the 6 digit merchant PIN on this device to return to the full app.
+                Payments taken on this device will go to the new location from now on.
               </Text>
-              <MerchantExitPinInput
-                value={merchantModeExitPin}
-                visible={merchantModeExitPinVisible}
-                onToggleVisible={() => setMerchantModeExitPinVisible((current) => !current)}
+              <MerchantPinDisplay
+                value={merchantSwitchPin}
+                visible={merchantSwitchPinVisible}
+                onToggleVisible={() => setMerchantSwitchPinVisible((current) => !current)}
               />
-              <MerchantExitPinPad
+              <MerchantPinKeypad
                 onDigit={(digit) => {
-                  setMerchantModeExitPin((value) => `${value}${digit}`.replace(/\D/g, "").slice(0, 6));
-                  setMerchantModeExitError(null);
+                  setMerchantSwitchPin((value) => `${value}${digit}`.replace(/\D/g, "").slice(0, 6));
+                  setMerchantSwitchError(null);
                 }}
                 onBackspace={() => {
-                  setMerchantModeExitPin((value) => value.slice(0, -1));
-                  setMerchantModeExitError(null);
+                  setMerchantSwitchPin((value) => value.slice(0, -1));
+                  setMerchantSwitchError(null);
                 }}
               />
-              {merchantModeExitError ? <Text style={styles.merchantExitError}>{merchantModeExitError}</Text> : null}
-              <MerchantExitSwipe
-                disabled={merchantModeBusy || !/^\d{6}$/.test(merchantModeExitPin)}
+              {merchantSwitchError ? <Text style={styles.merchantExitError}>{merchantSwitchError}</Text> : null}
+              <MerchantPinSlider
+                disabled={merchantModeBusy || !/^\d{6}$/.test(merchantSwitchPin)}
                 loading={merchantModeBusy}
+                label="Slide to switch"
+                loadingLabel="Switching"
                 onComplete={() => {
-                  void handleDisableMerchantMode();
+                  if (merchantSwitchLocationID === null) {
+                    return;
+                  }
+                  void handleSwitchMerchantLocation(merchantSwitchLocationID, merchantSwitchPin);
                 }}
               />
             </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* The server has just ended merchant mode for this device. Said plainly,
+          because whoever is at the counter needs to know the till is no longer
+          taking payments. */}
+      <Modal
+        visible={Boolean(merchantForcedExitNotice)}
+        transparent
+        presentationStyle="overFullScreen"
+        animationType="fade"
+        onRequestClose={() => setMerchantForcedExitNotice(null)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setMerchantForcedExitNotice(null)} accessible={false}>
+          <Pressable style={styles.walletChooserCard} onPress={() => {}} accessible={false}>
+            <View style={styles.walletChooserHeader}>
+              <View style={styles.walletChooserHeaderCopy}>
+                <Text style={styles.walletChooserTitle}>Merchant mode ended</Text>
+              </View>
+            </View>
+            <Text style={styles.walletChooserBalance}>{merchantForcedExitNotice}</Text>
+            <Pressable
+              style={styles.connectionStateButton}
+              onPress={() => setMerchantForcedExitNotice(null)}
+            >
+              <Text style={styles.connectionStateButtonText}>OK</Text>
+            </Pressable>
           </Pressable>
         </Pressable>
       </Modal>
@@ -4432,8 +5408,8 @@ function WalletAppShellContent({
         animationType="none"
         onRequestClose={() => setShowWalletChooser(false)}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setShowWalletChooser(false)}>
-          <Pressable style={styles.walletChooserCard} onPress={() => {}}>
+        <Pressable style={styles.modalOverlay} onPress={() => setShowWalletChooser(false)} accessible={false}>
+          <Pressable style={styles.walletChooserCard} onPress={() => {}} accessible={false}>
             <View style={styles.walletChooserHeader}>
               <View style={styles.walletChooserHeaderCopy}>
                 <Text style={styles.walletChooserTitle}>Choose Wallet</Text>
@@ -4490,8 +5466,8 @@ function WalletAppShellContent({
         animationType="none"
         onRequestClose={() => setShowParticipateMenu(false)}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setShowParticipateMenu(false)}>
-          <Pressable style={styles.moreMenuCard} onPress={() => {}}>
+        <Pressable style={styles.modalOverlay} onPress={() => setShowParticipateMenu(false)} accessible={false}>
+          <Pressable style={styles.moreMenuCard} onPress={() => {}} accessible={false}>
             <View style={styles.moreMenuHeader}>
               <View style={styles.moreMenuHeaderCopy}>
                 <Text style={styles.moreMenuTitle}>Participate</Text>
@@ -4506,7 +5482,6 @@ function WalletAppShellContent({
               {participateTargets.map((target) => {
                 const entry = PARTICIPATE_ENTRIES[target];
                 const active = tab === target;
-                const showDot = target === "improver" && improverNotifications?.hasUnseen === true;
                 return (
                   <Pressable
                     key={target}
@@ -4526,7 +5501,6 @@ function WalletAppShellContent({
                         size={18}
                         color={active ? palette.primaryStrong : palette.textMuted}
                       />
-                      {showDot ? <View style={styles.bottomTabDot} /> : null}
                     </View>
                   </Pressable>
                 );
@@ -4543,14 +5517,15 @@ function WalletAppShellContent({
         presentationStyle="overFullScreen"
         animationType="fade"
         onRequestClose={() => setNotificationsOpen(false)}
+        onDismiss={drainPanelAction}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setNotificationsOpen(false)}>
-          <Pressable style={styles.moreMenuCard} onPress={() => {}}>
+        <Pressable style={styles.modalOverlay} onPress={() => setNotificationsOpen(false)} accessible={false}>
+          <Pressable style={styles.moreMenuCard} onPress={() => {}} accessible={false}>
             <View style={styles.moreMenuHeader}>
               <View style={styles.moreMenuHeaderCopy}>
                 <Text style={styles.moreMenuTitle}>Notifications</Text>
                 <Text style={styles.moreMenuSubtitle}>
-                  {notificationItems.length > 0
+                  {panelNotificationItems.length > 0
                     ? "Tap one to jump straight to it."
                     : "You are all caught up."}
                 </Text>
@@ -4560,19 +5535,28 @@ function WalletAppShellContent({
               </Pressable>
             </View>
 
-            {notificationItems.length > 0 ? (
+            {panelNotificationItems.length > 0 ? (
               <>
                 <ScrollView style={styles.notificationList} showsVerticalScrollIndicator={false}>
-                  {notificationItems.map((item) => (
+                  {panelNotificationItems.map((item) => (
+                    <View key={item.id} style={styles.notificationRow}>
                     <Pressable
-                      key={item.id}
                       style={styles.moreMenuItem}
+                      accessibilityRole="button"
+                      // Title and body read as one announcement; left to merge
+                      // on their own they arrive as two unrelated fragments.
+                      accessibilityLabel={item.body ? `${item.title}. ${item.body}` : item.title}
+                      accessibilityHint={
+                        item.target.kind === "none" ? undefined : "Opens what this is about"
+                      }
                       onPress={() => {
+                        console.error("[w9] notification tapped:", item.target.kind);
+                        pendingPanelActionRef.current = () => openNotification(item);
                         setNotificationsOpen(false);
-                        openNotification(item);
+                        setTimeout(drainPanelAction, 600);
                       }}
                     >
-                      <View style={styles.moreMenuCopy}>
+                      <View style={[styles.moreMenuCopy, styles.notificationCopyInset]}>
                         <Text style={styles.moreMenuLabel}>{item.title}</Text>
                         {item.body ? <Text style={styles.moreMenuBody}>{item.body}</Text> : null}
                       </View>
@@ -4580,9 +5564,25 @@ function WalletAppShellContent({
                         <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
                       ) : null}
                     </Pressable>
+                    {/* Drawn over the bubble's top-right corner rather than
+                        inside it. A Pressable that sets its own label merges
+                        its children into one accessibility element, so nesting
+                        this put the dismiss out of reach of a screen reader
+                        entirely. As a sibling it keeps its own element and
+                        still lands where it should. */}
+                    <Pressable
+                      style={styles.notificationDismiss}
+                      onPress={() => handleDismissNotification(item)}
+                      hitSlop={10}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Dismiss ${item.title}`}
+                    >
+                      <Ionicons name="close" size={14} color={palette.textMuted} />
+                    </Pressable>
+                    </View>
                   ))}
                 </ScrollView>
-                <Pressable style={styles.notificationClearAll} onPress={clearNotifications}>
+                <Pressable style={styles.notificationClearAll} onPress={handleClearNotifications}>
                   <Text style={styles.notificationClearAllText}>Clear all</Text>
                 </Pressable>
               </>
@@ -4650,6 +5650,41 @@ function WalletAppShellContent({
           </View>
         </View>
       </Modal>
+
+      {/*
+        Queued behind the redemption result rather than stacked on it: at the
+        crossing both fire at once, and two overlaid modals read as a glitch.
+        Closing the redemption result reveals this one immediately.
+      */}
+      <W9TierModal
+        visible={Boolean(visibleW9Tier) && !redeemFlow && !merchantKiosk}
+        tier={visibleW9Tier}
+        earnedSfluv={w9Status?.earnedSfluv ?? "0"}
+        thresholdSfluv={w9Status?.thresholdSfluv ?? "0"}
+        earnedBase={w9Status?.earnedBase ?? "0"}
+        thresholdBase={w9Status?.thresholdBase ?? "0"}
+        tokenSymbol={clientConfig.tokenSymbol}
+        busy={w9Busy}
+        onStartForm={() => {
+          void handleStartW9();
+        }}
+        onDismiss={() => acknowledgeW9Tier(visibleW9Tier)}
+        onClosed={() => {
+          console.error("[w9] tier modal reported dismissed");
+          void presentW9Form();
+        }}
+      />
+
+      {/* Shown after the form clears, and only then. Kept separate from the
+          tier modal rather than added as a fifth presentation: that one is a
+          ladder of warnings sharing a meter, and this is the one screen in the
+          whole flow that is not asking for anything. */}
+      <W9CompleteModal
+        visible={w9Released !== null && !redeemFlow && !merchantKiosk}
+        releasedSfluv={w9Released ?? ""}
+        tokenSymbol={clientConfig.tokenSymbol}
+        onDismiss={() => setW9Released(null)}
+      />
     </RootContainer>
   );
 }
@@ -5804,6 +6839,8 @@ function PrivyWalletApp({
                 ) : (
                   <>
                     <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Continue with Google"
                       style={[
                         styles.loginOptionButton,
                         styles.loginOptionButtonLight,
@@ -5825,6 +6862,8 @@ function PrivyWalletApp({
                       </View>
                     </Pressable>
                     <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Continue with Email"
                       style={[
                         styles.loginOptionButton,
                         styles.loginOptionButtonOutline,
@@ -5846,6 +6885,8 @@ function PrivyWalletApp({
                       </View>
                     </Pressable>
                     <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Continue with Apple"
                       style={[
                         styles.loginOptionButton,
                         styles.loginOptionButtonDark,
@@ -6336,6 +7377,7 @@ export default function App() {
         <PrivyProvider
           appId={mobileConfig.privyAppId}
           clientId={mobileConfig.privyClientId || undefined}
+          storage={resilientPrivyStorage}
           supportedChains={[supportedChain]}
           config={{
             embedded: {
@@ -6394,6 +7436,27 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   },
   notificationList: {
     maxHeight: 340,
+  },
+  notificationRow: {
+    position: "relative",
+  },
+  notificationDismiss: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1,
+  },
+  // Clears the corner the dismiss occupies. Without it a title's last line
+  // runs under the control, and on a one-line entry the chevron sits under it
+  // too — two tap targets in the same few pixels, one of which discards what
+  // the other opens.
+  notificationCopyInset: {
+    paddingRight: 22,
   },
   notificationClearAll: {
     alignSelf: "center",
@@ -6722,17 +7785,6 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
   },
   bottomTabTextActive: {
     color: palette.primaryStrong,
-  },
-  bottomTabDot: {
-    position: "absolute",
-    top: -2,
-    right: -3,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: palette.danger,
-    borderWidth: 1.5,
-    borderColor: palette.surface,
   },
   loginWrap: {
     flex: 1,
@@ -7127,125 +8179,16 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     color: palette.textMuted,
     lineHeight: 20,
   },
-  merchantExitInput: {
-    minHeight: 52,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: palette.primary,
-    backgroundColor: palette.surface,
-    color: palette.text,
-    fontSize: 18,
-    fontWeight: "800",
-    letterSpacing: 4,
-    textAlign: "center",
-    paddingHorizontal: spacing.md,
-  },
-  merchantExitPinDisplay: {
-    minHeight: 54,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: palette.primary,
-    backgroundColor: palette.surface,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingLeft: spacing.md,
-  },
-  merchantExitPinDisplayText: {
-    flex: 1,
-    color: palette.text,
-    fontSize: 20,
-    fontWeight: "800",
-    letterSpacing: 4,
-    textAlign: "center",
-  },
-  merchantExitPinPlaceholder: {
-    color: palette.textMuted,
-    fontSize: 15,
-    letterSpacing: 0,
-    textAlign: "left",
-  },
-  merchantExitPinEye: {
-    width: 48,
-    minHeight: 52,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  merchantExitKeypad: {
-    gap: spacing.xs,
-  },
-  merchantExitKeypadRow: {
-    flexDirection: "row",
-    gap: spacing.xs,
-  },
-  merchantExitKeypadKey: {
-    flex: 1,
-    minHeight: 48,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: palette.border,
-    backgroundColor: palette.surface,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  merchantExitKeypadAction: {
-    backgroundColor: palette.primarySoft,
-  },
-  merchantExitKeypadText: {
-    color: palette.text,
-    fontSize: 22,
-    fontWeight: "800",
-  },
   merchantExitError: {
     color: palette.danger,
     lineHeight: 20,
     fontWeight: "700",
   },
-  merchantExitButton: {
-    minHeight: 50,
-    borderRadius: radii.md,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: palette.danger,
-  },
-  merchantExitButtonText: {
-    color: palette.white,
-    fontWeight: "800",
-  },
-  merchantExitSwipeTrack: {
-    minHeight: 58,
-    borderRadius: radii.pill,
-    backgroundColor: palette.primaryStrong,
-    justifyContent: "center",
-    paddingHorizontal: 8,
-    position: "relative",
-    overflow: "hidden",
-  },
-  merchantExitSwipeTrackDisabled: {
-    backgroundColor: palette.borderStrong,
-  },
-  merchantExitSwipeText: {
-    color: palette.white,
+  merchantExitSignOut: {
+    color: palette.textMuted,
     textAlign: "center",
-    fontSize: 15,
-    fontWeight: "800",
-    paddingHorizontal: 72,
-  },
-  merchantExitSwipeTextDisabled: {
-    color: palette.surface,
-  },
-  merchantExitSwipeThumb: {
-    position: "absolute",
-    left: 4,
-    top: 4,
-    bottom: 4,
-    width: 54,
-    borderRadius: radii.pill,
-    backgroundColor: palette.surface,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  merchantExitSwipeThumbDisabled: {
-    backgroundColor: palette.surfaceStrong,
+    fontWeight: "700",
+    paddingVertical: spacing.xs,
   },
   buttonDisabled: {
     opacity: 0.55,

@@ -105,6 +105,14 @@ export function useNotificationInbox({ onNavigate }: Options) {
     [],
   );
 
+  /** Dismissing one entry without going anywhere. */
+  const dismiss = useCallback(
+    (item: InboxNotification) => {
+      resolve((candidate) => candidate.id === item.id);
+    },
+    [resolve],
+  );
+
   /** Tapping an entry: go where it points, then retire it. */
   const open = useCallback(
     (item: InboxNotification) => {
@@ -135,5 +143,5 @@ export function useNotificationInbox({ onNavigate }: Options) {
     applyItems([]);
   }, [applyItems, items]);
 
-  return { items, open, resolveTarget, clearAll };
+  return { items, open, dismiss, resolveTarget, clearAll };
 }

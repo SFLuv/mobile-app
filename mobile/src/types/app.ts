@@ -21,6 +21,14 @@ export interface AppUser {
   mailingListOptIn: boolean;
   mailingListOptInAt?: string | null;
   mailingListPolicyVersion: string;
+  /**
+   * What this person said they were signing up as, answered once at signup.
+   * Not interchangeable with `isMerchant`, which is recomputed from approved
+   * listings: a merchant whose first location is still being reviewed is
+   * `accountType: "merchant"` with `isMerchant: false`. Undefined on a backend
+   * that predates the question, which is why nothing keys off "not merchant".
+   */
+  accountType?: "regular" | "merchant";
   /** Volunteer email list — distinct from `mailingListOptIn`. Undefined = unknown. */
   volunteerListOptIn?: boolean;
 }
@@ -139,7 +147,10 @@ export interface AppMerchantModeDevice {
   userId: string;
   locationId: number;
   locationName: string;
+  /** The location's payment wallet as it stands now, not as it stood at enrolment. */
   walletAddress: string;
+  locationActive: boolean;
+  locationApproved: boolean;
   displayName: string;
   platform: string;
   appVersion: string;
@@ -156,6 +167,22 @@ export interface AppMerchantModeStatus {
   isMerchant: boolean;
   passcodeSet: boolean;
   device?: AppMerchantModeDevice | null;
+  /**
+   * Set when the server has just turned merchant mode off for this device —
+   * the shop closed, lost approval, or lost its payment wallet. Shown once,
+   * then the app returns to the normal wallet.
+   */
+  forcedExitReason?: string;
+}
+
+/** A shop this device can be put to work at. */
+export interface AppMerchantModeLocation {
+  id: number;
+  name: string;
+  street: string;
+  city: string;
+  walletAddress: string;
+  tippingWalletAddress: string;
 }
 
 export interface AppWalletOwnerLookup {
@@ -696,7 +723,21 @@ export interface AppImproverNotification {
   isManager: boolean;
   amountSfluv?: number | null;
   payoutError?: string | null;
+  /**
+   * Where tapping this notification goes, decided server-side. Absent means
+   * the notification is text only. `url` exists because some destinations —
+   * a partner's signup page, a form we do not host — cannot be mapped from
+   * `type` by any client build.
+   */
+  action?: AppNotificationAction | null;
 }
+
+export type AppNotificationAction =
+  | { kind: "tax" }
+  | { kind: "improver" }
+  | { kind: "volunteer" }
+  | { kind: "volunteer-event"; eventId: string }
+  | { kind: "url"; url: string };
 
 export interface AppImproverNotificationFeed {
   notifications: AppImproverNotification[];
@@ -808,3 +849,101 @@ export interface MerchantApplicationDraft {
   messagingService: string;
   reference: string;
 }
+
+/** One line of the merchant-mode day: a payment, its tip, or one without the other. */
+export type MerchantDayRow = {
+  at: number;
+  /** Base units. Negative on a refund. */
+  paymentBase: string;
+  tipBase: string;
+  from: string;
+  paymentHash?: string;
+  tipHash?: string;
+  refund: boolean;
+};
+
+/**
+ * The merchant-mode home screen in one payload. Totals are computed server-side
+ * so every till agrees, and so the figures cannot drift with the app version.
+ */
+export type MerchantToday = {
+  businessDate: string;
+  timeZone: string;
+  paymentsBase: string;
+  tipsBase: string;
+  tokenDecimals: number;
+  transactions: MerchantDayRow[];
+  /** False when no tipping wallet is configured, or it failed the ownership check. */
+  tipsWalletConfigured: boolean;
+};
+
+
+/**
+ * What happened when a reward QR was scanned.
+ *
+ * "escrowed" is a success, not a failure: the code was consumed and the money
+ * is the volunteer's, but it waits on a W-9. Treating it as an error would tell
+ * someone their reward failed when it did not.
+ */
+export type RedeemOutcome =
+  | { status: "paid" }
+  | { status: "escrowed"; amountSfluv: string; taxYear: number; message: string }
+  /**
+   * Refused, not failed. Past the limit with a hold already open, the backend
+   * hands the redemption code back — so this is "do this, then scan again"
+   * rather than a lost reward.
+   */
+  | { status: "blocked"; amountSfluv: string; taxYear: number; message: string };
+
+/** One held or owed payout, as shown in the tax panel. */
+export interface AppW9Item {
+  source: string;
+  sourceLabel: string;
+  amountSfluv: string;
+  state: string;
+  escrowedAt?: string | null;
+  expiresAt?: string | null;
+}
+
+/**
+ * A person's tax position: whether a form is owed, how much is waiting on it,
+ * and how long the automatic window has left.
+ */
+export interface AppW9Status {
+  taxYear: number;
+  required: boolean;
+  filingStatus: string;
+  cleared: boolean;
+  thresholdSfluv: string;
+  earnedSfluv: string;
+  escrowedSfluv: string;
+  escrowedCount: number;
+  /** When the oldest hold leaves the automatic window. After it, releasing needs an admin. */
+  escrowExpiresAt?: string | null;
+  backPaySfluv: string;
+  backPayCount: number;
+  formUrl?: string;
+  items: AppW9Item[];
+
+  /**
+   * The warning this person has reached and not yet answered, if any. Drives
+   * which tier modal shows. Null once they file, because clearing a filing
+   * deletes the notices behind it.
+   */
+  tier: AppW9Tier | null;
+  tierAcknowledged: boolean;
+  /** A payout was actually refused — not merely held. */
+  blocked: boolean;
+  /**
+   * Raw base units, so the progress meter never has to parse a formatted
+   * amount back into a number to draw it.
+   */
+  earnedBase: string;
+  thresholdBase: string;
+}
+
+/**
+ * The four rungs of the escalation. The first two arrive while money is still
+ * being paid; the last two arrive after it has stopped.
+ */
+export type AppW9Tier = "notice_400" | "warning_500" | "escrow_600" | "blocked";

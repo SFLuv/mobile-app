@@ -1,6 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 
+import type { AppNotificationAction } from "../types/app";
+
 const STORAGE_KEY = "sfluv-wallet:notification-inbox";
 const MAX_ITEMS = 50;
 
@@ -13,8 +15,42 @@ export type NotificationTarget =
   | { kind: "volunteer-event"; eventId: string }
   | { kind: "volunteer" }
   | { kind: "improver" }
+  // Tax is not a role, so it cannot route to a role panel: a merchant, a
+  // volunteer and an improver can all owe a W-9. It opens the wallet, which
+  // every signed-in user can reach.
+  | { kind: "tax" }
   | { kind: "activity" }
+  // An arbitrary link, chosen by the server. Nothing in the app can be built
+  // to know these ahead of time — a partner's signup page, a form we do not
+  // host — which is why the destination travels with the notification.
+  | { kind: "url"; url: string }
   | { kind: "none" };
+
+/**
+ * Maps a destination chosen by the server onto one this build knows how to
+ * reach. Anything unrecognised becomes "none" and the notification renders as
+ * plain text: dropping someone on the wrong screen is worse than nowhere, and
+ * it lets the server add destinations without waiting for an app release.
+ */
+export function targetFromAction(
+  action: AppNotificationAction | null | undefined,
+): NotificationTarget {
+  if (!action) {
+    return { kind: "none" };
+  }
+  switch (action.kind) {
+    case "tax":
+    case "improver":
+    case "volunteer":
+      return { kind: action.kind };
+    case "volunteer-event":
+      return { kind: "volunteer-event", eventId: action.eventId };
+    case "url":
+      return { kind: "url", url: action.url };
+    default:
+      return { kind: "none" };
+  }
+}
 
 export type InboxNotification = {
   id: string;
@@ -44,6 +80,9 @@ export function targetFromData(data: Record<string, unknown> | undefined): Notif
   }
   if (type.startsWith("workflow_") || type.startsWith("improver_")) {
     return { kind: "improver" };
+  }
+  if (type.startsWith("w9_") || type.startsWith("tax_")) {
+    return { kind: "tax" };
   }
   if (type === "transaction" || type === "wallet_activity" || type === "reward") {
     return { kind: "activity" };

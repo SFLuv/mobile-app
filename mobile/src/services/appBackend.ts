@@ -15,12 +15,17 @@ import {
   AppImproverAbsencePeriodCreateResult,
   AppImproverAbsencePeriodDeleteResult,
   AppImproverNotification,
+  AppNotificationAction,
   AppImproverNotificationFeed,
   AppImproverWorkflowFeed,
   AppImproverWorkflowListItem,
   AppImproverWorkflowSeriesUnclaimResult,
   AppLocation,
   AppLocationDayHours,
+  AppMerchantModeLocation,
+  AppW9Status,
+  AppW9Tier,
+  RedeemOutcome,
   AppMerchantModeStatus,
   AppOwnedLocation,
   AppTransaction,
@@ -48,6 +53,7 @@ import {
   MerchantApplicationDraft,
   PonderSubscription,
   VerifiedEmail,
+  MerchantToday,
 } from "../types/app";
 
 export class AppBackendAuthError extends Error {
@@ -112,6 +118,7 @@ type GetUserResponse = {
     mailing_list_opt_in_at?: string | null;
     mailing_list_policy_version: string;
     volunteer_list_opt_in?: boolean;
+    account_type?: string;
   };
   wallets: Array<{
     id?: number;
@@ -548,12 +555,15 @@ type MerchantModeStatusResponse = {
   user_id: string;
   is_merchant: boolean;
   passcode_set: boolean;
+  forced_exit_reason?: string;
   device?: {
     id: string;
     user_id: string;
     location_id: number;
     location_name: string;
     wallet_address: string;
+    location_active?: boolean;
+    location_approved?: boolean;
     display_name: string;
     platform: string;
     app_version: string;
@@ -682,6 +692,23 @@ const POLICY_REQUIRED_HEADER = "X-SFLUV-Auth-Reason";
 const POLICY_REQUIRED_REASON = "privacy-policy-required";
 const APP_BACKEND_REQUEST_TIMEOUT_MS = 25_000;
 
+/**
+ * An unrecognised tier is treated as no tier rather than rendered blindly: a
+ * backend that grows a fifth rung must not make an older app draw a modal it
+ * has no copy for.
+ */
+function normalizeW9Tier(tier: string): AppW9Tier | null {
+  switch (tier) {
+    case "notice_400":
+    case "warning_500":
+    case "escrow_600":
+    case "blocked":
+      return tier;
+    default:
+      return null;
+  }
+}
+
 function endpoint(path: string): string {
   return `${mobileConfig.appBackendURL.replace(/\/+$/, "")}${path}`;
 }
@@ -781,6 +808,11 @@ function mapUser(input: GetUserResponse["user"]): AppUser {
         ? input.mailing_list_opt_in_at
         : undefined,
     mailingListPolicyVersion: asString(input.mailing_list_policy_version),
+    // Only the two values the backend writes are honoured. Anything else —
+    // including the empty string an older backend sends — is left undefined
+    // rather than guessed at, because the merchant path is the locked-down one.
+    accountType:
+      input.account_type === "merchant" || input.account_type === "regular" ? input.account_type : undefined,
     // Separate from the account-level mailing list. Undefined means the backend
     // has not told us yet, which is not the same as "opted out".
     volunteerListOptIn:
@@ -1716,7 +1748,37 @@ function mapImproverNotification(input: unknown): AppImproverNotification | null
     isManager: record.is_manager === true,
     amountSfluv: readOptionalNumber(record.amount_sfluv) ?? null,
     payoutError: readOptionalString(record.payout_error) ?? null,
+    action: mapNotificationAction(record.action),
   };
+}
+
+/**
+ * An unrecognised kind returns null rather than a guess, which renders the
+ * notification as plain text. That is the correct degradation: sending a user
+ * to the wrong screen is worse than sending them nowhere.
+ */
+function mapNotificationAction(input: unknown): AppNotificationAction | null {
+  if (!input) {
+    return null;
+  }
+  const record = readRecord(input);
+  const kind = readOptionalString(record.kind);
+  switch (kind) {
+    case "tax":
+    case "improver":
+    case "volunteer":
+      return { kind };
+    case "volunteer-event": {
+      const eventId = readOptionalString(record.event_id);
+      return eventId ? { kind, eventId } : null;
+    }
+    case "url": {
+      const url = readOptionalString(record.url);
+      return url ? { kind, url } : null;
+    }
+    default:
+      return null;
+  }
 }
 
 function mapImproverNotificationFeed(input: unknown): AppImproverNotificationFeed {
@@ -1911,6 +1973,7 @@ function mapMerchantModeStatus(input: MerchantModeStatusResponse): AppMerchantMo
     userId: asString(input.user_id),
     isMerchant: input.is_merchant === true,
     passcodeSet: input.passcode_set === true,
+    forcedExitReason: asString(input.forced_exit_reason) || undefined,
     device: input.device
       ? {
           id: asString(input.device.id),
@@ -1920,6 +1983,10 @@ function mapMerchantModeStatus(input: MerchantModeStatusResponse): AppMerchantMo
           walletAddress: ethers.utils.isAddress(rawWalletAddress)
             ? ethers.utils.getAddress(rawWalletAddress)
             : rawWalletAddress,
+          // Absent on an older backend. Treated as healthy so a version skew
+          // does not throw every till out of merchant mode.
+          locationActive: input.device.location_active !== false,
+          locationApproved: input.device.location_approved !== false,
           displayName: asString(input.device.display_name),
           platform: asString(input.device.platform),
           appVersion: asString(input.device.app_version),
@@ -2238,6 +2305,49 @@ export class AppBackendClient {
     return mapMerchantModeStatus(body);
   }
 
+  async getMerchantToday(installationID?: string): Promise<MerchantToday> {
+    const query = installationID ? `?installation_id=${encodeURIComponent(installationID)}` : "";
+    const response = await this.authFetch(`/merchant-mode/today${query}`);
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load today's takings");
+    }
+    const body = (await response.json()) as {
+      business_date?: string;
+      timezone?: string;
+      payments_base?: string;
+      tips_base?: string;
+      token_decimals?: number;
+      tips_wallet_configured?: boolean;
+      transactions?: Array<{
+        at?: number;
+        payment_base?: string;
+        tip_base?: string;
+        from?: string;
+        payment_hash?: string;
+        tip_hash?: string;
+        refund?: boolean;
+      }>;
+    };
+
+    return {
+      businessDate: body.business_date ?? "",
+      timeZone: body.timezone ?? "",
+      paymentsBase: body.payments_base ?? "0",
+      tipsBase: body.tips_base ?? "0",
+      tokenDecimals: typeof body.token_decimals === "number" ? body.token_decimals : 6,
+      tipsWalletConfigured: body.tips_wallet_configured === true,
+      transactions: (body.transactions ?? []).map((row) => ({
+        at: row.at ?? 0,
+        paymentBase: row.payment_base ?? "0",
+        tipBase: row.tip_base ?? "0",
+        from: row.from ?? "",
+        paymentHash: row.payment_hash,
+        tipHash: row.tip_hash,
+        refund: row.refund === true,
+      })),
+    };
+  }
+
   async setMerchantModePin(pin: string, currentPin?: string): Promise<AppMerchantModeStatus> {
     const response = await this.authFetch("/merchant-mode/pin", {
       method: "POST",
@@ -2251,21 +2361,70 @@ export class AppBackendClient {
     return mapMerchantModeStatus(body);
   }
 
+  /**
+   * Checks a PIN without ending the shift.
+   *
+   * There is no verify endpoint. The only other server-side check lives on
+   * /merchant-mode/disable, which drops the device out of merchant mode as the
+   * price of asking, and this app has to keep working against the backend that
+   * is already deployed to the tills in the field. Re-setting the PIN to itself
+   * runs the same bcrypt comparison, counts the same failed attempts and honours
+   * the same lockout; rotating the stored hash to an identical PIN is the entire
+   * side effect. If a /merchant-mode/pin/verify ever lands, this is the one line
+   * that changes.
+   *
+   * The caller must already know a PIN exists: with none set the server treats
+   * this as a first PIN and stores whatever was typed.
+   */
+  async confirmMerchantModePin(pin: string): Promise<void> {
+    await this.setMerchantModePin(pin, pin);
+  }
+
+  /**
+   * Shops this device can be put to work at. Only trading, approved locations
+   * with a payment wallet come back, so anything in this list is safe to pick.
+   */
+  async listMerchantModeLocations(): Promise<AppMerchantModeLocation[]> {
+    const response = await this.authFetch("/merchant-mode/locations");
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load your locations");
+    }
+    const body = (await response.json()) as {
+      locations?: Array<{
+        id: number;
+        name: string;
+        street: string;
+        city: string;
+        wallet_address: string;
+        tipping_wallet_address: string;
+      }>;
+    };
+    return (body.locations || []).map((location) => ({
+      id: asNumber(location.id),
+      name: asString(location.name),
+      street: asString(location.street),
+      city: asString(location.city),
+      walletAddress: asString(location.wallet_address),
+      tippingWalletAddress: asString(location.tipping_wallet_address),
+    }));
+  }
+
   async enableMerchantMode(input: {
     installationID: string;
     locationID: number;
-    walletAddress?: string;
     displayName?: string;
     platform?: string;
     appVersion?: string;
   }): Promise<AppMerchantModeStatus> {
+    // No wallet is sent. The till is paid into whatever wallet the shop is
+    // configured with, resolved fresh on every poll, so that a later swap
+    // reaches this device without anyone re-enrolling it.
     const response = await this.authFetch("/merchant-mode/enable", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         installation_id: input.installationID,
         location_id: input.locationID,
-        wallet_address: input.walletAddress || "",
         display_name: input.displayName || "",
         platform: input.platform || "",
         app_version: input.appVersion || "",
@@ -3024,7 +3183,15 @@ export class AppBackendClient {
     return mapWalletOwnerLookup(body, normalizedAddress);
   }
 
-  async redeemCode(code: string, address: string): Promise<void> {
+  /**
+   * Redeems a reward QR.
+   *
+   * A reward can now come back held rather than sent: past the annual reporting
+   * threshold the code is still consumed and the money is still the volunteer's,
+   * but it waits on a W-9. That is a 202, not an error — the old code threw here
+   * and told people to rescan a QR they had already used.
+   */
+  async redeemCode(code: string, address: string): Promise<RedeemOutcome> {
     const response = await fetchWithTimeout(endpoint("/redeem"), {
       method: "POST",
       headers: { ...clientMetadataHeaders(), "Content-Type": "application/json" },
@@ -3034,28 +3201,49 @@ export class AppBackendClient {
       }),
     }, APP_BACKEND_REQUEST_TIMEOUT_MS);
 
+    if (response.status === 202) {
+      const held = (await response.json()) as {
+        amount_sfluv?: string;
+        tax_year?: number;
+        message?: string;
+      };
+      return {
+        status: "escrowed",
+        amountSfluv: asString(held.amount_sfluv),
+        taxYear: asNumber(held.tax_year),
+        message: asString(held.message) || "Reward saved. Complete your W-9 to receive it.",
+      };
+    }
+
+    if (response.status === 409) {
+      // Refused for want of a tax form. The backend has already handed the code
+      // back, so the only thing left to do is explain it — never tell them to
+      // rescan a QR that is already gone, because this one is not.
+      const refused = (await response.json().catch(() => ({}))) as {
+        status?: string;
+        reason?: string;
+        amount_sfluv?: string;
+        tax_year?: number;
+        message?: string;
+      };
+      if (refused.status === "blocked" || refused.reason === "w9_required") {
+        return {
+          status: "blocked",
+          amountSfluv: asString(refused.amount_sfluv),
+          taxYear: asNumber(refused.tax_year),
+          message:
+            asString(refused.message) ||
+            "We couldn't send this reward yet. Complete your W-9, then scan this code again.",
+        };
+      }
+      throw new Error("Unable to redeem this QR code right now.");
+    }
+
     if (response.ok) {
-      return;
+      return { status: "paid" };
     }
 
     const rawBody = (await response.text()).trim();
-    try {
-      const parsed = JSON.parse(rawBody) as { reason?: string; error?: string };
-      if (parsed.reason === "w9_required" || parsed.error === "w9_required") {
-        throw new Error("A W9 form is required before this reward can be redeemed.");
-      }
-      if (parsed.reason === "w9_pending" || parsed.error === "w9_pending") {
-        throw new Error("Your W9 form is still being processed. Try this QR code again once it is approved.");
-      }
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        (error.message === "A W9 form is required before this reward can be redeemed." ||
-          error.message === "Your W9 form is still being processed. Try this QR code again once it is approved.")
-      ) {
-        throw error;
-      }
-    }
 
     switch (rawBody) {
       case "code not started":
@@ -3328,4 +3516,75 @@ export class AppBackendClient {
       throw new Error("Unable to submit merchant application.");
     }
   }
+
+  /**
+   * A person's tax position. Drives the escrow card and the notification badge.
+   */
+  async getW9Status(): Promise<AppW9Status> {
+    const response = await this.authFetch("/w9/status");
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load your tax status");
+    }
+    const body = (await response.json()) as Record<string, unknown>;
+    return {
+      taxYear: asNumber(body.tax_year),
+      required: body.required === true,
+      filingStatus: asString(body.filing_status),
+      cleared: body.cleared === true,
+      thresholdSfluv: asString(body.threshold_sfluv),
+      earnedSfluv: asString(body.earned_sfluv),
+      escrowedSfluv: asString(body.escrowed_sfluv),
+      escrowedCount: asNumber(body.escrowed_count),
+      escrowExpiresAt: (body.escrow_expires_at as string) || null,
+      backPaySfluv: asString(body.back_pay_sfluv),
+      backPayCount: asNumber(body.back_pay_count),
+      formUrl: asString(body.form_url) || undefined,
+      tier: normalizeW9Tier(asString(body.tier)),
+      tierAcknowledged: body.tier_acknowledged === true,
+      blocked: body.blocked === true,
+      earnedBase: asString(body.earned_base) || "0",
+      thresholdBase: asString(body.threshold_base) || "0",
+      items: Array.isArray(body.items)
+        ? (body.items as Array<Record<string, unknown>>).map((item) => ({
+            source: asString(item.source),
+            sourceLabel: asString(item.source_label),
+            amountSfluv: asString(item.amount_sfluv),
+            state: asString(item.state),
+            escrowedAt: (item.escrowed_at as string) || null,
+            expiresAt: (item.expires_at as string) || null,
+          }))
+        : [],
+    };
+  }
+
+  /**
+   * Returns a fresh link to the hosted tax form.
+   *
+   * Always fetched rather than cached: these links expire, and somebody tapping
+   * "complete your tax form" three days later must not land on a dead page.
+   */
+  async startW9(): Promise<string> {
+    const response = await this.authFetch("/w9/start", { method: "POST" });
+    if (!response.ok) {
+      await throwRequestError(response, "The tax form is unavailable right now");
+    }
+    const body = (await response.json()) as { form_url?: string };
+    const url = asString(body.form_url);
+    if (!url) {
+      throw new Error("The tax form is unavailable right now. Please try again shortly.");
+    }
+    return url;
+  }
+
+  /**
+   * Records that a tier's modal has been answered.
+   *
+   * Best effort by design: failing to record a dismissal shows the warning once
+   * more, which is much the better of the two ways this can go wrong.
+   */
+  async acknowledgeW9Tier(tier: AppW9Tier): Promise<void> {
+    await this.authFetch(`/w9/tier/${encodeURIComponent(tier)}/ack`, { method: "POST" });
+  }
+
 }
+

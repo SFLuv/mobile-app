@@ -3,7 +3,8 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "r
 import { Ionicons } from "@expo/vector-icons";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { TransactionDetailsModal } from "../components/TransactionDetailsModal";
-import { AppContact, AppLocation, AppTransaction } from "../types/app";
+import { AppContact, AppLocation, AppTransaction, AppW9Status } from "../types/app";
+import { W9EscrowCard } from "../components/W9EscrowCard";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import {
   buildAddressNameMaps,
@@ -33,6 +34,9 @@ type Props = {
   onOpenWalletChooser: () => void;
   refreshing: boolean;
   onRefresh: () => Promise<void>;
+  w9Status?: AppW9Status | null;
+  w9Busy?: boolean;
+  onStartW9?: () => void;
   showWalletChooser?: boolean;
   merchantMode?: boolean;
   merchantLocationName?: string;
@@ -72,6 +76,9 @@ export function WalletHomeScreen({
   onOpenWalletChooser,
   refreshing,
   onRefresh,
+  w9Status,
+  w9Busy,
+  onStartW9,
   showWalletChooser,
   merchantMode,
   merchantLocationName,
@@ -111,6 +118,13 @@ export function WalletHomeScreen({
         }
         showsVerticalScrollIndicator={false}
       >
+        {/* Money owed belongs on the wallet, not only in a role panel: a
+            merchant or an improver can owe a W-9 without ever opening one, and
+            a tax push routes here because it is the one screen everybody has. */}
+        {onStartW9 && !merchantMode ? (
+          <W9EscrowCard status={w9Status ?? null} busy={w9Busy} onStart={onStartW9} />
+        ) : null}
+
         <View style={styles.heroWrap}>
           <View style={styles.heroGlowLarge} />
           <View style={styles.heroGlowSmall} />
@@ -159,12 +173,22 @@ export function WalletHomeScreen({
 
           <View style={styles.heroActionRow}>
             {!merchantMode ? (
-              <Pressable style={styles.heroPrimaryAction} onPress={onOpenSend}>
+              <Pressable
+                style={styles.heroPrimaryAction}
+                accessibilityRole="button"
+                accessibilityLabel="Send"
+                onPress={onOpenSend}
+              >
                 <Ionicons name="arrow-up" size={16} color={palette.white} />
                 <Text style={styles.heroPrimaryActionText}>Send</Text>
               </Pressable>
             ) : null}
-            <Pressable style={[styles.heroSecondaryAction, merchantMode ? styles.heroFullWidthAction : undefined]} onPress={onOpenReceive}>
+            <Pressable
+              style={[styles.heroSecondaryAction, merchantMode ? styles.heroFullWidthAction : undefined]}
+              accessibilityRole="button"
+              accessibilityLabel="Receive"
+              onPress={onOpenReceive}
+            >
               <Ionicons name="arrow-down" size={16} color={palette.primaryStrong} />
               <Text style={styles.heroSecondaryActionText}>Receive</Text>
             </Pressable>
