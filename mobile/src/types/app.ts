@@ -125,9 +125,18 @@ export interface AppLocation {
 
 export interface AppOwnedLocation extends AppLocation {
   ownerId: string;
+  /** Tri-state: true approved, false rejected, null still awaiting review. */
   approval?: boolean | null;
   adminPhone: string;
   adminEmail: string;
+  /** The Location Approval Form's single Contact field. */
+  contactName?: string;
+  /** "How did you hear about SFLuv", already resolved past any Other answer. */
+  referralSource?: string;
+  /** Null on any listing filled in before the form asked. Not a no. */
+  acceptsTips?: boolean | null;
+  hasStaffTablet?: boolean | null;
+  /** Superseded by contactName; still read so an older listing keeps its name. */
   contactFirstname: string;
   contactLastname: string;
   contactPhone: string;
@@ -830,26 +839,45 @@ export interface MerchantPlaceCandidate {
 
 export interface MerchantPlaceDetails extends AppLocation {}
 
+/**
+ * One location's application, in the shape the Location Approval Form collects
+ * it. Mirrors the web app's three steps — Public Information, Contact, Payment
+ * System — because the two submit to the same endpoint and an answer collected
+ * on one platform is read back on the other.
+ *
+ * The single-sheet draft this replaced carried sole_proprietorship, tipping
+ * policy and division, table coverage, service stations, tablet model and
+ * messaging service. Those columns still exist and still hold what the
+ * merchants already on the map told us, but nothing collects them now.
+ */
 export interface MerchantApplicationDraft {
+  // Public Information
   place: MerchantPlaceDetails | null;
+  /** Typed by the merchant only where Google has no name for the place. */
+  locationName: string;
+  /** Likewise the category: Google's own is used whenever it has one. */
+  businessType: string;
   description: string;
-  businessPhone: string;
-  businessEmail: string;
-  primaryContactEmail: string;
-  primaryContactFirstName: string;
-  primaryContactLastName: string;
-  primaryContactPhone: string;
-  posSystem: string;
-  soleProprietorship: string;
-  tippingPolicy: string;
-  tippingDivision: string;
-  tableCoverage: string;
-  serviceStations: string;
-  tabletModel: string;
-  messagingService: string;
-  reference: string;
-}
+  /** Optional, and shown on the map. Need not match the contact phone. */
+  publicPhone: string;
 
+  // Contact — internal only, never published
+  contactName: string;
+  contactPhone: string;
+  contactEmail: string;
+  /** "How did you hear about SFLuv"; an Other answer arrives already resolved. */
+  referralSource: string;
+
+  // Payment System
+  posSystem: string;
+  /**
+   * Decides whether approval mints this location a tipping wallet, so it is
+   * nullable: null is "unanswered", which the form does not allow through but
+   * the type has to be able to express before the step is filled in.
+   */
+  acceptsTips: boolean | null;
+  hasStaffTablet: boolean | null;
+}
 /** One line of the merchant-mode day: a payment, its tip, or one without the other. */
 export type MerchantDayRow = {
   at: number;

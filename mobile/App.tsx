@@ -48,6 +48,8 @@ import { WalletHomeScreen } from "./src/screens/WalletHomeScreen";
 import { ActivityScreen } from "./src/screens/ActivityScreen";
 import { MerchantTodayScreen, formatBase } from "./src/screens/MerchantTodayScreen";
 import { MerchantDeviceSetupScreen } from "./src/screens/MerchantDeviceSetupScreen";
+import { MerchantApplicationScreen } from "./src/screens/MerchantApplicationScreen";
+import { MerchantOnboardingScreen } from "./src/screens/MerchantOnboardingScreen";
 import {
   MerchantPinDisplay,
   MerchantPinKeypad,
@@ -1560,6 +1562,10 @@ function WalletAppShellContent({
   const [merchantTodayRefreshing, setMerchantTodayRefreshing] = useState(false);
   const [paymentReceipt, setPaymentReceipt] = useState<PaymentReceipt | null>(null);
   const [merchantModeBusy, setMerchantModeBusy] = useState(false);
+  // Whether the Location Approval Form is open over the merchant gate screen.
+  // Only reachable from that screen, which is only reachable by a merchant
+  // account with nothing listed — so the form has exactly one entrance.
+  const [merchantApplicationOpen, setMerchantApplicationOpen] = useState(false);
   const [merchantModeMessage, setMerchantModeMessage] = useState<string | null>(null);
   const [merchantModeExitPin, setMerchantModeExitPin] = useState("");
   const [merchantModeExitPinVisible, setMerchantModeExitPinVisible] = useState(false);
@@ -1911,12 +1917,36 @@ function WalletAppShellContent({
   // consumer dock on the way to the setup screen.
   const merchantDeviceEnrollable =
     merchantDeviceSetupPending && (!merchantModeLocationsLoaded || merchantModeLocations.length > 0);
-  // No approved shop to sync to, so there is no till to lock down. They keep the
-  // dock and can look around the app; the wallet tab explains the wait.
-  const merchantAwaitingApproval = merchantDeviceSetupPending && !merchantDeviceEnrollable;
-  // Till chrome: no dock, no tabs, no notifications. Covers both a live till and
-  // the short first-run flow that turns this device into one.
-  const merchantKiosk = merchantModeActive || merchantDeviceEnrollable;
+  // What this account has actually filed for, which the merchant-mode location
+  // list cannot answer: that only ever returns approved shops, because its job
+  // is enrolling a till. Telling "never applied" from "waiting on review" needs
+  // the pending rows, and the two put a merchant on different screens.
+  const merchantPendingLocation = useMemo(
+    () => ownedLocations.find((location) => location.approval === null || location.approval === undefined) ?? null,
+    [ownedLocations],
+  );
+  const merchantHasApprovedLocation = useMemo(
+    () => ownedLocations.some((location) => location.approval === true),
+    [ownedLocations],
+  );
+  // A merchant account never gets the ordinary app on a phone. Before there is
+  // a till to run it sees one of two screens and nothing else: the application
+  // form, or the wait. The old behaviour handed them the whole dock with the
+  // wallet tab swapped, which is an app whose every write the server refuses.
+  //
+  // Rejected-only counts as "start": nothing is on the map and the way forward
+  // is another application.
+  const merchantOnboardingState: "start" | "pending" | null =
+    merchantDeviceSetupPending && !merchantDeviceEnrollable && !merchantHasApprovedLocation
+      ? merchantPendingLocation
+        ? "pending"
+        : "start"
+      : null;
+  // Till chrome: no dock, no tabs, no notifications. Covers a live till, the
+  // short first-run flow that turns this device into one, and the two screens
+  // before either exists — a merchant account is never given the dock.
+  const merchantKiosk =
+    merchantModeActive || merchantDeviceEnrollable || merchantOnboardingState !== null;
   // A null status means the merchant-mode calls have not answered yet, which is
   // a different thing from a merchant with no PIN. Non-merchants never get one.
   const merchantSetupReady =
@@ -4704,6 +4734,31 @@ function WalletAppShellContent({
         showRedeemScanner={!merchantModeActive}
       />
     ) : null;
+  const merchantOnboardingContent =
+    merchantOnboardingState === null ? null : merchantApplicationOpen ? (
+      <MerchantApplicationScreen
+        onClose={() => setMerchantApplicationOpen(false)}
+        onSubmit={async (draft) => {
+          if (!backendClient) {
+            throw new Error("Not signed in — log out and back in, then try again.");
+          }
+          await backendClient.submitMerchantApplication(draft);
+          // Re-read before the form closes: the listing it just created is what
+          // moves this account from "start" to "pending", and without the
+          // refresh the gate screen would still be offering the form.
+          await refreshEverything();
+        }}
+      />
+    ) : (
+      <MerchantOnboardingScreen
+        state={merchantOnboardingState}
+        locationName={merchantPendingLocation?.name}
+        busy={merchantModeBusy}
+        onStartApplication={() => setMerchantApplicationOpen(true)}
+        onRefresh={refreshEverything}
+        onLogout={handleLogout}
+      />
+    );
   const merchantSetupContent = (
     <MerchantDeviceSetupScreen
       locations={merchantModeLocations}
@@ -4891,15 +4946,16 @@ function WalletAppShellContent({
                 </View>
               )}
             </View>
+          ) : merchantOnboardingContent ? (
+            // Ahead of every tab: a merchant account with no till has no app to
+            // be given, only the application or the wait.
+            merchantOnboardingContent
           ) : merchantDeviceEnrollable ? (
             merchantSetupContent
           ) : merchantModeActive ? (
             merchantTodayContent
           ) : tab === "wallet" ? (
-            // A merchant still waiting on approval keeps the rest of the app but
-            // gets no wallet: there is nothing for them to spend from yet, and a
-            // live send screen would be the one real action they must not have.
-            merchantAwaitingApproval ? merchantSetupContent : walletTabContent
+            walletTabContent
           ) : tab === "activity" ? (
             <ActivityScreen
               transactions={activityTransactions}

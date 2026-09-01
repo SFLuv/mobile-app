@@ -1890,6 +1890,13 @@ function mapOwnedLocation(input: Record<string, unknown>): AppOwnedLocation {
     approval: typeof input.approval === "boolean" ? input.approval : null,
     adminPhone: asString(input.admin_phone),
     adminEmail: asString(input.admin_email),
+    contactName: asString(input.contact_name),
+    referralSource: asString(input.referral_source),
+    // Left as null when the column is null — every listing that predates the
+    // Location Approval Form has no answer, and reading that as a no would say
+    // a shop takes no tips when nobody ever asked it.
+    acceptsTips: typeof input.accepts_tips === "boolean" ? input.accepts_tips : null,
+    hasStaffTablet: typeof input.has_staff_tablet === "boolean" ? input.has_staff_tablet : null,
     contactFirstname: asString(input.contact_firstname),
     contactLastname: asString(input.contact_lastname),
     contactPhone: asString(input.contact_phone),
@@ -3467,9 +3474,24 @@ export class AppBackendClient {
     }
   }
 
-  async submitMerchantApplication(draft: MerchantApplicationDraft): Promise<void> {
+  /**
+   * Files one location's application, in the shape the Location Approval Form
+   * collects it.
+   *
+   * The same endpoint the web app posts to, and deliberately the same payload:
+   * an application filed on a phone has to be indistinguishable from one filed
+   * in a browser once it reaches the review queue.
+   *
+   * Returns the new location's id. Opening hours and a logo are written through
+   * their own endpoints, which are addressed by that id and so can only run
+   * once the listing exists.
+   */
+  async submitMerchantApplication(draft: MerchantApplicationDraft): Promise<number> {
     if (!draft.place) {
-      throw new Error("Select your business location first.");
+      throw new Error("Find your location first.");
+    }
+    if (draft.acceptsTips === null || draft.hasStaffTablet === null) {
+      throw new Error("Answer every question on the Payment System step.");
     }
 
     const response = await this.authFetch("/locations", {
@@ -3479,41 +3501,55 @@ export class AppBackendClient {
         id: 0,
         google_id: draft.place.googleId,
         owner_id: "",
-        name: draft.place.name,
-        description: draft.description.trim(),
-        type: draft.place.type,
+        // Google's own values wherever it has them; the typed answer is the
+        // fallback for a place with no name or no category, which is why the
+        // form asks for those two at all.
+        name: draft.place.name || draft.locationName.trim(),
+        type: draft.place.type || draft.businessType.trim(),
         street: draft.place.street,
         city: draft.place.city,
         state: draft.place.state,
         zip: draft.place.zip,
         lat: draft.place.lat,
         lng: draft.place.lng,
-        phone: draft.businessPhone.trim(),
-        email: draft.businessEmail.trim(),
-        admin_phone: draft.primaryContactPhone.trim(),
-        admin_email: draft.primaryContactEmail.trim(),
         website: draft.place.website,
         image_url: draft.place.imageUrl,
         rating: draft.place.rating,
         maps_page: draft.place.mapsPage,
         opening_hours: draft.place.openingHours,
-        contact_firstname: draft.primaryContactFirstName.trim(),
-        contact_lastname: draft.primaryContactLastName.trim(),
-        contact_phone: draft.primaryContactPhone.trim(),
+
+        description: draft.description.trim(),
+        phone: draft.publicPhone.trim(),
+
+        // Contact. admin_* and contact_phone are the same two answers under two
+        // column names, a split the old single-sheet form left behind; the
+        // backend mirrors whichever arrives, and sending both keeps the admin
+        // panel and the approval email agreeing with the form.
+        contact_name: draft.contactName.trim(),
+        contact_phone: draft.contactPhone.trim(),
+        admin_phone: draft.contactPhone.trim(),
+        admin_email: draft.contactEmail.trim(),
+        referral_source: draft.referralSource.trim(),
+
+        // Payment System.
         pos_system: draft.posSystem.trim(),
-        sole_proprietorship: draft.soleProprietorship.trim(),
-        tipping_policy: draft.tippingPolicy.trim(),
-        tipping_division: draft.tippingDivision.trim(),
-        table_coverage: draft.tableCoverage.trim(),
-        service_stations: Number(draft.serviceStations || "0"),
-        tablet_model: draft.tabletModel.trim(),
-        messaging_service: draft.messagingService.trim(),
-        reference: draft.reference.trim(),
+        accepts_tips: draft.acceptsTips,
+        has_staff_tablet: draft.hasStaffTablet,
       }),
     });
 
     if (!response.ok) {
-      throw new Error("Unable to submit merchant application.");
+      await throwRequestError(response, "Unable to submit your application");
+    }
+
+    // The id, so hours and a logo can be attached. An older backend answered
+    // with the string "success", which is not an error here — it costs the
+    // follow-up writes, not the application.
+    try {
+      const body = (await response.json()) as Record<string, unknown>;
+      return asNumber(body.id);
+    } catch {
+      return 0;
     }
   }
 
