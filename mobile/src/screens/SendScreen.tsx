@@ -416,6 +416,14 @@ export function SendScreen({
     }
   }, [availableBalance, clientConfig.tokenDecimals]);
   const amountRaw = useMemo(() => parseTokenAmount(amountInput, clientConfig.tokenDecimals), [amountInput, clientConfig.tokenDecimals]);
+  // A send the chain must reject should never leave the screen. This is the
+  // 7500-for-75.00 typo that once "succeeded" at a pizza counter: the chain
+  // reverted it, the old receipt check could not tell, and the phone showed a
+  // success screen for a payment that never happened.
+  const exceedsBalance = useMemo(
+    () => Boolean(parsedBalanceRaw && amountRaw && amountRaw.gt(parsedBalanceRaw)),
+    [amountRaw, parsedBalanceRaw],
+  );
   const scannerPermissionGranted = permission?.granted === true;
 
   const payableMerchants = useMemo(
@@ -824,6 +832,9 @@ export function SendScreen({
     if (!target || !amountRaw || amountRaw.lte(0) || !normalizedAmount) {
       return;
     }
+    if (exceedsBalance) {
+      return;
+    }
 
     dismissNoteEditor();
     clearTipState();
@@ -856,6 +867,7 @@ export function SendScreen({
     clearTipState,
     clientConfig.tokenDecimals,
     dismissNoteEditor,
+    exceedsBalance,
     hapticsEnabled,
     memoInput,
     onPrepareSend,
@@ -1233,6 +1245,11 @@ export function SendScreen({
             <View style={styles.flexGrow} />
 
             <View style={styles.amountMetaBlock}>
+              {exceedsBalance ? (
+                <Text style={[styles.balanceLabel, { color: palette.danger ?? "#c62828", fontWeight: "600" }]}>
+                  That's more than your available balance
+                </Text>
+              ) : null}
               <Text style={styles.balanceLabel}>
                 {formatBalanceText(availableBalance, clientConfig.tokenDecimals, clientConfig.tokenSymbol)}
               </Text>
@@ -1265,7 +1282,7 @@ export function SendScreen({
             <View style={styles.sendDock}>
               <SwipeToSend
                 layoutMode={layoutMode}
-                disabled={!activeTarget || !amountRaw || amountRaw.lte(0) || phase !== "editing"}
+                disabled={!activeTarget || !amountRaw || amountRaw.lte(0) || exceedsBalance || phase !== "editing"}
                 loading={phase === "sending"}
                 label="Slide to send"
                 onComplete={() => {

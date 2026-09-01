@@ -424,13 +424,62 @@ export class SmartWalletService {
     for (let i = 0; i < 60; i++) {
       const receipt = await this.backend.getReceipt(sentUserOpHash);
       if (receipt) {
+        // The receipt is the BUNDLE transaction's receipt, and its existence
+        // says nothing about whether OUR operation worked. A user operation
+        // that reverts — an over-balance transfer, say — is absorbed by the
+        // EntryPoint: the bundle mines "successfully" and the truth is
+        // recorded in UserOperationEvent.success. A customer once paid for
+        // pizza on the strength of the old existence check while their
+        // transfer reverted on-chain, so the event's word is now the only
+        // word that counts.
+        this.assertUserOpSucceeded(receipt, sentUserOpHash);
         const txHash = typeof receipt?.transactionHash === "string" ? receipt.transactionHash : undefined;
         return { userOpHash: sentUserOpHash, txHash };
       }
       await sleep(2_000);
     }
 
-    return { userOpHash: sentUserOpHash };
+    // Two minutes of silence is neither success nor failure — the operation
+    // may still land. Resolving quietly here is how a dropped payment once
+    // wore a success screen; only an explicit answer from the chain gets to
+    // do that now.
+    throw new Error(
+      "The network did not confirm this payment in time. Check your Activity before trying again — it may still go through.",
+    );
+  }
+
+  /**
+   * Throws unless the receipt's EntryPoint logs say this specific user
+   * operation succeeded. The bundle can mine while the operation inside it
+   * reverted; UserOperationEvent.success is where the EntryPoint records
+   * which of the two happened.
+   */
+  private assertUserOpSucceeded(receipt: any, userOpHash: string): void {
+    const userOpEventInterface = new ethers.utils.Interface([
+      "event UserOperationEvent(bytes32 indexed userOpHash, address indexed sender, address indexed paymaster, uint256 nonce, bool success, uint256 actualGasCost, uint256 actualGasUsed)",
+    ]);
+    const eventTopic = userOpEventInterface.getEventTopic("UserOperationEvent").toLowerCase();
+    const wanted = userOpHash.toLowerCase();
+    const logs: any[] = Array.isArray(receipt?.logs) ? receipt.logs : [];
+
+    for (const log of logs) {
+      const topics: string[] = Array.isArray(log?.topics) ? log.topics : [];
+      if ((topics[0] || "").toLowerCase() !== eventTopic) continue;
+      if ((topics[1] || "").toLowerCase() !== wanted) continue;
+      const parsed = userOpEventInterface.parseLog({ topics: log.topics, data: log.data });
+      if (parsed.args.success) {
+        return;
+      }
+      throw new Error(
+        "This payment failed on-chain — nothing was sent. Check the amount against your balance and try again.",
+      );
+    }
+
+    // A receipt that never mentions our operation is not proof of payment,
+    // whatever else it is.
+    throw new Error(
+      "The network's answer did not confirm this payment. Check your Activity before trying again.",
+    );
   }
 
   async ensureSmartWalletDeployed(): Promise<boolean> {
