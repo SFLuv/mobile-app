@@ -65,6 +65,7 @@ import { ThemedActivityIndicator } from "./src/components/ThemedActivityIndicato
 import { W9CompleteModal } from "./src/components/W9CompleteModal";
 import { W9TierModal } from "./src/components/W9TierModal";
 import { mobileConfig } from "./src/config";
+import { initSentry, syncSentryUser, wrapRoot } from "./src/services/observability";
 import {
   clearCachedRouteDiscovery,
   createSmartWalletServiceFromSigner,
@@ -119,6 +120,13 @@ import {
   spacing,
   useAppTheme,
 } from "./src/theme";
+
+/*
+ * Initialised at module scope, before any component renders, so a crash during
+ * startup is still reported. A missing DSN makes this a no-op — see
+ * src/services/observability.ts.
+ */
+initSentry();
 
 type RuntimeState = {
   loading: boolean;
@@ -5766,6 +5774,17 @@ function PrivyWalletApp({
   const { wallets, create } = useEmbeddedEthereumWallet();
   const emailCodeInputRef = useRef<TextInput | null>(null);
 
+  /*
+   * Tie Sentry events to the signed-in account, and untie them on sign-out.
+   *
+   * Driving this off `user?.id` rather than the logout call sites means both
+   * directions are covered by one effect: Privy clearing `user` is what a
+   * logout, a session expiry, and an account deletion all have in common.
+   */
+  useEffect(() => {
+    syncSentryUser(user?.id);
+  }, [user?.id]);
+
   const [runtime, setRuntime] = useState<RuntimeState>(blankRuntime(true));
   const [preferredCandidateKey, setPreferredCandidateKey] = useState<string | undefined>(undefined);
   const [pendingLinkIntent, setPendingLinkIntent] = useState<PendingLinkIntent | null>(null);
@@ -7328,7 +7347,7 @@ function blockedCompatibilityState(
   return null;
 }
 
-export default function App() {
+function App() {
   const [preferences, setPreferences, preferencesLoaded] = useStoredPreferences();
   const [compatibility, setCompatibility] = useState<CompatibilityState>({ status: "loading" });
   const compatibilityClientRef = useRef<AppBackendClient | null>(null);
@@ -7454,6 +7473,13 @@ export default function App() {
     </AppThemeProvider>
   );
 }
+
+/*
+ * React Native has no error boundary above the root component, so an uncaught
+ * render error unmounts the tree to a blank screen with nothing reported. This
+ * is what closes that gap — keep it as the default export.
+ */
+export default wrapRoot(App);
 
 const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, isDark: boolean) =>
   StyleSheet.create({

@@ -87,6 +87,27 @@ Do not regress:
 
 ---
 
+### Two traps found while doing Phase 1
+
+Both were caught by `npx expo export`, not by `tsc` or `expo config`. Bundle the
+app before believing this integration works.
+
+**The Metro resolver must chain, not replace.** `getSentryExpoConfig` installs
+its own `resolveRequest`. The pre-existing `jose` override replaced it and
+called `metro-resolver`'s `resolve` directly, which re-enters and blows the
+stack. It surfaces as `RangeError: Maximum call stack size exceeded` while
+resolving an unrelated module, which points nowhere near the cause. The override
+now delegates to the upstream resolver instead.
+
+**`promise` is now a direct dependency, and is not unused.** It is required by
+`@sentry/react-native/dist/js/integrations/reactnativeerrorhandlersutils.js`,
+which imports `promise/setimmediate/done` without declaring the dependency —
+it assumes React Native's copy is hoisted to the root of `node_modules`. npm
+keeps it nested under `react-native/node_modules/`, so the import fails to
+resolve and the bundle does not build. Declaring `promise` at React Native's
+own version (8.3.0) hoists it and dedupes to a single copy. Do not remove it as
+an unused dependency; the build breaks.
+
 ## Phase 2: Init, release identity, and the scrubber
 
 Files involved:
