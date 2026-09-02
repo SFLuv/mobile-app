@@ -1,8 +1,16 @@
 const path = require("path");
-const { getDefaultConfig } = require("expo/metro-config");
+const { getSentryExpoConfig } = require("@sentry/react-native/metro");
 const { resolve } = require("metro-resolver");
 
-const config = getDefaultConfig(__dirname);
+/*
+ * getSentryExpoConfig wraps expo/metro-config's getDefaultConfig and adds the
+ * debug-id that ties a shipped bundle to its uploaded source map. Reverting to
+ * getDefaultConfig costs unminified stack traces and fails silently.
+ *
+ * The jose resolver override below must survive that swap — Privy needs jose's
+ * browser entry, and dropping it breaks login rather than degrading it.
+ */
+const config = getSentryExpoConfig(__dirname);
 
 const joseBrowserEntry = path.join(
   path.dirname(require.resolve("jose/package.json")),

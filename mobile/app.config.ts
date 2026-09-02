@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { withSentry } from "@sentry/react-native/expo";
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
 const DEFAULT_EAS_PROJECT_ID = "457c71a1-29cd-4e60-9be8-04a6e0a6194a";
@@ -7,6 +8,8 @@ const DEFAULT_EXPO_OWNER = "sfluv";
 const DEFAULT_EXPO_SLUG = "sfluv";
 const DEFAULT_IOS_BUNDLE_IDENTIFIER = "org.sfluv.wallet";
 const DEFAULT_ANDROID_PACKAGE = "org.sfluv.wallet";
+const DEFAULT_SENTRY_ORG = "sfluv";
+const DEFAULT_SENTRY_PROJECT = "sfluv-mobile";
 
 function buildExtra(config: ConfigContext["config"]): ExpoConfig["extra"] {
   const baseExtra =
@@ -41,7 +44,7 @@ const googleServicesFile = resolveGoogleServicesFile();
 const expoOwner = process.env.EXPO_OWNER?.trim() || DEFAULT_EXPO_OWNER;
 const expoSlug = process.env.EXPO_SLUG?.trim() || DEFAULT_EXPO_SLUG;
 
-export default ({ config }: ConfigContext): ExpoConfig => ({
+const baseConfig = (config: ConfigContext["config"]): ExpoConfig => ({
   ...config,
   name: "SFLuv",
   slug: expoSlug,
@@ -123,3 +126,24 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   extra: buildExtra(config),
 });
+
+/*
+ * withSentry is a config plugin, not a config wrapper — it attaches the native
+ * mods that write `sentry.properties` into the generated iOS and Android
+ * projects. It does not appear in the `plugins` array above; confirm it took
+ * with `expo config --type prebuild` and look for @sentry/react-native in
+ * _internal.pluginHistory.
+ *
+ * Source-map upload runs during the native release build and reads
+ * SENTRY_AUTH_TOKEN from the environment — `scripts/with-local-env.sh` loads it
+ * from `mobile/.env` locally, EAS from a build secret. The token is
+ * deliberately never inlined here: the plugin would write it into the shipped
+ * application package. Without it the upload is skipped and the build still
+ * succeeds, leaving stack traces minified rather than failing outright.
+ */
+export default ({ config }: ConfigContext): ExpoConfig =>
+  withSentry(baseConfig(config), {
+    url: "https://sentry.io/",
+    organization: process.env.SENTRY_ORG?.trim() || DEFAULT_SENTRY_ORG,
+    project: process.env.SENTRY_PROJECT?.trim() || DEFAULT_SENTRY_PROJECT,
+  });
