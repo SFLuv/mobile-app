@@ -15,6 +15,81 @@ Decisions locked:
 
 ---
 
+## Status
+
+Last updated 2026-09-02. Branch `pjol/sentry-plan`, three commits on top of `main`.
+
+| Phase | State | Commit |
+| --- | --- | --- |
+| 1 — Install and build wiring | **Done** | `4b1218e` |
+| 2 — Init, release identity, scrubber | **Done** | `8a566d4` |
+| 3 — Error plumbing and noise control | Not started | — |
+| 4 — Source maps and secrets | **Blocked** — needs the org auth token | — |
+| 5 — Store privacy disclosure | Not started | — |
+| 6 — Web | Not started | — |
+
+The Sentry org exists and the `sfluv-mobile` project is created. `sfluv-web` is not.
+
+### What is actually verified
+
+- `tsc --noEmit` clean.
+- The iOS bundle builds (`npx expo export --platform ios`), 8.93 MB.
+- The DSN is embedded when `EXPO_PUBLIC_SENTRY_DSN` is set, and the app stays
+  entirely offline when it is not.
+- No auth token appears in the bundle.
+- The redaction functions were exercised against the real W-9 log line from
+  `App.tsx` — the vendor token is stripped, the endpoint path survives.
+- `eas.json` profile inheritance resolves as intended: `preview` inherits the
+  DSN and production backend from `production` while overriding only the
+  environment. Confirmed against `@expo/eas-json`'s `mergeProfiles`, which
+  merges `env` per key rather than replacing it.
+
+### What is NOT verified
+
+Nothing has ever reached Sentry. No build has been installed on a device, so:
+
+- **No event has been sent.** The DSN is wired but unproven end to end.
+- **Source maps have never been uploaded**, because that needs
+  `SENTRY_AUTH_TOKEN`, which nobody has created yet. This is the highest-risk
+  remaining item: if `release`/`dist` do not match the uploaded artifact, every
+  stack trace stays minified and the integration looks like it works while
+  being nearly useless. See Phase 4.
+- The native `sentry.properties` files have not been observed. The plugin is
+  confirmed registered via `_internal.pluginHistory`, but `expo prebuild` was
+  never run to see the files it writes.
+
+### Picking this up
+
+1. Create an **organization** auth token (Settings → Developer Settings →
+   Organization Tokens). Not a personal token — see Phase 4.
+2. Put it in `mobile/.env` as `SENTRY_AUTH_TOKEN`, and add it as an EAS secret.
+   Use `mobile/.env`, **not** `.env.local` — see Phase 4 for why that
+   distinction bites here.
+3. Build `preview` and install it on a device.
+4. Trigger a deliberate error and walk the Verification checklist below. Item 2
+   (unminified frames) is the one that matters most.
+5. Then Phase 3, which is where the real diagnostic value is — the
+   UserOperation sponsor/submit path is currently the hardest thing in this app
+   to debug from a user report.
+
+Do Phase 4 before Phase 3. Until the pipeline is proven, Phase 3's work cannot
+be measured.
+
+### Notes for whoever owns this next
+
+- `promise` is a direct dependency now and looks unused. It is not. Removing it
+  breaks the bundle — see "Two traps found while doing Phase 1".
+- `eas.json` carries the DSN in every profile, including `development`. Local
+  dev builds will report to the shared project tagged `environment=development`.
+  That is deliberate; drop the key from the `development` profile if it turns
+  out to be noise.
+- The scrubber in `src/services/observability.ts` is not optional hardening. It
+  is what stops the existing `[w9]` console traces from shipping tokenized tax
+  URLs, because Sentry converts `console.*` into breadcrumbs automatically.
+  Read that file before changing any logging in the W-9 flow.
+
+---
+
 ## Current State
 
 ### Mobile (`mobile/`)
@@ -25,9 +100,14 @@ Decisions locked:
 - Dynamic config in `app.config.ts` (a function export, not a static `app.json`).
 - `metro.config.js` carries a `resolveRequest` override forcing `jose` to its browser entry. Privy depends on this.
 - No CI. Builds run locally through `npm run build:ios:dev` / `eas-cli`, with env injected by `scripts/with-local-env.sh` from a gitignored `mobile/.env`.
-- `App.tsx` is 8,322 lines. Root component is `export default function App()` at `App.tsx:7331`.
+- `App.tsx` is 8,322 lines. Root component was `export default function App()` at `App.tsx:7331`.
 - No error boundary, no `ErrorUtils.setGlobalHandler`, no unhandled-rejection handler.
 - 10 `console.error` and 37 `console.warn` call sites across `App.tsx` and `src/`.
+
+Phases 1 and 2 have since changed three of these: the root component is now
+`function App()` wrapped by `wrapRoot(App)` at the bottom of the file, which
+supplies the error boundary that line four says was missing. The 47 console call
+sites are untouched and are Phase 3's job.
 
 ### Web (`SFLuv/app/frontend`, separate repo)
 
@@ -322,10 +402,15 @@ Web: repeat 1–4 and 8 against a Vercel preview deployment.
 
 ## Sequence
 
-- Slice A — Phases 1, 2, 4. Install, init, source maps. Proves the pipeline end to end with a deliberate error and nothing else.
+- Slice A — Phases 1, 2, 4. Install, init, source maps. Proves the pipeline end to end with a deliberate error and nothing else. **Phases 1 and 2 are done; Phase 4 is the remaining half and is blocked on the org auth token.**
 - Slice B — Phase 3. Filters, breadcrumbs, converting the existing console sites. Do not ship A to production without B; the quota will not survive it.
 - Slice C — Phase 5. Store disclosure. Gates the next submission.
 - Slice D — Phase 6. Web.
+
+Slice A is deliberately not finished. Phases 1 and 2 are inert on their own —
+they will report errors, but with minified stack traces until Phase 4 uploads
+source maps. That is not a state to ship to production; it is a state to hand
+over.
 
 ---
 
