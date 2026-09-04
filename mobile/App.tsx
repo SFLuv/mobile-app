@@ -261,8 +261,60 @@ const WALLET_CREATE_TIMEOUT_MS = 30_000;
 const WALLET_DISCOVERY_TIMEOUT_MS = 45_000;
 const EMAIL_LOGIN_CODE_LENGTH = 6;
 
+/**
+ * The device's installation id, read and written so a broken keychain degrades
+ * instead of throwing.
+ *
+ * Raw SecureStore here is what stuck an unsigned simulator build on "Checking
+ * your locations…" forever. Without a keychain entitlement every call throws,
+ * and the throw landed before /merchant-mode/status was ever requested. The
+ * caller logs and moves on, so merchantModeStatus stayed null — which the setup
+ * screen's readiness gate reads as "still loading", with nothing left to
+ * arrive. Thirteen call sites read this id, and every one of them was one
+ * keychain failure away from the same hang.
+ *
+ * Deliberately NOT routed through resilientPrivyStorage, despite the identical
+ * shape. That adapter guards session tokens, so on a release build its fallback
+ * is memory: a token is worth losing rather than writing to unencrypted disk.
+ * An installation id is the opposite trade — a device identifier, hashed
+ * server-side, and not a secret. Held in memory it would be minted afresh on
+ * every launch, so merchant mode would re-prompt for the PIN each start and the
+ * server would collect an orphan device binding per launch, with no error to
+ * notice. Disk is the right answer for this value and the wrong one for that
+ * one, which is why they do not share a store.
+ */
+async function readAppInstallationID(): Promise<string | null> {
+  try {
+    const stored = await SecureStore.getItemAsync(APP_INSTALLATION_ID_KEY);
+    if (stored) {
+      return stored;
+    }
+  } catch (error) {
+    console.warn(
+      "[installation-id] keychain unavailable on read — using fallback storage:",
+      (error as Error)?.message,
+    );
+  }
+  return AsyncStorage.getItem(APP_INSTALLATION_ID_KEY).catch(() => null);
+}
+
+async function writeAppInstallationID(value: string): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(APP_INSTALLATION_ID_KEY, value);
+    return;
+  } catch (error) {
+    console.warn(
+      "[installation-id] keychain unavailable on write — using fallback storage:",
+      (error as Error)?.message,
+    );
+  }
+  // Failing to persist must not fail the caller. An id that lasts only this
+  // session still lets merchant mode work now, which beats refusing to load.
+  await AsyncStorage.setItem(APP_INSTALLATION_ID_KEY, value).catch(() => undefined);
+}
+
 async function getOrCreateAppInstallationID(): Promise<string> {
-  const existing = await SecureStore.getItemAsync(APP_INSTALLATION_ID_KEY);
+  const existing = await readAppInstallationID();
   if (existing) {
     return existing;
   }
@@ -271,7 +323,7 @@ async function getOrCreateAppInstallationID(): Promise<string> {
     typeof Crypto.randomUUID === "function"
       ? Crypto.randomUUID()
       : ethers.utils.hexlify(ethers.utils.randomBytes(16));
-  await SecureStore.setItemAsync(APP_INSTALLATION_ID_KEY, nextID);
+  await writeAppInstallationID(nextID);
   return nextID;
 }
 
