@@ -2033,6 +2033,22 @@ function WalletAppShellContent({
     return () => clearTimeout(timer);
   }, [accountRoutingUnresolved]);
   const accountRoutingPending = accountRoutingUnresolved && !accountRoutingTimedOut;
+  /**
+   * Every state between signing in and having a working till or a live app.
+   *
+   * Covers the routing spinner, the application form, the two lock screens
+   * before and after filing it, and the PIN-and-location first run. Through all
+   * of them the top-right control is Log out, because none of them can reach
+   * settings: the content branch renders the setup screen instead, so the
+   * settings button was a control that visibly did nothing. Worse, on the
+   * first-run screens it was hidden entirely, which left a half-enrolled device
+   * with no way out of the account in the chrome at all.
+   *
+   * A live till is excluded: its lock button opens the merchant-mode sheet,
+   * which already carries a sign out.
+   */
+  const merchantSetupFlow =
+    accountRoutingPending || merchantDeviceEnrollable || merchantOnboardingState !== null;
   const walletSyncReady = backendBootstrapReady && Boolean(appUser) && Boolean(runtime.discovery);
   const walletHistoryActive = tab === "wallet" && walletPane === "home";
   const activityHistoryActive = tab === "activity";
@@ -4323,6 +4339,23 @@ function WalletAppShellContent({
     })();
   };
 
+  /**
+   * Logging out, with a chance to say no.
+   *
+   * The same Alert the till's sign-out already uses, so the one destructive
+   * action in the app asks the same way wherever it is reached. Every logout
+   * outside merchant mode now goes through here — the top bar during setup and
+   * the quiet links on the setup screens themselves — because a control that
+   * signs somebody out on a single mistaken tap is a bad control regardless of
+   * which screen it sits on.
+   */
+  const confirmLogout = () => {
+    Alert.alert("Log out?", "You will need to sign in again to pick up where you left off.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Log out", style: "destructive", onPress: () => handleLogout() },
+    ]);
+  };
+
   const handleSetMerchantModePin = async (pin: string, currentPin?: string) => {
     if (!backendClient) {
       throw new Error("Backend not configured.");
@@ -4838,7 +4871,7 @@ function WalletAppShellContent({
         busy={merchantModeBusy}
         onStartApplication={() => setMerchantApplicationOpen(true)}
         onRefresh={refreshEverything}
-        onLogout={handleLogout}
+        onLogout={confirmLogout}
       />
     );
   const merchantSetupContent = (
@@ -4852,7 +4885,7 @@ function WalletAppShellContent({
       onConfirmPin={handleConfirmMerchantModePin}
       onSelectLocation={handleEnableMerchantMode}
       onRefresh={refreshEverything}
-      onLogout={handleLogout}
+      onLogout={confirmLogout}
     />
   );
   const merchantTodayContent = (
@@ -4925,9 +4958,22 @@ function WalletAppShellContent({
                 ) : null}
               </Pressable>
             ) : null}
-            {/* Nothing to reach during first-run setup: there is no till to
-                lock and no settings a half-enrolled device should open. */}
-            {!merchantDeviceEnrollable ? (
+            {merchantSetupFlow ? (
+              /* The one control that must exist on every screen of the setup
+                 flow. Settings cannot be opened from any of them, so the button
+                 that used to sit here did nothing; and on the first-run screens
+                 there was no button at all, which is how a device could end up
+                 with no way to leave the account from the chrome. */
+              <Pressable
+                style={styles.iconButton}
+                onPress={confirmLogout}
+                accessibilityRole="button"
+                accessibilityLabel="Log out"
+                accessibilityHint="Signs this device out of the SFLuv account"
+              >
+                <Ionicons name="log-out-outline" size={18} color={palette.primaryStrong} />
+              </Pressable>
+            ) : !merchantDeviceEnrollable ? (
               <Pressable
                 style={[styles.iconButton, tab === "settings" ? styles.iconButtonActive : undefined]}
                 // Icon-only, and in merchant mode it is the ONLY control on the
@@ -5192,7 +5238,7 @@ function WalletAppShellContent({
               notificationSubscribedCount={pushSyncState.subscribedCount}
               notificationStatusMessage={pushSyncState.message}
               onSyncNotifications={handleSyncPushNotifications}
-              onLogout={handleLogout}
+              onLogout={confirmLogout}
               googleLinked={googleLinked}
               googleLinkedEmail={googleLinkedEmail}
               googleActionBusy={googleActionBusy}
