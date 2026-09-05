@@ -840,6 +840,34 @@ export interface MerchantPlaceCandidate {
 export interface MerchantPlaceDetails extends AppLocation {}
 
 /**
+ * The postal half of a Google result, for a place that is an address rather
+ * than a business.
+ *
+ * No name and no category on purpose: Google returns the street itself as the
+ * display name for these, and inheriting it puts a shop on the map called
+ * "1234 Main St". The merchant types both, which is the only time the form asks
+ * for them.
+ */
+export interface MerchantAddressDraft {
+  street: string;
+  city: string;
+  state: string;
+  zip: string;
+  lat: number;
+  lng: number;
+  formattedAddress: string;
+}
+
+/**
+ * What the location box has settled on, and which of the two paths that puts
+ * the application on. Mirrors PlaceSelection in the web app, because the two
+ * submit the same payload and the backend tells them apart by listing_source.
+ */
+export type MerchantPlaceSelection =
+  | { source: "google_place"; place: MerchantPlaceDetails }
+  | { source: "manual"; address: MerchantAddressDraft };
+
+/**
  * One location's application, in the shape the Location Approval Form collects
  * it. Mirrors the web app's three steps — Public Information, Contact, Payment
  * System — because the two submit to the same endpoint and an answer collected
@@ -852,11 +880,13 @@ export interface MerchantPlaceDetails extends AppLocation {}
  */
 export interface MerchantApplicationDraft {
   // Public Information
-  place: MerchantPlaceDetails | null;
+  /** A confirmed business listing, a confirmed address, or nothing yet. */
+  selection: MerchantPlaceSelection | null;
   /** Typed by the merchant only where Google has no name for the place. */
   locationName: string;
   /** Likewise the category: Google's own is used whenever it has one. */
   businessType: string;
+  /** Optional, as on the web: a shop with nothing to add still belongs on the map. */
   description: string;
   /** Optional, and shown on the map. Need not match the contact phone. */
   publicPhone: string;

@@ -2003,6 +2003,36 @@ function WalletAppShellContent({
   // a different thing from a merchant with no PIN. Non-merchants never get one.
   const merchantSetupReady =
     merchantModeLocationsLoaded && (merchantModeStatus !== null || !appUser?.isMerchant);
+  /**
+   * Whether we can yet tell which of the three apps this account gets.
+   *
+   * A merchant account is never given the ordinary dock — it gets a till, or
+   * the application screen, or the wait. But that is decided from the profile
+   * and then from the merchant-mode calls, and until both have answered the
+   * only thing to render is the default layout, which is the one layout a
+   * merchant must never see. It flashed on every sign-in.
+   *
+   * The profile half covers every account, merchant or not: before it lands,
+   * nobody's dock is worth showing, and a spinner is the honest answer to
+   * "which app is this".
+   */
+  const accountRoutingUnresolved =
+    (Boolean(backendClient) && !appUser && !runtime.error) ||
+    (merchantAccount && !merchantModeActive && !merchantSetupReady);
+  // A cover that can outlive its answer is just a hang, and merchantSetupReady
+  // has no timeout of its own — a failed merchant-mode call leaves it false for
+  // good. So the cover expires and lets the app render rather than holding the
+  // whole account behind a spinner nothing will clear.
+  const [accountRoutingTimedOut, setAccountRoutingTimedOut] = useState(false);
+  useEffect(() => {
+    if (!accountRoutingUnresolved) {
+      setAccountRoutingTimedOut(false);
+      return;
+    }
+    const timer = setTimeout(() => setAccountRoutingTimedOut(true), 10000);
+    return () => clearTimeout(timer);
+  }, [accountRoutingUnresolved]);
+  const accountRoutingPending = accountRoutingUnresolved && !accountRoutingTimedOut;
   const walletSyncReady = backendBootstrapReady && Boolean(appUser) && Boolean(runtime.discovery);
   const walletHistoryActive = tab === "wallet" && walletPane === "home";
   const activityHistoryActive = tab === "activity";
@@ -4870,7 +4900,7 @@ function WalletAppShellContent({
             <Text style={styles.brand}>{activeTitle}</Text>
           </View>
           <View style={styles.topActions}>
-            {!merchantKiosk ? (
+            {!merchantKiosk && !accountRoutingPending ? (
               <Pressable
                 style={styles.iconButton}
                 onPress={openNotificationPanel}
@@ -4997,6 +5027,15 @@ function WalletAppShellContent({
                   </Pressable>
                 </View>
               )}
+            </View>
+          ) : accountRoutingPending ? (
+            // Ahead of everything, including the merchant screens themselves:
+            // until the profile and the merchant-mode calls answer, rendering
+            // anything at all means guessing which app this account gets, and
+            // the guess that shows is the one a merchant is never given.
+            <View style={styles.centerState}>
+              <ThemedActivityIndicator size="large" color={palette.primaryStrong} />
+              <Text style={styles.stateText}>Loading your account...</Text>
             </View>
           ) : merchantOnboardingContent ? (
             // Ahead of every tab: a merchant account with no till has no app to
@@ -5226,7 +5265,7 @@ function WalletAppShellContent({
       <PaymentReceivedOverlay receipt={paymentReceipt} onDismiss={() => setPaymentReceipt(null)} />
 
 
-      {showStandardChrome && !merchantKiosk && !sendPaneActive ? (
+      {showStandardChrome && !merchantKiosk && !accountRoutingPending && !sendPaneActive ? (
         <View pointerEvents="box-none" style={styles.bottomDockShell}>
           <BlurView
             pointerEvents="none"

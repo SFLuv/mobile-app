@@ -3487,36 +3487,66 @@ export class AppBackendClient {
    * once the listing exists.
    */
   async submitMerchantApplication(draft: MerchantApplicationDraft): Promise<number> {
-    if (!draft.place) {
+    const selection = draft.selection;
+    if (!selection) {
       throw new Error("Find your location first.");
     }
     if (draft.acceptsTips === null || draft.hasStaffTablet === null) {
       throw new Error("Answer every question on the Payment System step.");
     }
 
+    // Which of the two paths this application is on. The backend re-fetches a
+    // google_place submission from Google and overwrites the name, category and
+    // coordinates from its own lookup; a manual one carries no place id at all,
+    // and must not carry one, or it would be ambiguous which half of the record
+    // Google actually vouched for.
+    const placeFields =
+      selection.source === "google_place"
+        ? {
+            listing_source: "google_place" as const,
+            google_id: selection.place.googleId,
+            name: selection.place.name,
+            type: selection.place.type || draft.businessType.trim(),
+            street: selection.place.street,
+            city: selection.place.city,
+            state: selection.place.state,
+            zip: selection.place.zip,
+            lat: selection.place.lat,
+            lng: selection.place.lng,
+            website: selection.place.website,
+            image_url: selection.place.imageUrl,
+            rating: selection.place.rating,
+            maps_page: selection.place.mapsPage,
+            opening_hours: selection.place.openingHours,
+          }
+        : {
+            listing_source: "manual" as const,
+            google_id: "",
+            // Typed by the merchant, because Google returns the street as this
+            // result's display name and inheriting it would put a shop on the
+            // map called "1234 Main St".
+            name: draft.locationName.trim(),
+            type: draft.businessType.trim(),
+            street: selection.address.street,
+            city: selection.address.city,
+            state: selection.address.state,
+            zip: selection.address.zip,
+            lat: selection.address.lat,
+            lng: selection.address.lng,
+            website: "",
+            image_url: "",
+            rating: 0,
+            maps_page: "",
+            opening_hours: [] as string[],
+          };
+
     const response = await this.authFetch("/locations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         id: 0,
-        google_id: draft.place.googleId,
         owner_id: "",
-        // Google's own values wherever it has them; the typed answer is the
-        // fallback for a place with no name or no category, which is why the
-        // form asks for those two at all.
-        name: draft.place.name || draft.locationName.trim(),
-        type: draft.place.type || draft.businessType.trim(),
-        street: draft.place.street,
-        city: draft.place.city,
-        state: draft.place.state,
-        zip: draft.place.zip,
-        lat: draft.place.lat,
-        lng: draft.place.lng,
-        website: draft.place.website,
-        image_url: draft.place.imageUrl,
-        rating: draft.place.rating,
-        maps_page: draft.place.mapsPage,
-        opening_hours: draft.place.openingHours,
+        ...placeFields,
 
         description: draft.description.trim(),
         phone: draft.publicPhone.trim(),
