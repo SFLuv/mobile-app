@@ -30,6 +30,27 @@ export type SendResult = {
 };
 
 export type AmountUnit = "wei" | "token";
+
+/**
+ * What, in the receipt, proves this particular call actually did its work.
+ *
+ * Needed because this stack has no UserOperationEvent to consult. See
+ * assertUserOpSucceeded — the short version is that the transaction is sent by
+ * a sponsor EOA to a Citizen Wallet TokenEntryPoint, which absorbs a reverting
+ * inner call, so the transaction mines with status 1 whether the transfer
+ * happened or not. The only thing in the receipt that distinguishes the two is
+ * the log the inner call would have emitted, and a reverted call emits none.
+ */
+type CallSuccessProof = {
+  /** The contract expected to emit it. */
+  address: string;
+  /** topic0 and any indexed topics that must match. null is a wildcard. */
+  topics: (string | null)[];
+  /** Shown when the log is absent, which means the call did not do its work. */
+  missingMessage: string;
+  /** Optional extra check on the non-indexed data, e.g. a transfer amount. */
+  verifyData?: (data: string) => string | null;
+};
 type RuntimeWalletConfig = AppClientConfig["wallet"];
 
 export type RouteCandidate = {
@@ -354,7 +375,11 @@ export class SmartWalletService {
     return false;
   }
 
-  private async submitAccountContractCall(target: string, targetCallData: string): Promise<SendResult> {
+  private async submitAccountContractCall(
+    target: string,
+    targetCallData: string,
+    proof?: CallSuccessProof,
+  ): Promise<SendResult> {
     const sender = await this.smartAccountAddress();
     const nonce: ethers.BigNumber = await this.tokenEntryPoint.getNonce(sender, NONCE_KEY_ZERO);
     const needsInitCode = nonce.eq(0) && !(await this.hasDeployedCode(sender));
@@ -432,7 +457,7 @@ export class SmartWalletService {
         // pizza on the strength of the old existence check while their
         // transfer reverted on-chain, so the event's word is now the only
         // word that counts.
-        this.assertUserOpSucceeded(receipt, sentUserOpHash);
+        this.assertUserOpSucceeded(receipt, sentUserOpHash, proof);
         const txHash = typeof receipt?.transactionHash === "string" ? receipt.transactionHash : undefined;
         return { userOpHash: sentUserOpHash, txHash };
       }
@@ -449,18 +474,39 @@ export class SmartWalletService {
   }
 
   /**
-   * Throws unless the receipt's EntryPoint logs say this specific user
-   * operation succeeded. The bundle can mine while the operation inside it
-   * reverted; UserOperationEvent.success is where the EntryPoint records
-   * which of the two happened.
+   * Throws unless the receipt proves this specific call did its work.
+   *
+   * The first version of this looked only for the EntryPoint's
+   * UserOperationEvent and threw when it was absent. Right for a standard 4337
+   * deployment, wrong for this one: our operations are not bundled through
+   * EntryPoint.handleOps. The engine signs and sends the transaction itself,
+   * from a sponsor EOA, to a Citizen Wallet TokenEntryPoint — and that contract
+   * emits no UserOperationEvent. The receipt of a real, successful 9.01 SFLUV
+   * send carries three logs: two from the account naming the TokenEntryPoint,
+   * and the ERC-20 Transfer. No 0x49628fd1… topic appears anywhere in it, so
+   * the scan fell through and every send in the app reported failure while
+   * succeeding on chain. Senders then retried, and paid twice.
+   *
+   * What has not changed is why that check was added. The pizza payment
+   * reverted inside a transaction that still mined with status 1, because the
+   * TokenEntryPoint absorbs a failing inner call exactly as handleOps would. So
+   * receipt.status is still no answer on its own, and "did the inner call
+   * happen" is still a question for the logs — just for the log the call itself
+   * emits, rather than a bookkeeping event this stack does not produce. A
+   * reverted call emits nothing, so absence is the failure signal.
+   *
+   * The UserOperationEvent path stays in front of it: it is the better answer
+   * where it exists, costs nothing where it does not, and means this keeps
+   * working unchanged if the stack ever moves to a stock EntryPoint.
    */
-  private assertUserOpSucceeded(receipt: any, userOpHash: string): void {
+  private assertUserOpSucceeded(receipt: any, userOpHash: string, proof?: CallSuccessProof): void {
+    const logs: any[] = Array.isArray(receipt?.logs) ? receipt.logs : [];
+
     const userOpEventInterface = new ethers.utils.Interface([
       "event UserOperationEvent(bytes32 indexed userOpHash, address indexed sender, address indexed paymaster, uint256 nonce, bool success, uint256 actualGasCost, uint256 actualGasUsed)",
     ]);
     const eventTopic = userOpEventInterface.getEventTopic("UserOperationEvent").toLowerCase();
     const wanted = userOpHash.toLowerCase();
-    const logs: any[] = Array.isArray(receipt?.logs) ? receipt.logs : [];
 
     for (const log of logs) {
       const topics: string[] = Array.isArray(log?.topics) ? log.topics : [];
@@ -475,11 +521,34 @@ export class SmartWalletService {
       );
     }
 
-    // A receipt that never mentions our operation is not proof of payment,
-    // whatever else it is.
-    throw new Error(
-      "The network's answer did not confirm this payment. Check your Activity before trying again.",
-    );
+    if (proof) {
+      for (const log of logs) {
+        if (String(log?.address || "").toLowerCase() !== proof.address.toLowerCase()) continue;
+        const topics: string[] = Array.isArray(log?.topics) ? log.topics : [];
+        const topicsMatch = proof.topics.every(
+          (expected, index) =>
+            expected === null || (topics[index] || "").toLowerCase() === expected.toLowerCase(),
+        );
+        if (!topicsMatch) continue;
+        // The right event between the right parties. Anything still wrong with
+        // it is about the value, and deserves its own message.
+        const dataProblem = proof.verifyData?.(String(log?.data || "0x"));
+        if (dataProblem) {
+          throw new Error(dataProblem);
+        }
+        return;
+      }
+      throw new Error(proof.missingMessage);
+    }
+
+    // Nothing was asked for, so the transaction mining is all there is to go on.
+    // Callers that care pass a proof; this is the floor, not the standard.
+    const status = receipt?.status;
+    const mined =
+      status === undefined || status === null || status === 1 || status === "0x1" || status === true;
+    if (!mined) {
+      throw new Error("This transaction failed on-chain. Nothing was sent.");
+    }
   }
 
   async ensureSmartWalletDeployed(): Promise<boolean> {
@@ -637,7 +706,35 @@ export class SmartWalletService {
     }
 
     const transferCallData = this.erc20.encodeFunctionData("transfer", [recipient, amount]);
-    return this.submitAccountContractCall(this.runtimeConfig.tokenAddress, transferCallData);
+
+    // The ERC-20 Transfer this call must emit: from us, to them, for exactly
+    // this amount. It is the only thing in the receipt that tells a transfer
+    // that happened from one the TokenEntryPoint absorbed, so it is what the
+    // success screen is allowed to rest on.
+    const sender = await this.smartAccountAddress();
+    const proof: CallSuccessProof = {
+      address: this.runtimeConfig.tokenAddress,
+      topics: [
+        ethers.utils.id("Transfer(address,address,uint256)"),
+        ethers.utils.hexZeroPad(sender, 32),
+        ethers.utils.hexZeroPad(recipient, 32),
+      ],
+      missingMessage:
+        "This payment did not go through — nothing was sent. Check your balance and try again.",
+      // Belt and braces on the 7500-for-75.00 shape of mistake: the right
+      // parties for the wrong number is still not the payment that was
+      // authorised.
+      verifyData: (data) => {
+        try {
+          if (ethers.BigNumber.from(data || "0x0").eq(amount)) return null;
+        } catch {
+          return "This payment could not be confirmed. Check your Activity before trying again.";
+        }
+        return "This payment went through for a different amount than requested. Check your Activity before trying again.";
+      },
+    };
+
+    return this.submitAccountContractCall(this.runtimeConfig.tokenAddress, transferCallData, proof);
   }
 }
 
