@@ -407,7 +407,9 @@ export interface AppWorkflowStep {
   roleId?: string | null;
   assignedImproverId?: string | null;
   assignedImproverName?: string | null;
-  status: "locked" | "available" | "in_progress" | "completed" | "paid_out";
+  // "skipped": the workflow's window closed before anyone started this step.
+  // Inert — matches none of the actionable checks, and is not "completed".
+  status: "locked" | "available" | "in_progress" | "completed" | "paid_out" | "skipped";
   startedAt?: number | null;
   completedAt?: number | null;
   payoutError?: string | null;

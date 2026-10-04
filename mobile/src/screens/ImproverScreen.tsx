@@ -371,6 +371,43 @@ function getInitialStepIndexForWorkflowCard(workflow: AppImproverWorkflowListIte
   return preferred ? Math.max(0, preferred.stepOrder - 1) : 0;
 }
 
+// A role can cover more than one step of the same workflow, so finishing one
+// does not mean the improver is done. These two helpers are what make the rest
+// of that work findable: the pager lands on it, and the step list says which
+// numbers are theirs.
+//
+// Without them an improver assigned to steps 1 and 3 completed step 1, stayed
+// looking at their own finished step, and had no way to know step 3 was also
+// theirs short of paging through every step in the workflow.
+function assignedStepOrders(workflow: AppWorkflow, userId?: string | null): number[] {
+  if (!userId) {
+    return [];
+  }
+  return [...workflow.steps]
+    .filter((step) => step.assignedImproverId === userId)
+    .map((step) => step.stepOrder)
+    .sort((left, right) => left - right);
+}
+
+// The next step of theirs that is still open, after the one they just left.
+// Returns -1 when there is nothing further, so the caller can stay put.
+function nextActionableAssignedStepIndex(
+  workflow: AppWorkflow,
+  userId: string | null | undefined,
+  afterStepOrder: number,
+): number {
+  if (!userId) {
+    return -1;
+  }
+  const sortedSteps = [...workflow.steps].sort((left, right) => left.stepOrder - right.stepOrder);
+  return sortedSteps.findIndex(
+    (step) =>
+      step.assignedImproverId === userId &&
+      step.stepOrder > afterStepOrder &&
+      (step.status === "available" || step.status === "in_progress" || step.status === "locked"),
+  );
+}
+
 function isFullWorkflow(workflow: AppWorkflow | AppImproverWorkflowListItem): workflow is AppWorkflow {
   return Array.isArray((workflow as AppWorkflow).steps);
 }
@@ -1821,7 +1858,22 @@ export function ImproverScreen({
         const payload = buildCompletionPayload(workflow, step);
         const updatedWorkflow = await backendClient.completeWorkflowStep(workflow.id, step.id, payload);
         mergeWorkflow(updatedWorkflow);
-        setNotice(payload.stepNotPossible ? "Step marked not possible." : "Workflow step completed.");
+
+        // Their role may cover a later step of this same workflow. Move to it
+        // rather than leaving them looking at the step they just finished —
+        // which read as "you are done here" when they were not.
+        const nextIndex = nextActionableAssignedStepIndex(updatedWorkflow, user?.id, step.stepOrder);
+        if (nextIndex >= 0) {
+          const nextStep = [...updatedWorkflow.steps].sort((left, right) => left.stepOrder - right.stepOrder)[nextIndex];
+          setDetailStepIndex(nextIndex);
+          setNotice(
+            payload.stepNotPossible
+              ? `Step marked not possible. You're also on step ${nextStep.stepOrder}: ${nextStep.title}.`
+              : `Step completed. You're also on step ${nextStep.stepOrder}: ${nextStep.title}.`,
+          );
+        } else {
+          setNotice(payload.stepNotPossible ? "Step marked not possible." : "Workflow step completed.");
+        }
         setError(null);
         setCompletionForms((current) => {
           if (!current[step.id]) {
@@ -1861,7 +1913,7 @@ export function ImproverScreen({
         setActionKey("");
       }
     },
-    [backendClient, buildCompletionPayload, mergeWorkflow, refreshSelectedWorkflow, refreshWorkflowSurfaces],
+    [backendClient, buildCompletionPayload, mergeWorkflow, refreshSelectedWorkflow, refreshWorkflowSurfaces, user?.id],
   );
 
   const requestPayoutRetry = useCallback(
@@ -2241,6 +2293,10 @@ export function ImproverScreen({
     [selectedWorkflow],
   );
   const currentDetailStepIndex = Math.min(detailStepIndex, Math.max(sortedDetailSteps.length - 1, 0));
+  const myStepOrders = useMemo(
+    () => (selectedWorkflow ? assignedStepOrders(selectedWorkflow, user?.id) : []),
+    [selectedWorkflow, user?.id],
+  );
   const currentDetailStep = sortedDetailSteps[currentDetailStepIndex] || null;
   const detailSubmissionExpanded = currentDetailStep ? Boolean(submissionDetailsOpen[currentDetailStep.id]) : false;
   const currentDetailStepHasCompletionForm = Boolean(
@@ -3611,6 +3667,12 @@ export function ImproverScreen({
                   <View style={styles.stepPagerRow}>
                     <Text style={styles.stepPagerTitle}>
                       Step {currentDetailStepIndex + 1} of {sortedDetailSteps.length}
+                      {/* Which of these steps are theirs. "Step 2 of 4" alone
+                          told an improver nothing about where their other
+                          assigned step was. */}
+                      {selectedWorkflow && myStepOrders.length > 1
+                        ? ` · yours: ${myStepOrders.join(", ")}`
+                        : ""}
                     </Text>
                     <View style={styles.inlineActions}>
                       <Pressable
