@@ -63,6 +63,7 @@ import { BulletinScreen } from "./src/screens/BulletinScreen";
 import { MessagesScreen } from "./src/screens/MessagesScreen";
 import { BulletinPost, Conversation } from "./src/types/bulletin";
 import { ImproverScreen } from "./src/screens/ImproverScreen";
+import { NotificationsScreen } from "./src/screens/NotificationsScreen";
 import { VolunteerScreen } from "./src/screens/VolunteerScreen";
 import { ThemedActivityIndicator } from "./src/components/ThemedActivityIndicator";
 import { W9CompleteModal } from "./src/components/W9CompleteModal";
@@ -106,10 +107,12 @@ import {
   MerchantToday,
 } from "./src/types/app";
 import { useNotificationInbox } from "./src/hooks/useNotificationInbox";
+import { useNotificationFeed } from "./src/hooks/useNotificationFeed";
+import { loadBootCache, rememberSignedIn, saveBootCache } from "./src/services/bootCache";
+import type { AppNotificationFeed } from "./src/types/notifications";
 import {
   InboxNotification,
   NotificationTarget,
-  targetFromAction,
   targetFromData,
 } from "./src/services/notificationInbox";
 import { AppPreferences, defaultAppPreferences } from "./src/types/preferences";
@@ -187,11 +190,35 @@ type PushSyncState = {
 };
 
 type CompatibilityState =
+  // "loading" is now only the first moment of a cold start, before the cached
+  // startup state has been read off disk. A device that has run the app before
+  // passes through it in milliseconds rather than waiting on two network calls.
   | { status: "loading" }
-  | { status: "ready"; config: AppClientConfig; version: AppClientVersionPolicy }
+  | {
+      status: "ready";
+      config: AppClientConfig;
+      version: AppClientVersionPolicy;
+      /**
+       * True while running on the cache, before the real check has confirmed
+       * it. The app is fully usable either way — this exists so the UI can be
+       * honest about the state being provisional, and so the revalidation can
+       * tell a first confirmation from a routine refresh.
+       */
+      provisional?: boolean;
+    }
   | { status: "blocked"; title: string; message: string; updateUrl?: string };
 
-type Tab = "wallet" | "activity" | "improver" | "volunteer" | "map" | "bulletin" | "messages" | "contacts" | "settings";
+type Tab =
+  | "wallet"
+  | "activity"
+  | "improver"
+  | "volunteer"
+  | "map"
+  | "bulletin"
+  | "messages"
+  | "contacts"
+  | "notifications"
+  | "settings";
 
 /** Slots in the bottom dock. Distinct from `Tab`: "participate" can lead to two screens. */
 // Activity lives inside the wallet ("See all"); Contacts lives inside Messages.
@@ -211,6 +238,9 @@ const TAB_SLIDE_ORDER: Tab[] = [
   "bulletin",
   "messages",
   "contacts",
+  // Reached from the bell rather than the dock, which is full. It sits at the
+  // end so sliding into it always animates the same way.
+  "notifications",
   "settings",
 ];
 const TAB_SLIDE_DISTANCE = 26;
@@ -3034,25 +3064,12 @@ function WalletAppShellContent({
     ]).start();
   }, [tab, tabFade, tabSlideX]);
 
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
-
-  /**
-   * What a tapped notification wants to do, held until the panel is gone.
-   *
-   * The panel is a UIKit modal. Navigating in the same breath as closing it
-   * asks iOS to present the next thing — the tier modal, most importantly —
-   * while the panel is still mid-dismissal, and iOS silently drops that
-   * presentation and never retries. So the tap stashes its intent, and it
-   * runs from the panel's own dismissal callback, with a timer as fallback
-   * for the platforms that never report one. Whichever fires first drains;
-   * the other finds nothing.
-   */
-  const pendingPanelActionRef = useRef<(() => void) | null>(null);
-  const drainPanelAction = useCallback(() => {
-    const action = pendingPanelActionRef.current;
-    pendingPanelActionRef.current = null;
-    if (action) action();
-  }, []);
+  // Notifications are a screen now, not a modal over one. That removes a
+  // workaround rather than moving it: the panel used to stash a tapped
+  // notification's intent and run it from the modal's dismissal callback,
+  // because asking iOS to present the W-9 tier modal while the panel was still
+  // mid-dismissal made it silently drop the presentation and never retry.
+  // Navigating between tabs has no such race, so the deferral is gone.
 
   const openVolunteerPanel = useCallback((eventId: string | null = null) => {
     setVolunteerRouteRequest((current) => ({ eventId, nonce: current.nonce + 1 }));
@@ -3128,48 +3145,92 @@ function WalletAppShellContent({
   const {
     items: notificationItems,
     open: openNotification,
-    dismiss: dismissPushNotification,
     resolveTarget: resolveNotificationTarget,
-    clearAll: clearNotifications,
   } = useNotificationInbox({ onNavigate: navigateToNotificationTarget });
 
-  // The top bar shows two sources of notification, and they have different
-  // lifetimes. A push is a past event: it sits in the tray until cleared. A
-  // server-derived entry describes a condition that is true right now — an
-  // unfiled W-9, a payout waiting — and disappears on its own when that stops
-  // being true. Merging them is a display decision only; neither one adopts
-  // the other's rules.
-  const serverNotificationItems = useMemo<InboxNotification[]>(
-    () =>
-      (improverNotifications?.notifications ?? [])
-        // Seen means dismissed here. The server keeps deriving the entry for as
-        // long as its condition holds, so this is the only record that somebody
-        // has put it away, and hiding it is what stops the count nagging.
-        .filter((entry) => !entry.seen)
-        .map((entry) => ({
-        // Namespaced so a feed key can never collide with a push id and
-        // resolve the wrong item out of the inbox.
-        id: `feed:${entry.key}`,
+  /**
+   * The server-side notification ledger behind the Notifications screen.
+   *
+   * Kept beside the local push mirror rather than replacing it, because the
+   * two do different jobs. The mirror knows about the OS tray — what is still
+   * sitting in the notification shade, and how to clear it — which the server
+   * cannot know. The ledger is the history, and the only place internal alerts
+   * exist at all.
+   */
+  const {
+    feed: notificationFeed,
+    loading: notificationsLoading,
+    loadingMore: notificationsLoadingMore,
+    error: notificationsError,
+    unseenCount: serverUnseenCount,
+    refresh: refreshNotificationFeed,
+    loadMore: loadMoreNotifications,
+    markSeen: markNotificationsSeen,
+    runAction: runNotificationAction,
+  } = useNotificationFeed({
+    client: backendClient ?? null,
+    userId: appUser?.id ?? null,
+    isActive: useCallback(() => appIsActiveRef.current, []),
+  });
+
+  /**
+   * The screen's feed, with the derived condition entries folded in.
+   *
+   * Two sources have to meet here because they are stored differently and
+   * neither can be moved. The ledger is rows in a table, so it has history and
+   * pagination. The W-9 and payout entries are derived from live state on every
+   * request — nothing is stored but a seen marker — so they have no history at
+   * all and can only ever be active. Folding them in as active rows is the
+   * honest representation of that: they appear while their condition holds and
+   * they do not accumulate anywhere afterwards.
+   *
+   * Their ids are negated so they cannot collide with a ledger row's id, which
+   * the list uses as its key and the seen call uses as its subject.
+   */
+  const screenNotificationFeed = useMemo<AppNotificationFeed | null>(() => {
+    if (!notificationFeed) {
+      return null;
+    }
+    const derived = (improverNotifications?.notifications ?? [])
+      .filter((entry) => !entry.seen)
+      .map((entry, index) => ({
+        id: -(index + 1),
+        kind: entry.type,
         title: entry.title,
         body: entry.body,
-        receivedAt: entry.createdAt * 1000,
-        target: targetFromAction(entry.action),
-      })),
-    [improverNotifications],
-  );
+        createdAt: entry.createdAt * 1000,
+        // Routed by the entry's own type, which is the same string a real push
+        // of this kind carries — so targetFromData sends a tap to the same
+        // place either way, and neither has to know about the other.
+        data: { type: entry.type } as Record<string, string>,
+        seen: false,
+        internal: null,
+      }));
+    if (derived.length === 0) {
+      return notificationFeed;
+    }
+    return {
+      ...notificationFeed,
+      active: [...notificationFeed.active, ...derived],
+      unseenCount: notificationFeed.unseenCount + derived.length,
+    };
+  }, [improverNotifications, notificationFeed]);
 
-  // Live conditions first: they are the ones still asking for something.
-  const panelNotificationItems = useMemo(
-    () => [...serverNotificationItems, ...notificationItems],
-    [notificationItems, serverNotificationItems],
-  );
-
-  // The badge counts everything outstanding, not everything unread, and it does
-  // not clear just because the panel was opened. Reading a notification is not
-  // the same as dealing with it: a W-9 that still needs filing is still owed
-  // whether or not somebody has glanced at the row. The count comes down when
-  // an entry is dismissed or its condition resolves, and not before.
-  const panelNotificationCount = panelNotificationItems.length;
+  /**
+   * What the bell's badge counts.
+   *
+   * Outstanding things, not unread ones — but what counts as outstanding now
+   * differs by kind, and that is the change this screen brought. An ordinary
+   * notification stops counting once it has been looked at. An internal alert
+   * keeps counting until it is dealt with, however many times somebody has
+   * scrolled past it, because a merchant waiting on approval is still waiting.
+   *
+   * The server's number covers the ledger and is computed over all of it
+   * rather than over a page; the local mirror adds tray entries the server has
+   * never been told about.
+   */
+  const panelNotificationCount =
+    (screenNotificationFeed?.unseenCount ?? serverUnseenCount) + notificationItems.length;
 
   // Reaching a screen under your own steam handles the notification for it just
   // as tapping it would, so it clears from our list and the OS tray together.
@@ -3312,58 +3373,30 @@ function WalletAppShellContent({
     }
   }, [appUser, backendClient]);
 
-  // Opening the panel only refreshes it. Marking everything seen on open would
-  // empty the badge for someone who did nothing but look, which is the opposite
-  // of what a count of outstanding things is for.
-  const openNotificationPanel = useCallback(() => {
-    setNotificationsOpen(true);
-    void refreshImproverNotifications();
-  }, [refreshImproverNotifications]);
-
   /**
-   * Dismisses one entry, from whichever source it came.
+   * Opens the Notifications screen.
    *
-   * A push is dropped from the tray and the local mirror. A derived entry has
-   * no tray and cannot be deleted — the server rebuilds it from live state on
-   * every request — so dismissal is recorded as a seen mark against its key,
-   * which the feed then filters out. Either way the row goes and the count
-   * comes down by one.
+   * Viewing it marks ordinary notifications seen, which is the rule for them:
+   * a receipt for a payment has done its job once it has been read, and a
+   * badge that will not clear for notifications somebody has read teaches
+   * people to ignore the badge.
+   *
+   * Internal alerts are explicitly not covered. The server refuses to mark
+   * them whatever is asked, so a merchant waiting on approval is still waiting
+   * after somebody has scrolled past it, and still counted.
    */
-  const handleDismissNotification = useCallback(
-    (item: InboxNotification) => {
-      const feedKey = item.id.startsWith("feed:") ? item.id.slice("feed:".length) : null;
-      if (!feedKey) {
-        dismissPushNotification(item);
-        return;
-      }
-      // Optimistic: the row disappears on the tap rather than after a round
-      // trip, and the response replaces the feed either way.
-      setImproverNotifications((current) =>
-        current
-          ? {
-              ...current,
-              notifications: current.notifications.map((entry) =>
-                entry.key === feedKey ? { ...entry, seen: true } : entry,
-              ),
-            }
-          : current,
-      );
-      void backendClient
-        ?.markImproverNotificationsSeen({ keys: [feedKey] })
-        .then(setImproverNotifications)
-        .catch(() => {
-          // Put it back rather than leave a row that is gone here and present
-          // on every other device.
-          void refreshImproverNotifications();
-        });
-    },
-    [backendClient, dismissPushNotification, refreshImproverNotifications],
-  );
-
-  const handleClearNotifications = useCallback(() => {
-    clearNotifications();
-    void handleMarkImproverNotificationsSeen();
-  }, [clearNotifications, handleMarkImproverNotificationsSeen]);
+  const openNotificationPanel = useCallback(() => {
+    setTab("notifications");
+    // Two sources, two seen records. The ledger's and the derived feed's are
+    // separate tables and neither call covers the other.
+    void refreshNotificationFeed({ silent: true }).then(() => markNotificationsSeen());
+    void refreshImproverNotifications().then(() => handleMarkImproverNotificationsSeen());
+  }, [
+    handleMarkImproverNotificationsSeen,
+    markNotificationsSeen,
+    refreshImproverNotifications,
+    refreshNotificationFeed,
+  ]);
 
   // Reminder settings live on the backend, not in device preferences, because
   // the backend is what sends the push at a time this app may not be running.
@@ -4800,6 +4833,8 @@ function WalletAppShellContent({
         ? "Bulletin"
       : tab === "messages" || tab === "contacts"
         ? "Messages"
+      : tab === "notifications"
+        ? "Notifications"
           : "Settings";
   const showBlockingWalletState = runtime.loading && !runtime.service;
   // A boot that never finishes is indistinguishable from a crash to the user.
@@ -5015,7 +5050,7 @@ function WalletAppShellContent({
                 }
               >
                 <Ionicons
-                  name={panelNotificationItems.length > 0 ? "notifications" : "notifications-outline"}
+                  name={panelNotificationCount > 0 ? "notifications" : "notifications-outline"}
                   size={18}
                   color={palette.primaryStrong}
                 />
@@ -5268,6 +5303,30 @@ function WalletAppShellContent({
                 }
               }}
               onToast={showToast}
+            />
+          ) : tab === "notifications" ? (
+            <NotificationsScreen
+              feed={screenNotificationFeed}
+              loading={notificationsLoading}
+              loadingMore={notificationsLoadingMore}
+              error={notificationsError}
+              onRefresh={async () => {
+                await refreshNotificationFeed({ silent: true });
+                await markNotificationsSeen();
+                await refreshImproverNotifications();
+                await handleMarkImproverNotificationsSeen();
+              }}
+              onLoadMore={loadMoreNotifications}
+              onAction={runNotificationAction}
+              onOpen={(item) => {
+                // Routed by the push payload the notification was sent with,
+                // so a history row lands in the same place tapping the real
+                // push would have.
+                const target = targetFromData(item.data);
+                navigateToNotificationTarget(target);
+                resolveNotificationTarget(target);
+              }}
+              onClose={() => setTab("wallet")}
             />
           ) : tab === "messages" || tab === "contacts" ? (
             <MessagesScreen
@@ -5829,86 +5888,6 @@ function WalletAppShellContent({
       </Modal>
 
 
-      <Modal
-        visible={notificationsOpen}
-        transparent
-        presentationStyle="overFullScreen"
-        animationType="fade"
-        onRequestClose={() => setNotificationsOpen(false)}
-        onDismiss={drainPanelAction}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => setNotificationsOpen(false)} accessible={false}>
-          <Pressable style={styles.moreMenuCard} onPress={() => {}} accessible={false}>
-            <View style={styles.moreMenuHeader}>
-              <View style={styles.moreMenuHeaderCopy}>
-                <Text style={styles.moreMenuTitle}>Notifications</Text>
-                <Text style={styles.moreMenuSubtitle}>
-                  {panelNotificationItems.length > 0
-                    ? "Tap one to jump straight to it."
-                    : "You are all caught up."}
-                </Text>
-              </View>
-              <Pressable style={styles.walletChooserClose} onPress={() => setNotificationsOpen(false)}>
-                <Ionicons name="close" size={20} color={palette.primaryStrong} />
-              </Pressable>
-            </View>
-
-            {panelNotificationItems.length > 0 ? (
-              <>
-                <ScrollView style={styles.notificationList} showsVerticalScrollIndicator={false}>
-                  {panelNotificationItems.map((item) => (
-                    <View key={item.id} style={styles.notificationRow}>
-                    <Pressable
-                      style={styles.moreMenuItem}
-                      accessibilityRole="button"
-                      // Title and body read as one announcement; left to merge
-                      // on their own they arrive as two unrelated fragments.
-                      accessibilityLabel={item.body ? `${item.title}. ${item.body}` : item.title}
-                      accessibilityHint={
-                        item.target.kind === "none" ? undefined : "Opens what this is about"
-                      }
-                      onPress={() => {
-                        console.error("[w9] notification tapped:", item.target.kind);
-                        pendingPanelActionRef.current = () => openNotification(item);
-                        setNotificationsOpen(false);
-                        setTimeout(drainPanelAction, 600);
-                      }}
-                    >
-                      <View style={[styles.moreMenuCopy, styles.notificationCopyInset]}>
-                        <Text style={styles.moreMenuLabel}>{item.title}</Text>
-                        {item.body ? <Text style={styles.moreMenuBody}>{item.body}</Text> : null}
-                      </View>
-                      {item.target.kind !== "none" ? (
-                        <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
-                      ) : null}
-                    </Pressable>
-                    {/* Drawn over the bubble's top-right corner rather than
-                        inside it. A Pressable that sets its own label merges
-                        its children into one accessibility element, so nesting
-                        this put the dismiss out of reach of a screen reader
-                        entirely. As a sibling it keeps its own element and
-                        still lands where it should. */}
-                    <Pressable
-                      style={styles.notificationDismiss}
-                      onPress={() => handleDismissNotification(item)}
-                      hitSlop={10}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Dismiss ${item.title}`}
-                    >
-                      <Ionicons name="close" size={14} color={palette.textMuted} />
-                    </Pressable>
-                    </View>
-                  ))}
-                </ScrollView>
-                <Pressable style={styles.notificationClearAll} onPress={handleClearNotifications}>
-                  <Text style={styles.notificationClearAllText}>Clear all</Text>
-                </Pressable>
-              </>
-            ) : null}
-          </Pressable>
-        </Pressable>
-      </Modal>
-
       <Modal visible={Boolean(redeemFlow)} transparent animationType="fade" onRequestClose={() => setRedeemFlow(null)}>
         <View style={styles.sendingOverlay}>
           <View style={styles.sendingCard}>
@@ -6012,11 +5991,17 @@ function PrivyWalletApp({
   preferences,
   preferencesLoaded,
   onUpdatePreferences,
+  bootedFromCache,
+  onSignedInChange,
 }: {
   clientConfig: AppClientConfig;
   preferences: AppPreferences;
   preferencesLoaded: boolean;
   onUpdatePreferences: (next: AppPreferences) => void;
+  /** True when this launch started from cached startup state. */
+  bootedFromCache: boolean;
+  /** Reports sign-in state up, so the next cold start shows the right skeleton. */
+  onSignedInChange: (signedIn: boolean) => void;
 }) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
@@ -6029,6 +6014,19 @@ function PrivyWalletApp({
   const emailCodeInputRef = useRef<TextInput | null>(null);
 
   const [runtime, setRuntime] = useState<RuntimeState>(blankRuntime(true));
+
+  // Tell the cache whether somebody is signed in, so the next cold start shows
+  // the signed-in skeleton or the sign-in one rather than guessing. Only once
+  // Privy is ready: before that `user` is null because nothing has been read
+  // yet, not because nobody is signed in, and recording that would make every
+  // launch after a backgrounded session show the wrong skeleton.
+  const signedIn = isReady ? Boolean(user?.id) : null;
+  useEffect(() => {
+    if (signedIn === null) {
+      return;
+    }
+    onSignedInChange(signedIn);
+  }, [onSignedInChange, signedIn]);
   const [preferredCandidateKey, setPreferredCandidateKey] = useState<string | undefined>(undefined);
   const [pendingLinkIntent, setPendingLinkIntent] = useState<PendingLinkIntent | null>(null);
   const [backendBootstrapReady, setBackendBootstrapReady] = useState(false);
@@ -6986,12 +6984,30 @@ function PrivyWalletApp({
     );
   };
 
+  /**
+   * While Privy initializes.
+   *
+   * Privy's init reads the keychain, which is usually quick and occasionally
+   * is not. It used to show a centred spinner over the words "Initializing
+   * Privy…" — an implementation detail, on a screen with none of the app's own
+   * furniture, and indistinguishable from a hang.
+   *
+   * On a launch that started from cache we know whether somebody was signed in
+   * last time, so the app's own chrome goes up instead and the wait happens
+   * behind something that looks like the app. It is a skeleton, not a stale
+   * copy: nothing is interactive yet, because until Privy answers we do not
+   * know whose data to show, and showing the last session's balance to
+   * whoever opened the phone would be worse than showing nothing.
+   */
   if (!isReady) {
+    if (bootedFromCache) {
+      return <BootSkeleton palette={palette} styles={styles} />;
+    }
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.centerState}>
           <ThemedActivityIndicator size="large" color={palette.primaryStrong} />
-          <Text style={styles.stateText}>Initializing Privy…</Text>
+          <Text style={styles.stateText}>Starting SFLUV…</Text>
         </View>
       </SafeAreaView>
     );
@@ -7564,6 +7580,133 @@ function CompatibilityGateScreen({
   );
 }
 
+/**
+ * The app's own furniture, with nothing in it yet.
+ *
+ * Shown for the moment between the cached config being applied and Privy
+ * answering. The point is that the shape of the app is already on screen — a
+ * top bar, a card where the balance goes, a dock — so the wait reads as
+ * loading rather than as a blank screen or a hang.
+ *
+ * Nothing here is pressable. A dock that moved before the app knew who was
+ * signed in would navigate into screens with no data behind them.
+ */
+/**
+ * "Running on saved settings."
+ *
+ * Shown when the app is up but the settings check could not reach the server.
+ * The session is deliberately not torn down — the cached config is the best
+ * information available and everything works on it — so the honest thing is to
+ * keep the app usable and say that one part of it is out of date, rather than
+ * either hiding it or blocking on it.
+ *
+ * An overlay rather than a row in the layout, so it cannot shift the content
+ * underneath it or need threading through the shell's props. It sits under the
+ * status bar and above everything else.
+ */
+function StaleSettingsBanner({ onRetry }: { onRetry: () => void }) {
+  const { palette } = useAppTheme();
+  return (
+    <SafeAreaView
+      pointerEvents="box-none"
+      style={{ position: "absolute", top: 0, left: 0, right: 0 }}
+    >
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: spacing.sm,
+          marginHorizontal: spacing.lg,
+          marginTop: spacing.sm,
+          paddingVertical: spacing.sm,
+          paddingHorizontal: spacing.md,
+          borderRadius: radii.md,
+          backgroundColor: palette.surfaceStrong,
+        }}
+        accessibilityRole="alert"
+      >
+        <Ionicons name="cloud-offline-outline" size={14} color={palette.textMuted} />
+        <Text style={{ flex: 1, fontSize: 12, color: palette.textMuted }}>
+          Running on saved settings — we could not reach SFLUV.
+        </Text>
+        <Pressable onPress={onRetry} accessibilityRole="button" hitSlop={8}>
+          <Text style={{ fontSize: 12, fontWeight: "700", color: palette.primaryStrong }}>Retry</Text>
+        </Pressable>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+function BootSkeleton({
+  palette,
+  styles,
+}: {
+  palette: Palette;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  const block = (height: number, width: number | `${number}%`, radius = 12) => (
+    <View
+      style={{
+        height,
+        width,
+        borderRadius: radius,
+        backgroundColor: palette.surfaceMuted,
+      }}
+    />
+  );
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <View
+        style={{ flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg }}
+        accessibilityRole="progressbar"
+        accessibilityLabel="Loading SFLUV"
+      >
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: spacing.xl,
+          }}
+        >
+          {block(18, 96)}
+          <View style={{ flexDirection: "row", gap: spacing.sm }}>
+            {block(32, 32, 16)}
+            {block(32, 32, 16)}
+          </View>
+        </View>
+
+        {block(132, "100%", 20)}
+
+        <View style={{ height: spacing.lg }} />
+        {block(56, "100%", 16)}
+        <View style={{ height: spacing.sm }} />
+        {block(56, "100%", 16)}
+        <View style={{ height: spacing.sm }} />
+        {block(56, "100%", 16)}
+
+        <View style={{ flex: 1 }} />
+
+        <View
+          style={{
+            flexDirection: "row",
+            justifyContent: "space-between",
+            alignItems: "center",
+            paddingVertical: spacing.md,
+          }}
+        >
+          {block(28, 44, 14)}
+          {block(28, 44, 14)}
+          {block(44, 44, 22)}
+          {block(28, 44, 14)}
+          {block(28, 44, 14)}
+        </View>
+      </View>
+    </SafeAreaView>
+  );
+}
+
 function blockedCompatibilityState(
   version: AppClientVersionPolicy,
   config: AppClientConfig,
@@ -7598,6 +7741,23 @@ export default function App() {
     compatibilityClientRef.current = new AppBackendClient(async () => null);
   }
   const compatibilityCheckInFlightRef = useRef(false);
+  // Whether this launch is running on cached startup state. Passed down so the
+  // shell can show its own skeleton instead of a bare spinner while Privy
+  // initializes — we know from the cache whether somebody was signed in, so we
+  // know which skeleton is the right one.
+  const [bootedFromCache, setBootedFromCache] = useState(false);
+  // Mirrors "was somebody signed in", for the cache write. A ref rather than
+  // state because nothing renders from it and it is read inside a callback.
+  const signedInRef = useRef(false);
+  // Records whether the last real check reached the server, so the shell can
+  // say it is running on cached settings rather than leaving a stale config
+  // looking current.
+  const [compatibilityStale, setCompatibilityStale] = useState(false);
+
+  const handleSignedInChange = useCallback((signedIn: boolean) => {
+    signedInRef.current = signedIn;
+    void rememberSignedIn(signedIn);
+  }, []);
 
   // Re-fetches the client-version policy and backend config and re-evaluates the
   // blocking state. Runs at cold start and again every time the app returns to
@@ -7616,38 +7776,89 @@ export default function App() {
         client.getClientConfig(),
       ]);
       const blocked = blockedCompatibilityState(version, config);
+
+      // Cache the answer for the next cold start. saveBootCache refuses a
+      // blocking policy, so this cannot store a gate the next launch would
+      // then skip.
+      void saveBootCache({ version, config, wasSignedIn: signedInRef.current });
+      setCompatibilityStale(false);
+
       setCompatibility((current) => {
+        // A block takes effect immediately, whether this was a cold start, a
+        // foreground re-check, or a confirmation of a cached boot. This is the
+        // line that keeps the version gate working while the app starts
+        // optimistically.
         if (blocked) {
           return blocked;
         }
+        // A silent refresh keeps the running session's config, but still has
+        // to clear `provisional` — otherwise a boot from cache stays marked
+        // unconfirmed for the life of the process even though the real check
+        // has since agreed with it.
         if (silentReadyRefresh && current.status === "ready") {
-          // ponytail: keep foreground success silent; hot-swap config here only if resume-time
-          // config changes must apply without relaunch.
-          return current;
+          return current.provisional ? { ...current, provisional: false } : current;
         }
         return { status: "ready", version, config };
       });
     } catch (error) {
-      // Only hard-fail the initial load. A transient failure on a foreground
-      // re-check should not tear down an already-running session.
-      setCompatibility((current) =>
-        current.status === "loading"
-          ? {
-              status: "blocked",
-              title: "Unable to Start SFLUV",
-              message:
-                (error as Error)?.message ||
-                "SFLUV could not load compatibility settings. Please try again.",
-            }
-          : current,
-      );
+      // Only hard-fail a start with nothing to fall back on. A transient
+      // failure must not tear down a running session, and must not tear down a
+      // session running on the cache either: the cached config is still the
+      // best information we have, and the app is usable on it. That is the
+      // whole point of having it.
+      setCompatibility((current) => {
+        if (current.status !== "loading") {
+          // Running on cached settings. The session stays up — that is what the
+          // cache is for — but it says so rather than letting a stale config
+          // pass for a current one.
+          setCompatibilityStale(true);
+          return current;
+        }
+        return {
+          status: "blocked",
+          title: "Unable to Start SFLUV",
+          message:
+            (error as Error)?.message ||
+            "SFLUV could not load compatibility settings. Please try again.",
+        };
+      });
     } finally {
       compatibilityCheckInFlightRef.current = false;
     }
   }, []);
 
+  /**
+   * Boot from the cache, then check for real.
+   *
+   * The read is local and takes a moment, so a returning user is inside the
+   * app — moving between tabs, reading what was there last time — while the
+   * version policy and config are still in flight. A first-ever launch finds
+   * nothing cached and waits for the network exactly as it always did.
+   */
   useEffect(() => {
-    void refreshCompatibility();
+    let cancelled = false;
+    void (async () => {
+      const cached = await loadBootCache();
+      if (cancelled) {
+        return;
+      }
+      if (cached) {
+        signedInRef.current = cached.wasSignedIn;
+        setBootedFromCache(true);
+        // Only ever applied over "loading". If the real check has already
+        // landed — possible on a fast connection — its answer is newer and
+        // the cache must not overwrite it, least of all if it blocked.
+        setCompatibility((current) =>
+          current.status === "loading"
+            ? { status: "ready", version: cached.version, config: cached.config, provisional: true }
+            : current,
+        );
+      }
+      await refreshCompatibility();
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [refreshCompatibility]);
 
   useEffect(() => {
@@ -7692,6 +7903,7 @@ export default function App() {
           updateUrl={compatibility.updateUrl}
         />
       ) : readyConfig && supportedChain ? (
+        <View style={{ flex: 1 }}>
         <PrivyProvider
           appId={mobileConfig.privyAppId}
           clientId={mobileConfig.privyClientId || undefined}
@@ -7710,8 +7922,14 @@ export default function App() {
             preferences={preferences}
             preferencesLoaded={preferencesLoaded}
             onUpdatePreferences={setPreferences}
+            bootedFromCache={bootedFromCache}
+            onSignedInChange={handleSignedInChange}
           />
         </PrivyProvider>
+        {compatibilityStale ? (
+          <StaleSettingsBanner onRetry={() => void refreshCompatibility(true)} />
+        ) : null}
+        </View>
       ) : null}
     </AppThemeProvider>
   );
@@ -7752,40 +7970,10 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     top: 60,
     left: -40,
   },
-  notificationList: {
-    maxHeight: 340,
-  },
-  notificationRow: {
-    position: "relative",
-  },
-  notificationDismiss: {
-    position: "absolute",
-    top: 6,
-    right: 6,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 1,
-  },
   // Clears the corner the dismiss occupies. Without it a title's last line
   // runs under the control, and on a one-line entry the chevron sits under it
   // too — two tap targets in the same few pixels, one of which discards what
   // the other opens.
-  notificationCopyInset: {
-    paddingRight: 22,
-  },
-  notificationClearAll: {
-    alignSelf: "center",
-    paddingVertical: 8,
-    paddingHorizontal: spacing.md,
-  },
-  notificationClearAllText: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: palette.textMuted,
-  },
   topBadge: {
     position: "absolute",
     top: -3,

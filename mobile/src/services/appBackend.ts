@@ -70,6 +70,14 @@ import {
   UserProfile,
   UserSearchResult,
 } from "../types/bulletin";
+import {
+  AppAlertAction,
+  AppAlertActionResult,
+  AppInternalNotification,
+  AppNotificationFeed,
+  AppNotificationField,
+  AppNotificationItem,
+} from "../types/notifications";
 
 export class AppBackendAuthError extends Error {
   readonly status?: number;
@@ -1812,6 +1820,136 @@ function mapImproverNotificationFeed(input: unknown): AppImproverNotificationFee
   };
 }
 
+/**
+ * Notification mappers.
+ *
+ * Deliberately permissive about what the server sends. The alert kinds and
+ * their buttons are declared server-side precisely so new ones can ship
+ * without an app release, which only works if a build that has never heard of
+ * a kind still renders its title, body and detail rows rather than dropping
+ * it. An unrecognised action style falls back to a plain button for the same
+ * reason — invisible is worse than undecorated.
+ */
+function mapNotificationFields(input: unknown): AppNotificationField[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  return input
+    .map((entry) => {
+      const record = readRecord(entry);
+      return { label: asString(record.label), value: asString(record.value) };
+    })
+    .filter((field) => field.label.length > 0 || field.value.length > 0);
+}
+
+function mapNotificationActions(input: unknown): AppAlertAction[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  const out: AppAlertAction[] = [];
+  for (const entry of Array.isArray(input) ? input : []) {
+    const record = readRecord(entry);
+    const id = asString(record.id);
+    const label = asString(record.label);
+    // A button with no id cannot be pressed and one with no label cannot be
+    // read, so neither is worth rendering.
+    if (!id || !label) {
+      continue;
+    }
+    const style = asString(record.style);
+    out.push({
+      id,
+      label,
+      style: style === "primary" || style === "danger" ? style : "default",
+      url: asString(record.url) || undefined,
+      confirm: asString(record.confirm) || undefined,
+    });
+  }
+  return out;
+}
+
+/** Timestamps arrive as RFC3339; NaN would poison every comparison downstream. */
+function mapNotificationTime(value: unknown): number {
+  const parsed = Date.parse(asString(value));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function mapInternalNotification(input: unknown): AppInternalNotification | null {
+  if (!input) {
+    return null;
+  }
+  const record = readRecord(input);
+  const id = readOptionalNumber(record.id);
+  if (!id) {
+    return null;
+  }
+  const resolvedAt = record.resolved_at ? mapNotificationTime(record.resolved_at) : null;
+  return {
+    id,
+    set: asString(record.set),
+    setLabel: asString(record.set_label),
+    alertKey: asString(record.alert_key),
+    fields: mapNotificationFields(record.fields),
+    urgent: record.urgent === true,
+    actions: mapNotificationActions(record.actions),
+    resolved: record.resolved === true,
+    resolvedAt: resolvedAt && resolvedAt > 0 ? resolvedAt : null,
+    outcome: asString(record.outcome),
+  };
+}
+
+function mapNotificationData(input: unknown): Record<string, string> {
+  const record = readRecord(input);
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (typeof value === "string") {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+function mapNotificationItem(input: unknown): AppNotificationItem | null {
+  const record = readRecord(input);
+  const id = readOptionalNumber(record.id);
+  if (!id) {
+    return null;
+  }
+  return {
+    id,
+    kind: asString(record.kind),
+    title: asString(record.title) || "SFLuv",
+    body: asString(record.body),
+    createdAt: mapNotificationTime(record.created_at),
+    data: mapNotificationData(record.data),
+    seen: record.seen === true,
+    internal: mapInternalNotification(record.internal),
+  };
+}
+
+function mapNotificationList(input: unknown): AppNotificationItem[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  return input
+    .map((entry) => mapNotificationItem(entry))
+    .filter((entry): entry is AppNotificationItem => entry !== null);
+}
+
+function mapNotificationFeed(input: unknown): AppNotificationFeed {
+  const record = readRecord(input);
+  const active = mapNotificationList(record.active);
+  return {
+    active,
+    history: mapNotificationList(record.history),
+    nextCursor: asString(record.next_cursor) || null,
+    // The server counts over the whole feed rather than the page, so it stays
+    // right when the active list is capped.
+    unseenCount: readOptionalNumber(record.unseen_count) ?? active.length,
+    sets: Array.isArray(record.sets) ? record.sets.map((entry) => asString(entry)).filter(Boolean) : [],
+  };
+}
+
 function mapWallet(input: WalletsResponse[number]): AppWallet {
   return {
     id: typeof input.id === "number" ? input.id : undefined,
@@ -2664,6 +2802,79 @@ export class AppBackendClient {
       await throwRequestError(response, "Unable to update notifications");
     }
     return mapImproverNotificationFeed(await response.json());
+  }
+
+  // ── Notifications ──────────────────────────────────────────────────────────
+
+  /**
+   * The notification screen.
+   *
+   * One call returns both halves: everything still outstanding, and the first
+   * page of what is already dealt with. Pass a cursor for later pages — the
+   * active list comes back each time, which costs a few rows and keeps the two
+   * halves from disagreeing while somebody scrolls.
+   */
+  async getNotifications(input?: { cursor?: string | null; limit?: number }): Promise<AppNotificationFeed> {
+    const query = new URLSearchParams();
+    if (input?.cursor) {
+      query.set("cursor", input.cursor);
+    }
+    if (input?.limit) {
+      query.set("limit", String(input.limit));
+    }
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    const response = await this.authFetch(`/notifications${suffix}`);
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to load notifications");
+    }
+    return mapNotificationFeed(await response.json());
+  }
+
+  /**
+   * Marks ordinary notifications seen, which is what opening the screen does.
+   *
+   * It cannot retire an internal alert — the server refuses to, in SQL — so
+   * viewing the screen never clears something that still needs doing.
+   */
+  async markNotificationsSeen(input?: { ids?: number[] }): Promise<AppNotificationFeed> {
+    const body = input?.ids?.length ? { ids: input.ids } : { all: true };
+    const response = await this.authFetch("/notifications/seen", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to update notifications");
+    }
+    return mapNotificationFeed(await response.json());
+  }
+
+  /**
+   * Presses one of an alert's buttons.
+   *
+   * A refusal comes back as a 200 with refused: true, because the refusals here
+   * are ordinary — somebody else got there first, the outage is still going —
+   * and deserve their own sentence rather than a generic failure.
+   */
+  async pressNotificationAction(
+    notificationId: number,
+    action: string,
+  ): Promise<AppAlertActionResult> {
+    const response = await this.authFetch(`/notifications/${notificationId}/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to run that");
+    }
+    const body = (await response.json()) as Record<string, unknown>;
+    return {
+      ok: Boolean(body.ok),
+      refused: Boolean(body.refused),
+      message: typeof body.message === "string" ? body.message : "",
+      feed: body.feed ? mapNotificationFeed(body.feed) : null,
+    };
   }
 
   async getImproverAbsencePeriods(): Promise<AppImproverAbsencePeriod[]> {
