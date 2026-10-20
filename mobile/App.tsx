@@ -3142,11 +3142,13 @@ function WalletAppShellContent({
     ],
   );
 
-  const {
-    items: notificationItems,
-    open: openNotification,
-    resolveTarget: resolveNotificationTarget,
-  } = useNotificationInbox({ onNavigate: navigateToNotificationTarget });
+  // Only the tray half of this hook is still wanted. Its list of received
+  // pushes used to be added to the badge, and cannot be any more: every
+  // notification the server sends now also writes a ledger row, so the two
+  // describe the same arrivals and adding them counted each one twice.
+  const { resolveTarget: resolveNotificationTarget } = useNotificationInbox({
+    onNavigate: navigateToNotificationTarget,
+  });
 
   /**
    * The server-side notification ledger behind the Notifications screen.
@@ -3186,6 +3188,14 @@ function WalletAppShellContent({
    *
    * Their ids are negated so they cannot collide with a ledger row's id, which
    * the list uses as its key and the seen call uses as its subject.
+   *
+   * The `seen` filter is what makes the two acking rules meet. A payout entry
+   * acks on view, so the server marks it and it stops arriving here — correct,
+   * because it has no history row to drop into and nothing is being asked of
+   * anybody. A tax entry never reports itself seen, however many times it has
+   * been looked at, so it keeps arriving and stays at the top until the W-9 is
+   * on file. The rule lives on the server (structs.NotificationAcksOnView);
+   * this filter just honours whatever it says.
    */
   const screenNotificationFeed = useMemo<AppNotificationFeed | null>(() => {
     if (!notificationFeed) {
@@ -3225,12 +3235,14 @@ function WalletAppShellContent({
    * keeps counting until it is dealt with, however many times somebody has
    * scrolled past it, because a merchant waiting on approval is still waiting.
    *
-   * The server's number covers the ledger and is computed over all of it
-   * rather than over a page; the local mirror adds tray entries the server has
-   * never been told about.
+   * A tax notice is the strictest case: it is outstanding from the moment it
+   * is raised until the form is filed, and no amount of looking at it counts.
+   *
+   * One source, deliberately. The server's number covers the whole ledger
+   * rather than the page in hand, and every notification that reaches a device
+   * is in it.
    */
-  const panelNotificationCount =
-    (screenNotificationFeed?.unseenCount ?? serverUnseenCount) + notificationItems.length;
+  const panelNotificationCount = screenNotificationFeed?.unseenCount ?? serverUnseenCount;
 
   // Reaching a screen under your own steam handles the notification for it just
   // as tapping it would, so it clears from our list and the OS tray together.
@@ -3381,9 +3393,10 @@ function WalletAppShellContent({
    * badge that will not clear for notifications somebody has read teaches
    * people to ignore the badge.
    *
-   * Internal alerts are explicitly not covered. The server refuses to mark
-   * them whatever is asked, so a merchant waiting on approval is still waiting
-   * after somebody has scrolled past it, and still counted.
+   * Two kinds are explicitly not covered, and the server is what refuses
+   * them rather than this call: internal alerts, so a merchant waiting on
+   * approval is still waiting after somebody has scrolled past it; and the
+   * W-9 notices, which are answered by filing the form and by nothing else.
    */
   const openNotificationPanel = useCallback(() => {
     setTab("notifications");
