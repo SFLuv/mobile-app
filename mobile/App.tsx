@@ -59,6 +59,9 @@ import { PaymentReceivedOverlay, type PaymentReceipt } from "./src/components/Pa
 import { MapScreen } from "./src/screens/MapScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { ContactsScreen } from "./src/screens/ContactsScreen";
+import { BulletinScreen } from "./src/screens/BulletinScreen";
+import { MessagesScreen } from "./src/screens/MessagesScreen";
+import { BulletinPost, Conversation } from "./src/types/bulletin";
 import { ImproverScreen } from "./src/screens/ImproverScreen";
 import { VolunteerScreen } from "./src/screens/VolunteerScreen";
 import { ThemedActivityIndicator } from "./src/components/ThemedActivityIndicator";
@@ -188,10 +191,11 @@ type CompatibilityState =
   | { status: "ready"; config: AppClientConfig; version: AppClientVersionPolicy }
   | { status: "blocked"; title: string; message: string; updateUrl?: string };
 
-type Tab = "wallet" | "activity" | "improver" | "volunteer" | "map" | "contacts" | "settings";
+type Tab = "wallet" | "activity" | "improver" | "volunteer" | "map" | "bulletin" | "messages" | "contacts" | "settings";
 
 /** Slots in the bottom dock. Distinct from `Tab`: "participate" can lead to two screens. */
-type DockTabKey = "participate" | "map" | "wallet" | "activity" | "contacts";
+// Activity lives inside the wallet ("See all"); Contacts lives inside Messages.
+type DockTabKey = "participate" | "map" | "wallet" | "bulletin" | "messages";
 
 /**
  * Left-to-right reading order of the screens, used only to decide which way a
@@ -204,6 +208,8 @@ const TAB_SLIDE_ORDER: Tab[] = [
   "map",
   "wallet",
   "activity",
+  "bulletin",
+  "messages",
   "contacts",
   "settings",
 ];
@@ -1601,6 +1607,16 @@ function WalletAppShellContent({
     eventId: string | null;
     nonce: number;
   }>({ eventId: null, nonce: 0 });
+  // Opening Messages at a particular thread (from a Bulletin post, a push, or
+  // after paying in a chat) goes through a nonce, like the volunteer panel.
+  const [messagesRouteRequest, setMessagesRouteRequest] = useState<{
+    conversationId: number | null;
+    nonce: number;
+  }>({ conversationId: null, nonce: 0 });
+  // Set while the send screen is open for a payment started in a chat, so the
+  // finished transfer can be added to that conversation.
+  const pendingChatPaymentRef = useRef<{ conversationId: number; recipient: string } | null>(null);
+  const chatPaymentSentRef = useRef(false);
   const [volunteerReminderPreferences, setVolunteerReminderPreferences] =
     useState<AppVolunteerReminderPreferences | null>(null);
   const [improverNotifications, setImproverNotifications] = useState<AppImproverNotificationFeed | null>(null);
@@ -2935,8 +2951,12 @@ function WalletAppShellContent({
     }
     tabs.push({ key: "map", label: "Map", icon: tab === "map" ? "map" : "map-outline" });
     tabs.push({ key: "wallet", label: "Wallet", icon: "wallet", center: true });
-    tabs.push({ key: "activity", label: "Activity", icon: tab === "activity" ? "pulse" : "pulse-outline" });
-    tabs.push({ key: "contacts", label: "Contacts", icon: tab === "contacts" ? "people" : "people-outline" });
+    tabs.push({ key: "bulletin", label: "Bulletin", icon: tab === "bulletin" ? "newspaper" : "newspaper-outline" });
+    tabs.push({
+      key: "messages",
+      label: "Messages",
+      icon: tab === "messages" || tab === "contacts" ? "chatbubbles" : "chatbubbles-outline",
+    });
     return tabs;
   }, [participateActive, participateTargets, tab]);
 
@@ -2944,8 +2964,15 @@ function WalletAppShellContent({
     if (participateActive) {
       return "participate";
     }
-    if (tab === "map" || tab === "wallet" || tab === "activity" || tab === "contacts") {
+    if (tab === "map" || tab === "wallet" || tab === "bulletin" || tab === "messages") {
       return tab;
+    }
+    // Activity is part of the wallet now, and Contacts part of Messages.
+    if (tab === "activity") {
+      return "wallet";
+    }
+    if (tab === "contacts") {
+      return "messages";
     }
     return null;
   }, [participateActive, tab]);
@@ -3026,6 +3053,11 @@ function WalletAppShellContent({
     setTab("volunteer");
   }, []);
 
+  const openConversation = useCallback((conversationId: number | null) => {
+    setMessagesRouteRequest((current) => ({ conversationId, nonce: current.nonce + 1 }));
+    setTab("messages");
+  }, []);
+
   const navigateToNotificationTarget = useCallback(
     (target: NotificationTarget) => {
       switch (target.kind) {
@@ -3061,6 +3093,12 @@ function WalletAppShellContent({
         case "activity":
           setTab("activity");
           return;
+        case "conversation":
+          openConversation(target.conversationId);
+          return;
+        case "bulletin":
+          setTab("bulletin");
+          return;
         case "url":
           // Leaving the app is the point here, so there is no in-app state to
           // set. A link the OS refuses to open fails silently rather than
@@ -3074,6 +3112,7 @@ function WalletAppShellContent({
     [
       canAccessImproverPanel,
       canAccessVolunteerPanel,
+      openConversation,
       openImproverPanel,
       openVolunteerPanel,
       refreshW9Status,
@@ -4542,6 +4581,15 @@ function WalletAppShellContent({
   const completeSendFlow = () => {
     setSendReturnTab(null);
     setWalletPane("home");
+    if (chatPaymentSentRef.current && pendingChatPaymentRef.current) {
+      // A payment made from a chat goes back to that chat.
+      const { conversationId } = pendingChatPaymentRef.current;
+      chatPaymentSentRef.current = false;
+      pendingChatPaymentRef.current = null;
+      openConversation(conversationId);
+      return;
+    }
+    pendingChatPaymentRef.current = null;
     setTab("wallet");
   };
 
@@ -4656,6 +4704,20 @@ function WalletAppShellContent({
     }
 
     const result = await runtime.service.sendSFLUV(recipient, amount, unit);
+    const chatPayment = pendingChatPaymentRef.current;
+    if (
+      chatPayment &&
+      result.txHash &&
+      backendClient &&
+      chatPayment.recipient.toLowerCase() === recipient.toLowerCase()
+    ) {
+      chatPaymentSentRef.current = true;
+      // The server checks the transfer against the indexer; a not-yet-indexed
+      // transfer is stored as pending and confirmed when the chat is next read.
+      void backendClient.attachConversationPayment(chatPayment.conversationId, result.txHash).catch(() => {
+        showToast("Payment sent, but it couldn't be added to the chat.", "error");
+      });
+    }
     if (memo.trim() && result.txHash && backendClient) {
       void backendClient.saveTransactionMemo(result.txHash, memo).catch(() => {
         // Memo save failure should not block the transfer UX.
@@ -4728,8 +4790,10 @@ function WalletAppShellContent({
         ? "Volunteer"
       : tab === "map"
         ? "Merchant Map"
-        : tab === "contacts"
-          ? "Contacts"
+      : tab === "bulletin"
+        ? "Bulletin"
+      : tab === "messages" || tab === "contacts"
+        ? "Messages"
           : "Settings";
   const showBlockingWalletState = runtime.loading && !runtime.service;
   // A boot that never finishes is indistinguishable from a crash to the user.
@@ -5177,7 +5241,60 @@ function WalletAppShellContent({
                 }, { returnTab: "map" });
               }}
             />
-          ) : tab === "contacts" ? (
+          ) : tab === "bulletin" ? (
+            <BulletinScreen
+              backendClient={backendClient ?? null}
+              tokenSymbol={clientConfig.tokenSymbol}
+              locations={locations}
+              hapticsEnabled={preferences.hapticsEnabled}
+              onMessageAboutPost={async (post: BulletinPost) => {
+                if (!backendClient) {
+                  throw new Error("Backend not configured.");
+                }
+                const conversation = await backendClient.startConversation(post.author.user_id, post.id);
+                openConversation(conversation.id);
+              }}
+              onOpenEvent={(eventId) => {
+                if (canAccessVolunteerPanel) {
+                  openVolunteerPanel(eventId);
+                } else {
+                  showToast("Volunteer events aren't available right now.", "info");
+                }
+              }}
+              onToast={showToast}
+            />
+          ) : tab === "messages" || tab === "contacts" ? (
+            <MessagesScreen
+              backendClient={backendClient ?? null}
+              tokenSymbol={clientConfig.tokenSymbol}
+              hapticsEnabled={preferences.hapticsEnabled}
+              requestedSegment={tab === "contacts" ? "contacts" : undefined}
+              requestedSegmentNonce={tab === "contacts" ? messagesRouteRequest.nonce : undefined}
+              requestedConversationId={messagesRouteRequest.conversationId}
+              requestedConversationNonce={messagesRouteRequest.nonce}
+              onToast={showToast}
+              onPayInConversation={(conversation: Conversation) => {
+                if (!conversation.pay_address) {
+                  showToast("Payment isn't available in this conversation.", "error");
+                  return;
+                }
+                pendingChatPaymentRef.current = { conversationId: conversation.id, recipient: conversation.pay_address };
+                chatPaymentSentRef.current = false;
+                const post = conversation.post;
+                openSendDraft(
+                  {
+                    recipient: conversation.pay_address,
+                    amount:
+                      post && post.category === "for_sale" && post.accepts_sfluv && post.price_sfluv
+                        ? post.price_sfluv
+                        : undefined,
+                    recipientLabel: conversation.other_user.public_name,
+                    recipientKind: "contact",
+                  },
+                  { returnTab: "messages" },
+                );
+              }}
+              contactsElement={
             <ContactsScreen
               clientConfig={clientConfig}
               contacts={contacts}
@@ -5219,6 +5336,8 @@ function WalletAppShellContent({
                 const updatedContacts = await backendClient.getContacts();
                 setContacts(updatedContacts);
               }}
+            />
+              }
             />
           ) : (
             <SettingsScreen

@@ -20,6 +20,10 @@ export type NotificationTarget =
   // every signed-in user can reach.
   | { kind: "tax" }
   | { kind: "activity" }
+  // A direct message, opened at its thread.
+  | { kind: "conversation"; conversationId: number }
+  // Something about the person's own Bulletin activity (e.g. moderation).
+  | { kind: "bulletin" }
   // An arbitrary link, chosen by the server. Nothing in the app can be built
   // to know these ahead of time — a partner's signup page, a form we do not
   // host — which is why the destination travels with the notification.
@@ -87,6 +91,15 @@ export function targetFromData(data: Record<string, unknown> | undefined): Notif
   if (type === "transaction" || type === "wallet_activity" || type === "reward") {
     return { kind: "activity" };
   }
+  if (type === "bulletin_message") {
+    const conversationId = Number(asString(data?.conversation_id));
+    return Number.isFinite(conversationId) && conversationId > 0
+      ? { kind: "conversation", conversationId }
+      : { kind: "bulletin" };
+  }
+  if (type.startsWith("bulletin_")) {
+    return { kind: "bulletin" };
+  }
   return { kind: "none" };
 }
 
@@ -96,6 +109,9 @@ export function targetsMatch(left: NotificationTarget, right: NotificationTarget
   }
   if (left.kind === "volunteer-event" && right.kind === "volunteer-event") {
     return left.eventId === right.eventId;
+  }
+  if (left.kind === "conversation" && right.kind === "conversation") {
+    return left.conversationId === right.conversationId;
   }
   return true;
 }

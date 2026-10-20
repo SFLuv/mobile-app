@@ -55,6 +55,21 @@ import {
   VerifiedEmail,
   MerchantToday,
 } from "../types/app";
+import {
+  BulletinCategory,
+  BulletinFeedPage,
+  BulletinPhoto,
+  BulletinPost,
+  BulletinPostInput,
+  BulletinPostPatch,
+  BulletinRequestError,
+  ChatMessage,
+  Conversation,
+  MessagesPage,
+  ReportReason,
+  UserProfile,
+  UserSearchResult,
+} from "../types/bulletin";
 
 export class AppBackendAuthError extends Error {
   readonly status?: number;
@@ -3652,5 +3667,180 @@ export class AppBackendClient {
     await this.authFetch(`/w9/tier/${encodeURIComponent(tier)}/ack`, { method: "POST" });
   }
 
-}
+  // ── Bulletin and Messages ──────────────────────────────────────────────────
 
+  /**
+   * One request against the Bulletin API. A refusal is thrown as a
+   * BulletinRequestError carrying the server's sentence and code, so screens
+   * can show the sentence and branch on the code (profile_required,
+   * suspended, rate_limited...).
+   */
+  private async bulletinRequest<T>(path: string, init: RequestInit = {}, fallback = "Something went wrong"): Promise<T> {
+    const response = await this.authFetch(path, init);
+    if (!response.ok) {
+      const detail = await readResponseDetail(response);
+      let message = fallback;
+      let code = "error";
+      try {
+        const parsed = JSON.parse(detail) as { error?: string; code?: string };
+        if (parsed?.error) message = parsed.error;
+        if (parsed?.code) code = parsed.code;
+      } catch {
+        // Not JSON: keep the fallback sentence rather than showing raw text.
+      }
+      throw new BulletinRequestError(message, code, response.status);
+    }
+    if (response.status === 204) {
+      return undefined as T;
+    }
+    const text = await response.text();
+    return (text ? JSON.parse(text) : undefined) as T;
+  }
+
+  private jsonInit(method: string, body?: unknown): RequestInit {
+    return {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    };
+  }
+
+  getMyProfile(): Promise<UserProfile> {
+    return this.bulletinRequest("/me/profile", {}, "Unable to load your profile");
+  }
+
+  saveMyProfile(input: { public_name: string; handle?: string | null; discoverable: boolean }): Promise<UserProfile> {
+    return this.bulletinRequest("/me/profile", this.jsonInit("PUT", input), "Unable to save your profile");
+  }
+
+  getBulletinFeed(input: {
+    lat: number;
+    lng: number;
+    radiusMiles?: number;
+    category?: BulletinCategory | null;
+    cursor?: string | null;
+  }): Promise<BulletinFeedPage> {
+    const params = new URLSearchParams();
+    params.set("lat", String(input.lat));
+    params.set("lng", String(input.lng));
+    if (input.radiusMiles) params.set("radius_mi", String(input.radiusMiles));
+    if (input.category) params.set("category", input.category);
+    if (input.cursor) params.set("cursor", input.cursor);
+    return this.bulletinRequest(`/bulletin/posts?${params.toString()}`, {}, "Unable to load the Bulletin");
+  }
+
+  getMyBulletinPosts(): Promise<BulletinPost[]> {
+    return this.bulletinRequest("/bulletin/posts/mine", {}, "Unable to load your posts");
+  }
+
+  getBulletinPost(postId: number, near?: { lat: number; lng: number } | null): Promise<BulletinPost> {
+    const query = near ? `?lat=${near.lat}&lng=${near.lng}` : "";
+    return this.bulletinRequest(`/bulletin/posts/${postId}${query}`, {}, "Unable to load this post");
+  }
+
+  createBulletinPost(input: BulletinPostInput): Promise<BulletinPost> {
+    return this.bulletinRequest("/bulletin/posts", this.jsonInit("POST", input), "Unable to post");
+  }
+
+  updateBulletinPost(postId: number, patch: BulletinPostPatch): Promise<BulletinPost> {
+    return this.bulletinRequest(`/bulletin/posts/${postId}`, this.jsonInit("PATCH", patch), "Unable to update this post");
+  }
+
+  deleteBulletinPost(postId: number): Promise<void> {
+    return this.bulletinRequest(`/bulletin/posts/${postId}`, { method: "DELETE" }, "Unable to delete this post");
+  }
+
+  uploadBulletinPhoto(postId: number, photo: { uri: string; mimeType?: string | null; fileName?: string | null }): Promise<BulletinPhoto> {
+    const form = new FormData();
+    const type = photo.mimeType && photo.mimeType.startsWith("image/") ? photo.mimeType : "image/jpeg";
+    // React Native's FormData takes a file descriptor object, not a Blob.
+    form.append("photo", { uri: photo.uri, name: photo.fileName || "photo.jpg", type } as unknown as Blob);
+    return this.bulletinRequest(`/bulletin/posts/${postId}/photos`, { method: "POST", body: form }, "Unable to upload a photo");
+  }
+
+  async getBulletinPhotoDataUri(photoId: number): Promise<string | null> {
+    const response = await this.authFetch(`/bulletin/photos/${photoId}`);
+    if (!response.ok) {
+      return null;
+    }
+    const contentType = response.headers.get("content-type")?.trim() || "";
+    if (!contentType.startsWith("image/")) {
+      return null;
+    }
+    const payload = await response.arrayBuffer();
+    return `data:${contentType};base64,${Buffer.from(payload).toString("base64")}`;
+  }
+
+  leaveBulletinFeedback(postId: number, toUserId: string, positive: boolean): Promise<void> {
+    return this.bulletinRequest(
+      `/bulletin/posts/${postId}/feedback`,
+      this.jsonInit("POST", { to_user_id: toUserId, positive }),
+      "Unable to save feedback",
+    );
+  }
+
+  searchSFLuvUsers(query: string): Promise<UserSearchResult> {
+    return this.bulletinRequest(`/users/search?q=${encodeURIComponent(query)}`, {}, "Unable to search");
+  }
+
+  getConversations(): Promise<Conversation[]> {
+    return this.bulletinRequest("/me/conversations", {}, "Unable to load messages");
+  }
+
+  getMessagingSummary(): Promise<{ unread_conversations: number }> {
+    return this.bulletinRequest("/me/messaging-summary", {}, "Unable to load messages");
+  }
+
+  startConversation(userId: string, postId?: number | null): Promise<Conversation> {
+    return this.bulletinRequest(
+      "/conversations",
+      this.jsonInit("POST", { user_id: userId, post_id: postId ?? null }),
+      "Unable to start a conversation",
+    );
+  }
+
+  getConversation(conversationId: number): Promise<Conversation> {
+    return this.bulletinRequest(`/conversations/${conversationId}`, {}, "Unable to load this conversation");
+  }
+
+  getConversationMessages(conversationId: number, beforeId?: number | null): Promise<MessagesPage> {
+    const query = beforeId ? `?before=${beforeId}` : "";
+    return this.bulletinRequest(`/conversations/${conversationId}/messages${query}`, {}, "Unable to load messages");
+  }
+
+  sendConversationMessage(conversationId: number, body: string): Promise<ChatMessage> {
+    return this.bulletinRequest(
+      `/conversations/${conversationId}/messages`,
+      this.jsonInit("POST", { body }),
+      "Unable to send your message",
+    );
+  }
+
+  attachConversationPayment(conversationId: number, txHash: string): Promise<ChatMessage> {
+    return this.bulletinRequest(
+      `/conversations/${conversationId}/payments`,
+      this.jsonInit("POST", { tx_hash: txHash }),
+      "Unable to add the payment to this conversation",
+    );
+  }
+
+  markConversationRead(conversationId: number): Promise<void> {
+    return this.bulletinRequest(`/conversations/${conversationId}/read`, { method: "POST" }, "Unable to update messages");
+  }
+
+  archiveConversation(conversationId: number): Promise<void> {
+    return this.bulletinRequest(`/conversations/${conversationId}/archive`, { method: "POST" }, "Unable to archive");
+  }
+
+  blockUser(userId: string): Promise<void> {
+    return this.bulletinRequest("/blocks", this.jsonInit("POST", { user_id: userId }), "Unable to block");
+  }
+
+  unblockUser(userId: string): Promise<void> {
+    return this.bulletinRequest(`/blocks/${encodeURIComponent(userId)}`, { method: "DELETE" }, "Unable to unblock");
+  }
+
+  reportContent(input: { target_type: "post" | "message" | "user"; target_id: string; reason: ReportReason; details?: string }): Promise<void> {
+    return this.bulletinRequest("/reports", this.jsonInit("POST", input), "Unable to send the report");
+  }
+}
