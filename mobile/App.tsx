@@ -1770,6 +1770,12 @@ function WalletAppShellContent({
     }
 
     const returnTab = walletPane === "send" ? sendReturnTab : null;
+    if (walletPane === "send") {
+      // Backing out of send drops any chat link, so a later wallet send to the
+      // same person isn't attached to that chat.
+      pendingChatPaymentRef.current = null;
+      chatPaymentSentRef.current = false;
+    }
     const animationID = walletPaneAnimationIDRef.current + 1;
     walletPaneAnimationIDRef.current = animationID;
     walletPaneGestureActiveRef.current = false;
