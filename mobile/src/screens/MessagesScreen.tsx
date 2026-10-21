@@ -51,6 +51,22 @@ type Props = {
   requestedConversationId?: number | null;
   requestedConversationNonce?: number;
   onPayInConversation: (conversation: Conversation) => void;
+  /**
+   * How many conversations have something unread, reported every time the
+   * inbox is loaded.
+   *
+   * The dock's Messages badge is driven from here while this screen is open,
+   * because the inbox it already polls carries the answer — so the badge
+   * clears on backing out of a thread rather than on the shell's next poll.
+   */
+  onUnreadChange?: (count: number) => void;
+  /**
+   * A thread has been opened, by any route — a tap in the inbox, a search
+   * result, or a deep link from a push. The shell uses it to clear the OS
+   * notification for that conversation, since reading the message handles it
+   * however the person got here.
+   */
+  onConversationOpened?: (conversationId: number) => void;
   onToast: (message: string, tone?: "info" | "success" | "error") => void;
 };
 
@@ -71,6 +87,8 @@ export function MessagesScreen({
   requestedConversationId,
   requestedConversationNonce,
   onPayInConversation,
+  onUnreadChange,
+  onConversationOpened,
   onToast,
 }: Props) {
   const { palette } = useAppTheme();
@@ -96,14 +114,31 @@ export function MessagesScreen({
     }
   }, [requestedConversationId, requestedConversationNonce]);
 
+  // One place for every route into a thread — a deep link, a search result, a
+  // tap in the inbox — rather than a call beside each of the three, where a
+  // fourth would have been added without one.
+  useEffect(() => {
+    if (openId) {
+      onConversationOpened?.(openId);
+    }
+  }, [onConversationOpened, openId]);
+
   const loadInbox = useCallback(async () => {
     if (!backendClient) return;
     try {
-      setConversations(await backendClient.getConversations());
+      const inbox = await backendClient.getConversations();
+      setConversations(inbox);
+      // Conversations with something unread, not messages: two unread messages
+      // in one thread are one thing to go and read. Matches what the server's
+      // own summary counts, so the number does not change when the shell takes
+      // the count back over.
+      onUnreadChange?.(inbox.filter((conversation) => conversation.unread_count > 0).length);
     } catch {
+      // Left as it was. A dropped request is not an empty inbox, and it is not
+      // a cleared badge either.
       setConversations((current) => current ?? []);
     }
-  }, [backendClient]);
+  }, [backendClient, onUnreadChange]);
 
   useEffect(() => {
     void loadInbox();

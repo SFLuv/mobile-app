@@ -282,6 +282,10 @@ const MERCHANT_MODE_STATUS_POLL_INTERVAL_MS = 15_000;
 const WALLET_TRANSACTION_LIMIT = 10;
 const ACTIVITY_TRANSACTION_PAGE_SIZE = 10;
 const IMPROVER_NOTIFICATION_POLL_MS = 60_000;
+// The safety net under the Messages badge, not its main source: a message push
+// bumps the count the moment it lands, and the Messages screen reports its own
+// while it is open. This covers the person who has push turned off.
+const MESSAGES_UNREAD_POLL_MS = 60_000;
 // Faster than the notification poll: this one decides whether a modal
 // interrupts somebody, and a reward that was just held should say so while the
 // person is still looking at the screen that told them it arrived.
@@ -1207,6 +1211,11 @@ type DockTab = {
   icon: keyof typeof Ionicons.glyphMap;
   /** The raised, always-centered action button. Exactly one tab carries this. */
   center?: boolean;
+  /**
+   * Outstanding items behind this tab, shown on the icon. Only for a tab whose
+   * notifications are counted nowhere else — see where the dock is built.
+   */
+  badge?: number;
 };
 
 /**
@@ -1397,7 +1406,9 @@ function BottomDock({
             onLayout={onSlotLayout}
             style={styles.dockTab}
             accessibilityRole="button"
-            accessibilityLabel={tab.label}
+            accessibilityLabel={
+              tab.badge && tab.badge > 0 ? `${tab.label}, ${tab.badge} unread` : tab.label
+            }
             onPress={() => onSelect(tab.key)}
           >
             <View>
@@ -1406,6 +1417,11 @@ function BottomDock({
                 size={20}
                 color={active ? palette.primaryStrong : palette.textMuted}
               />
+              {tab.badge && tab.badge > 0 ? (
+                <View style={styles.dockBadge}>
+                  <Text style={styles.dockBadgeText}>{tab.badge > 9 ? "9+" : tab.badge}</Text>
+                </View>
+              ) : null}
             </View>
             <Text
               numberOfLines={1}
@@ -2972,6 +2988,25 @@ function WalletAppShellContent({
     setTab("improver");
   }, []);
 
+  /**
+   * Conversations with something unread in them, shown on the Messages tab.
+   *
+   * Messages are the one notification kind with no row in the notification
+   * ledger — they would be the third place counting the same thing, after the
+   * thread itself and the inbox's own dots — so this is where they are counted
+   * instead, and the bell stays the count of everything else.
+   *
+   * Three things keep it honest, and the cheapest one does most of the work:
+   * the Messages screen reports its own count from the inbox it already polls,
+   * an arriving push bumps it immediately, and a slow poll covers the case
+   * where no push can arrive at all.
+   */
+  const [messagesUnread, setMessagesUnread] = useState(0);
+  // Read by the poll without becoming one of its dependencies: a ref, so
+  // changing tabs does not tear down and restart the interval.
+  const messagesScreenOpenRef = useRef(false);
+  messagesScreenOpenRef.current = tab === "messages" || tab === "contacts";
+
   const dockTabs = useMemo<DockTab[]>(() => {
     const tabs: DockTab[] = [];
     if (participateTargets.length > 0) {
@@ -2988,13 +3023,19 @@ function WalletAppShellContent({
     tabs.push({ key: "map", label: "Map", icon: tab === "map" ? "map" : "map-outline" });
     tabs.push({ key: "wallet", label: "Wallet", icon: "wallet", center: true });
     tabs.push({ key: "bulletin", label: "Bulletin", icon: tab === "bulletin" ? "newspaper" : "newspaper-outline" });
+    // The one dock tab with its own indicator, and for the same reason the
+    // Participate tab has none: a notification is counted in exactly one
+    // place. Messages are the kind that is not in the bell's ledger at all —
+    // they are pushed to the phone and then counted here — so this is that one
+    // place for them, and nothing above says it twice.
     tabs.push({
       key: "messages",
       label: "Messages",
       icon: tab === "messages" || tab === "contacts" ? "chatbubbles" : "chatbubbles-outline",
+      badge: messagesUnread,
     });
     return tabs;
-  }, [participateActive, participateTargets, tab]);
+  }, [messagesUnread, participateActive, participateTargets, tab]);
 
   const activeDockKey = useMemo<DockTabKey | null>(() => {
     if (participateActive) {
@@ -3149,6 +3190,17 @@ function WalletAppShellContent({
   const { resolveTarget: resolveNotificationTarget } = useNotificationInbox({
     onNavigate: navigateToNotificationTarget,
   });
+
+  // Reading a message handles its notification, the same way tapping the push
+  // would: the shade clears with the unread dot rather than keeping something
+  // the person has already read. Stable, because the screen calls it from an
+  // effect.
+  const handleConversationOpened = useCallback(
+    (conversationId: number) => {
+      resolveNotificationTarget({ kind: "conversation", conversationId });
+    },
+    [resolveNotificationTarget],
+  );
 
   /**
    * The server-side notification ledger behind the Notifications screen.
@@ -3370,6 +3422,61 @@ function WalletAppShellContent({
     }, IMPROVER_NOTIFICATION_POLL_MS);
     return () => clearInterval(interval);
   }, [appUser, backendClient, refreshImproverNotifications]);
+
+  const refreshMessagesUnread = useCallback(async () => {
+    if (!backendClient || !appUser) {
+      setMessagesUnread(0);
+      return;
+    }
+    try {
+      const summary = await backendClient.getMessagingSummary();
+      setMessagesUnread(summary.unread_conversations);
+    } catch {
+      // Left at its last value. A failed request is not evidence that nothing
+      // is waiting, and clearing the badge on a dropped connection is the one
+      // wrong answer here.
+    }
+  }, [appUser, backendClient]);
+
+  useEffect(() => {
+    void refreshMessagesUnread();
+  }, [refreshMessagesUnread]);
+
+  useEffect(() => {
+    if (!backendClient || !appUser) {
+      return;
+    }
+    const interval = setInterval(() => {
+      // Not while the Messages screen is up: it polls the inbox every fifteen
+      // seconds and reports the count from that, so this would be a second
+      // request for an answer already on screen.
+      if (appIsActiveRef.current && !messagesScreenOpenRef.current) {
+        void refreshMessagesUnread();
+      }
+    }, MESSAGES_UNREAD_POLL_MS);
+    return () => clearInterval(interval);
+  }, [appUser, backendClient, refreshMessagesUnread]);
+
+  // The push is the trigger, the same way the till's incoming-payment
+  // confirmation is: the badge moves when the message lands rather than at the
+  // top of some interval. Filtered to message pushes so nothing else re-reads
+  // the inbox summary.
+  useEffect(() => {
+    if (!backendClient || !appUser) {
+      return;
+    }
+    const subscription = Notifications.addNotificationReceivedListener((notification) => {
+      const data = (notification.request.content.data ?? {}) as Record<string, unknown>;
+      if (data.type !== "bulletin_message") {
+        return;
+      }
+      // Counted by the server rather than incremented here: two messages in
+      // one conversation are one unread conversation, which only the server
+      // knows.
+      void refreshMessagesUnread();
+    });
+    return () => subscription.remove();
+  }, [appUser, backendClient, refreshMessagesUnread]);
 
   const handleMarkImproverNotificationsSeen = useCallback(async () => {
     // Ungated for the same reason the fetch is: a non-improver can hold a tax
@@ -4020,6 +4127,10 @@ function WalletAppShellContent({
         // A payout may have landed while the app was away, so the badge and the
         // tab dot must be re-derived before the user looks at them.
         void refreshImproverNotifications();
+        // Messages that arrived while the app was away were pushed to the
+        // phone, not to the foreground listener, so the Messages badge is
+        // re-read here rather than waiting for the next poll.
+        void refreshMessagesUnread();
         setPushDeviceSyncRequestVersion((current) => current + 1);
       }
     });
@@ -4033,6 +4144,7 @@ function WalletAppShellContent({
     backendClient,
     publicBackendClient,
     refreshImproverNotifications,
+    refreshMessagesUnread,
     runtime.service,
     runtime.discovery,
     selectedCandidateKey,
@@ -5350,6 +5462,8 @@ function WalletAppShellContent({
               requestedSegmentNonce={tab === "contacts" ? messagesRouteRequest.nonce : undefined}
               requestedConversationId={messagesRouteRequest.conversationId}
               requestedConversationNonce={messagesRouteRequest.nonce}
+              onUnreadChange={setMessagesUnread}
+              onConversationOpened={handleConversationOpened}
               onToast={showToast}
               onPayInConversation={(conversation: Conversation) => {
                 if (!conversation.pay_address) {
@@ -8236,6 +8350,27 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     // clipping it was cutting the wallet icon in half.
     overflow: "visible",
     ...shadows.card,
+  },
+  // Same shape as the header bell's badge, ringed in the dock's own surface
+  // rather than the page background it sits on.
+  dockBadge: {
+    position: "absolute",
+    top: -4,
+    right: -8,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.danger,
+    borderWidth: 1.5,
+    borderColor: palette.surface,
+  },
+  dockBadgeText: {
+    color: palette.white,
+    fontSize: 9,
+    fontWeight: "800",
   },
   bottomDockGlassLayer: {
     ...StyleSheet.absoluteFillObject,
