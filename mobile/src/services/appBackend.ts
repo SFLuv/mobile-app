@@ -169,6 +169,7 @@ type TransactionsResponse = {
     from: string;
     to: string;
     memo?: string;
+    type?: string;
   }>;
   total: number;
 };
@@ -3438,6 +3439,7 @@ export class AppBackendClient {
       to: tx.to,
       memo: tx.memo,
       direction: tx.from.toLowerCase() === address.toLowerCase() ? "send" : "receive",
+      type: tx.type,
     }));
   }
 

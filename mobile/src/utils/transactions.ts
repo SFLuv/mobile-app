@@ -24,9 +24,20 @@ function normalizeAddress(address?: string): string {
   return address?.trim().toLowerCase() || "";
 }
 
+// A transfer is a reward when the faucet paid it. The backend decides that
+// from who the faucet was at the time of the transfer, so rewards keep their
+// label when the faucet moves to a new wallet. The comparison against
+// faucetAddress is only for transfers the backend has not labelled: an older
+// backend, or transfers read straight off chain.
 export function isRewardTransaction(transaction: AppTransaction, faucetAddress?: string): boolean {
+  if (transaction.direction === "send") {
+    return false;
+  }
+  if (transaction.type !== undefined) {
+    return transaction.type === "volunteer_reward";
+  }
   const normalizedFaucet = normalizeAddress(faucetAddress);
-  return Boolean(normalizedFaucet) && transaction.direction !== "send" && normalizeAddress(transaction.from) === normalizedFaucet;
+  return Boolean(normalizedFaucet) && normalizeAddress(transaction.from) === normalizedFaucet;
 }
 
 export function buildAddressNameMaps(
