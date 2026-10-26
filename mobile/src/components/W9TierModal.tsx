@@ -15,6 +15,10 @@ type Props = {
   earnedBase: string;
   thresholdBase: string;
   tokenSymbol: string;
+  /** An admin asked for the form directly; see AppW9Status.adminRequested. */
+  adminRequested?: boolean;
+  /** The year the form is for, named in the admin-request wording. */
+  taxYear?: number;
   busy?: boolean;
   onStartForm: () => void;
   onDismiss: () => void;
@@ -46,7 +50,26 @@ type Presentation = {
  * to dismiss the one that matters. The last two arrive after money has stopped
  * and are plain about it.
  */
-function presentationFor(tier: AppW9Tier, threshold: string, symbol: string): Presentation {
+function presentationFor(
+  tier: AppW9Tier,
+  threshold: string,
+  symbol: string,
+  adminRequested: boolean,
+  taxYear?: number,
+): Presentation {
+  // Asked for by an admin. The backend delivers the request as the notice or
+  // warning tier, because those are the prompts older builds can draw; this
+  // build says what actually happened. The escrow and blocked tiers keep their
+  // own wording: when money is held or refused, that is the news.
+  if (adminRequested && (tier === "notice_400" || tier === "warning_500")) {
+    return {
+      icon: "document-text",
+      tone: "notice",
+      title: "SFLuv has asked you for a W-9",
+      body: `We need a W-9 on file for you${taxYear ? ` for ${taxYear}` : ""}. It takes a couple of minutes, and the form is hosted securely by our tax provider.`,
+      dismiss: "Later",
+    };
+  }
   switch (tier) {
     case "notice_400":
       return {
@@ -109,6 +132,8 @@ export function W9TierModal({
   earnedBase,
   thresholdBase,
   tokenSymbol,
+  adminRequested = false,
+  taxYear,
   busy = false,
   onStartForm,
   onDismiss,
@@ -117,8 +142,8 @@ export function W9TierModal({
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
   const presentation = useMemo(
-    () => (tier ? presentationFor(tier, thresholdSfluv, tokenSymbol) : null),
-    [thresholdSfluv, tier, tokenSymbol],
+    () => (tier ? presentationFor(tier, thresholdSfluv, tokenSymbol, adminRequested, taxYear) : null),
+    [adminRequested, taxYear, thresholdSfluv, tier, tokenSymbol],
   );
 
   if (!presentation) {

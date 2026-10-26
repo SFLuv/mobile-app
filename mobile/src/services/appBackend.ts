@@ -3857,6 +3857,7 @@ export class AppBackendClient {
       formUrl: asString(body.form_url) || undefined,
       tier: normalizeW9Tier(asString(body.tier)),
       tierAcknowledged: body.tier_acknowledged === true,
+      adminRequested: body.admin_requested === true,
       blocked: body.blocked === true,
       earnedBase: asString(body.earned_base) || "0",
       thresholdBase: asString(body.threshold_base) || "0",

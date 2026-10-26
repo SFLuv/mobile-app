@@ -1007,6 +1007,12 @@ export interface AppW9Status {
    */
   tier: AppW9Tier | null;
   tierAcknowledged: boolean;
+  /**
+   * An admin asked for this person's W-9 directly, rather than a threshold
+   * asking on its own. The tier still decides whether the modal shows; this
+   * only changes what it says. False from a backend that predates the flag.
+   */
+  adminRequested: boolean;
   /** A payout was actually refused — not merely held. */
   blocked: boolean;
   /**
