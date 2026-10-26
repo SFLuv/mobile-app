@@ -968,7 +968,13 @@ export type RedeemOutcome =
    * hands the redemption code back — so this is "do this, then scan again"
    * rather than a lost reward.
    */
-  | { status: "blocked"; amountSfluv: string; taxYear: number; message: string };
+  | { status: "blocked"; amountSfluv: string; taxYear: number; message: string }
+  /**
+   * Sent, not yet confirmed. The transfer went out but the backend did not see
+   * it land in time; it settles from the chain on its own. The code stays
+   * spent, so scanning again would only say it was already redeemed.
+   */
+  | { status: "pending"; message: string };
 
 /** One held or owed payout, as shown in the tax panel. */
 export interface AppW9Item {

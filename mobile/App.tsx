@@ -3908,6 +3908,19 @@ function WalletAppShellContent({
           return;
         }
 
+        // Sent but not yet confirmed. The money is almost always already on
+        // its way, so this reads as a success with a caveat, not an error that
+        // invites a second scan of a code that is already spent.
+        if (outcome.status === "pending") {
+          setRedeemFlow((current) =>
+            current && current.code === code && current.stage === "redeeming"
+              ? { code, stage: "success", walletAddress: payoutAddress, message: outcome.message }
+              : current,
+          );
+          void refreshWalletSurface();
+          return;
+        }
+
         if (outcome.status === "escrowed") {
           setRedeemFlow((current) =>
             current && current.code === code && current.stage === "redeeming"

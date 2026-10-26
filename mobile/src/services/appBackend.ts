@@ -3481,6 +3481,11 @@ export class AppBackendClient {
     const rawBody = (await response.text()).trim();
 
     switch (rawBody) {
+      case "payout pending":
+        return {
+          status: "pending",
+          message: "Your perk was sent and is still confirming. Check your wallet in a few minutes; there's no need to scan again.",
+        };
       case "code not started":
         throw new Error("This perk is not active yet.");
       case "code expired":
