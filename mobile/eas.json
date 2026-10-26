@@ -23,7 +23,8 @@
         "EXPO_PUBLIC_EAS_PROJECT_ID": "457c71a1-29cd-4e60-9be8-04a6e0a6194a",
         "EXPO_PUBLIC_PRIVY_APP_ID": "cmc3nhnmc004yl10mwcmj4be3",
         "EXPO_PUBLIC_PRIVY_CLIENT_ID": "client-WY6MsAXARAYUgz2i28xA5GP48PCXp5hw8eKTiD158gcx5"
-      }
+      },
+      "channel": "development"
     },
     "development-sanchez0-local": {
       "developmentClient": true,
@@ -40,7 +41,8 @@
         "EXPO_PUBLIC_PRIVY_APP_ID": "cmlidct3t00pql50du730rr3o",
         "EXPO_PUBLIC_PRIVY_CLIENT_ID": "client-WY6W1dt7xSPHt77ahZUNcj6TCuH8GtvFxvz8uEVqHr24z",
         "EXPO_PUBLIC_EAS_PROJECT_ID": "ee7c9c8e-f237-44cf-917c-ee424401e299"
-      }
+      },
+      "channel": "development"
     },
     "production": {
       "autoIncrement": true,
@@ -54,12 +56,14 @@
         "EXPO_PUBLIC_PRIVY_APP_ID": "cmc3nhnmc004yl10mwcmj4be3",
         "EXPO_PUBLIC_PRIVY_CLIENT_ID": "client-WY6MsAXARAYUgz2i28xA5GP48PCXp5hw8eKTiD158gcx5",
         "EXPO_PUBLIC_EAS_PROJECT_ID": "457c71a1-29cd-4e60-9be8-04a6e0a6194a"
-      }
+      },
+      "channel": "production"
     },
     "preview": {
       "extends": "production",
       "autoIncrement": false,
-      "distribution": "internal"
+      "distribution": "internal",
+      "channel": "preview"
     }
   }
 }

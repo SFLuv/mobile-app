@@ -37,6 +37,12 @@ function resolveGoogleServicesFile(): string | undefined {
   return fs.existsSync(defaultAbsolutePath) ? defaultRelativePath : undefined;
 }
 
+function resolveEasProjectId(config: ConfigContext["config"]): string {
+  const extraEas = (config.extra as { eas?: { projectId?: unknown } } | undefined)?.eas;
+  const existingProjectId = typeof extraEas?.projectId === "string" ? extraEas.projectId : undefined;
+  return process.env.EXPO_PUBLIC_EAS_PROJECT_ID?.trim() || existingProjectId || DEFAULT_EAS_PROJECT_ID;
+}
+
 const googleServicesFile = resolveGoogleServicesFile();
 const expoOwner = process.env.EXPO_OWNER?.trim() || DEFAULT_EXPO_OWNER;
 const expoSlug = process.env.EXPO_SLUG?.trim() || DEFAULT_EXPO_SLUG;
@@ -50,6 +56,19 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   description:
     "This app is a nonprofit-run community hub for managing and spending your SFLUV, redeeming perks, and coordinating verified improvers. Improvers can sign up to complete real-world tasks in San Francisco and be rewarded with SFLUV.",
   scheme: "sfluv",
+  // Over-the-air updates. A JavaScript-only fix ships with `eas update` in
+  // minutes, without store review. The fingerprint policy ties every update to
+  // the exact native code it was built against, so an update can never reach a
+  // build whose native side it does not match; native changes (new native
+  // packages, permissions, SDK upgrades) still need a store release.
+  runtimeVersion: { policy: "fingerprint" },
+  updates: {
+    url: `https://u.expo.dev/${resolveEasProjectId(config)}`,
+    // Download in the background on launch and apply on the next one, so a
+    // slow network never holds up opening the app.
+    checkAutomatically: "ON_LOAD",
+    fallbackToCacheTimeout: 0,
+  },
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
@@ -119,6 +138,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ],
     "expo-notifications",
     "expo-secure-store",
+    "expo-updates",
     "expo-web-browser",
   ],
   extra: buildExtra(config),
