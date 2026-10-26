@@ -16,7 +16,7 @@ import {
 import MapView, { Marker, PROVIDER_GOOGLE, Region } from "react-native-maps";
 import { useCurrentLocation } from "../hooks/useCurrentLocation";
 import { AppLocation } from "../types/app";
-import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
+import { Palette, chromeLabel, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { formatDistanceLabel, locationDistanceMeters, sortLocationsByProximity, UserLocation } from "../utils/location";
 import { currentWeekdayIndex, getOpenState, isTodayHoursLine, OpenState } from "../utils/openingHours";
 import { MerchantIcon, MerchantMapPin, OpenStatusBadge, useMarkerTracking } from "../components/MerchantPin";
@@ -532,10 +532,26 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
             />
           ) : null}
           <Pressable style={styles.segmentButton} onPress={() => onChangeViewMode("map")}>
-            <Text style={[styles.segmentText, viewMode === "map" ? styles.segmentTextActive : undefined]}>Map View</Text>
+            <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={chromeLabel.minimumFontScale}
+              maxFontSizeMultiplier={chromeLabel.maxFontSizeMultiplier}
+              style={[styles.segmentText, viewMode === "map" ? styles.segmentTextActive : undefined]}
+            >
+              Map View
+            </Text>
           </Pressable>
           <Pressable style={styles.segmentButton} onPress={() => onChangeViewMode("list")}>
-            <Text style={[styles.segmentText, viewMode === "list" ? styles.segmentTextActive : undefined]}>List View</Text>
+            <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={chromeLabel.minimumFontScale}
+              maxFontSizeMultiplier={chromeLabel.maxFontSizeMultiplier}
+              style={[styles.segmentText, viewMode === "list" ? styles.segmentTextActive : undefined]}
+            >
+              List View
+            </Text>
           </Pressable>
         </View>
 
@@ -824,6 +840,13 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       color: palette.textMuted,
       fontWeight: "800",
       fontSize: 13,
+      // Stretched and inset for the same reason as the dock's labels: the
+      // indicator behind these is exactly one button wide, so a label sized to
+      // its own content runs onto its rounded ends at larger text sizes.
+      alignSelf: "stretch",
+      textAlign: "center",
+      paddingHorizontal: 6,
+      includeFontPadding: false,
     },
     segmentTextActive: {
       color: palette.white,

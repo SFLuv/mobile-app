@@ -99,6 +99,27 @@ export const radii = {
   pill: 999,
 };
 
+/**
+ * Limits for text that has to stay inside fixed chrome: a dock label, a
+ * segmented control, anything sitting on an indicator sized to its slot.
+ *
+ * Two numbers because there are two separate problems. The cap stops the
+ * system text-size setting from pulling that chrome apart — at 200% a word
+ * like "Participate" is wider than its slot however the slot is laid out —
+ * while still honouring the first part of the preference, which is why this is
+ * a cap and not allowFontScaling={false}. The floor is how much the label may
+ * then give back to fit the width it actually has, which narrow phones need
+ * even at the default text size.
+ *
+ * Use both together, with numberOfLines={1} and a label box that stretches:
+ * adjustsFontSizeToFit has nothing to fit against if the text is sized to its
+ * own content.
+ */
+export const chromeLabel = {
+  maxFontSizeMultiplier: 1.2,
+  minimumFontScale: 0.7,
+};
+
 export function getShadows(themePalette: Palette) {
   const onDark = themePalette.background === darkPalette.background;
   return {

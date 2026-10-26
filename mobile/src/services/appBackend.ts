@@ -271,6 +271,7 @@ type ClientConfigResponse = {
     workflow_payouts_enabled?: boolean;
     merchant_payments_enabled?: boolean;
     volunteer_events_enabled?: boolean;
+    community_features_enabled?: boolean;
   };
   migration?: {
     state?: string;
@@ -1065,6 +1066,11 @@ function mapClientConfig(input: ClientConfigResponse): AppClientConfig {
       // every user, so an older backend that has never heard of it must not
       // surface a tab pointing at endpoints it cannot serve.
       volunteerEventsEnabled: input.features?.volunteer_events_enabled === true,
+      // Opt-in for the same reason, and with one more: these two tabs replaced
+      // Contacts in the dock, so a backend that has never heard of them must
+      // leave the dock as it was rather than hide Contacts behind an inbox it
+      // cannot serve.
+      communityFeaturesEnabled: input.features?.community_features_enabled === true,
     },
     migration: {
       state: asString(input.migration?.state, "pre_cutover"),

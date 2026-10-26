@@ -124,6 +124,7 @@ import {
   radii,
   spacing,
   useAppTheme,
+  chromeLabel,
 } from "./src/theme";
 
 type RuntimeState = {
@@ -221,8 +222,10 @@ type Tab =
   | "settings";
 
 /** Slots in the bottom dock. Distinct from `Tab`: "participate" can lead to two screens. */
-// Activity lives inside the wallet ("See all"); Contacts lives inside Messages.
-type DockTabKey = "participate" | "map" | "wallet" | "bulletin" | "messages";
+// Activity lives inside the wallet ("See all"). Contacts lives inside Messages
+// when the community features are on, and takes its own slot back when they are
+// off — which is why "contacts" is still a dock key.
+type DockTabKey = "participate" | "map" | "wallet" | "bulletin" | "messages" | "contacts";
 
 /**
  * Left-to-right reading order of the screens, used only to decide which way a
@@ -1393,6 +1396,9 @@ function BottomDock({
               </Animated.View>
               <Text
                 numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={chromeLabel.minimumFontScale}
+                maxFontSizeMultiplier={chromeLabel.maxFontSizeMultiplier}
                 style={[styles.bottomTabText, active ? styles.bottomTabTextActive : undefined]}
               >
                 {tab.label}
@@ -1419,12 +1425,17 @@ function BottomDock({
               />
               {tab.badge && tab.badge > 0 ? (
                 <View style={styles.dockBadge}>
-                  <Text style={styles.dockBadgeText}>{tab.badge > 9 ? "9+" : tab.badge}</Text>
+                  <Text style={styles.dockBadgeText} maxFontSizeMultiplier={chromeLabel.maxFontSizeMultiplier} numberOfLines={1}>
+                    {tab.badge > 9 ? "9+" : tab.badge}
+                  </Text>
                 </View>
               ) : null}
             </View>
             <Text
               numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={chromeLabel.minimumFontScale}
+              maxFontSizeMultiplier={chromeLabel.maxFontSizeMultiplier}
               style={[styles.bottomTabText, active ? styles.bottomTabTextActive : undefined]}
             >
               {tab.label}
@@ -2009,6 +2020,9 @@ function WalletAppShellContent({
   // The volunteer portal is open to every signed-in user, but only once the
   // backend says it can serve it — the tab must never point at a 404.
   const canAccessVolunteerPanel = Boolean(appUser) && clientConfig.features.volunteerEventsEnabled;
+  // Bulletin + Messages, from the server switch. Off is the dock this app
+  // shipped with, so nothing here may assume either tab exists.
+  const communityEnabled = clientConfig.features.communityFeaturesEnabled;
   const showVolunteerNav = canAccessVolunteerPanel && preferences.showVolunteerPanel;
   // Participate is one slot leading to one or two panels. With both available
   // it opens a chooser; with one it goes straight there; with neither the slot
@@ -3022,37 +3036,48 @@ function WalletAppShellContent({
     }
     tabs.push({ key: "map", label: "Map", icon: tab === "map" ? "map" : "map-outline" });
     tabs.push({ key: "wallet", label: "Wallet", icon: "wallet", center: true });
-    tabs.push({ key: "bulletin", label: "Bulletin", icon: tab === "bulletin" ? "newspaper" : "newspaper-outline" });
-    // The one dock tab with its own indicator, and for the same reason the
-    // Participate tab has none: a notification is counted in exactly one
-    // place. Messages are the kind that is not in the bell's ledger at all —
-    // they are pushed to the phone and then counted here — so this is that one
-    // place for them, and nothing above says it twice.
-    tabs.push({
-      key: "messages",
-      label: "Messages",
-      icon: tab === "messages" || tab === "contacts" ? "chatbubbles" : "chatbubbles-outline",
-      badge: messagesUnread,
-    });
+    if (communityEnabled) {
+      tabs.push({ key: "bulletin", label: "Bulletin", icon: tab === "bulletin" ? "newspaper" : "newspaper-outline" });
+      // The one dock tab with its own indicator, and for the same reason the
+      // Participate tab has none: a notification is counted in exactly one
+      // place. Messages are the kind that is not in the bell's ledger at all —
+      // they are pushed to the phone and then counted here — so this is that one
+      // place for them, and nothing above says it twice.
+      tabs.push({
+        key: "messages",
+        label: "Messages",
+        icon: tab === "messages" || tab === "contacts" ? "chatbubbles" : "chatbubbles-outline",
+        badge: messagesUnread,
+      });
+    } else {
+      // Contacts takes its slot back. It has to: with Messages gone the only
+      // remaining way into Contacts is an addcontact deep link, and a screen
+      // reachable solely by link is a screen nobody finds.
+      tabs.push({ key: "contacts", label: "Contacts", icon: tab === "contacts" ? "people" : "people-outline" });
+    }
     return tabs;
-  }, [messagesUnread, participateActive, participateTargets, tab]);
+  }, [communityEnabled, messagesUnread, participateActive, participateTargets, tab]);
 
   const activeDockKey = useMemo<DockTabKey | null>(() => {
     if (participateActive) {
       return "participate";
     }
-    if (tab === "map" || tab === "wallet" || tab === "bulletin" || tab === "messages") {
+    if (tab === "map" || tab === "wallet") {
       return tab;
     }
-    // Activity is part of the wallet now, and Contacts part of Messages.
+    if (communityEnabled && (tab === "bulletin" || tab === "messages")) {
+      return tab;
+    }
+    // Activity is part of the wallet now. Contacts is part of Messages while
+    // the community features are on, and its own slot when they are off.
     if (tab === "activity") {
       return "wallet";
     }
     if (tab === "contacts") {
-      return "messages";
+      return communityEnabled ? "messages" : "contacts";
     }
     return null;
-  }, [participateActive, tab]);
+  }, [communityEnabled, participateActive, tab]);
 
   const handleDockSelect = useCallback(
     (key: DockTabKey) => {
@@ -3158,10 +3183,17 @@ function WalletAppShellContent({
           setTab("activity");
           return;
         case "conversation":
-          openConversation(target.conversationId);
+          // Same shape as the role panels above: a push can outlive the switch
+          // that showed its screen, so an arrival for a surface that is off is
+          // dropped rather than sent to a tab the dock no longer has.
+          if (communityEnabled) {
+            openConversation(target.conversationId);
+          }
           return;
         case "bulletin":
-          setTab("bulletin");
+          if (communityEnabled) {
+            setTab("bulletin");
+          }
           return;
         case "url":
           // Leaving the app is the point here, so there is no in-app state to
@@ -3176,6 +3208,7 @@ function WalletAppShellContent({
     [
       canAccessImproverPanel,
       canAccessVolunteerPanel,
+      communityEnabled,
       openConversation,
       openImproverPanel,
       openVolunteerPanel,
@@ -3424,7 +3457,10 @@ function WalletAppShellContent({
   }, [appUser, backendClient, refreshImproverNotifications]);
 
   const refreshMessagesUnread = useCallback(async () => {
-    if (!backendClient || !appUser) {
+    // Nothing shows this count when the tab is gone, so asking for it is a
+    // request made for nobody. Gated here rather than at the call sites so the
+    // one-shot and the interval cannot disagree.
+    if (!backendClient || !appUser || !communityEnabled) {
       setMessagesUnread(0);
       return;
     }
@@ -3436,14 +3472,14 @@ function WalletAppShellContent({
       // is waiting, and clearing the badge on a dropped connection is the one
       // wrong answer here.
     }
-  }, [appUser, backendClient]);
+  }, [appUser, backendClient, communityEnabled]);
 
   useEffect(() => {
     void refreshMessagesUnread();
   }, [refreshMessagesUnread]);
 
   useEffect(() => {
-    if (!backendClient || !appUser) {
+    if (!backendClient || !appUser || !communityEnabled) {
       return;
     }
     const interval = setInterval(() => {
@@ -3455,7 +3491,7 @@ function WalletAppShellContent({
       }
     }, MESSAGES_UNREAD_POLL_MS);
     return () => clearInterval(interval);
-  }, [appUser, backendClient, refreshMessagesUnread]);
+  }, [appUser, backendClient, communityEnabled, refreshMessagesUnread]);
 
   // The push is the trigger, the same way the till's incoming-payment
   // confirmation is: the badge moves when the message lands rather than at the
@@ -5148,6 +5184,54 @@ function WalletAppShellContent({
       walletHomeContent
     );
 
+  // Contacts renders in two places and must behave the same in both: as a
+  // segment inside Messages when the community features are on, and as its own
+  // dock screen when they are off. Built once here so the two cannot drift.
+  const contactsScreenElement = (
+    <ContactsScreen
+      clientConfig={clientConfig}
+      contacts={contacts}
+      shareAddress={smartAddress}
+      syncNotice={syncNotice}
+      incomingContactAddress={pendingContactAddress}
+      onIncomingContactAddressHandled={() => {
+        setPendingContactAddress(null);
+      }}
+      onAddContact={async (name, address) => {
+        if (!backendClient) {
+          throw new Error("Backend not configured.");
+        }
+        await backendClient.addContact(name, address);
+        const updatedContacts = await backendClient.getContacts();
+        setContacts(updatedContacts);
+      }}
+      onUpdateContact={async (contact) => {
+        if (!backendClient) {
+          throw new Error("Backend not configured.");
+        }
+        await backendClient.updateContact(contact);
+        const updatedContacts = await backendClient.getContacts();
+        setContacts(updatedContacts);
+      }}
+      onToggleFavorite={async (contact) => {
+        if (!backendClient) {
+          throw new Error("Backend not configured.");
+        }
+        await backendClient.toggleFavorite(contact);
+        const updatedContacts = await backendClient.getContacts();
+        setContacts(updatedContacts);
+      }}
+      onDeleteContact={async (contactID) => {
+        if (!backendClient) {
+          throw new Error("Backend not configured.");
+        }
+        await backendClient.deleteContact(contactID);
+        const updatedContacts = await backendClient.getContacts();
+        setContacts(updatedContacts);
+      }}
+    />
+  );
+
   return (
     <RootContainer style={[styles.safe, !showStandardChrome ? styles.safeFullscreen : undefined]}>
       <StatusBar style={isDark ? "light" : "dark"} />
@@ -5453,7 +5537,7 @@ function WalletAppShellContent({
               }}
               onClose={() => setTab("wallet")}
             />
-          ) : tab === "messages" || tab === "contacts" ? (
+          ) : communityEnabled && (tab === "messages" || tab === "contacts") ? (
             <MessagesScreen
               backendClient={backendClient ?? null}
               tokenSymbol={clientConfig.tokenSymbol}
@@ -5486,51 +5570,10 @@ function WalletAppShellContent({
                   { returnTab: "messages" },
                 );
               }}
-              contactsElement={
-            <ContactsScreen
-              clientConfig={clientConfig}
-              contacts={contacts}
-              shareAddress={smartAddress}
-              syncNotice={syncNotice}
-              incomingContactAddress={pendingContactAddress}
-              onIncomingContactAddressHandled={() => {
-                setPendingContactAddress(null);
-              }}
-              onAddContact={async (name, address) => {
-                if (!backendClient) {
-                  throw new Error("Backend not configured.");
-                }
-                await backendClient.addContact(name, address);
-                const updatedContacts = await backendClient.getContacts();
-                setContacts(updatedContacts);
-              }}
-              onUpdateContact={async (contact) => {
-                if (!backendClient) {
-                  throw new Error("Backend not configured.");
-                }
-                await backendClient.updateContact(contact);
-                const updatedContacts = await backendClient.getContacts();
-                setContacts(updatedContacts);
-              }}
-              onToggleFavorite={async (contact) => {
-                if (!backendClient) {
-                  throw new Error("Backend not configured.");
-                }
-                await backendClient.toggleFavorite(contact);
-                const updatedContacts = await backendClient.getContacts();
-                setContacts(updatedContacts);
-              }}
-              onDeleteContact={async (contactID) => {
-                if (!backendClient) {
-                  throw new Error("Backend not configured.");
-                }
-                await backendClient.deleteContact(contactID);
-                const updatedContacts = await backendClient.getContacts();
-                setContacts(updatedContacts);
-              }}
+              contactsElement={contactsScreenElement}
             />
-              }
-            />
+          ) : tab === "contacts" ? (
+            contactsScreenElement
           ) : (
             <SettingsScreen
               user={appUser}
@@ -8436,6 +8479,19 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     fontWeight: "800",
     fontSize: 9,
     letterSpacing: -0.15,
+    // Stretched and centred rather than sized to its content, so
+    // adjustsFontSizeToFit has a width to shrink against — against content
+    // width there is nothing to fit and the label just grows.
+    alignSelf: "stretch",
+    textAlign: "center",
+    // Clear of the indicator's rounded ends. The bubble is BUBBLE_PAD narrower
+    // than the slot, so a label filling the slot touches its corners: this is
+    // the inset that keeps "Participate" inside the highlight instead of
+    // running onto its edges.
+    paddingHorizontal: 5,
+    // Android adds its own vertical padding inside the line box, which here
+    // reads as the label sitting low in the indicator.
+    includeFontPadding: false,
   },
   bottomTabTextActive: {
     color: palette.primaryStrong,

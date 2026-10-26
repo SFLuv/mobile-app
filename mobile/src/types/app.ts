@@ -256,6 +256,8 @@ export interface AppClientConfig {
     workflowPayoutsEnabled: boolean;
     merchantPaymentsEnabled: boolean;
     volunteerEventsEnabled: boolean;
+    /** Bulletin board + Messages (chat). One flag for both — see the dock. */
+    communityFeaturesEnabled: boolean;
   };
   migration: {
     state: string;
