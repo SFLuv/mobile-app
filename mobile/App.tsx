@@ -110,6 +110,7 @@ import {
 import { useNotificationInbox } from "./src/hooks/useNotificationInbox";
 import { useNotificationFeed } from "./src/hooks/useNotificationFeed";
 import { loadBootCache, rememberSignedIn, saveBootCache } from "./src/services/bootCache";
+import { cachedBetaFor, emptyBetaAccess, primeBetaCache, saveBetaCache } from "./src/services/betaCache";
 import type { AppNotificationFeed } from "./src/types/notifications";
 import {
   InboxNotification,
@@ -2033,29 +2034,51 @@ function WalletAppShellContent({
    * direction: hiding a tab somebody is entitled to is a missing feature,
    * while showing one they are not is a screen full of refusals.
    */
-  const [betaAccess, setBetaAccess] = useState<AppBetaAccess>({ features: [], available: {} });
+  const [betaAccess, setBetaAccess] = useState<AppBetaAccess>(
+    // Synchronous, from the mirror warmed during boot. This is what keeps the
+    // dock still: the first render already knows how many tabs there are.
+    () => cachedBetaFor(appUser?.id) ?? emptyBetaAccess,
+  );
+
+  // The user can arrive after this component mounts, in which case the
+  // initializer above had nothing to key on. Applied once their id is known,
+  // and only over an empty state so it cannot undo a fetch that already landed.
+  const betaUserId = appUser?.id ?? null;
   useEffect(() => {
-    if (!backendClient || !appUser) {
-      setBetaAccess({ features: [], available: {} });
+    if (!betaUserId) {
+      return;
+    }
+    const cached = cachedBetaFor(betaUserId);
+    if (!cached) {
+      return;
+    }
+    setBetaAccess((current) => (Object.keys(current.available).length === 0 ? cached : current));
+  }, [betaUserId]);
+
+  useEffect(() => {
+    if (!backendClient || !betaUserId) {
       return;
     }
     let cancelled = false;
     void (async () => {
       try {
         const access = await backendClient.getMyBetaAccess();
-        if (!cancelled) {
-          setBetaAccess(access);
+        if (cancelled) {
+          return;
         }
+        setBetaAccess(access);
+        void saveBetaCache(betaUserId, access);
       } catch {
-        if (!cancelled) {
-          setBetaAccess({ features: [], available: {} });
-        }
+        // Deliberately keeps what is on screen. Clearing here would turn a
+        // dropped request into the dock rearranging itself, which is the thing
+        // the cache exists to prevent — and the server refuses anything the
+        // person is not entitled to regardless of what is drawn.
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [appUser, backendClient]);
+  }, [backendClient, betaUserId]);
 
   // Separate, because they are separate decisions: somebody can be in the
   // bulletin beta and not the chat beta. Messages took the dock slot Contacts
@@ -8055,7 +8078,10 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const cached = await loadBootCache();
+      // Both local reads together, before the signed-in shell mounts, so the
+      // dock can be built from the cached answer on its very first render
+      // rather than reflowing once a fetch lands.
+      const [cached] = await Promise.all([loadBootCache(), primeBetaCache()]);
       if (cancelled) {
         return;
       }
