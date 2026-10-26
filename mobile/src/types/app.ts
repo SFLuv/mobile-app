@@ -218,6 +218,9 @@ export interface AppTransaction {
   to: string;
   memo?: string;
   direction: "send" | "receive";
+  // What the backend says the transfer was: "volunteer_reward" or "transfer".
+  // Absent from an older backend, and from transfers read straight off chain.
+  type?: string;
 }
 
 /**
