@@ -206,7 +206,7 @@ export function MessagesScreen({
         }}
       >
         <Avatar name={item.other_user.public_name} />
-        <View style={styles.rowBody}>
+        <View style={[styles.rowBody, item.other_user_inactive ? styles.rowInactive : undefined]}>
           <View style={styles.rowTop}>
             <Text style={styles.rowName} numberOfLines={1}>
               {item.other_user.public_name}
@@ -216,8 +216,10 @@ export function MessagesScreen({
           <View style={styles.rowPreviewLine}>
             {item.post ? <Ionicons name={CATEGORY_ICONS[item.post.category]} size={13} color={palette.textMuted} /> : null}
             <Text style={[styles.rowPreview, item.unread_count > 0 && styles.rowPreviewUnread]} numberOfLines={1}>
-              {item.post ? `${item.post.title} · ` : ""}
-              {preview}
+              {/* Greyed is not self-explanatory, so the row says why. */}
+              {item.other_user_inactive
+                ? "Can't receive messages right now"
+                : `${item.post ? `${item.post.title} · ` : ""}${preview}`}
             </Text>
           </View>
         </View>
@@ -494,7 +496,11 @@ function ChatThreadModal({
 
   const post = conversation?.post ?? null;
   const iAmAuthor = Boolean(post && conversation && post.author_id !== conversation.other_user.user_id);
-  const canPay = Boolean(conversation?.pay_address) && !conversation?.blocked_by_me && (!post || post.accepts_sfluv || post.category !== "for_sale");
+  const canPay =
+    Boolean(conversation?.pay_address) &&
+    !conversation?.blocked_by_me &&
+    !conversation?.other_user_inactive &&
+    (!post || post.accepts_sfluv || post.category !== "for_sale");
   const tradeDone = post && (post.status === "sold" || post.status === "claimed");
 
   const renderMessage = ({ item }: { item: ChatMessage }) => {
@@ -624,6 +630,16 @@ function ChatThreadModal({
             <View style={styles.blockedBar}>
               <Text style={styles.blockedText}>You blocked {conversation.other_user.public_name}.</Text>
             </View>
+          ) : conversation?.other_user_inactive ? (
+            // The same bar the block state uses, for the same reason: a
+            // composer that accepts a message nobody can read is worse than no
+            // composer. Phrased without mentioning the beta, which is not this
+            // person's business.
+            <View style={styles.blockedBar}>
+              <Text style={styles.blockedText}>
+                {conversation.other_user.public_name} can&apos;t receive messages right now.
+              </Text>
+            </View>
           ) : (
             <View style={styles.composer}>
               {canPay && conversation ? (
@@ -688,6 +704,9 @@ function createStyles(palette: Palette) {
     rowBody: { flex: 1, minWidth: 0 },
     rowTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" },
     rowName: { fontSize: 15, fontWeight: "600", color: palette.text, flexShrink: 1 },
+    // Dimmed rather than hidden: the conversation is still theirs to read, and
+    // it comes back to full strength if the person's access is restored.
+    rowInactive: { opacity: 0.45 },
     rowTime: { fontSize: 12, color: palette.textMuted, marginLeft: 8 },
     rowPreviewLine: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
     rowPreview: { fontSize: 13, color: palette.textMuted, flexShrink: 1 },

@@ -115,6 +115,14 @@ export interface Conversation {
   unread_count: number;
   last_message_at: string;
   pay_address?: string;
+  /**
+   * The other person no longer has access to messages — they were taken out of
+   * the chat beta. The conversation and its history are untouched and they are
+   * still a member of it; what this says is that they cannot read it right now,
+   * so sending would be shouting into a room nobody is in. Reversed the moment
+   * their access is restored, with nothing to repair.
+   */
+  other_user_inactive?: boolean;
   blocked_by_me: boolean;
 }
 

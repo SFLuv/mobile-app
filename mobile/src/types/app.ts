@@ -220,6 +220,18 @@ export interface AppTransaction {
   direction: "send" | "receive";
 }
 
+/**
+ * Beta surfaces this account may use, from GET /me/beta.
+ *
+ * Gate on `available`, which is the server's master switch and this person's
+ * grant already combined. Missing keys are absent access, so an older backend
+ * or a feature this build does not know about reads as off.
+ */
+export interface AppBetaAccess {
+  features: string[];
+  available: Record<string, boolean>;
+}
+
 export interface AppClientConfig {
   schemaVersion: number;
   configVersion: string;
@@ -256,8 +268,6 @@ export interface AppClientConfig {
     workflowPayoutsEnabled: boolean;
     merchantPaymentsEnabled: boolean;
     volunteerEventsEnabled: boolean;
-    /** Bulletin board + Messages (chat). One flag for both — see the dock. */
-    communityFeaturesEnabled: boolean;
   };
   migration: {
     state: string;

@@ -85,6 +85,7 @@ import {
 import {
   AppAccountDeletionPreview,
   AppAccountDeletionStatusResponse,
+  AppBetaAccess,
   AppClientConfig,
   AppClientVersionPolicy,
   AppContact,
@@ -2020,9 +2021,48 @@ function WalletAppShellContent({
   // The volunteer portal is open to every signed-in user, but only once the
   // backend says it can serve it — the tab must never point at a 404.
   const canAccessVolunteerPanel = Boolean(appUser) && clientConfig.features.volunteerEventsEnabled;
-  // Bulletin + Messages, from the server switch. Off is the dock this app
-  // shipped with, so nothing here may assume either tab exists.
-  const communityEnabled = clientConfig.features.communityFeaturesEnabled;
+  /**
+   * Which beta surfaces this account may use.
+   *
+   * Fetched rather than read from /config, because the answer is per-user: two
+   * people on the same backend get different docks. The server has already
+   * combined its own master switch with this person's grant, so there is one
+   * answer here rather than two to reconcile.
+   *
+   * Defaults to nothing and falls back to nothing on failure. That is the safe
+   * direction: hiding a tab somebody is entitled to is a missing feature,
+   * while showing one they are not is a screen full of refusals.
+   */
+  const [betaAccess, setBetaAccess] = useState<AppBetaAccess>({ features: [], available: {} });
+  useEffect(() => {
+    if (!backendClient || !appUser) {
+      setBetaAccess({ features: [], available: {} });
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const access = await backendClient.getMyBetaAccess();
+        if (!cancelled) {
+          setBetaAccess(access);
+        }
+      } catch {
+        if (!cancelled) {
+          setBetaAccess({ features: [], available: {} });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [appUser, backendClient]);
+
+  // Separate, because they are separate decisions: somebody can be in the
+  // bulletin beta and not the chat beta. Messages took the dock slot Contacts
+  // used to hold, so chat being off is what brings Contacts back — the bulletin
+  // has no such side effect.
+  const bulletinEnabled = betaAccess.available.bulletin === true;
+  const chatEnabled = betaAccess.available.chat === true;
   const showVolunteerNav = canAccessVolunteerPanel && preferences.showVolunteerPanel;
   // Participate is one slot leading to one or two panels. With both available
   // it opens a chooser; with one it goes straight there; with neither the slot
@@ -3036,8 +3076,10 @@ function WalletAppShellContent({
     }
     tabs.push({ key: "map", label: "Map", icon: tab === "map" ? "map" : "map-outline" });
     tabs.push({ key: "wallet", label: "Wallet", icon: "wallet", center: true });
-    if (communityEnabled) {
+    if (bulletinEnabled) {
       tabs.push({ key: "bulletin", label: "Bulletin", icon: tab === "bulletin" ? "newspaper" : "newspaper-outline" });
+    }
+    if (chatEnabled) {
       // The one dock tab with its own indicator, and for the same reason the
       // Participate tab has none: a notification is counted in exactly one
       // place. Messages are the kind that is not in the bell's ledger at all —
@@ -3050,13 +3092,13 @@ function WalletAppShellContent({
         badge: messagesUnread,
       });
     } else {
-      // Contacts takes its slot back. It has to: with Messages gone the only
-      // remaining way into Contacts is an addcontact deep link, and a screen
-      // reachable solely by link is a screen nobody finds.
+      // Contacts takes its slot back. It has to: Messages is where Contacts
+      // lives, so without it the only remaining way in is an addcontact deep
+      // link, and a screen reachable solely by link is a screen nobody finds.
       tabs.push({ key: "contacts", label: "Contacts", icon: tab === "contacts" ? "people" : "people-outline" });
     }
     return tabs;
-  }, [communityEnabled, messagesUnread, participateActive, participateTargets, tab]);
+  }, [bulletinEnabled, chatEnabled, messagesUnread, participateActive, participateTargets, tab]);
 
   const activeDockKey = useMemo<DockTabKey | null>(() => {
     if (participateActive) {
@@ -3065,19 +3107,22 @@ function WalletAppShellContent({
     if (tab === "map" || tab === "wallet") {
       return tab;
     }
-    if (communityEnabled && (tab === "bulletin" || tab === "messages")) {
+    if (bulletinEnabled && tab === "bulletin") {
+      return tab;
+    }
+    if (chatEnabled && tab === "messages") {
       return tab;
     }
     // Activity is part of the wallet now. Contacts is part of Messages while
-    // the community features are on, and its own slot when they are off.
+    // chat is on, and its own slot when it is off.
     if (tab === "activity") {
       return "wallet";
     }
     if (tab === "contacts") {
-      return communityEnabled ? "messages" : "contacts";
+      return chatEnabled ? "messages" : "contacts";
     }
     return null;
-  }, [communityEnabled, participateActive, tab]);
+  }, [bulletinEnabled, chatEnabled, participateActive, tab]);
 
   const handleDockSelect = useCallback(
     (key: DockTabKey) => {
@@ -3186,12 +3231,12 @@ function WalletAppShellContent({
           // Same shape as the role panels above: a push can outlive the switch
           // that showed its screen, so an arrival for a surface that is off is
           // dropped rather than sent to a tab the dock no longer has.
-          if (communityEnabled) {
+          if (chatEnabled) {
             openConversation(target.conversationId);
           }
           return;
         case "bulletin":
-          if (communityEnabled) {
+          if (bulletinEnabled) {
             setTab("bulletin");
           }
           return;
@@ -3207,8 +3252,10 @@ function WalletAppShellContent({
     },
     [
       canAccessImproverPanel,
+      bulletinEnabled,
+      canAccessImproverPanel,
       canAccessVolunteerPanel,
-      communityEnabled,
+      chatEnabled,
       openConversation,
       openImproverPanel,
       openVolunteerPanel,
@@ -3460,7 +3507,7 @@ function WalletAppShellContent({
     // Nothing shows this count when the tab is gone, so asking for it is a
     // request made for nobody. Gated here rather than at the call sites so the
     // one-shot and the interval cannot disagree.
-    if (!backendClient || !appUser || !communityEnabled) {
+    if (!backendClient || !appUser || !chatEnabled) {
       setMessagesUnread(0);
       return;
     }
@@ -3472,14 +3519,14 @@ function WalletAppShellContent({
       // is waiting, and clearing the badge on a dropped connection is the one
       // wrong answer here.
     }
-  }, [appUser, backendClient, communityEnabled]);
+  }, [appUser, backendClient, chatEnabled]);
 
   useEffect(() => {
     void refreshMessagesUnread();
   }, [refreshMessagesUnread]);
 
   useEffect(() => {
-    if (!backendClient || !appUser || !communityEnabled) {
+    if (!backendClient || !appUser || !chatEnabled) {
       return;
     }
     const interval = setInterval(() => {
@@ -3491,7 +3538,7 @@ function WalletAppShellContent({
       }
     }, MESSAGES_UNREAD_POLL_MS);
     return () => clearInterval(interval);
-  }, [appUser, backendClient, communityEnabled, refreshMessagesUnread]);
+  }, [appUser, backendClient, chatEnabled, refreshMessagesUnread]);
 
   // The push is the trigger, the same way the till's incoming-payment
   // confirmation is: the badge moves when the message lands rather than at the
@@ -5537,7 +5584,7 @@ function WalletAppShellContent({
               }}
               onClose={() => setTab("wallet")}
             />
-          ) : communityEnabled && (tab === "messages" || tab === "contacts") ? (
+          ) : chatEnabled && (tab === "messages" || tab === "contacts") ? (
             <MessagesScreen
               backendClient={backendClient ?? null}
               tokenSymbol={clientConfig.tokenSymbol}

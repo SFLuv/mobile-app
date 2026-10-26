@@ -5,6 +5,7 @@ import { clientMetadataHeaders, getClientMetadata } from "./clientMetadata";
 import {
   AppAccountDeletionPreview,
   AppAccountDeletionStatusResponse,
+  AppBetaAccess,
   AppClientConfig,
   AppClientVersionPolicy,
   AppContact,
@@ -271,7 +272,6 @@ type ClientConfigResponse = {
     workflow_payouts_enabled?: boolean;
     merchant_payments_enabled?: boolean;
     volunteer_events_enabled?: boolean;
-    community_features_enabled?: boolean;
   };
   migration?: {
     state?: string;
@@ -1066,11 +1066,6 @@ function mapClientConfig(input: ClientConfigResponse): AppClientConfig {
       // every user, so an older backend that has never heard of it must not
       // surface a tab pointing at endpoints it cannot serve.
       volunteerEventsEnabled: input.features?.volunteer_events_enabled === true,
-      // Opt-in for the same reason, and with one more: these two tabs replaced
-      // Contacts in the dock, so a backend that has never heard of them must
-      // leave the dock as it was rather than hide Contacts behind an inbox it
-      // cannot serve.
-      communityFeaturesEnabled: input.features?.community_features_enabled === true,
     },
     migration: {
       state: asString(input.migration?.state, "pre_cutover"),
@@ -3671,6 +3666,27 @@ export class AppBackendClient {
       memo: tx.memo,
       direction: tx.from.toLowerCase() === address.toLowerCase() ? "send" : "receive",
     }));
+  }
+
+  /**
+   * Which beta surfaces this account may use.
+   *
+   * `available` is the one to gate on: the server has already folded its own
+   * master switch together with this person's grant, so there is a single
+   * answer rather than two that can disagree. `features` is the raw grant list
+   * and is only for saying so in words.
+   *
+   * A backend that predates this returns 404, and an older build that never
+   * asks sees nothing new — both of which read as "no beta access", which is
+   * the safe direction.
+   */
+  async getMyBetaAccess(): Promise<AppBetaAccess> {
+    const response = await this.authFetch("/me/beta");
+    if (!response.ok) {
+      return { features: [], available: {} };
+    }
+    const body = (await response.json()) as { features?: string[]; available?: Record<string, boolean> };
+    return { features: body.features ?? [], available: body.available ?? {} };
   }
 
   async lookupMerchantWalletLabel(address: string): Promise<string | null> {
