@@ -224,10 +224,11 @@ type Tab =
   | "settings";
 
 /** Slots in the bottom dock. Distinct from `Tab`: "participate" can lead to two screens. */
-// Activity lives inside the wallet ("See all"). Contacts lives inside Messages
-// when the community features are on, and takes its own slot back when they are
-// off — which is why "contacts" is still a dock key.
-type DockTabKey = "participate" | "map" | "wallet" | "bulletin" | "messages" | "contacts";
+// Five slots, always. Each beta surface swaps the tab already in its slot
+// rather than adding one — Bulletin takes Activity's, Messages takes Contacts' —
+// so every one of these keys can be the occupant depending on access, and the
+// count never changes.
+type DockTabKey = "participate" | "map" | "wallet" | "bulletin" | "activity" | "messages" | "contacts";
 
 /**
  * Left-to-right reading order of the screens, used only to decide which way a
@@ -285,7 +286,12 @@ const TRANSFER_REFRESH_DEBOUNCE_MS = 350;
 const TRANSACTION_POLL_INTERVAL_MS = 2_000;
 const MERCHANT_MODE_STATUS_POLL_INTERVAL_MS = 15_000;
 const WALLET_TRANSACTION_LIMIT = 10;
-const ACTIVITY_TRANSACTION_PAGE_SIZE = 10;
+// Twenty rather than ten, because the Activity screen fetches the next page as
+// you approach the end of the list instead of waiting for a button. A page that
+// is roughly a screen and a half means the fetch finishes before the scroll
+// reaches where it would have stopped, which is the whole point of dropping the
+// button.
+const ACTIVITY_TRANSACTION_PAGE_SIZE = 20;
 const IMPROVER_NOTIFICATION_POLL_MS = 60_000;
 // The safety net under the Messages badge, not its main source: a message push
 // bumps the count the moment it lands, and the Messages screen reports its own
@@ -3099,8 +3105,17 @@ function WalletAppShellContent({
     }
     tabs.push({ key: "map", label: "Map", icon: tab === "map" ? "map" : "map-outline" });
     tabs.push({ key: "wallet", label: "Wallet", icon: "wallet", center: true });
+    // The dock is five slots, always. Each beta surface SWAPS the tab already
+    // in its slot rather than adding one: Bulletin takes Activity's, Messages
+    // takes Contacts'. Turning a beta on therefore changes what a slot leads
+    // to and never how many there are, so the row does not reflow around
+    // somebody's thumb when their access changes.
     if (bulletinEnabled) {
       tabs.push({ key: "bulletin", label: "Bulletin", icon: tab === "bulletin" ? "newspaper" : "newspaper-outline" });
+    } else {
+      // Activity is still reachable from the wallet's "See all" when Bulletin
+      // has the slot — this is a second way in, not the only one.
+      tabs.push({ key: "activity", label: "Activity", icon: tab === "activity" ? "pulse" : "pulse-outline" });
     }
     if (chatEnabled) {
       // The one dock tab with its own indicator, and for the same reason the
@@ -3115,9 +3130,10 @@ function WalletAppShellContent({
         badge: messagesUnread,
       });
     } else {
-      // Contacts takes its slot back. It has to: Messages is where Contacts
-      // lives, so without it the only remaining way in is an addcontact deep
-      // link, and a screen reachable solely by link is a screen nobody finds.
+      // Contacts holds the slot when Messages does not. It has to: Messages is
+      // where Contacts lives, so without it the only remaining way in is an
+      // addcontact deep link, and a screen reachable solely by link is a
+      // screen nobody finds.
       tabs.push({ key: "contacts", label: "Contacts", icon: tab === "contacts" ? "people" : "people-outline" });
     }
     return tabs;
@@ -3133,13 +3149,17 @@ function WalletAppShellContent({
     if (bulletinEnabled && tab === "bulletin") {
       return tab;
     }
+    if (!bulletinEnabled && tab === "activity") {
+      return "activity";
+    }
     if (chatEnabled && tab === "messages") {
       return tab;
     }
-    // Activity is part of the wallet now. Contacts is part of Messages while
-    // chat is on, and its own slot when it is off.
+    // Activity has its own slot while Bulletin does not, and otherwise lights
+    // the wallet it is reached from. Contacts is part of Messages while chat is
+    // on, and its own slot when it is off.
     if (tab === "activity") {
-      return "wallet";
+      return bulletinEnabled ? "wallet" : "activity";
     }
     if (tab === "contacts") {
       return chatEnabled ? "messages" : "contacts";
@@ -5502,13 +5522,13 @@ function WalletAppShellContent({
               merchantLabels={merchantLabelsByAddress}
               activeAddress={smartAddress}
               selectedWalletLabel={selectedWalletLabel}
+              onBack={() => {
+                setTab("wallet");
+                setWalletPane("home");
+              }}
               refreshing={refreshingActivity}
               loadingMore={loadingMoreActivity}
               canLoadMore={activityHasMore}
-              showWalletChooser={canChooseWallet}
-              onOpenWalletChooser={() => {
-                setShowWalletChooser(true);
-              }}
               onRefresh={async () => {
                 setRefreshingActivity(true);
                 try {

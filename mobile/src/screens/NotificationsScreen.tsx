@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert as RNAlert,
@@ -15,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { SupportRequestModal } from "../components/SupportRequestModal";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
+import { SwipeBack } from "../components/SwipeBack";
 import type { AppAlertAction, AppNotificationFeed, AppNotificationItem } from "../types/notifications";
 import { supportRequestDetails } from "../utils/supportRequests";
 
@@ -29,15 +30,20 @@ import { supportRequestDetails } from "../utils/supportRequests";
  * it was a receipt for a payment or a merchant waiting on approval.
  *
  * So it is a screen, the history comes from the server a page at a time, and
- * the list has two parts with different rules:
+ * it has two tabs rather than two stacked sections:
  *
- *   Needs attention — things still asking for something. Ordinary
- *   notifications leave as soon as they have been looked at. Internal alerts
- *   leave when they are dealt with, which for some of them means pressing a
- *   button here and for others means the condition going away on its own.
+ *   New — things still asking for something. Ordinary notifications leave as
+ *   soon as they have been looked at. Internal alerts leave when they are
+ *   dealt with, which for some of them means pressing a button here and for
+ *   others means the condition going away on its own.
  *
- *   Earlier — everything settled, newest first, loading more as you reach the
+ *   History — everything settled, newest first, loading more as you reach the
  *   bottom.
+ *
+ * Tabs rather than sections because the two answer different questions, and
+ * stacking them meant scrolling past an empty "nothing right now" to reach the
+ * list somebody actually opened the screen for. It opens on History when there
+ * is nothing new, for that reason.
  *
  * The one rule worth stating because it is easy to get backwards: being on
  * this screen marks ordinary notifications seen, and does not touch alerts.
@@ -60,7 +66,6 @@ type Props = {
 };
 
 type Row =
-  | { kind: "header"; key: string; title: string; subtitle: string }
   | { kind: "item"; key: string; item: AppNotificationItem }
   | { kind: "empty"; key: string; message: string }
   | { kind: "footer"; key: string };
@@ -103,6 +108,27 @@ export function NotificationsScreen({
   // Guards against onEndReached firing repeatedly while a page is in flight,
   // which FlatList will happily do on a fast scroll.
   const loadingMoreRef = useRef(false);
+
+  /**
+   * Which tab is showing.
+   *
+   * Opens on History when there is nothing new, because the alternative is an
+   * empty screen with the thing somebody came to read one tap away. Chosen once
+   * per visit rather than on every feed change: a notification arriving while
+   * the screen is open should light the other tab, not move somebody off the
+   * one they are reading.
+   */
+  const [activeTab, setActiveTab] = useState<"new" | "history">(() =>
+    (feed?.active.length ?? 0) > 0 ? "new" : "history",
+  );
+  const chosenRef = useRef(feed != null);
+  useEffect(() => {
+    // The first feed can arrive after mount, in which case the initial guess
+    // above was made with nothing to go on.
+    if (chosenRef.current || !feed) return;
+    chosenRef.current = true;
+    setActiveTab(feed.active.length > 0 ? "new" : "history");
+  }, [feed]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -169,30 +195,19 @@ export function NotificationsScreen({
     const active = feed?.active ?? [];
     const history = feed?.history ?? [];
 
-    out.push({
-      kind: "header",
-      key: "header:active",
-      title: "Needs attention",
-      subtitle:
-        active.length === 0
-          ? "Nothing right now."
-          : active.length === 1
-            ? "One thing"
-            : `${active.length} things`,
-    });
-    if (active.length === 0) {
-      out.push({ kind: "empty", key: "empty:active", message: "You are all caught up." });
-    }
-    for (const item of active) {
-      out.push({ kind: "item", key: `active:${item.id}`, item });
+    // No section headers any more: the tab is the heading, and repeating it
+    // inside the list was the duplicate title this screen already had too much
+    // of.
+    if (activeTab === "new") {
+      if (active.length === 0) {
+        out.push({ kind: "empty", key: "empty:active", message: "You are all caught up." });
+      }
+      for (const item of active) {
+        out.push({ kind: "item", key: `active:${item.id}`, item });
+      }
+      return out;
     }
 
-    out.push({
-      kind: "header",
-      key: "header:history",
-      title: "Earlier",
-      subtitle: history.length === 0 ? "Nothing yet." : "Everything already dealt with",
-    });
     if (history.length === 0) {
       out.push({
         kind: "empty",
@@ -203,12 +218,11 @@ export function NotificationsScreen({
     for (const item of history) {
       out.push({ kind: "item", key: `history:${item.id}`, item });
     }
-
     if (feed?.nextCursor) {
       out.push({ kind: "footer", key: "footer:more" });
     }
     return out;
-  }, [feed]);
+  }, [feed, activeTab]);
 
   const openSupportItem = useMemo(() => {
     if (openSupportId === null || !feed) {
@@ -223,14 +237,6 @@ export function NotificationsScreen({
 
   const renderRow = useCallback(
     ({ item: row }: { item: Row }) => {
-      if (row.kind === "header") {
-        return (
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>{row.title}</Text>
-            <Text style={styles.sectionSubtitle}>{row.subtitle}</Text>
-          </View>
-        );
-      }
       if (row.kind === "empty") {
         return <Text style={styles.emptyText}>{row.message}</Text>;
       }
@@ -375,18 +381,45 @@ export function NotificationsScreen({
   );
 
   return (
-    <View style={styles.screen}>
+    <SwipeBack onBack={onClose} style={styles.screen}>
+      {/* No title here. The app header above already says "Notifications",
+          and printing it twice was the screen telling you where you are in a
+          place you can already see. The tabs take that space instead, inline
+          with the back button. */}
       <View style={styles.topBar}>
         <Pressable style={styles.backButton} onPress={onClose} accessibilityRole="button" accessibilityLabel="Back">
           <Ionicons name="chevron-back" size={22} color={palette.primaryStrong} />
         </Pressable>
-        <View style={styles.topBarCopy}>
-          <Text style={styles.topBarTitle}>Notifications</Text>
-          {feed && feed.sets.length > 0 ? (
-            <Text style={styles.topBarSubtitle}>
-              You receive {feed.sets.length === 1 ? "one alert set" : `${feed.sets.length} alert sets`}
-            </Text>
-          ) : null}
+        <View style={styles.tabRow}>
+          {(["new", "history"] as const).map((key) => {
+            const selected = activeTab === key;
+            const count = key === "new" ? (feed?.active.length ?? 0) : 0;
+            return (
+              <Pressable
+                key={key}
+                style={[styles.tabButton, selected && styles.tabButtonActive]}
+                onPress={() => setActiveTab(key)}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                accessibilityLabel={key === "new" ? "New notifications" : "Notification history"}
+              >
+                <Text
+                  style={[styles.tabLabel, selected && styles.tabLabelActive]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.8}
+                  maxFontSizeMultiplier={1.2}
+                >
+                  {key === "new" ? "New" : "History"}
+                </Text>
+                {count > 0 ? (
+                  <View style={styles.tabCount}>
+                    <Text style={styles.tabCountText}>{count > 9 ? "9+" : count}</Text>
+                  </View>
+                ) : null}
+              </Pressable>
+            );
+          })}
         </View>
       </View>
 
@@ -441,7 +474,7 @@ export function NotificationsScreen({
         }}
         onClose={() => setOpenSupportId(null)}
       />
-    </View>
+    </SwipeBack>
   );
 }
 
@@ -456,6 +489,10 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>) 
       alignItems: "center",
       gap: spacing.sm,
       paddingHorizontal: spacing.lg,
+      // The back button used to sit flush against the app header above it,
+      // which on a device with a tall status area reads as crowding the top of
+      // the screen rather than as a row of its own.
+      paddingTop: spacing.sm,
       paddingBottom: spacing.md,
     },
     backButton: {
@@ -466,17 +503,50 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>) 
       justifyContent: "center",
       backgroundColor: palette.surfaceMuted,
     },
-    topBarCopy: {
+    tabRow: {
       flex: 1,
+      flexDirection: "row",
+      gap: spacing.xs,
+      backgroundColor: palette.surfaceMuted,
+      borderRadius: radii.md,
+      padding: 3,
     },
-    topBarTitle: {
-      fontSize: 22,
+    tabButton: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+      paddingVertical: 8,
+      borderRadius: radii.sm,
+    },
+    tabButtonActive: {
+      backgroundColor: palette.surface,
+      ...shadows.soft,
+    },
+    tabLabel: {
+      fontSize: 13,
       fontWeight: "700",
+      color: palette.textMuted,
+      includeFontPadding: false,
+    },
+    tabLabelActive: {
       color: palette.text,
     },
-    topBarSubtitle: {
-      fontSize: 12,
-      color: palette.textMuted,
+    tabCount: {
+      minWidth: 18,
+      height: 18,
+      borderRadius: 9,
+      paddingHorizontal: 5,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: palette.primaryStrong,
+    },
+    tabCountText: {
+      fontSize: 10,
+      fontWeight: "800",
+      color: palette.white,
+      includeFontPadding: false,
     },
     errorBanner: {
       flexDirection: "row",
@@ -507,24 +577,6 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>) 
     listContent: {
       paddingHorizontal: spacing.lg,
       paddingBottom: spacing.xl * 2,
-    },
-    sectionHeader: {
-      flexDirection: "row",
-      alignItems: "baseline",
-      justifyContent: "space-between",
-      marginTop: spacing.lg,
-      marginBottom: spacing.sm,
-    },
-    sectionTitle: {
-      fontSize: 13,
-      fontWeight: "700",
-      letterSpacing: 0.4,
-      textTransform: "uppercase",
-      color: palette.textMuted,
-    },
-    sectionSubtitle: {
-      fontSize: 12,
-      color: palette.textMuted,
     },
     emptyText: {
       fontSize: 13,

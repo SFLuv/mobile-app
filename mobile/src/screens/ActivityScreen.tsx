@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from "react-native";
+import { SwipeBack } from "../components/SwipeBack";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { TransactionDetailsModal } from "../components/TransactionDetailsModal";
 import { AppContact, AppLocation, AppTransaction } from "../types/app";
@@ -9,7 +10,6 @@ import {
   buildAddressNameMaps,
   buildTransactionDetailPayload,
   isRewardTransaction,
-  shortAddress,
   TransactionDetailPayload,
 } from "../utils/transactions";
 
@@ -24,11 +24,11 @@ type Props = {
   merchantLabels: Record<string, string>;
   activeAddress: string;
   selectedWalletLabel?: string;
+  /** Back to the wallet. Also what a rightward swipe does. */
+  onBack: () => void;
   refreshing: boolean;
   loadingMore: boolean;
   canLoadMore: boolean;
-  showWalletChooser?: boolean;
-  onOpenWalletChooser?: () => void;
   onRefresh: () => Promise<void>;
   onLoadMore: () => Promise<void>;
 };
@@ -54,11 +54,10 @@ export function ActivityScreen({
   merchantLabels,
   activeAddress,
   selectedWalletLabel,
+  onBack,
   refreshing,
   loadingMore,
   canLoadMore,
-  showWalletChooser,
-  onOpenWalletChooser,
   onRefresh,
   onLoadMore,
 }: Props) {
@@ -79,10 +78,139 @@ export function ActivityScreen({
     );
   }, [activeAddress, contactNameByAddress, faucetAddress, merchantNameByAddress, transactions]);
 
+  const [query, setQuery] = useState("");
+
+  /**
+   * What the search box matches.
+   *
+   * Built from the row as it is displayed rather than from the raw transaction:
+   * somebody searching "Gus's" is looking for the name on screen, and that name
+   * came from a contact or a merchant lookup, not from the chain. The raw
+   * addresses and the hash are in there too, because the other reason to search
+   * this list is that somebody has an address or a transaction id in hand.
+   */
+  const haystackFor = useCallback(
+    (details: TransactionDetailPayload) =>
+      [
+        details.fromLabel,
+        details.toLabel,
+        details.typeLabel,
+        details.received ? "received in" : "sent out",
+        details.transaction.from,
+        details.transaction.to,
+        details.transaction.hash,
+        details.transaction.memo ?? "",
+        details.transaction.amountFormatted,
+      ]
+        .join(" ")
+        .toLowerCase(),
+    [],
+  );
+
+  const visibleTransactions = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return decoratedTransactions;
+    return decoratedTransactions.filter((details) => haystackFor(details).includes(term));
+  }, [decoratedTransactions, haystackFor, query]);
+
+  // onEndReached fires repeatedly on a fast scroll, and will fire again before
+  // an in-flight page resolves. The ref is what stops three identical requests
+  // for page two.
+  const loadingMoreRef = useRef(false);
+  const reachedEnd = useCallback(() => {
+    // Not while filtering: the end of a filtered list is not the end of the
+    // data, and fetching more rows that the filter will also hide reads as the
+    // search doing nothing.
+    if (query.trim() || loadingMoreRef.current || !canLoadMore || loadingMore) return;
+    loadingMoreRef.current = true;
+    void onLoadMore().finally(() => {
+      loadingMoreRef.current = false;
+    });
+  }, [canLoadMore, loadingMore, onLoadMore, query]);
+
+  const renderRow = useCallback(
+    ({ item: details, index }: { item: TransactionDetailPayload; index: number }) => {
+      const incoming = details.received;
+      const reward = incoming && isRewardTransaction(details.transaction, faucetAddress);
+      const title = reward
+        ? "Received Reward"
+        : incoming
+          ? `Received from ${details.fromLabel}`
+          : `Sent to ${details.toLabel}`;
+
+      return (
+        <Pressable
+          style={[styles.row, index === visibleTransactions.length - 1 ? styles.rowLast : undefined]}
+          onPress={() => setSelectedTransaction(details)}
+        >
+          <View style={[styles.iconWrap, incoming ? styles.iconReceive : styles.iconSend]}>
+            <Ionicons
+              name={incoming ? "arrow-down" : "arrow-up"}
+              size={16}
+              color={incoming ? palette.success : palette.primaryStrong}
+            />
+          </View>
+          <View style={styles.cardBody}>
+            <Text style={styles.cardTitle}>{title}</Text>
+            <Text style={styles.cardMeta}>{formatDate(details.transaction.timestamp)}</Text>
+            {details.transaction.memo ? <Text style={styles.memo}>{details.transaction.memo}</Text> : null}
+          </View>
+          <View style={styles.amountWrap}>
+            <Text style={[styles.amount, incoming ? styles.amountReceive : styles.amountSend]}>
+              {incoming ? "+" : "-"}
+              {details.transaction.amountFormatted}
+            </Text>
+            <Text style={styles.currency}>{tokenSymbol}</Text>
+          </View>
+        </Pressable>
+      );
+    },
+    [faucetAddress, palette, styles, tokenSymbol, visibleTransactions.length],
+  );
+
   return (
-    <>
-      <ScrollView
+    <SwipeBack onBack={onBack} style={styles.screen}>
+      {/* Back arrow and search, in the row the wallet pill used to hold. The
+          pill named the wallet these transactions belong to, which the wallet
+          screen one tap back already says; what this list actually needed was a
+          way through it. */}
+      <View style={styles.searchRow}>
+        <Pressable
+          style={styles.backButton}
+          onPress={onBack}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Back to wallet"
+        >
+          <Ionicons name="chevron-back" size={22} color={palette.primaryStrong} />
+        </Pressable>
+        <View style={styles.searchField}>
+          <Ionicons name="search" size={15} color={palette.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Address, tx id, merchant, type, contact"
+            placeholderTextColor={palette.textMuted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+            accessibilityLabel="Search transactions"
+          />
+          {query.length > 0 ? (
+            <Pressable onPress={() => setQuery("")} hitSlop={8} accessibilityLabel="Clear search">
+              <Ionicons name="close-circle" size={16} color={palette.textMuted} />
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+
+      <FlatList
+        data={visibleTransactions}
+        keyExtractor={(details) => details.transaction.id}
+        renderItem={renderRow}
         contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             key={refreshControlKey}
@@ -90,87 +218,43 @@ export function ActivityScreen({
             onRefresh={() => void onRefresh()}
             tintColor={refreshAccent}
             colors={[refreshAccent]}
-            progressBackgroundColor={isDark ? palette.backgroundMuted : palette.surfaceStrong}
+            progressBackgroundColor={palette.surfaceStrong}
           />
         }
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.historyPanel}>
-        {/* Names the wallet these transactions belong to, and still opens the
-            chooser when there is more than one wallet to choose from. */}
-        <Pressable
-          style={styles.walletPill}
-          disabled={!showWalletChooser || !onOpenWalletChooser}
-          onPress={onOpenWalletChooser}
-        >
-          <Ionicons name="receipt-outline" size={16} color={palette.primaryStrong} />
-          <Text style={styles.walletPillText} numberOfLines={1}>
-            {selectedWalletLabel?.trim() || (activeAddress ? shortAddress(activeAddress) : "Wallet")}
-          </Text>
-          {showWalletChooser && onOpenWalletChooser ? (
-            <Ionicons name="chevron-down" size={13} color={palette.textMuted} />
-          ) : null}
-        </Pressable>
-
-        {!transactionsLoaded ? (
-          <View style={styles.emptyCardInline}>
-            <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
-            <Text style={styles.emptyTitle}>Loading transactions</Text>
-          </View>
-        ) : decoratedTransactions.length === 0 ? (
-          <View style={styles.emptyCardInline}>
-            <Text style={styles.emptyTitle}>No transactions yet</Text>
-            <Text style={styles.emptyBody}>Your sends and receives will show up here after the first payment.</Text>
-          </View>
-        ) : (
-          decoratedTransactions.map((details, index) => {
-            const incoming = details.received;
-            const reward = incoming && isRewardTransaction(details.transaction, faucetAddress);
-            const title = reward ? "Received Reward" : incoming ? `Received from ${details.fromLabel}` : `Sent to ${details.toLabel}`;
-
-            return (
-              <Pressable
-                key={details.transaction.id}
-                style={[styles.row, index === decoratedTransactions.length - 1 ? styles.rowLast : undefined]}
-                onPress={() => setSelectedTransaction(details)}
-              >
-                <View style={[styles.iconWrap, incoming ? styles.iconReceive : styles.iconSend]}>
-                  <Ionicons
-                    name={incoming ? "arrow-down" : "arrow-up"}
-                    size={16}
-                    color={incoming ? palette.success : palette.primaryStrong}
-                  />
-                </View>
-                <View style={styles.cardBody}>
-                  <Text style={styles.cardTitle}>{title}</Text>
-                  <Text style={styles.cardMeta}>{formatDate(details.transaction.timestamp)}</Text>
-                  {details.transaction.memo ? <Text style={styles.memo}>{details.transaction.memo}</Text> : null}
-                </View>
-                <View style={styles.amountWrap}>
-                  <Text style={[styles.amount, incoming ? styles.amountReceive : styles.amountSend]}>
-                    {incoming ? "+" : "-"}
-                    {details.transaction.amountFormatted}
-                  </Text>
-                  <Text style={styles.currency}>{tokenSymbol}</Text>
-                </View>
-              </Pressable>
-            );
-          })
-        )}
-
-        </View>
-
-        {decoratedTransactions.length > 0 && canLoadMore ? (
-          <Pressable
-            style={[styles.loadMoreButton, loadingMore ? styles.loadMoreButtonDisabled : undefined]}
-            disabled={loadingMore}
-            onPress={() => void onLoadMore()}
-          >
-            {loadingMore ? <ThemedActivityIndicator size="small" color={palette.white} /> : null}
-            <Text style={styles.loadMoreText}>{loadingMore ? "Loading..." : "Load 10 more"}</Text>
-          </Pressable>
-        ) : null}
-      </ScrollView>
+        /* A screen and a half ahead, so the next page is usually in hand before
+           the scroll reaches where the button used to be. */
+        onEndReached={reachedEnd}
+        onEndReachedThreshold={1.5}
+        ListEmptyComponent={
+          !transactionsLoaded ? (
+            <View style={styles.emptyCardInline}>
+              <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
+              <Text style={styles.emptyTitle}>Loading transactions</Text>
+            </View>
+          ) : query.trim() ? (
+            <View style={styles.emptyCardInline}>
+              <Text style={styles.emptyTitle}>Nothing matches that</Text>
+              <Text style={styles.emptyBody}>
+                Try part of an address, a transaction id, or the name you know them by.
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.emptyCardInline}>
+              <Text style={styles.emptyTitle}>No transactions yet</Text>
+              <Text style={styles.emptyBody}>
+                Your sends and receives will show up here after the first payment.
+              </Text>
+            </View>
+          )
+        }
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={styles.footerLoading}>
+              <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
+            </View>
+          ) : null
+        }
+      />
 
       <TransactionDetailsModal
         visible={Boolean(selectedTransaction)}
@@ -179,7 +263,7 @@ export function ActivityScreen({
         explorerURL={explorerURL}
         onClose={() => setSelectedTransaction(null)}
       />
-    </>
+    </SwipeBack>
   );
 }
 
@@ -190,25 +274,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       paddingTop: spacing.sm,
       gap: spacing.md,
       paddingBottom: 120,
-    },
-    walletPill: {
-      alignSelf: "flex-start",
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8,
-      maxWidth: "100%",
-      backgroundColor: palette.surfaceStrong,
-      borderRadius: radii.pill,
-      borderWidth: 1,
-      borderColor: palette.border,
-      paddingHorizontal: 12,
-      paddingVertical: 9,
-    },
-    walletPillText: {
-      flexShrink: 1,
-      fontSize: 13,
-      fontWeight: "800",
-      color: palette.text,
     },
     walletBar: {
       backgroundColor: palette.surface,
@@ -246,15 +311,6 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     emptyBody: {
       color: palette.textMuted,
       lineHeight: 20,
-    },
-    historyPanel: {
-      backgroundColor: palette.surface,
-      borderRadius: radii.lg,
-      borderWidth: 1,
-      borderColor: palette.border,
-      padding: spacing.md,
-      gap: spacing.sm,
-      ...shadows.soft,
     },
     row: {
       paddingVertical: spacing.sm,
@@ -320,23 +376,47 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       fontSize: 12,
       fontWeight: "700",
     },
-    loadMoreButton: {
-      minHeight: 48,
-      borderRadius: radii.md,
-      backgroundColor: palette.primaryStrong,
+    screen: {
+      flex: 1,
+    },
+    searchRow: {
       flexDirection: "row",
       alignItems: "center",
+      gap: spacing.sm,
+      paddingHorizontal: spacing.lg,
+      // Clear of the app header above, for the same reason the notification
+      // screen's row is.
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.sm,
+    },
+    backButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: "center",
       justifyContent: "center",
+      backgroundColor: palette.surfaceMuted,
+    },
+    searchField: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
       gap: spacing.xs,
-      ...shadows.soft,
+      paddingHorizontal: spacing.sm,
+      height: 36,
+      borderRadius: radii.md,
+      backgroundColor: palette.surfaceMuted,
     },
-    loadMoreButtonDisabled: {
-      opacity: 0.85,
+    searchInput: {
+      flex: 1,
+      fontSize: 13,
+      color: palette.text,
+      padding: 0,
+      includeFontPadding: false,
     },
-    loadMoreText: {
-      color: palette.white,
-      fontWeight: "800",
-      fontSize: 14,
+    footerLoading: {
+      paddingVertical: spacing.lg,
+      alignItems: "center",
     },
   });
 }

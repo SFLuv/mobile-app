@@ -2067,7 +2067,10 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     detailPage: {
       flex: 1,
       paddingHorizontal: spacing.lg,
-      paddingTop: 2,
+      // Was 2, which put the back button flush against the app header above
+      // it — on a device with a tall status area that reads as crowding the
+      // top of the screen rather than as a row of its own.
+      paddingTop: spacing.sm,
       paddingBottom: 128,
       gap: 10,
     },
