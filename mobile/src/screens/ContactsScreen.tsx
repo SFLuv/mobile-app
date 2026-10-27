@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  Dimensions,
   Easing,
+  Keyboard,
   Modal,
   Platform,
   Pressable,
@@ -11,6 +13,7 @@ import {
   Text,
   TextInput,
   View,
+  type KeyboardEvent,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
@@ -99,6 +102,19 @@ export function ContactsScreen({
   const [searchContentHeight, setSearchContentHeight] = useState(0);
   const searchReveal = useRef(new Animated.Value(0)).current;
   const [manualEntry, setManualEntry] = useState("");
+  const addSheetScrollRef = useRef<ScrollView>(null);
+  // The sheet is a transparent modal, which iOS does not move for the keyboard,
+  // so it is lifted by hand to keep the paste field in view.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  // How far the bottom of this screen sits above the bottom of the display: the
+  // home-indicator inset on Face ID phones, none on Home-button phones. The dock
+  // is pinned to the display rather than to this screen, so on a Home-button
+  // phone the dock reaches further into the screen and everything that has to
+  // clear it needs that much more room.
+  const [screenBottomGap, setScreenBottomGap] = useState(HOME_INDICATOR_INSET);
+  const screenRef = useRef<View>(null);
+  // iOS only: Android lays the dock out against its own bottom inset.
+  const dockLift = Platform.OS === "ios" ? Math.max(0, HOME_INDICATOR_INSET - screenBottomGap) : 0;
   const [editingID, setEditingID] = useState<number | null>(null);
   const [editingName, setEditingName] = useState("");
   const [editingAddress, setEditingAddress] = useState("");
@@ -226,6 +242,32 @@ export function ContactsScreen({
     }
   };
 
+  useEffect(() => {
+    if (!addSheetOpen || Platform.OS !== "ios") {
+      return;
+    }
+    const onShow = (event: KeyboardEvent) => {
+      setKeyboardHeight(event.endCoordinates.height);
+      requestAnimationFrame(() => addSheetScrollRef.current?.scrollToEnd({ animated: true }));
+    };
+    const show = Keyboard.addListener("keyboardWillShow", onShow);
+    const hide = Keyboard.addListener("keyboardWillHide", () => setKeyboardHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+      setKeyboardHeight(0);
+    };
+  }, [addSheetOpen]);
+
+  const measureScreenBottom = () => {
+    screenRef.current?.measureInWindow((_x, y, _width, height) => {
+      if (!height) {
+        return;
+      }
+      setScreenBottomGap(Math.max(0, Dimensions.get("window").height - (y + height)));
+    });
+  };
+
   const openAddSheet = () => {
     setAddSheetOpen(true);
     addSheetAnim.setValue(0);
@@ -347,8 +389,11 @@ export function ContactsScreen({
   };
 
   return (
-    <View style={styles.screen}>
-    <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+    <View ref={screenRef} style={styles.screen} onLayout={measureScreenBottom}>
+    <ScrollView
+      contentContainerStyle={[styles.container, { paddingBottom: styles.container.paddingBottom + dockLift }]}
+      showsVerticalScrollIndicator={false}
+    >
       {syncNotice ? (
         <View style={styles.noticeCard}>
           <Text style={styles.noticeTitle}>App Sync</Text>
@@ -579,7 +624,7 @@ export function ContactsScreen({
 
       {contactMode === "contacts" ? (
         <Pressable
-          style={styles.fab}
+          style={[styles.fab, { bottom: styles.fab.bottom + dockLift }]}
           onPress={openAddSheet}
           accessibilityRole="button"
           accessibilityLabel="Add contact"
@@ -597,11 +642,20 @@ export function ContactsScreen({
         animationType="none"
         onRequestClose={closeAddSheet}
       >
-        <Animated.View style={[styles.addSheetBackdrop, { opacity: addSheetAnim }]}>
+        <Animated.View
+          style={[styles.addSheetBackdrop, { opacity: addSheetAnim, paddingBottom: keyboardHeight }]}
+        >
           <Pressable style={styles.addSheetDismissArea} onPress={closeAddSheet} />
           <Animated.View
             style={[
               styles.addSheetCard,
+              keyboardHeight
+                ? {
+                    minHeight: 0,
+                    maxHeight: Dimensions.get("window").height - keyboardHeight - spacing.xxl * 2,
+                    paddingBottom: spacing.md,
+                  }
+                : null,
               {
                 transform: [
                   {
@@ -620,7 +674,7 @@ export function ContactsScreen({
                 <Ionicons name="close" size={18} color={palette.primaryStrong} />
               </Pressable>
             </View>
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <ScrollView ref={addSheetScrollRef} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             <View style={styles.scanCard}>
               {permission?.status === "granted" ? (
                 <View style={styles.scannerFrame}>
@@ -752,6 +806,9 @@ export function ContactsScreen({
     </View>
   );
 }
+
+/** The bottom safe-area inset on Face ID iPhones, which the dock layout is built around. */
+const HOME_INDICATOR_INSET = 34;
 
 function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) {
   return StyleSheet.create({
