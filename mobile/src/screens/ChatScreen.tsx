@@ -86,6 +86,11 @@ import {
  */
 const STAMP_COLUMN_WIDTH = 56;
 
+/** One row of the thread: a message, or a date between sessions. */
+type ChatRow =
+  | { kind: "message"; message: ChatMessage; previousInTime?: ChatMessage }
+  | { kind: "separator"; label: string; key: string };
+
 /** iMessage's six, which cover almost every reaction anybody actually sends. */
 const DEFAULT_REACTIONS = ["❤️", "👍", "👎", "😂", "‼️", "❓"];
 
@@ -182,6 +187,34 @@ export function ChatScreen({
    * picked yet" has to be distinguishable from "not selecting".
    */
   const [selectedIds, setSelectedIds] = useState<number[] | null>(null);
+
+  /**
+   * Attachments chosen but not yet sent.
+   *
+   * ── Why picking no longer sends ───────────────────────────────────────────
+   *
+   * Choosing a photo used to post it immediately, which meant there was no
+   * moment at which you could say anything about it: the picture arrived, and
+   * then a second message explaining it arrived after. Staging them puts the
+   * send under the person's control, the way every other chat app works.
+   *
+   * `splitAt` is where the caret was when the attachment was picked, so the
+   * draft can be cut into the part that goes BEFORE it and the part that goes
+   * after — iMessage's behaviour, where text either side of an inserted photo
+   * becomes its own message on its own side of it.
+   */
+  const [staged, setStaged] = useState<{
+    files: Array<{ uri: string; mimeType?: string | null; fileName?: string | null; isImage: boolean }>;
+    reference?: {
+      kind: "transaction" | "merchant" | "event";
+      label: string;
+      txHash?: string;
+      locationId?: number;
+      eventId?: string;
+    };
+    splitAt: number;
+  } | null>(null);
+  const caretRef = useRef(0);
 
   const inputRef = useRef<TextInput | null>(null);
   const swipeRef = useRef<SwipeBackHandle>(null);
@@ -303,10 +336,36 @@ export function ChatScreen({
   const typing = useTypingIndicators(conversationId, subscribe);
   const reportTyping = useTypingReporter(conversationId, sendTyping);
 
-  // The list is inverted, so it wants newest-first. Memoized because a fresh
-  // array on every render defeats FlatList's own bail-out and re-renders every
-  // bubble on each keystroke in the composer.
-  const orderedMessages = useMemo(() => [...messages].reverse(), [messages]);
+  /**
+   * The list's rows: messages and date separators, interleaved.
+   *
+   * ── Why separators are their own row ──────────────────────────────────────
+   *
+   * They were rendered inside the message row, which put a centred full-width
+   * label inside a flex row laid out for a bubble and a timestamp — so it was
+   * squeezed beside the bubble, inherited the row's alignment, and slid
+   * sideways with the timestamp-reveal gesture. A separator is not part of a
+   * message and does not behave like one; it is its own row.
+   *
+   * ── The ordering, which is easy to get backwards ──────────────────────────
+   *
+   * The list is inverted, so index 0 renders at the BOTTOM. The array therefore
+   * runs newest to oldest. A separator has to appear visually ABOVE the message
+   * whose session it opens, which means it comes AFTER that message in the
+   * array.
+   */
+  const rows = useMemo<ChatRow[]>(() => {
+    const ordered = [...messages].reverse();
+    const out: ChatRow[] = [];
+    ordered.forEach((message, index) => {
+      out.push({ kind: "message", message, previousInTime: ordered[index + 1] });
+      const separator = sessionSeparator(ordered[index + 1], message);
+      if (separator) {
+        out.push({ kind: "separator", label: separator, key: `sep:${message.id}` });
+      }
+    });
+    return out;
+  }, [messages]);
 
   const isGroup = conversation?.kind === "group";
 
@@ -595,22 +654,81 @@ export function ChatScreen({
     }
   };
 
-  const sendAttachments = async (
-    files: Array<{ uri: string; mimeType?: string | null; fileName?: string | null }>,
+  /** Stages files for the next send, rather than posting them now. */
+  const stageAttachments = (
+    files: Array<{ uri: string; mimeType?: string | null; fileName?: string | null; isImage: boolean }>,
   ) => {
-    if (!backendClient || files.length === 0) {
+    if (files.length === 0) {
       return;
     }
     setMode("text");
+    setStaged((current) => ({
+      files: [...(current?.files ?? []), ...files].slice(0, 10),
+      reference: current?.reference,
+      // The caret when the FIRST attachment of a batch was added. Adding a
+      // second photo should not move where the text splits.
+      splitAt: current?.splitAt ?? caretRef.current,
+    }));
+    setTimeout(() => inputRef.current?.focus(), 120);
+  };
+
+  /**
+   * Sends the staged attachments and the draft around them.
+   *
+   * Up to three messages, in the order they read: the text before the
+   * attachment, the attachment, then the text after. Each is a separate send
+   * because each is a separate message — which is what makes a photo with a
+   * sentence either side look like it does in iMessage rather than like a
+   * caption.
+   */
+  const sendStaged = async () => {
+    if (!backendClient || !staged || sending) {
+      return;
+    }
+    const before = draft.slice(0, staged.splitAt).trim();
+    const after = draft.slice(staged.splitAt).trim();
+
     setSending(true);
     try {
-      const message = await backendClient.uploadConversationAttachments(conversationId, files, {
-        body: draft.trim() || undefined,
-        replyToId: replyingTo?.id ?? null,
-      });
-      setMessages((current) => [...current, message]);
+      if (before) {
+        const leading = await backendClient.sendConversationMessage(
+          conversationId,
+          before,
+          replyingTo?.id ?? null,
+        );
+        setMessages((current) => [...current, leading]);
+      }
+
+      if (staged.files.length > 0) {
+        const message = await backendClient.uploadConversationAttachments(
+          conversationId,
+          staged.files,
+          // The reply is attached to the FIRST message sent, not repeated on
+          // each — three messages all quoting the same thing reads as three
+          // replies.
+          { replyToId: before ? null : replyingTo?.id ?? null },
+        );
+        setMessages((current) => [...current, message]);
+      } else if (staged.reference) {
+        const message = await backendClient.attachConversationReference(conversationId, {
+          kind: staged.reference.kind,
+          tx_hash: staged.reference.txHash,
+          location_id: staged.reference.locationId,
+          event_id: staged.reference.eventId,
+          reply_to_id: before ? null : staged.reference ? replyingTo?.id ?? null : null,
+        });
+        setMessages((current) => [...current, message]);
+      }
+
+      if (after) {
+        const trailing = await backendClient.sendConversationMessage(conversationId, after, null);
+        setMessages((current) => [...current, trailing]);
+      }
+
+      setStaged(null);
       setDraft("");
       setReplyingTo(null);
+      reportTyping(false);
     } catch (e) {
       onToast(e instanceof BulletinRequestError ? e.message : "Couldn't send that.", "error");
     } finally {
@@ -618,28 +736,6 @@ export function ChatScreen({
     }
   };
 
-  const sendLink = async (url: string) => {
-    if (!backendClient) {
-      return;
-    }
-    setMode("text");
-    setSending(true);
-    try {
-      const message = await backendClient.attachConversationReference(conversationId, {
-        kind: "link",
-        link_url: url,
-        body: draft.trim() || undefined,
-        reply_to_id: replyingTo?.id ?? null,
-      });
-      setMessages((current) => [...current, message]);
-      setDraft("");
-      setReplyingTo(null);
-    } catch (e) {
-      onToast(e instanceof BulletinRequestError ? e.message : "Couldn't share that link.", "error");
-    } finally {
-      setSending(false);
-    }
-  };
 
   // ── Attachment options ────────────────────────────────────────────────────
 
@@ -665,11 +761,12 @@ export function ChatScreen({
             if (result.canceled) {
               return;
             }
-            await sendAttachments(
+            stageAttachments(
               result.assets.map((asset) => ({
                 uri: asset.uri,
                 mimeType: asset.mimeType,
                 fileName: asset.fileName,
+                isImage: true,
               })),
             );
           })();
@@ -690,11 +787,12 @@ export function ChatScreen({
             if (result.canceled) {
               return;
             }
-            await sendAttachments(
+            stageAttachments(
               result.assets.map((asset) => ({
                 uri: asset.uri,
                 mimeType: asset.mimeType,
                 fileName: asset.fileName,
+                isImage: true,
               })),
             );
           })();
@@ -721,11 +819,12 @@ export function ChatScreen({
             if (result.canceled || result.assets.length === 0) {
               return;
             }
-            await sendAttachments(
+            stageAttachments(
               result.assets.map((asset) => ({
                 uri: asset.uri,
                 mimeType: asset.mimeType,
                 fileName: asset.name,
+                isImage: Boolean(asset.mimeType?.startsWith("image/")),
               })),
             );
           })();
@@ -750,8 +849,7 @@ export function ChatScreen({
     isGroup,
     onSendPayment,
     onToast,
-    sendAttachments,
-    sendLink,
+    stageAttachments,
     tokenSymbol,
   ]);
 
@@ -849,11 +947,36 @@ export function ChatScreen({
     );
   };
 
+  /**
+   * What "Copy" puts on the clipboard.
+   *
+   * For a plain message, its text. For a message whose content is a card, the
+   * thing the card points AT — the link's URL, the transaction's hash — because
+   * that is what somebody copying a preview wants to paste somewhere. Copying
+   * the card's scraped title instead would hand them our words about the link
+   * rather than the link.
+   */
   const copyMessage = async (message: ChatMessage) => {
     setActionTarget(null);
-    const text = message.body?.trim();
+
+    const attachment = message.attachments?.[0];
+    const fromAttachment =
+      attachment?.kind === "link"
+        ? attachment.link_url
+        : attachment?.kind === "transaction"
+          ? attachment.tx_hash
+          : "";
+
+    // The body wins when there is one AND it is not just the bare link the
+    // card already represents — a sentence containing a link copies as the
+    // sentence, a message that is only a link copies as the URL.
+    const body = message.body?.trim() ?? "";
+    const bodyIsJustTheLink =
+      Boolean(fromAttachment) && body.replace(fromAttachment ?? "", "").trim() === "";
+    const text = body && !bodyIsJustTheLink ? body : fromAttachment || body;
+
     if (!text) {
-      onToast("There's no text to copy.", "info");
+      onToast("There's nothing to copy.", "info");
       return;
     }
     await Clipboard.setStringAsync(text);
@@ -886,30 +1009,28 @@ export function ChatScreen({
     [onOpenEvent, onOpenMerchant, onOpenTransaction, onToast],
   );
 
-  const renderMessage = ({ item, index }: { item: ChatMessage; index: number }) => {
-    // The list is rendered reversed, so the message BEFORE this one in time is
-    // at the next index up.
-    const previousInTime = orderedMessages[index + 1];
-    // A centred date when a conversation picks up after a gap, the way iMessage
-    // does it. Rendered as part of this row rather than as a separate list item
-    // so the inverted list's ordering stays trivially correct.
-    const separator = sessionSeparator(previousInTime, item);
-
-    if (item.kind === "system") {
+  const renderRow = ({ item: row }: { item: ChatRow }) => {
+    if (row.kind === "separator") {
       return (
-        <>
-          {separator ? <Text style={styles.daySeparator}>{separator}</Text> : null}
-          <View style={styles.systemLine}>
-            <Text style={styles.systemText}>{item.body}</Text>
-          </View>
-        </>
+        <View style={styles.daySeparatorRow}>
+          <Text style={styles.daySeparator}>{row.label}</Text>
+        </View>
       );
     }
 
-    // The list is rendered reversed, so a higher index is an OLDER message.
+    const item = row.message;
+    const olderNeighbour = row.previousInTime;
+
+    if (item.kind === "system") {
+      return (
+        <View style={styles.systemLine}>
+          <Text style={styles.systemText}>{item.body}</Text>
+        </View>
+      );
+    }
+
     // A run of messages from one person shows their name once, on the oldest of
-    // the run — which is the one with a different sender above it.
-    const olderNeighbour = messages[messages.length - index - 2];
+    // the run — the one with a different sender above it.
     const showSender =
       isGroup &&
       !item.is_mine &&
@@ -925,7 +1046,6 @@ export function ChatScreen({
           { transform: [{ translateX: stampReveal }] },
         ]}
       >
-        {separator ? <Text style={styles.daySeparator}>{separator}</Text> : null}
         <View style={styles.messageColumn}>
           {showSender ? <Text style={styles.senderName}>{item.sender_name}</Text> : null}
 
@@ -1023,18 +1143,46 @@ export function ChatScreen({
                 <Ionicons name="chevron-forward" size={15} color={palette.textMuted} />
               </Pressable>
             ) : (
-              <View
-                style={[
-                  styles.bubble,
-                  item.is_mine ? styles.bubbleMine : styles.bubbleTheirs,
-                  // An attachment supplies its own surface, so the bubble around
-                  // it drops its fill and padding rather than framing it twice.
-                  item.attachments?.length ? styles.bubbleBare : undefined,
-                ]}
-              >
-                {item.attachments?.length ? (
-                  <View style={styles.attachments}>
-                    {item.attachments.map((attachment: MessageAttachment) => (
+              (() => {
+                const attachments = item.attachments ?? [];
+                const body = item.body?.trim() ?? "";
+                const emojiOnly = attachments.length === 0 && isEmojiOnly(body);
+
+                // ── A link that IS the message ────────────────────────────
+                //
+                // When the whole message is one link, the card says everything
+                // and the URL beneath it is noise. When the link is one part of
+                // a sentence, the sentence has to survive — so the text renders
+                // as a normal bubble and the card goes under it, rather than the
+                // text becoming a caption clamped under an image.
+                const soleLink =
+                  attachments.length === 1 &&
+                  attachments[0].kind === "link" &&
+                  Boolean(attachments[0].link_url) &&
+                  body.replace(attachments[0].link_url ?? "", "").trim() === "";
+
+                return (
+                  <View style={styles.messageStack}>
+                    {/* The text, in a normal bubble, whenever there is text
+                        worth showing. */}
+                    {body && !soleLink ? (
+                      emojiOnly ? (
+                        <Text style={styles.emojiOnly}>{item.body}</Text>
+                      ) : (
+                        <View
+                          style={[
+                            styles.bubble,
+                            item.is_mine ? styles.bubbleMine : styles.bubbleTheirs,
+                          ]}
+                        >
+                          <Text style={item.is_mine ? styles.bubbleTextMine : styles.bubbleText}>
+                            {item.body}
+                          </Text>
+                        </View>
+                      )
+                    ) : null}
+
+                    {attachments.map((attachment: MessageAttachment) => (
                       <MessageAttachmentCard
                         key={attachment.id}
                         attachment={attachment}
@@ -1043,21 +1191,18 @@ export function ChatScreen({
                         tokenSymbol={tokenSymbol}
                         mine={item.is_mine}
                         handlers={attachmentHandlers}
+                        // Cards get the same long-press as a bubble: there is no
+                        // reason you can react to "nice" and not to the photo it
+                        // was about.
+                        onLongPress={() => {
+                          triggerClickHaptic(hapticsEnabled);
+                          setActionTarget(item);
+                        }}
                       />
                     ))}
                   </View>
-                ) : null}
-                {item.body ? (
-                  <Text
-                    style={[
-                      item.is_mine ? styles.bubbleTextMine : styles.bubbleText,
-                      item.attachments?.length ? styles.caption : undefined,
-                    ]}
-                  >
-                    {item.body}
-                  </Text>
-                ) : null}
-              </View>
+                );
+              })()
             )}
           </Pressable>
 
@@ -1167,9 +1312,9 @@ export function ChatScreen({
           // the bottom and the keyboard cannot fight a scroll-to-end. See the
           // note at the top of the file.
           inverted
-          data={orderedMessages}
-          keyExtractor={(item) => String(item.id)}
-          renderItem={renderMessage}
+          data={rows}
+          keyExtractor={(row) => (row.kind === "separator" ? row.key : String(row.message.id))}
+          renderItem={renderRow}
           contentContainerStyle={styles.listContent}
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
@@ -1274,7 +1419,7 @@ export function ChatScreen({
               setDraft(value);
               reportTyping(value.trim().length > 0);
             }}
-            onSend={() => void (editing ? submitEdit() : send())}
+            onSend={() => void (editing ? submitEdit() : staged ? sendStaged() : send())}
             sending={sending}
             attachmentOptions={attachmentOptions}
             onSendAmount={
@@ -1305,6 +1450,21 @@ export function ChatScreen({
                 : null
             }
             onCancelReply={() => setReplyingTo(null)}
+            stagedAttachments={staged?.files}
+            onRemoveStaged={(index) =>
+              setStaged((current) => {
+                if (!current) {
+                  return null;
+                }
+                const files = current.files.filter((_, i) => i !== index);
+                // Nothing staged any more means nothing to stage FOR, so the
+                // split point goes too.
+                return files.length === 0 && !current.reference ? null : { ...current, files };
+              })
+            }
+            onCaretChange={(position) => {
+              caretRef.current = position;
+            }}
             linkPreview={linkPreview}
             onDismissLinkPreview={() => {
               // Remembered per URL, so dismissing does not just make the card
@@ -1631,6 +1791,47 @@ function formatSessionStamp(at: Date): string {
   return `${day} ${time}`;
 }
 
+/**
+ * Whether a message is nothing but a few emoji, which iMessage renders large
+ * and unbubbled.
+ *
+ * "Fewer than five" is the rule asked for, and the count is of GRAPHEMES rather
+ * than code points: 👨‍👩‍👧 is one emoji to a reader and five code points to
+ * JavaScript, so counting the latter would bubble a single family emoji.
+ * Intl.Segmenter does the clustering where it exists; where it does not, the
+ * fallback is deliberately conservative and leaves the message bubbled rather
+ * than guessing.
+ */
+function isEmojiOnly(body: string): boolean {
+  const text = body.trim();
+  if (!text) {
+    return false;
+  }
+  // Anything that is not an emoji, a modifier, a joiner or a space disqualifies
+  // it immediately — this is the cheap check that rejects almost every message.
+  if (/[^\p{Extended_Pictographic}\p{Emoji_Component}\u200d\ufe0f\s]/u.test(text)) {
+    return false;
+  }
+  const segmenter =
+    typeof Intl !== "undefined" && "Segmenter" in Intl
+      ? new (Intl as unknown as { Segmenter: new (l?: string, o?: object) => { segment: (s: string) => Iterable<unknown> } }).Segmenter(
+          undefined,
+          { granularity: "grapheme" },
+        )
+      : null;
+  if (!segmenter) {
+    return false;
+  }
+  let count = 0;
+  for (const _ of segmenter.segment(text.replace(/\s+/g, ""))) {
+    count += 1;
+    if (count >= 5) {
+      return false;
+    }
+  }
+  return count > 0;
+}
+
 /** The per-message time revealed by swiping the thread left. */
 function formatMessageStamp(at: string): string {
   return new Date(at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -1707,7 +1908,14 @@ function createStyles(palette: Palette) {
       borderColor: palette.border,
       borderBottomLeftRadius: 6,
     },
-    bubbleBare: { backgroundColor: "transparent", borderWidth: 0, paddingHorizontal: 0, paddingVertical: 0 },
+    // A stack rather than one bubble: text and cards are separate objects now,
+    // so a sentence containing a link keeps its bubble and the card sits under
+    // it instead of the text being clamped beneath an image.
+    messageStack: { gap: 4, alignItems: "stretch" },
+    // iMessage's treatment for a message that is only a few emoji: large, and
+    // no bubble, because the emoji IS the message rather than something said
+    // inside one.
+    emojiOnly: { fontSize: 44, lineHeight: 52, paddingHorizontal: 4 },
     bubbleText: { fontSize: 15, color: palette.text, lineHeight: 20 },
     bubbleTextMine: { fontSize: 15, color: palette.white, lineHeight: 20 },
     caption: { marginTop: 6, color: palette.text },
@@ -1771,6 +1979,9 @@ function createStyles(palette: Palette) {
     reactionEmoji: { fontSize: 13 },
     reactionCount: { fontSize: 11, color: palette.textMuted, fontWeight: "600" },
 
+    // Its own row: full width, centred, and outside the message row's flex
+    // layout. See the note on `rows`.
+    daySeparatorRow: { paddingVertical: spacing.sm },
     daySeparator: {
       textAlign: "center",
       fontSize: 11,

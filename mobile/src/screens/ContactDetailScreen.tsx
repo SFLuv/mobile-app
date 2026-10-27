@@ -17,10 +17,31 @@ import * as ImagePicker from "expo-image-picker";
 import { AppBackendClient } from "../services/appBackend";
 import { SwipeBack } from "../components/SwipeBack";
 import { SfluvQRCode } from "../components/SfluvQRCode";
-import { Avatar } from "../components/BulletinParts";
+import { Avatar, BadgeLine } from "../components/BulletinParts";
+import type { PublicUser } from "../types/bulletin";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { AppClientConfig, AppContact } from "../types/app";
 import { buildUniversalAddContactLink } from "../utils/universalLinks";
+
+/**
+ * One person: what you saved about them, and what they published about
+ * themselves.
+ *
+ * ── Why these are one screen ────────────────────────────────────────────────
+ *
+ * They were two ideas with no single place to see them. A contact was a name
+ * and an address you chose; a public profile was a display name, username and
+ * badges the account chose. Tapping a contact showed only the first, so
+ * somebody who was both — most saved contacts, as it turns out, since the link
+ * resolves automatically — appeared twice in the app with no connection
+ * between them.
+ *
+ * Now the private half is the editable top of the screen and the public half is
+ * a section under it, loaded when the address resolves to an account. The
+ * distinction is kept visible rather than merged, because it matters: the name
+ * and note are yours and nobody else sees them, and the profile is theirs and
+ * you cannot change it.
+ */
 
 /**
  * One contact, as a card.
@@ -79,6 +100,39 @@ export function ContactDetailScreen({
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [showQR, setShowQR] = useState(false);
+  /** Their public profile, when this contact's address belongs to an account. */
+  const [profile, setProfile] = useState<PublicUser | null>(null);
+  const [profileAvatarUri, setProfileAvatarUri] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!backendClient || !contact.userId) {
+      setProfile(null);
+      setProfileAvatarUri(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [publicUser, uri] = await Promise.all([
+          backendClient.getPublicUserProfile(contact.userId!),
+          backendClient.getUserAvatarDataUri(contact.userId!),
+        ]);
+        if (!cancelled) {
+          setProfile(publicUser);
+          setProfileAvatarUri(uri);
+        }
+      } catch {
+        // No profile, or unreachable. The private half of the screen is still
+        // the whole point of it, so this fails quietly.
+        if (!cancelled) {
+          setProfile(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [backendClient, contact.userId]);
 
   useEffect(() => {
     setName(contact.name);
@@ -168,6 +222,8 @@ export function ContactDetailScreen({
       { text: "Delete", style: "destructive", onPress: onDeleted },
     ]);
   };
+
+  const dirty = name.trim() !== contact.name || (notes ?? "") !== (contact.notes ?? "");
 
   const shareLink = buildUniversalAddContactLink({ address: contact.address }, clientConfig);
 
@@ -289,6 +345,32 @@ export function ContactDetailScreen({
           <Ionicons name="copy-outline" size={17} color={palette.textMuted} />
         </Pressable>
 
+        {/* Their profile. Read-only, and labelled as theirs — the fields above
+            are what you chose to call them, this is what they chose to be
+            called, and conflating the two would make a private note look
+            published. */}
+        {profile ? (
+          <>
+            <Text style={styles.label}>Their SFLuv profile</Text>
+            <View style={styles.profileCard}>
+              {profileAvatarUri ? (
+                <Image source={{ uri: profileAvatarUri }} style={styles.profileAvatar} />
+              ) : (
+                <Avatar name={profile.public_name} size={44} />
+              )}
+              <View style={{ flex: 1 }}>
+                <Text style={styles.profileName} numberOfLines={1}>
+                  {profile.public_name}
+                </Text>
+                {profile.handle ? (
+                  <Text style={styles.profileHandle}>@{profile.handle}</Text>
+                ) : null}
+                <BadgeLine user={profile} />
+              </View>
+            </View>
+          </>
+        ) : null}
+
         <Text style={styles.label}>Notes</Text>
         <TextInput
           style={styles.notes}
@@ -308,6 +390,23 @@ export function ContactDetailScreen({
         <Text style={styles.privateHint}>
           Only you can see this name, picture and note.
         </Text>
+
+        {/* An explicit Save, shown only when something has changed.
+            The fields still save on blur, which is what stops a note being lost
+            by walking away — but blur-only gave no way to tell whether an edit
+            had been kept, and on a screen holding somebody's private notes that
+            uncertainty is worth a button. */}
+        {dirty ? (
+          <Pressable
+            style={[styles.saveButton, saving && styles.saveButtonBusy]}
+            onPress={() => void persist({ name: name.trim(), notes })}
+            disabled={saving}
+            accessibilityRole="button"
+            accessibilityLabel="Save changes"
+          >
+            <Text style={styles.saveButtonText}>{saving ? "Saving…" : "Save changes"}</Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
     </SwipeBack>
   );
@@ -431,5 +530,27 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       lineHeight: 21,
     },
     privateHint: { fontSize: 12, color: palette.textMuted, marginTop: spacing.sm, textAlign: "center" },
+    profileCard: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      backgroundColor: palette.surface,
+      borderWidth: 1,
+      borderColor: palette.border,
+      borderRadius: radii.md,
+      padding: spacing.sm,
+    },
+    profileAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: palette.surfaceStrong },
+    profileName: { fontSize: 15, fontWeight: "700", color: palette.text },
+    profileHandle: { fontSize: 12, color: palette.textMuted, marginTop: 1 },
+    saveButton: {
+      marginTop: spacing.md,
+      borderRadius: radii.pill,
+      backgroundColor: palette.primary,
+      paddingVertical: 13,
+      alignItems: "center",
+    },
+    saveButtonBusy: { opacity: 0.6 },
+    saveButtonText: { color: palette.white, fontWeight: "700", fontSize: 15 },
   });
 }

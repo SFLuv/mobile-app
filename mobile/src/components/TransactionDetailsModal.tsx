@@ -78,6 +78,19 @@ export function TransactionDetailsModal({
   const progress = useRef(new Animated.Value(visible && details ? 1 : 0)).current;
   const dragY = useRef(new Animated.Value(0)).current;
   const scrollYRef = useRef(0);
+  /**
+   * Something to run once this modal has actually gone.
+   *
+   * Sharing opens another Modal, and iOS does not stack two — the second ends
+   * up presented but invisible, still capturing touches, and the whole app
+   * stops responding. A double requestAnimationFrame was not enough: the exit
+   * is a 220ms animation and the Modal stays mounted for all of it, so the
+   * share fired while this one was still up.
+   *
+   * Held here and invoked where `setMounted(false)` happens, which is the only
+   * place this component actually knows it is gone.
+   */
+  const afterDismissRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!copiedField) {
@@ -128,6 +141,13 @@ export function TransactionDetailsModal({
         dragY.setValue(0);
         setMounted(false);
         setRenderedDetails(null);
+        const queued = afterDismissRef.current;
+        afterDismissRef.current = null;
+        if (queued) {
+          // One frame past the unmount commit, so the native view controller
+          // has been dismissed before another is presented.
+          requestAnimationFrame(queued);
+        }
       }
     });
   }, [details, dragY, mounted, progress, visible]);
@@ -316,12 +336,12 @@ export function TransactionDetailsModal({
                   style={styles.inlineExplorerButton}
                   onPress={() => {
                     const hash = renderedDetails.transaction.hash;
-                    // Closed first, then the share sheet on the next frame: both
-                    // are modals, and presenting one from under another is what
-                    // left an invisible modal capturing every touch. Same
-                    // reasoning as closeMerchantSheet's afterClose.
+                    // Queued until this modal has finished its exit animation
+                    // and unmounted — see afterDismissRef. Firing it on a frame
+                    // timer instead was the bug: the exit takes 220ms and the
+                    // share sheet arrived in the middle of it.
+                    afterDismissRef.current = () => onShare(hash);
                     onClose();
-                    requestAnimationFrame(() => requestAnimationFrame(() => onShare(hash)));
                   }}
                   accessibilityRole="button"
                   accessibilityLabel="Share this transaction"

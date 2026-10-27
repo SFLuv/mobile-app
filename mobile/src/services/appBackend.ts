@@ -70,6 +70,7 @@ import {
   ConversationFile,
   ConversationRole,
   MessageReaction,
+  PublicUser,
   MessagesPage,
   ReportReason,
   UserProfile,
@@ -4034,6 +4035,15 @@ export class AppBackendClient {
 
   searchSFLuvUsers(query: string): Promise<UserSearchResult> {
     return this.bulletinRequest(`/users/search?q=${encodeURIComponent(query)}`, {}, "Unable to search");
+  }
+
+  /** One person's public face: display name, username, badges, good trades. */
+  getPublicUserProfile(userId: string): Promise<PublicUser> {
+    return this.bulletinRequest(
+      `/users/${encodeURIComponent(userId)}/public`,
+      {},
+      "Unable to load that profile",
+    );
   }
 
   getConversations(): Promise<Conversation[]> {

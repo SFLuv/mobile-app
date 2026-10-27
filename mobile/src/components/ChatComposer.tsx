@@ -69,6 +69,9 @@ export function ChatComposer({
   onCancelReply,
   linkPreview,
   onDismissLinkPreview,
+  stagedAttachments,
+  onRemoveStaged,
+  onCaretChange,
   hapticsEnabled,
   inputRef,
   placeholder = "Message",
@@ -100,6 +103,23 @@ export function ChatComposer({
     siteName: string;
   } | null;
   onDismissLinkPreview?: () => void;
+  /**
+   * Attachments picked but not yet sent, shown as thumbnails above the input.
+   *
+   * Picking used to send immediately, which left no moment to say anything
+   * about the thing being sent. These sit here until the send button is
+   * pressed, alongside whatever is typed.
+   */
+  stagedAttachments?: Array<{ uri: string; fileName?: string | null; isImage: boolean }>;
+  onRemoveStaged?: (index: number) => void;
+  /**
+   * The caret position, reported on every selection change.
+   *
+   * It is what lets the draft be split around an attachment: text before where
+   * the photo was inserted becomes its own message before it, text after
+   * becomes its own after.
+   */
+  onCaretChange?: (position: number) => void;
   hapticsEnabled: boolean;
   inputRef?: React.RefObject<TextInput | null>;
   placeholder?: string;
@@ -109,6 +129,36 @@ export function ChatComposer({
 
   return (
     <View style={styles.wrap}>
+      {/* Staged attachments, as thumbnails. Topmost in the stack because they
+          are the thing being sent; everything below is about it. */}
+      {stagedAttachments?.length ? (
+        <View style={styles.stagedRow}>
+          {stagedAttachments.map((item, index) => (
+            <View key={`${item.uri}:${index}`} style={styles.stagedItem}>
+              {item.isImage ? (
+                <Image source={{ uri: item.uri }} style={styles.stagedThumb} resizeMode="cover" />
+              ) : (
+                <View style={[styles.stagedThumb, styles.stagedFile]}>
+                  <Ionicons name="document-outline" size={18} color={palette.textMuted} />
+                  <Text style={styles.stagedFileName} numberOfLines={1}>
+                    {item.fileName || "File"}
+                  </Text>
+                </View>
+              )}
+              <Pressable
+                style={styles.stagedRemove}
+                onPress={() => onRemoveStaged?.(index)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={`Remove ${item.fileName || "attachment"}`}
+              >
+                <Ionicons name="close" size={12} color={palette.white} />
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
       {/* The detected link's card. Above the reply bar so the stack reads
           bottom-up as: what I am sending, what I am replying to, the input. */}
       {linkPreview && mode === "text" ? (
@@ -221,15 +271,21 @@ export function ChatComposer({
             style={styles.input}
             value={draft}
             onChangeText={onDraftChange}
+            onSelectionChange={(event) => onCaretChange?.(event.nativeEvent.selection.start)}
             placeholder={placeholder}
             placeholderTextColor={palette.textMuted}
             multiline
             maxLength={2000}
           />
           <Pressable
-            style={[styles.sendButton, (!draft.trim() || sending) && styles.sendButtonIdle]}
+            // Sendable with staged attachments and no text: a photo on its own
+            // is a message.
+            style={[
+              styles.sendButton,
+              (!draft.trim() && !stagedAttachments?.length) || sending ? styles.sendButtonIdle : undefined,
+            ]}
             onPress={() => void onSend()}
-            disabled={!draft.trim() || sending}
+            disabled={(!draft.trim() && !stagedAttachments?.length) || sending}
             accessibilityRole="button"
             accessibilityLabel="Send message"
           >
@@ -444,6 +500,33 @@ function createStyles(palette: Palette) {
     },
     sendButtonIdle: { opacity: 0.4 },
 
+    stagedRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: spacing.xs,
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.sm,
+    },
+    stagedItem: { position: "relative" },
+    stagedThumb: {
+      width: 60,
+      height: 60,
+      borderRadius: radii.sm,
+      backgroundColor: palette.surfaceStrong,
+    },
+    stagedFile: { alignItems: "center", justifyContent: "center", padding: 4, gap: 2 },
+    stagedFileName: { fontSize: 8, color: palette.textMuted, textAlign: "center" },
+    stagedRemove: {
+      position: "absolute",
+      top: -5,
+      right: -5,
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      backgroundColor: palette.navy,
+      alignItems: "center",
+      justifyContent: "center",
+    },
     linkCard: {
       flexDirection: "row",
       alignItems: "center",

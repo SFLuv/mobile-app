@@ -279,7 +279,18 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     container: {
       paddingHorizontal: spacing.lg,
       paddingTop: spacing.sm,
-      gap: spacing.md,
+      // No `gap` here, deliberately.
+      //
+      // This is what made the rows look lopsided. Each row has its own bottom
+      // border acting as the divider, AND the container put 16px between rows —
+      // so the divider was not centred between two items. Measuring from one
+      // divider to the next: 16 (gap) + 16 (top padding) above a row's content,
+      // and only 16 (bottom padding) below it. Hence "much more space on the
+      // top than the bottom", on every row.
+      //
+      // The gap and the border were doing the same job twice. With the gap
+      // gone, a row's padding IS the space either side of its content and the
+      // divider sits exactly between them.
       paddingBottom: 120,
     },
     walletBar: {
@@ -320,7 +331,10 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       lineHeight: 20,
     },
     row: {
-      paddingVertical: spacing.sm,
+      // Raised from spacing.sm to keep the rows the same height now that the
+      // container's 16px gap is gone — the space moved inside the row, where it
+      // is symmetric, instead of sitting outside it, where it was not.
+      paddingVertical: spacing.md,
       borderBottomWidth: 1,
       borderBottomColor: palette.border,
       flexDirection: "row",

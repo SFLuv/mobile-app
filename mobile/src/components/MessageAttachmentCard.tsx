@@ -93,6 +93,7 @@ export function MessageAttachmentCard({
   tokenSymbol,
   mine,
   handlers,
+  onLongPress,
 }: {
   attachment: MessageAttachment;
   conversationId: number;
@@ -100,6 +101,15 @@ export function MessageAttachmentCard({
   tokenSymbol: string;
   mine: boolean;
   handlers: AttachmentHandlers;
+  /**
+   * The thread's long-press menu — react, reply, copy.
+   *
+   * Passed down so a card gets the same actions as a bubble: there is no reason
+   * you can react to "nice" and not to the photo it was about. Every Pressable
+   * below forwards it, which is why it is threaded through rather than wrapped
+   * around the card — a wrapper would swallow the tap that opens the thing.
+   */
+  onLongPress?: () => void;
 }) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
@@ -112,6 +122,7 @@ export function MessageAttachmentCard({
           conversationId={conversationId}
           client={client}
           onOpen={handlers.onOpenImage}
+          onLongPress={onLongPress}
         />
       );
 
@@ -120,6 +131,8 @@ export function MessageAttachmentCard({
         <Pressable
           style={[styles.card, mine ? styles.cardMine : undefined]}
           onPress={() => handlers.onOpenFile?.(attachment)}
+          onLongPress={onLongPress}
+          delayLongPress={280}
           accessibilityRole="button"
           accessibilityLabel={`File: ${attachment.file_name ?? "attachment"}`}
         >
@@ -147,6 +160,8 @@ export function MessageAttachmentCard({
               void Linking.openURL(attachment.link_url).catch(() => {});
             }
           }}
+          onLongPress={onLongPress}
+          delayLongPress={280}
           accessibilityRole="link"
           accessibilityLabel={attachment.link_title || attachment.link_url || "Link"}
         >
@@ -188,6 +203,8 @@ export function MessageAttachmentCard({
         <Pressable
           style={[styles.card, mine ? styles.cardMine : undefined]}
           onPress={() => attachment.tx_hash && handlers.onOpenTransaction?.(attachment.tx_hash)}
+          onLongPress={onLongPress}
+          delayLongPress={280}
           accessibilityRole="button"
           accessibilityLabel="Transaction record"
         >
@@ -219,58 +236,77 @@ export function MessageAttachmentCard({
     case "merchant":
       return (
         <Pressable
-          style={[styles.card, mine ? styles.cardMine : undefined]}
+          style={[styles.referenceCard, mine ? styles.cardMine : undefined]}
           onPress={() => attachment.location_id && handlers.onOpenMerchant?.(attachment.location_id)}
           disabled={attachment.unavailable}
+          onLongPress={onLongPress}
+          delayLongPress={280}
           accessibilityRole="button"
           accessibilityLabel={`Merchant: ${attachment.location_name ?? "unavailable"}`}
         >
-          <View style={styles.iconWrap}>
-            <Ionicons name="storefront" size={20} color={palette.primaryStrong} />
+          <View style={styles.referenceBanner}>
+            <Ionicons name="storefront" size={15} color={palette.primaryStrong} />
+            <Text style={styles.referenceKicker} numberOfLines={1}>
+              SFLuv merchant
+            </Text>
           </View>
-          <View style={styles.cardBody}>
-            <Text style={styles.cardTitle} numberOfLines={1}>
+          <View style={styles.referenceBody}>
+            <Text style={styles.referenceTitle} numberOfLines={2}>
               {attachment.unavailable ? "Merchant no longer listed" : attachment.location_name}
             </Text>
             {!attachment.unavailable && attachment.location_address ? (
-              <Text style={styles.cardMeta} numberOfLines={1}>
+              <Text style={styles.referenceDetail} numberOfLines={2}>
                 {attachment.location_address}
               </Text>
             ) : null}
+            {attachment.unavailable ? null : (
+              <Text style={styles.referenceAction}>View on the map</Text>
+            )}
           </View>
-          {attachment.unavailable ? null : (
-            <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
-          )}
         </Pressable>
       );
 
     case "event":
+      // A card with the detail on it, not a calendar glyph.
+      //
+      // It rendered as an icon and a title, which told somebody almost nothing
+      // about whether to tap: when is it, is it still happening, is it the one
+      // they were already going to. A shared event is an invitation, so the
+      // card carries what you would want to know before answering — the day,
+      // the time, and whether it has passed — in the banner-and-detail shape
+      // the link preview already uses, so the two read as the same kind of
+      // object.
       return (
         <Pressable
-          style={[styles.card, mine ? styles.cardMine : undefined]}
+          style={[styles.referenceCard, mine ? styles.cardMine : undefined]}
           onPress={() => attachment.event_id && handlers.onOpenEvent?.(attachment.event_id)}
+          onLongPress={onLongPress}
+          delayLongPress={280}
           accessibilityRole="button"
           accessibilityLabel={`Volunteer event: ${attachment.event_title ?? "unavailable"}`}
         >
-          <View style={styles.iconWrap}>
-            <Ionicons name="calendar" size={20} color={palette.primaryStrong} />
+          <View style={styles.referenceBanner}>
+            <Ionicons name="calendar" size={15} color={palette.primaryStrong} />
+            <Text style={styles.referenceKicker} numberOfLines={1}>
+              {attachment.unavailable ? "Past event" : "Volunteer event"}
+            </Text>
           </View>
-          <View style={styles.cardBody}>
-            <Text style={styles.cardTitle} numberOfLines={2}>
+          <View style={styles.referenceBody}>
+            <Text style={styles.referenceTitle} numberOfLines={2}>
               {attachment.event_title || "Volunteer event"}
             </Text>
-            <Text style={styles.cardMeta} numberOfLines={1}>
-              {/* An event that has finished still shows its title and date —
-                  it is marked past rather than hidden, because "we did this
+            {attachment.event_start_at ? (
+              <Text style={styles.referenceDetail} numberOfLines={1}>
+                {formatEventWhen(attachment.event_start_at, attachment.event_end_at)}
+              </Text>
+            ) : null}
+            <Text style={styles.referenceAction} numberOfLines={1}>
+              {/* An event that has finished still shows its title and date — it
+                  is marked past rather than hidden, because "we did this
                   together last week" is a thing people share. */}
-              {attachment.unavailable
-                ? attachment.event_start_at
-                  ? `Past · ${formatEventDate(attachment.event_start_at)}`
-                  : "No longer available"
-                : formatEventDate(attachment.event_start_at)}
+              {attachment.unavailable ? "This event has finished" : "View event and sign up"}
             </Text>
           </View>
-          <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
         </Pressable>
       );
 
@@ -281,6 +317,8 @@ export function MessageAttachmentCard({
           onPress={() =>
             attachment.support_request_id && handlers.onOpenSupport?.(attachment.support_request_id)
           }
+          onLongPress={onLongPress}
+          delayLongPress={280}
           accessibilityRole="button"
           accessibilityLabel="Support request"
         >
@@ -333,11 +371,13 @@ function AttachmentImage({
   conversationId,
   client,
   onOpen,
+  onLongPress,
 }: {
   attachment: MessageAttachment;
   conversationId: number;
   client: AppBackendClient | null;
   onOpen?: (attachment: MessageAttachment, uri: string) => void;
+  onLongPress?: () => void;
 }) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
@@ -394,6 +434,8 @@ function AttachmentImage({
   return (
     <Pressable
       onPress={() => onOpen?.(attachment, uri)}
+      onLongPress={onLongPress}
+      delayLongPress={280}
       accessibilityRole="imagebutton"
       accessibilityLabel={attachment.file_name || "Photo"}
     >
@@ -418,13 +460,19 @@ function formatBaseAmount(base?: string): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
-function formatEventDate(seconds?: number): string {
-  if (!seconds) return "";
-  return new Date(seconds * 1000).toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
+/** "Sat 2 Nov · 9:00 – 12:00", or just the day when there is no end. */
+function formatEventWhen(startSeconds: number, endSeconds?: number): string {
+  const start = new Date(startSeconds * 1000);
+  const day = start.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+  const from = start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  if (!endSeconds) {
+    return `${day} · ${from}`;
+  }
+  const to = new Date(endSeconds * 1000).toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
   });
+  return `${day} · ${from} – ${to}`;
 }
 
 function createStyles(palette: Palette) {
@@ -456,6 +504,37 @@ function createStyles(palette: Palette) {
     cardBody: { flex: 1 },
     cardTitle: { fontSize: 14, fontWeight: "600", color: palette.text },
     cardMeta: { fontSize: 12, color: palette.textMuted, marginTop: 2 },
+    // The reference-card shape: a kicker banner saying WHAT this is, then the
+    // detail. Shared by the event and merchant cards so a shared thing reads
+    // the same way whatever kind it is — and the same way a link preview does.
+    referenceCard: {
+      backgroundColor: palette.surface,
+      borderWidth: 1,
+      borderColor: palette.border,
+      borderRadius: radii.md,
+      overflow: "hidden",
+      maxWidth: 268,
+      minWidth: 212,
+    },
+    referenceBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 6,
+      backgroundColor: palette.primaryMuted,
+    },
+    referenceKicker: {
+      fontSize: 10,
+      fontWeight: "800",
+      color: palette.primaryStrong,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+    },
+    referenceBody: { padding: spacing.sm, gap: 3 },
+    referenceTitle: { fontSize: 14, fontWeight: "700", color: palette.text },
+    referenceDetail: { fontSize: 12, color: palette.textMuted },
+    referenceAction: { fontSize: 12, fontWeight: "600", color: palette.primaryStrong, marginTop: 2 },
     linkCard: {
       backgroundColor: palette.surface,
       borderWidth: 1,

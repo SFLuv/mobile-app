@@ -1,5 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
+  Easing,
   FlatList,
   Modal,
   Pressable,
@@ -116,6 +118,18 @@ export function ShareSheet({
   const [selected, setSelected] = useState<number[]>([]);
   const [note, setNote] = useState("");
   const [sending, setSending] = useState(false);
+  // Drives both the dimming and the card's rise, so they read as one motion
+  // rather than a fade and a slide that happen to overlap.
+  const backdropFade = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(backdropFade, {
+      toValue: target ? 1 : 0,
+      duration: target ? 200 : 140,
+      easing: target ? Easing.out(Easing.cubic) : Easing.in(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [backdropFade, target]);
 
   useEffect(() => {
     if (!target || !backendClient || !chatEnabled) {
@@ -264,12 +278,28 @@ export function ShareSheet({
     <Modal
       visible={Boolean(target)}
       transparent
-      animationType="slide"
+      // "fade", not "slide".
+      //
+      // animationType="slide" moves the WHOLE modal including its darkened
+      // backdrop, so the dimming swept up from the bottom of the screen with
+      // the card — the background itself appeared to be sliding, which is what
+      // looked wrong. Fading dims the screen in place, and the card does its own
+      // short rise on top of that.
+      animationType="fade"
       onRequestClose={onClose}
     >
-      <View style={styles.backdrop}>
+      <Animated.View style={[styles.backdrop, { opacity: backdropFade }]}>
         <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityLabel="Close" />
-        <View style={styles.card}>
+        <Animated.View
+          style={[
+            styles.card,
+            {
+              transform: [
+                { translateY: backdropFade.interpolate({ inputRange: [0, 1], outputRange: [40, 0] }) },
+              ],
+            },
+          ]}
+        >
           <View style={styles.header}>
             <View style={{ flex: 1 }}>
               <Text style={styles.title}>Send to…</Text>
@@ -386,8 +416,8 @@ export function ShareSheet({
               This link opens in SFLuv. People without the app will be asked to install it.
             </Text>
           ) : null}
-        </View>
-      </View>
+        </Animated.View>
+      </Animated.View>
     </Modal>
   );
 }

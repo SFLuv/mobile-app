@@ -6061,8 +6061,19 @@ function WalletAppShellContent({
             Rendered instead of the tab content, innermost last so it draws on
             top. Each layer's back action pops exactly one, so info → chat →
             inbox works the way the swipe gesture implies it should. */}
+        {/* The chat stack OVERLAYS the tab content rather than replacing it.
+            A ternary unmounted the inbox the instant a chat opened, so the
+            screen sliding in had nothing behind it — the list vanished, a
+            blank gap slid across, and the chat arrived. Keeping both mounted
+            means the inbox stays visible underneath for the length of the
+            animation, which is what makes the push read as a push.
+
+            The cost is that the tab underneath stays mounted while a chat is
+            open, so its polling keeps running. That is the same tradeoff the
+            map already makes for its own overlay, and it is why the inbox's
+            poll is fifteen seconds rather than four. */}
         {chatStackActive ? (
-          <View style={styles.content}>
+          <View style={[styles.content, StyleSheet.absoluteFillObject, styles.chatStackOverlay]}>
             {chatRoute ? (
               <ChatScreen
                 conversationId={chatRoute.conversationId}
@@ -6166,6 +6177,16 @@ function WalletAppShellContent({
                   }}
                   onOpenMember={(userId) => {
                     setChatInfoRoute(null);
+                    // One page per person: if they are in the address book,
+                    // their contact card IS their profile page, so tapping a
+                    // member goes there rather than to a second view of the
+                    // same human. Somebody not saved has no card to show, so
+                    // the useful thing is to open a chat with them.
+                    const saved = contacts.find((entry) => entry.userId === userId);
+                    if (saved) {
+                      setContactDetailRoute(saved);
+                      return;
+                    }
                     void startConversationWith(userId);
                   }}
                   onAddMembers={(conversationId) =>
@@ -6277,7 +6298,8 @@ function WalletAppShellContent({
               </View>
             ) : null}
           </View>
-        ) : (
+        ) : null}
+
         <Animated.View
           style={[styles.content, { opacity: tabFade, transform: [{ translateX: tabSlideX }] }]}
         >
@@ -6619,7 +6641,6 @@ function WalletAppShellContent({
             />
           )}
         </Animated.View>
-        )}
 
         {/* ── The profile gate ────────────────────────────────────────────
             Required the first time Chats is opened, because a message from an
@@ -9272,6 +9293,15 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     borderTopLeftRadius: radii.xl,
     borderTopRightRadius: radii.xl,
     overflow: "hidden",
+  },
+  // Above the tab content, and deliberately TRANSPARENT.
+  //
+  // The opacity belongs to the sliding screen, not to this container: each
+  // screen in the stack paints its own background. Giving the container one
+  // would cover the inbox the moment the chat mounted, which is the thing this
+  // overlay exists to avoid — the slide would still happen, over a blank panel.
+  chatStackOverlay: {
+    zIndex: 20,
   },
   contentShellFullscreen: {
     borderTopLeftRadius: 0,

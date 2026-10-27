@@ -817,16 +817,40 @@ export function MapScreen({
                   ) : null}
 
                   {/* Directions sit with the location details rather than
-                      competing with the two actions at the bottom. */}
-                  <Pressable
-                    style={styles.directionsLink}
-                    onPress={() => {
-                      void openGoogleMaps(selectedLocation);
-                    }}
-                  >
-                    <Text style={styles.directionsLinkText}>Get directions</Text>
-                    <Ionicons name="open-outline" size={14} color={palette.primaryStrong} />
-                  </Pressable>
+                      competing with the two actions at the bottom — and share
+                      sits on the right of that same row.
+                      It was a button of its own above "Pay merchant", which put
+                      an occasional action in the middle of the sheet's bottom
+                      edge where the primary one belongs. Beside directions it
+                      reads as what it is: one of the small things you might do
+                      with a listing. */}
+                  <View style={styles.detailActionRow}>
+                    <Pressable
+                      style={styles.directionsLink}
+                      onPress={() => {
+                        void openGoogleMaps(selectedLocation);
+                      }}
+                    >
+                      <Text style={styles.directionsLinkText}>Get directions</Text>
+                      <Ionicons name="open-outline" size={14} color={palette.primaryStrong} />
+                    </Pressable>
+                    {onShareLocation ? (
+                      <Pressable
+                        style={styles.shareAction}
+                        onPress={() => {
+                          const target = selectedLocation;
+                          // Handed to afterClose, NOT called beside the close —
+                          // see the note on closeMerchantSheet for what
+                          // stacking two modals did.
+                          closeMerchantSheet(() => onShareLocation(target));
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Share ${selectedLocation.name}`}
+                      >
+                        <Ionicons name="share-outline" size={17} color={palette.primaryStrong} />
+                      </Pressable>
+                    ) : null}
+                  </View>
 
                   {!selectedLocation.payToAddress ? (
                     <Text style={styles.sheetMetaMuted}>
@@ -843,28 +867,6 @@ export function MapScreen({
                     >
                       <Ionicons name="globe-outline" size={16} color={palette.primaryStrong} />
                       <Text style={styles.secondaryActionText}>Open website</Text>
-                    </Pressable>
-                  ) : null}
-                  {/* Sending a shop to a friend is the thing people do with a
-                      map, and it had no button.
-                      Icon only, and narrow: the first version was a full-width
-                      "Send to a chat" row sitting directly above "Pay
-                      merchant", which gave an occasional action the same visual
-                      weight as the one this sheet exists for. */}
-                  {onShareLocation ? (
-                    <Pressable
-                      style={styles.shareAction}
-                      onPress={() => {
-                        const target = selectedLocation;
-                        // Handed to afterClose, NOT called beside the close —
-                        // see the note on closeMerchantSheet for what stacking
-                        // two modals did.
-                        closeMerchantSheet(() => onShareLocation(target));
-                      }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Share ${selectedLocation.name}`}
-                    >
-                      <Ionicons name="share-outline" size={18} color={palette.primaryStrong} />
                     </Pressable>
                   ) : null}
                   <Pressable
@@ -1167,14 +1169,22 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       alignItems: "center",
       gap: spacing.sm,
     },
+    // A row holding the listing's small actions: directions on the left,
+    // share pushed to the right.
+    detailActionRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: spacing.sm,
+    },
     shareAction: {
-      width: 44,
+      width: 38,
+      height: 38,
       alignItems: "center",
       justifyContent: "center",
-      borderRadius: radii.pill,
+      borderRadius: 19,
       borderWidth: 1,
       borderColor: palette.border,
-      paddingVertical: 11,
     },
     secondaryAction: {
       flex: 1,
