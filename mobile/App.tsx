@@ -5545,7 +5545,20 @@ function WalletAppShellContent({
     [contacts, locations, merchantLabelsByAddress],
   );
   const showStandardChrome = !chatStackActive;
-  const RootContainer = showStandardChrome ? SafeAreaView : View;
+  /**
+   * Always a SafeAreaView, including for the chat stack.
+   *
+   * showStandardChrome decides whether the TOP BAR and the DOCK are drawn. It
+   * must not also decide whether the screen respects the safe area, which is a
+   * different question with a different answer: the chat stack has no top bar,
+   * but it does have its own header with a back button in it, and without the
+   * inset that header renders under the status bar and the notch.
+   *
+   * The `View` branch this replaces was unreachable — showStandardChrome was a
+   * hardcoded `true` until the chat stack needed it — so it had never been
+   * seen to be wrong.
+   */
+  const RootContainer = SafeAreaView;
   /**
    * Shares a transaction into a chat.
    *
@@ -9023,6 +9036,9 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     backgroundColor: palette.background,
     paddingBottom: Platform.OS === "android" ? spacing.sm : 0,
   },
+  // Applied when the chat stack is up. On Android the shell adds its own bottom
+  // padding to sit above the nav bar; the chat composer provides its own, so the
+  // shell's would double it and leave a gap under the keyboard.
   safeFullscreen: {
     paddingBottom: 0,
   },
