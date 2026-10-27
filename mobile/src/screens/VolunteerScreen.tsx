@@ -1440,7 +1440,20 @@ function EventDetail({
           </View>
         ) : (
           <>
-            <View style={[styles.detailCard, styles.detailCardFill]}>
+            {/* The card scrolls, the sign-up bar below it does not.
+                Everything here used to be laid out to fit without scrolling,
+                with the description given a scroll of its own to absorb the
+                slack. That capped the description at whatever was left over —
+                on a long one, or a small screen, it was a couple of visible
+                lines inside a box. Scrolling the whole card instead means the
+                details overflow into a gesture people already expect, and the
+                sign-up button stays pinned where it has to be. */}
+            <ScrollView
+              style={[styles.detailCard, styles.detailCardFill]}
+              contentContainerStyle={styles.detailCardContent}
+              showsVerticalScrollIndicator
+              nestedScrollEnabled
+            >
               {event.coverPhotos.length > 0 ? (
                 <View
                   onTouchStart={() => onCoverSwiping(true)}
@@ -1569,23 +1582,17 @@ function EventDetail({
                   <Text style={styles.secondaryButtonText}>Directions</Text>
                 </Pressable>
               ) : null}
+              {/* Part of the details, not a component of its own.
+                  It was a bordered box with its own heading and its own
+                  scroll view, which read as a second card inside the first and
+                  — because the scroll was sized by whatever space was left —
+                  showed about two lines of a long description. Now it is simply
+                  the last thing in the card, at full length, and the card
+                  scrolls. */}
               {event.description ? (
-                <View style={styles.detailDescriptionBox}>
-                  <Text style={styles.detailDescriptionLabel}>Description</Text>
-                  <ScrollView
-                    style={styles.detailDescriptionScroll}
-                    contentContainerStyle={styles.detailDescriptionContent}
-                    showsVerticalScrollIndicator
-                    nestedScrollEnabled
-                  >
-                    <Text style={styles.detailDescription}>{event.description}</Text>
-                  </ScrollView>
-                </View>
-              ) : (
-                <View style={styles.detailDescriptionScroll} />
-              )}
-
-            </View>
+                <Text style={styles.detailDescription}>{event.description}</Text>
+              ) : null}
+            </ScrollView>
 
             <View style={styles.signupBar}>
               {event.status === "cancelled" ? (
@@ -1622,18 +1629,21 @@ function EventDetail({
               )}
 
               {/* "Who wants to come?" is the most common thing to do with an
-                  event after reading it, and it had no button. The reference
-                  goes into the chat as a card the recipient taps to land back
-                  on this page. */}
+                  event after reading it, and it had no button.
+                  Kept here, beside the sign-up action, because this is where
+                  somebody is when they decide to tell a friend. It is a general
+                  share now rather than send-to-a-chat: for an event the person
+                  you want to tell is often not on SFLuv yet, which is the whole
+                  case the chat-only version could not serve. */}
               {onShareEvent ? (
                 <Pressable
                   style={styles.secondaryButton}
                   onPress={() => onShareEvent(event)}
                   accessibilityRole="button"
-                  accessibilityLabel={`Send ${event.title} to a chat`}
+                  accessibilityLabel={`Share ${event.title}`}
                 >
-                  <Ionicons name="paper-plane-outline" size={16} color={palette.primaryStrong} />
-                  <Text style={styles.secondaryButtonText}>Send to a chat</Text>
+                  <Ionicons name="share-outline" size={16} color={palette.primaryStrong} />
+                  <Text style={styles.secondaryButtonText}>Share</Text>
                 </Pressable>
               ) : null}
             </View>
@@ -2072,14 +2082,20 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     coverDotActive: {
       backgroundColor: palette.primaryStrong,
     },
+    // The scroll VIEWPORT: the card's visible chrome. Padding and gap moved to
+    // detailCardContent, because a ScrollView applies its own style to the
+    // viewport and its contentContainerStyle to what scrolls inside it —
+    // padding here would clip the border instead of insetting the content.
     detailCard: {
       backgroundColor: palette.surface,
       borderRadius: radii.lg,
       borderWidth: 1,
       borderColor: palette.border,
+      ...shadows.soft,
+    },
+    detailCardContent: {
       padding: spacing.md,
       gap: 12,
-      ...shadows.soft,
     },
     // The root both panes live in: the list fills it, the detail overlays it.
     screen: {
@@ -2109,30 +2125,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       paddingBottom: 128,
       gap: 10,
     },
-    detailDescriptionLabel: {
-      fontSize: 11,
-      fontWeight: "800",
-      color: palette.primaryStrong,
-      textTransform: "uppercase",
-      letterSpacing: 0.5,
-      marginBottom: 6,
-    },
-    detailDescriptionBox: {
-      flexShrink: 1,
-      backgroundColor: palette.surfaceStrong,
-      borderRadius: radii.md,
-      borderWidth: 1,
-      borderColor: palette.border,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-    },
-    detailDescriptionScroll: {
-      flexGrow: 0,
-      flexShrink: 1,
-    },
-    detailDescriptionContent: {
-      paddingBottom: 2,
-    },
+
     detailTitleRow: {
       flexDirection: "row",
       alignItems: "center",

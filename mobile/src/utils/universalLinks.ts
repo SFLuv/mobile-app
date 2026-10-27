@@ -28,6 +28,38 @@ export type SfluvUniversalLink =
       memo?: string;
       tipToAddress?: string;
       href: string;
+    }
+  // ── Shareable links ───────────────────────────────────────────────────────
+  //
+  // These exist so a person can send a thing to somebody, which is a different
+  // job from the links above: those carry an INSTRUCTION (pay this, add this
+  // contact) and these carry a REFERENCE (look at this). Reference links are
+  // safe to post publicly, which is why they appear in the share sheet and the
+  // instruction ones do not.
+  //
+  // The host's AASA already allowlists "/" and "/*", so no configuration is
+  // needed for a new path to deep-link into the app.
+  | {
+      type: "event";
+      eventId: string;
+      href: string;
+    }
+  | {
+      type: "merchant";
+      locationId: number;
+      href: string;
+    }
+  | {
+      /**
+       * A transaction. Carries only the hash, which is public chain data — never
+       * the memo, which is the sender's private note. Somebody without the app
+       * gets a download prompt rather than a page about the transfer, because
+       * there is no public page for one and inventing one would publish
+       * somebody's payment history.
+       */
+      type: "transaction";
+      txHash: string;
+      href: string;
     };
 
 export type SendTarget = {
@@ -509,6 +541,33 @@ export function buildUniversalAddContactLink(input: {
   return `${normalizeOrigin(runtimeLinkConfig(config).appOrigin)}/addcontact/${ethers.utils.getAddress(input.address)}`;
 }
 
+/**
+ * A shareable link to a volunteer event.
+ *
+ * Opens the event in the app when it is installed, and lands on a page that
+ * describes the event otherwise. `/event/<id>` rather than a query parameter so
+ * the path is readable in a message and so the landing page can be statically
+ * routed.
+ */
+export function buildUniversalEventLink(input: { eventId: string }, config?: UniversalLinkConfig): string {
+  return `${normalizeOrigin(runtimeLinkConfig(config).appOrigin)}/event/${encodeURIComponent(input.eventId.trim())}`;
+}
+
+/** A shareable link to a merchant listing. */
+export function buildUniversalMerchantLink(input: { locationId: number }, config?: UniversalLinkConfig): string {
+  return `${normalizeOrigin(runtimeLinkConfig(config).appOrigin)}/merchant/${encodeURIComponent(String(input.locationId))}`;
+}
+
+/**
+ * A shareable link to a transaction.
+ *
+ * The hash only. See the note on the `transaction` link type for why there is
+ * deliberately no public page behind this one.
+ */
+export function buildUniversalTransactionLink(input: { txHash: string }, config?: UniversalLinkConfig): string {
+  return `${normalizeOrigin(runtimeLinkConfig(config).appOrigin)}/tx/${encodeURIComponent(input.txHash.trim().toLowerCase())}`;
+}
+
 export function parseSfluvUniversalLink(rawValue: string, config?: UniversalLinkConfig): SfluvUniversalLink | null {
   const trimmed = rawValue.trim();
   if (!trimmed) {
@@ -552,6 +611,32 @@ export function parseSfluvUniversalLink(rawValue: string, config?: UniversalLink
     .map((segment) => segment.trim())
     .filter(Boolean);
   const action = segments[0]?.toLowerCase();
+
+  // ── Reference links ───────────────────────────────────────────────────────
+  //
+  // Matched before the contact/pay handling below because they are unambiguous:
+  // a single known path segment and an id, with none of the query-parameter
+  // aliasing the payment links have accumulated.
+  if (action === "event" && segments[1]) {
+    const eventId = decodeURIComponent(segments[1]).trim();
+    if (eventId) {
+      return { type: "event", eventId, href: trimmed };
+    }
+  }
+  if (action === "merchant" && segments[1]) {
+    const locationId = Number.parseInt(decodeURIComponent(segments[1]).trim(), 10);
+    if (Number.isFinite(locationId) && locationId > 0) {
+      return { type: "merchant", locationId, href: trimmed };
+    }
+  }
+  if (action === "tx" && segments[1]) {
+    const txHash = decodeURIComponent(segments[1]).trim().toLowerCase();
+    // Shape-checked here rather than trusted: this value is pasted straight
+    // into a lookup, and a link is the one input that arrives from outside.
+    if (/^0x[0-9a-f]{64}$/.test(txHash)) {
+      return { type: "transaction", txHash, href: trimmed };
+    }
+  }
   const contactParamSets = collectParamsFromURL(parsedURL);
   const explicitQueryContactAddress = contactParamSets
     .map((params) => normalizeAddressParam(getParam(params, "addcontact", "addContact", "contact")))

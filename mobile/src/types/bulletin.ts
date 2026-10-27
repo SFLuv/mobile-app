@@ -253,6 +253,21 @@ export interface Conversation {
 
   post: ConversationPostChip | null;
   last_message: ChatMessage | null;
+  /**
+   * The newest reaction, set only when it is more recent than the last message.
+   *
+   * A reaction is not a message, so it never appears in the transcript as one —
+   * the thread renders it attached to the bubble it belongs to. This exists for
+   * the inbox, whose single preview line should describe the latest activity
+   * even when that activity was somebody tapping an emoji.
+   */
+  latest_reaction?: {
+    emoji: string;
+    user_name?: string;
+    is_mine: boolean;
+    message_excerpt?: string;
+    created_at: string;
+  };
   unread_count: number;
   last_message_at: string;
   pay_address?: string;

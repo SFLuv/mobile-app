@@ -20,7 +20,7 @@ import { useDockLift } from "../hooks/useDockLift";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
 import type { RealtimeEvent } from "../services/realtime";
-import { Conversation, PublicUser } from "../types/bulletin";
+import { Conversation, MessageAttachment, PublicUser } from "../types/bulletin";
 
 /**
  * The inbox.
@@ -178,29 +178,70 @@ export function MessagesScreen({
 
   const searching = query.trim().replace(/^@/, "").length >= 2;
 
+  /**
+   * The one line under a conversation's name.
+   *
+   * ── Why every kind gets its own sentence ─────────────────────────────────
+   *
+   * A row whose preview is blank, or just "Attachment", tells somebody nothing
+   * about whether it is worth opening — and most of what gets sent in this app
+   * is not plain text. A shared merchant, a volunteer event, a payment, a
+   * photo, somebody joining a group: each is a different reason to look, so
+   * each says what it is.
+   *
+   * Written from the reader's side throughout. "You sent 5 SFLUV", not
+   * "payment"; "Maria shared an event", not "attachment:event".
+   */
   const previewFor = (conversation: Conversation): string => {
     const last = conversation.last_message;
     if (!last) {
       return "";
     }
+
+    // A reaction newer than the last message IS the latest activity, so it is
+    // what the row describes. The server only sets this when that is the case.
+    const reaction = conversation.latest_reaction;
+    if (reaction) {
+      const who = reaction.is_mine ? "You" : reaction.user_name || "Someone";
+      const what = reaction.message_excerpt?.trim();
+      return what
+        ? `${who} reacted ${reaction.emoji} to "${what}"`
+        : `${who} reacted ${reaction.emoji} to a message`;
+    }
+
+    // A system line is already a complete sentence about the thread —
+    // "Maria added Sam" — so it is never prefixed with who caused it.
+    if (last.kind === "system") {
+      return last.body;
+    }
+
+    if (last.kind === "payment") {
+      const amount = formatSfluvAmount(last.amount_sfluv_base);
+      const sent = last.is_mine
+        ? `You sent ${amount} ${tokenSymbol}`
+        : `Sent you ${amount} ${tokenSymbol}`;
+      // The note, when there is one, is the informative half.
+      return last.body?.trim() ? `${sent} · ${last.body.trim()}` : sent.replace(/\s+/g, " ");
+    }
+
+    // In a group the speaker matters; in a direct thread the row's own name
+    // already says who the other person is, so only "You" is worth marking.
     const who = last.is_mine
       ? "You: "
       : conversation.kind === "group" && last.sender_name
         ? `${last.sender_name}: `
         : "";
-    if (last.kind === "system") {
-      return last.body;
+
+    const attachment = last.attachments?.[0];
+    if (attachment) {
+      const caption = last.body?.trim();
+      // A caption is what the sender chose to say, so it wins over our label —
+      // with the kind kept as a prefix so the row still shows what came with it.
+      const label = attachmentPreviewLabel(attachment, last.attachments?.length ?? 1);
+      return who + (caption ? `${label} · ${caption}` : label);
     }
-    if (last.kind === "payment") {
-      const amount = formatSfluvAmount(last.amount_sfluv_base);
-      return last.is_mine
-        ? `You sent ${amount} ${tokenSymbol}`.replace("  ", " ")
-        : `Sent you ${amount} ${tokenSymbol}`.replace("  ", " ");
-    }
-    if (!last.body?.trim() && last.attachments?.length) {
-      return who + attachmentKindLabel(last.attachments[0].kind);
-    }
-    return who + (last.body ?? "");
+
+    return who + (last.body?.trim() ?? "");
   };
 
   const renderConversation = ({ item }: { item: Conversation }) => {
@@ -218,7 +259,10 @@ export function MessagesScreen({
         accessibilityRole="button"
         accessibilityLabel={unread ? `${title}, unread` : title}
       >
-        <Avatar name={title} />
+        {/* 48 rather than the default 36: an inbox row is the one place the
+            picture does identification work, and iMessage's is about this
+            size relative to its two lines of text. */}
+        <Avatar name={title} size={48} />
         <View style={[styles.rowBody, item.other_user_inactive ? styles.rowInactive : undefined]}>
           <View style={styles.rowTop}>
             <View style={styles.rowTitleWrap}>
@@ -235,7 +279,7 @@ export function MessagesScreen({
             {item.post ? (
               <Ionicons name={CATEGORY_ICONS[item.post.category]} size={13} color={palette.textMuted} />
             ) : null}
-            <Text style={[styles.rowPreview, unread && styles.rowPreviewUnread]} numberOfLines={1}>
+            <Text style={[styles.rowPreview, unread && styles.rowPreviewUnread]} numberOfLines={2}>
               {/* Greyed is not self-explanatory, so the row says why. */}
               {item.other_user_inactive
                 ? "Can't receive messages right now"
@@ -348,6 +392,11 @@ export function MessagesScreen({
               data={conversations ?? []}
               keyExtractor={(item) => String(item.id)}
               renderItem={renderConversation}
+              // Hairlines between rows, inset past the avatar so the line
+              // starts where the text does — the iMessage arrangement, and what
+              // makes a list of rows read as discrete items rather than one
+              // continuous block of text.
+              ItemSeparatorComponent={() => <View style={styles.separator} />}
               contentContainerStyle={[
                 styles.listContent,
                 // Clears the floating button and, on a Home-button phone, the
@@ -405,6 +454,36 @@ export function MessagesScreen({
   );
 }
 
+/**
+ * What an attachment reads as in a one-line preview.
+ *
+ * Names the THING rather than the mechanism: somebody scanning their inbox
+ * wants "Shared a merchant", not "attachment". The count is used only for
+ * photos and files, where sending several at once is normal.
+ */
+function attachmentPreviewLabel(attachment: MessageAttachment, count: number): string {
+  switch (attachment.kind) {
+    case "image":
+      return count > 1 ? `📷 ${count} photos` : "📷 Photo";
+    case "file":
+      return count > 1 ? `📎 ${count} files` : `📎 ${attachment.file_name || "File"}`;
+    case "link":
+      return `🔗 ${attachment.link_title || attachment.link_site_name || "Link"}`;
+    case "transaction":
+      return "Shared a transaction";
+    case "merchant":
+      return `Shared ${attachment.location_name || "a merchant"}`;
+    case "event":
+      return `Shared ${attachment.event_title || "an event"}`;
+    case "support":
+      return "About your message to SFLuv";
+    default:
+      // A kind this build does not know, from a newer server. Named rather
+      // than blank, so the row is still worth tapping.
+      return attachmentKindLabel(attachment.kind);
+  }
+}
+
 export function formatSfluvAmount(base?: string | null): string {
   if (!base) return "";
   const value = Number(base) / 1_000_000;
@@ -431,7 +510,22 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     searchInput: { flex: 1, paddingVertical: 10, fontSize: 15, color: palette.text },
     listContent: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.lg },
 
-    row: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: spacing.sm },
+    row: {
+      flexDirection: "row",
+      // Top rather than centre: with two lines of preview, centring makes the
+      // name float away from the top of the avatar.
+      alignItems: "flex-start",
+      gap: spacing.sm,
+      paddingVertical: spacing.sm + 2,
+      minHeight: 72,
+    },
+    separator: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: palette.border,
+      // Inset by the avatar's width plus the row gap, so the line begins under
+      // the text rather than cutting across the pictures.
+      marginLeft: 48 + spacing.sm,
+    },
     rowBody: { flex: 1 },
     rowInactive: { opacity: 0.55 },
     rowTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },

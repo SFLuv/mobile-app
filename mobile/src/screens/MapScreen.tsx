@@ -360,13 +360,46 @@ export function MapScreen({
     }).start();
   };
 
-  const closeMerchantSheet = () => {
+  /**
+   * Closes the merchant sheet, optionally running something once it has
+   * actually gone.
+   *
+   * ── Why `afterClose` exists, and why it is not just a second statement ────
+   *
+   * This sheet is a `Modal`. So is the share sheet the shell opens. Calling
+   * `closeMerchantSheet()` and then opening the share sheet on the next line
+   * mounted the second modal while this one was still presented — the close is
+   * a 170ms animation and the unmount happens in its completion callback, so
+   * for that whole window both existed.
+   *
+   * iOS does not stack two RN modals. What happened instead was that one of
+   * them ended up presented but invisible, still capturing touches, and every
+   * tab in the app stopped responding — the dock would highlight and nothing
+   * would happen. It looked like a hang rather than a modal bug, which is why
+   * it was reported as "freezes the app".
+   *
+   * Note that every call site wraps this rather than passing it directly as a
+   * handler: `onPress={closeMerchantSheet}` would hand the press event in as
+   * `afterClose` and then call it, which is not a function. The compiler
+   * catches that today, but only because the parameter is typed.
+   *
+   * The double `requestAnimationFrame` is deliberate: the first gets us past
+   * the commit that unmounts this modal, the second past the paint, by which
+   * point the native view controller has been dismissed and another may be
+   * presented safely.
+   */
+  const closeMerchantSheet = (afterClose?: () => void) => {
     Animated.timing(merchantSheetAnim, {
       toValue: 0,
       duration: 170,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
-    }).start(() => setSelectedLocation(null));
+    }).start(() => {
+      setSelectedLocation(null);
+      if (afterClose) {
+        requestAnimationFrame(() => requestAnimationFrame(afterClose));
+      }
+    });
   };
 
   /**
@@ -695,10 +728,10 @@ export function MapScreen({
         transparent
         presentationStyle="overFullScreen"
         animationType="none"
-        onRequestClose={closeMerchantSheet}
+        onRequestClose={() => closeMerchantSheet()}
       >
         <Animated.View style={[styles.sheetBackdrop, { opacity: merchantSheetAnim }]}>
-          <Pressable style={styles.sheetDismissArea} onPress={closeMerchantSheet} />
+          <Pressable style={styles.sheetDismissArea} onPress={() => closeMerchantSheet()} />
           <Animated.View
             style={[
               styles.sheetCard,
@@ -728,7 +761,7 @@ export function MapScreen({
                     </Text>
                     <OpenStatusBadge state={openStateFor(selectedLocation)} />
                   </View>
-                  <Pressable style={styles.sheetClose} onPress={closeMerchantSheet} hitSlop={8}>
+                  <Pressable style={styles.sheetClose} onPress={() => closeMerchantSheet()} hitSlop={8}>
                     <Ionicons name="close" size={18} color={palette.primaryStrong} />
                   </Pressable>
                 </View>
@@ -812,23 +845,26 @@ export function MapScreen({
                       <Text style={styles.secondaryActionText}>Open website</Text>
                     </Pressable>
                   ) : null}
-                  {/* Sending a shop to a friend is the thing people do with
-                      a map, and it had no button. The reference goes into the
-                      chat as the same card the chat already renders, so the
-                      recipient lands back on this sheet rather than on a URL. */}
+                  {/* Sending a shop to a friend is the thing people do with a
+                      map, and it had no button.
+                      Icon only, and narrow: the first version was a full-width
+                      "Send to a chat" row sitting directly above "Pay
+                      merchant", which gave an occasional action the same visual
+                      weight as the one this sheet exists for. */}
                   {onShareLocation ? (
                     <Pressable
-                      style={styles.secondaryAction}
+                      style={styles.shareAction}
                       onPress={() => {
                         const target = selectedLocation;
-                        closeMerchantSheet();
-                        onShareLocation(target);
+                        // Handed to afterClose, NOT called beside the close —
+                        // see the note on closeMerchantSheet for what stacking
+                        // two modals did.
+                        closeMerchantSheet(() => onShareLocation(target));
                       }}
                       accessibilityRole="button"
-                      accessibilityLabel={`Send ${selectedLocation.name} to a chat`}
+                      accessibilityLabel={`Share ${selectedLocation.name}`}
                     >
-                      <Ionicons name="paper-plane-outline" size={16} color={palette.primaryStrong} />
-                      <Text style={styles.secondaryActionText}>Send to a chat</Text>
+                      <Ionicons name="share-outline" size={18} color={palette.primaryStrong} />
                     </Pressable>
                   ) : null}
                   <Pressable
@@ -1130,6 +1166,15 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       flexDirection: "row",
       alignItems: "center",
       gap: spacing.sm,
+    },
+    shareAction: {
+      width: 44,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: palette.border,
+      paddingVertical: 11,
     },
     secondaryAction: {
       flex: 1,

@@ -4187,6 +4187,27 @@ export class AppBackendClient {
     return `data:${contentType};base64,${Buffer.from(buffer).toString("base64")}`;
   }
 
+  /**
+   * A URL's metadata, without posting anything.
+   *
+   * Used by the composer to show the card before the message is sent. Returns
+   * empty strings rather than failing when the page is unreachable, so a link
+   * that cannot be previewed is still sendable as a plain link.
+   */
+  previewLink(url: string): Promise<{
+    url: string;
+    title: string;
+    description: string;
+    image_url: string;
+    site_name: string;
+  }> {
+    return this.bulletinRequest(
+      "/link-preview",
+      this.jsonInit("POST", { url }),
+      "Unable to read that link",
+    );
+  }
+
   /** The photos and files shared in a thread, for the info screen. */
   searchConversationFiles(conversationId: number, query?: string): Promise<ConversationFile[]> {
     const search = query?.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";

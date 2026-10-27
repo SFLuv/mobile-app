@@ -24,12 +24,16 @@ type Props = {
   explorerURL?: string;
   onClose: () => void;
   /**
-   * Offers "Send to a chat". Absent when messaging is off for this account.
+   * Offers "Share". Absent when messaging is off for this account.
    *
-   * What travels is the hash, which the chat resolves against the chain index —
-   * so the recipient sees the amount and the parties, and never the memo. A
-   * memo is a private note the sender wrote for their own records, and sharing
-   * a transaction is not a decision to publish it.
+   * What travels is the hash. Shared into a chat, the recipient's client
+   * resolves it against the chain index, so they see the amount and the parties
+   * and never the memo — a memo is the sender's private note and sharing a
+   * transaction is not a decision to publish it.
+   *
+   * Shared outside the app it is a link that only opens in SFLuv: there is no
+   * public page for a transaction, and inventing one would publish somebody's
+   * payment history.
    */
   onShare?: (txHash: string) => void;
 };
@@ -307,6 +311,25 @@ export function TransactionDetailsModal({
                   />
                 </Pressable>
               </View>
+              {onShare ? (
+                <Pressable
+                  style={styles.inlineExplorerButton}
+                  onPress={() => {
+                    const hash = renderedDetails.transaction.hash;
+                    // Closed first, then the share sheet on the next frame: both
+                    // are modals, and presenting one from under another is what
+                    // left an invisible modal capturing every touch. Same
+                    // reasoning as closeMerchantSheet's afterClose.
+                    onClose();
+                    requestAnimationFrame(() => requestAnimationFrame(() => onShare(hash)));
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Share this transaction"
+                >
+                  <Ionicons name="share-outline" size={16} color={palette.primaryStrong} />
+                  <Text style={styles.inlineExplorerButtonText}>Share</Text>
+                </Pressable>
+              ) : null}
               {explorerUrl(renderedDetails.transaction.hash, explorerURL) ? (
                 <Pressable
                   style={styles.inlineExplorerButton}

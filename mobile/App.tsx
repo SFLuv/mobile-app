@@ -117,7 +117,7 @@ import { ContactDetailScreen } from "./src/screens/ContactDetailScreen";
 import { MyProfileScreen } from "./src/screens/MyProfileScreen";
 import { ProfileSetupModal } from "./src/components/ProfileSetupModal";
 import { InAppBanner, type BannerNotification } from "./src/components/InAppBanner";
-import { ShareToChatSheet, type ShareTarget } from "./src/components/ShareToChatSheet";
+import { ShareSheet, type ShareTarget } from "./src/components/ShareSheet";
 import { ContactSupportModal } from "./src/components/ContactSupportModal";
 import { loadBootCache, rememberSignedIn, saveBootCache } from "./src/services/bootCache";
 import { cachedBetaFor, emptyBetaAccess, primeBetaCache, saveBetaCache } from "./src/services/betaCache";
@@ -657,6 +657,12 @@ function linkSignature(link: SfluvUniversalLink): string {
       return `redeem:${link.code.trim().toLowerCase()}`;
     case "request":
       return `request:${link.address.toLowerCase()}:${link.amount ?? ""}:${link.memo ?? ""}`;
+    case "event":
+      return `event:${link.eventId}`;
+    case "merchant":
+      return `merchant:${link.locationId}`;
+    case "transaction":
+      return `transaction:${link.txHash}`;
   }
 }
 
@@ -4150,9 +4156,47 @@ function WalletAppShellContent({
       return;
     }
 
+    // ── Reference links ─────────────────────────────────────────────────────
+    //
+    // Someone shared a thing with us. Each lands on the surface that already
+    // shows that thing rather than on a copy of it.
+    if (link.type === "event") {
+      openVolunteerPanel(link.eventId);
+      onConsumePendingLink();
+      return;
+    }
+
+    if (link.type === "merchant") {
+      // Opens the map's own merchant sheet, which is the one place a listing is
+      // shown. Harmless if the id is not in `locations` — MapScreen simply
+      // finds nothing and the map opens unfocused.
+      setMapFocusLocationId(link.locationId);
+      setTab("map");
+      onConsumePendingLink();
+      return;
+    }
+
+    if (link.type === "transaction") {
+      // Only the recipient's own transfers are in their history, so a shared
+      // transaction usually is not — Activity, with a word about why, beats a
+      // sheet that cannot be filled in.
+      setTab("activity");
+      showToast("Opening your activity. Shared transactions only show if they involve your wallet.", "info");
+      onConsumePendingLink();
+      return;
+    }
+
+    // Everything left is a redeem code; the switch above is exhaustive over the
+    // rest, so this is reached only for that one.
     openRedeemFlowForCode(link.code);
     onConsumePendingLink();
-  }, [merchantModeActive, onConsumePendingLink, openRedeemFlowForCode, pendingLinkIntent]);
+  }, [
+    merchantModeActive,
+    onConsumePendingLink,
+    openRedeemFlowForCode,
+    openVolunteerPanel,
+    pendingLinkIntent,
+  ]);
 
   useEffect(() => {
     if (!redeemFlow || redeemFlow.stage !== "awaiting_wallet") {
@@ -5500,9 +5544,26 @@ function WalletAppShellContent({
    * notification goes straight to the thread.
    */
   const walletSignerPending = runtime.loading && !runtime.service;
-  // The wallet pane is the only surface that cannot usefully be drawn without a
-  // signer, because its primary action is to sign something.
-  const showBlockingWalletState = walletSignerPending && tab === "wallet";
+  /**
+   * Nothing blocks on the signer any more.
+   *
+   * This was `walletSignerPending && tab === "wallet"`, which still meant the
+   * wallet — the tab the app opens on — showed a spinner over "Finding your
+   * smart wallet…" for as long as discovery took. That message is an
+   * implementation detail of ours, and the screen behind it is one we already
+   * have the numbers for: the balance is cached per address and the recent
+   * transactions are cached too.
+   *
+   * So the wallet paints from that cache immediately and the figures correct
+   * themselves when the live values land. The only thing genuinely unavailable
+   * before the signer exists is SENDING, and that is gated at the send button
+   * rather than by hiding the whole screen.
+   *
+   * What makes this honest rather than a lie about fresh data is the spinner in
+   * the top bar: the bell becomes one while anything is still arriving, so a
+   * cached figure is never presented as confirmed.
+   */
+  const showBlockingWalletState = false;
   /**
    * Anything still loading in the background, for the quiet spinner in the top
    * bar. Deliberately NOT a blocking state: it is there so that an app showing
@@ -5650,6 +5711,15 @@ function WalletAppShellContent({
             setTab("contacts");
             return;
           }
+          // A reference link scanned into the SEND screen is somebody holding
+          // the wrong QR code up to the wrong camera: an event or a merchant
+          // listing is not something to pay. Refused with a reason rather than
+          // coerced into a recipient, which is what reading `.address` off it
+          // would have done.
+          if (link.type === "event" || link.type === "merchant" || link.type === "transaction") {
+            showToast("That's a link to something to look at, not an address to pay.", "info");
+            return;
+          }
           openSendDraft({
             recipient: link.address,
             amount: link.type === "request" ? link.amount : undefined,
@@ -5760,6 +5830,55 @@ function WalletAppShellContent({
     }
   }, [clientConfig, smartAddress]);
 
+  /**
+   * Paints the wallet before discovery has run.
+   *
+   * The cached balance is keyed by address, and the address normally arrives
+   * with `runtime.discovery` — which is the slow part of boot. The default
+   * wallet address is also persisted per user (see walletPreferencesStorageKey)
+   * and read much earlier, so it is used as the address to paint from until
+   * discovery supplies the authoritative one.
+   *
+   * Safe because this address is only ever used for DISPLAY and for choosing
+   * which cached figures to show. Signing goes through `runtime.service`, which
+   * does not exist yet at this point — so a stale seed cannot send anything
+   * anywhere. It is the same trade the beta cache makes: keyed per user, and
+   * wrong only in the sense of being one session old.
+   */
+  useEffect(() => {
+    if (smartAddress) {
+      return;
+    }
+    // No separate "preferences loaded" gate: an unloaded value is simply empty,
+    // and empty means there is nothing to seed. The effect re-runs when it
+    // arrives.
+    const seeded = walletPreferences.defaultWalletAddress?.trim();
+    if (!seeded) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const cachedBalance = await AsyncStorage.getItem(walletBalanceCacheKey(seeded));
+        if (cancelled) {
+          return;
+        }
+        // Only the balance is seeded, not smartAddress itself: letting the
+        // real discovery own that field keeps one writer for it and avoids a
+        // race where a seeded value is mistaken for a confirmed one.
+        if (cachedBalance?.trim()) {
+          setSmartBalance((current) => (current === "..." ? cachedBalance.trim() : current));
+        }
+      } catch {
+        // No cache is the first-run case, and the screen reads "..." for a
+        // moment, which is what it did before.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [smartAddress, walletPreferences.defaultWalletAddress]);
+
   const contactsScreenElement = (
     <ContactsScreen
       clientConfig={clientConfig}
@@ -5842,39 +5961,37 @@ function WalletAppShellContent({
             <Text style={styles.brand}>{activeTitle}</Text>
           </View>
           <View style={styles.topActions}>
-            {/* The quiet "still loading" indicator.
-                The app is usable while this is up — that is the point of it. It
-                replaces a full-screen spinner that made every tab wait for the
-                wallet signer, and it sits beside the title rather than over the
-                content so nothing moves when it goes away. No label: there is
-                nothing for anybody to do about it, and a word here would be
-                read as a problem. */}
-            {backgroundLoading ? (
-              <View
-                style={styles.topLoading}
-                accessibilityRole="progressbar"
-                accessibilityLabel="Still loading your latest data"
-              >
-                <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
-              </View>
-            ) : null}
             {!merchantKiosk && !accountRoutingPending ? (
               <Pressable
                 style={styles.iconButton}
                 onPress={openNotificationPanel}
                 accessibilityRole="button"
                 accessibilityLabel={
-                  panelNotificationCount > 0
-                    ? `Notifications, ${panelNotificationCount} outstanding`
-                    : "Notifications"
+                  backgroundLoading
+                    ? "Notifications, still loading"
+                    : panelNotificationCount > 0
+                      ? `Notifications, ${panelNotificationCount} outstanding`
+                      : "Notifications"
                 }
               >
-                <Ionicons
-                  name={panelNotificationCount > 0 ? "notifications" : "notifications-outline"}
-                  size={18}
-                  color={palette.primaryStrong}
-                />
-                {panelNotificationCount > 0 ? (
+                {/* The bell IS the loading indicator while anything is still
+                    arriving.
+                    Better than a spinner of its own beside it, for a reason
+                    that is about meaning rather than space: notifications are
+                    exactly the thing that cannot be trusted until there is a
+                    live connection, so a spinner in their place is saying
+                    something true about that control. A second spinner
+                    elsewhere would just be saying "busy". */}
+                {backgroundLoading ? (
+                  <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
+                ) : (
+                  <Ionicons
+                    name={panelNotificationCount > 0 ? "notifications" : "notifications-outline"}
+                    size={18}
+                    color={palette.primaryStrong}
+                  />
+                )}
+                {panelNotificationCount > 0 && !backgroundLoading ? (
                   <View style={styles.topBadge}>
                     <Text style={styles.topBadgeText}>
                       {panelNotificationCount > 9 ? "9+" : panelNotificationCount}
@@ -6538,12 +6655,13 @@ function WalletAppShellContent({
         />
 
         {/* Sharing a merchant, event or transaction into a chat. */}
-        <ShareToChatSheet
+        <ShareSheet
           target={shareTarget}
           backendClient={backendClient ?? null}
+          clientConfig={clientConfig}
           hapticsEnabled={preferences.hapticsEnabled}
           onClose={() => setShareTarget(null)}
-          onShared={(conversationIds) => {
+          onShared={(conversationIds: number[]) => {
             // One chat: go there, because that is almost certainly where the
             // conversation continues. Several: stay put, since there is no one
             // destination and jumping to an arbitrary one would be wrong.
@@ -9089,12 +9207,6 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     color: palette.white,
     fontSize: 10,
     fontWeight: "800",
-  },
-  topLoading: {
-    width: 28,
-    height: 28,
-    alignItems: "center",
-    justifyContent: "center",
   },
   topBar: {
     paddingHorizontal: spacing.lg,

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import {
+  Image,
   Platform,
   Pressable,
   StyleSheet,
@@ -66,6 +67,8 @@ export function ChatComposer({
   availableBalance,
   replyingTo,
   onCancelReply,
+  linkPreview,
+  onDismissLinkPreview,
   hapticsEnabled,
   inputRef,
   placeholder = "Message",
@@ -82,6 +85,21 @@ export function ChatComposer({
   availableBalance?: string;
   replyingTo?: { id: number; senderName: string; body: string } | null;
   onCancelReply?: () => void;
+  /**
+   * A link found in the draft, with whatever metadata was scraped.
+   *
+   * Shown above the input, so the sender sees the card the recipient will get
+   * before sending it. Replaces a "Link" button in the attachment tray — see
+   * the note on linkPreview in ChatScreen for why detecting beats asking.
+   */
+  linkPreview?: {
+    url: string;
+    title: string;
+    description: string;
+    imageUrl: string;
+    siteName: string;
+  } | null;
+  onDismissLinkPreview?: () => void;
   hapticsEnabled: boolean;
   inputRef?: React.RefObject<TextInput | null>;
   placeholder?: string;
@@ -91,6 +109,39 @@ export function ChatComposer({
 
   return (
     <View style={styles.wrap}>
+      {/* The detected link's card. Above the reply bar so the stack reads
+          bottom-up as: what I am sending, what I am replying to, the input. */}
+      {linkPreview && mode === "text" ? (
+        <View style={styles.linkCard}>
+          {linkPreview.imageUrl ? (
+            <Image source={{ uri: linkPreview.imageUrl }} style={styles.linkImage} resizeMode="cover" />
+          ) : (
+            <View style={[styles.linkImage, styles.linkImageFallback]}>
+              <Ionicons name="link-outline" size={18} color={palette.textMuted} />
+            </View>
+          )}
+          <View style={styles.linkText}>
+            <Text style={styles.linkTitle} numberOfLines={1}>
+              {/* A link whose page we could not read still shows, as the bare
+                  host — so "recognised but not previewable" is visibly
+                  different from "not recognised". */}
+              {linkPreview.title || hostOf(linkPreview.url)}
+            </Text>
+            <Text style={styles.linkMeta} numberOfLines={2}>
+              {linkPreview.description || linkPreview.siteName || linkPreview.url}
+            </Text>
+          </View>
+          <Pressable
+            onPress={onDismissLinkPreview}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Don't send a link preview"
+          >
+            <Ionicons name="close" size={16} color={palette.textMuted} />
+          </Pressable>
+        </View>
+      ) : null}
+
       {replyingTo ? (
         <View style={styles.replyBar}>
           <View style={styles.replyStripe} />
@@ -339,6 +390,15 @@ function AmountPad({
   );
 }
 
+/** The host of a URL, for a card with no scraped title. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
 function createStyles(palette: Palette) {
   return StyleSheet.create({
     wrap: {
@@ -384,6 +444,23 @@ function createStyles(palette: Palette) {
     },
     sendButtonIdle: { opacity: 0.4 },
 
+    linkCard: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      marginHorizontal: spacing.md,
+      marginTop: spacing.sm,
+      padding: spacing.xs,
+      borderRadius: radii.md,
+      backgroundColor: palette.surface,
+      borderWidth: 1,
+      borderColor: palette.border,
+    },
+    linkImage: { width: 44, height: 44, borderRadius: radii.sm, backgroundColor: palette.surfaceStrong },
+    linkImageFallback: { alignItems: "center", justifyContent: "center" },
+    linkText: { flex: 1 },
+    linkTitle: { fontSize: 13, fontWeight: "600", color: palette.text },
+    linkMeta: { fontSize: 12, color: palette.textMuted, marginTop: 1 },
     replyBar: {
       flexDirection: "row",
       alignItems: "center",

@@ -328,9 +328,14 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
       alignItems: "center",
       gap: spacing.md,
     },
+    // The last row drops its divider — there is nothing under it to divide
+    // from — but keeps its padding.
+    //
+    // It used to drop `paddingBottom` too, which made the final item visibly
+    // shorter than every other one: `spacing.sm` of space above its content and
+    // none below. Within a row the two should match, and now they do.
     rowLast: {
       borderBottomWidth: 0,
-      paddingBottom: 0,
     },
     iconWrap: {
       width: 42,

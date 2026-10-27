@@ -3,14 +3,22 @@ import {
   FlatList,
   Modal,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 
 import { AppBackendClient } from "../services/appBackend";
+import type { AppClientConfig } from "../types/app";
+import {
+  buildUniversalEventLink,
+  buildUniversalMerchantLink,
+  buildUniversalTransactionLink,
+} from "../utils/universalLinks";
 import { ThemedActivityIndicator } from "./ThemedActivityIndicator";
 import { Avatar } from "./BulletinParts";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
@@ -18,14 +26,29 @@ import { triggerClickHaptic } from "../utils/haptics";
 import { BulletinRequestError, Conversation } from "../types/bulletin";
 
 /**
- * "Send this to…" — the Instagram-style share sheet.
+ * The share sheet: three routes out of one tray.
  *
- * ── What it shares ──────────────────────────────────────────────────────────
+ * ── Shape ───────────────────────────────────────────────────────────────────
  *
- * A reference, not a screenshot and not a link: a merchant, a volunteer event or
- * a transaction goes into the chat as the same card the chat already knows how
- * to render, which means the recipient taps it and lands on the real thing
- * inside the app rather than on a URL.
+ * The Instagram/TikTok arrangement, because it is the one people already know:
+ * a row of chats to send to across the top, then the generic actions — copy the
+ * link, or hand off to the OS share menu.
+ *
+ * It replaces a sheet that could only do the first of those. "Send to a chat"
+ * was the whole component, which made it useless to anybody sharing outside
+ * SFLuv — the common case for a merchant or an event, where the point is
+ * usually to tell somebody who is not on the app yet.
+ *
+ * ── What travels ────────────────────────────────────────────────────────────
+ *
+ * Internally: a reference, not a link. The chat renders the same card it
+ * renders for anything else, so the recipient taps it and lands on the real
+ * thing inside the app.
+ *
+ * Externally: a universal link. Someone with the app installed opens the thing;
+ * someone without it gets the web page behind that path, or a prompt to install
+ * for the kinds that have no public page. A transaction is deliberately in the
+ * second group — see the note on the `transaction` link type.
  *
  * ── Why several chats at once ───────────────────────────────────────────────
  *
@@ -43,9 +66,23 @@ export type ShareTarget =
   | { kind: "event"; eventId: string; label: string }
   | { kind: "transaction"; txHash: string; label: string };
 
-export function ShareToChatSheet({
+/**
+ * Whether a target has somewhere public to land.
+ *
+ * A merchant listing and a volunteer event are things we publish, so their
+ * links are worth sending to somebody who does not have the app. A transaction
+ * is not — there is no public page for one and inventing one would publish
+ * somebody's payment history — so its link only makes sense to a person who
+ * can open it in the app, and the sheet says so rather than implying otherwise.
+ */
+function hasPublicLanding(target: ShareTarget): boolean {
+  return target.kind !== "transaction";
+}
+
+export function ShareSheet({
   target,
   backendClient,
+  clientConfig,
   hapticsEnabled,
   onClose,
   onShared,
@@ -54,6 +91,8 @@ export function ShareToChatSheet({
   /** What to share, or null when the sheet is closed. */
   target: ShareTarget | null;
   backendClient: AppBackendClient | null;
+  /** Needed to build the universal link that copy and external share hand out. */
+  clientConfig: AppClientConfig;
   hapticsEnabled: boolean;
   onClose: () => void;
   /** Lets the caller offer "View" — the sheet itself does not navigate. */
@@ -92,6 +131,69 @@ export function ShareToChatSheet({
       cancelled = true;
     };
   }, [backendClient, target]);
+
+  /**
+   * The universal link for whatever is being shared.
+   *
+   * Built here rather than passed in, so every entry point produces the same
+   * link for the same thing — a caller that built its own would be a second
+   * place for the URL shape to drift.
+   */
+  const shareLink = useMemo(() => {
+    if (!target) {
+      return "";
+    }
+    try {
+      switch (target.kind) {
+        case "event":
+          return buildUniversalEventLink({ eventId: target.eventId }, clientConfig);
+        case "merchant":
+          return buildUniversalMerchantLink({ locationId: target.locationId }, clientConfig);
+        case "transaction":
+          return buildUniversalTransactionLink({ txHash: target.txHash }, clientConfig);
+      }
+    } catch {
+      // A malformed id. Better to hide the link actions than hand out a URL
+      // that goes nowhere.
+      return "";
+    }
+  }, [clientConfig, target]);
+
+  const copyLink = async () => {
+    if (!shareLink) {
+      return;
+    }
+    triggerClickHaptic(hapticsEnabled);
+    await Clipboard.setStringAsync(shareLink);
+    onToast(
+      hasPublicLanding(target!)
+        ? "Link copied."
+        : "Link copied. It opens in SFLuv for people who have the app.",
+      "success",
+    );
+    onClose();
+  };
+
+  const shareExternally = async () => {
+    if (!shareLink || !target) {
+      return;
+    }
+    triggerClickHaptic(hapticsEnabled);
+    // Closed first: the OS share sheet is itself a presented view, and opening
+    // it from under our own Modal is the same stacking problem that froze the
+    // app when this sheet was opened from the merchant modal.
+    onClose();
+    requestAnimationFrame(() => {
+      void Share.share({
+        message: `${target.label} — ${shareLink}`,
+        // iOS shows `url` separately and some targets prefer it; Android
+        // ignores it and uses `message`.
+        url: shareLink,
+      }).catch(() => {
+        // Dismissed, or no share targets. Nothing to recover.
+      });
+    });
+  };
 
   const toggle = (id: number) => {
     triggerClickHaptic(hapticsEnabled);
@@ -228,28 +330,87 @@ export function ShareToChatSheet({
             }}
           />
 
-          <View style={styles.footer}>
-            <TextInput
-              style={styles.note}
-              value={note}
-              onChangeText={setNote}
-              placeholder="Add a message (optional)"
-              placeholderTextColor={palette.textMuted}
-              maxLength={2000}
-            />
-            <Pressable
-              style={[styles.send, (selected.length === 0 || sending) && styles.sendDisabled]}
-              onPress={() => void share()}
-              disabled={selected.length === 0 || sending}
-              accessibilityRole="button"
-              accessibilityLabel="Send"
-            >
-              <Ionicons name="arrow-up" size={19} color={palette.white} />
-            </Pressable>
-          </View>
+          {/* The composer row only matters once a chat is picked. Hidden
+              otherwise, so the sheet opens as "share this" rather than as a
+              message form with an inert send button. */}
+          {selected.length > 0 ? (
+            <View style={styles.footer}>
+              <TextInput
+                style={styles.note}
+                value={note}
+                onChangeText={setNote}
+                placeholder="Add a message (optional)"
+                placeholderTextColor={palette.textMuted}
+                maxLength={2000}
+              />
+              <Pressable
+                style={[styles.send, sending && styles.sendDisabled]}
+                onPress={() => void share()}
+                disabled={sending}
+                accessibilityRole="button"
+                accessibilityLabel={`Send to ${selected.length === 1 ? "1 chat" : `${selected.length} chats`}`}
+              >
+                <Ionicons name="arrow-up" size={19} color={palette.white} />
+              </Pressable>
+            </View>
+          ) : null}
+
+          {/* The generic routes out. Always available, and the reason this is a
+              share sheet rather than a send-to-chat sheet: for a merchant or an
+              event the person you want to tell is often not on SFLuv yet. */}
+          {shareLink ? (
+            <View style={styles.actions}>
+              <ShareAction icon="link-outline" label="Copy link" onPress={() => void copyLink()} />
+              <ShareAction
+                icon="share-outline"
+                label="Share"
+                onPress={() => void shareExternally()}
+              />
+            </View>
+          ) : null}
+
+          {target && !hasPublicLanding(target) ? (
+            <Text style={styles.linkNote}>
+              This link opens in SFLuv. People without the app will be asked to install it.
+            </Text>
+          ) : null}
         </View>
       </View>
     </Modal>
+  );
+}
+
+function ShareAction({
+  icon,
+  label,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+}) {
+  const { palette } = useAppTheme();
+  return (
+    <Pressable
+      style={{ alignItems: "center", gap: 6, flex: 1, paddingVertical: spacing.sm }}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <View
+        style={{
+          width: 48,
+          height: 48,
+          borderRadius: 24,
+          backgroundColor: palette.surfaceStrong,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Ionicons name={icon} size={21} color={palette.text} />
+      </View>
+      <Text style={{ fontSize: 12, color: palette.textMuted }}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -290,7 +451,6 @@ function createStyles(palette: Palette) {
       alignItems: "center",
       gap: spacing.sm,
       padding: spacing.md,
-      paddingBottom: spacing.xxl,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: palette.border,
     },
@@ -314,5 +474,21 @@ function createStyles(palette: Palette) {
       justifyContent: "center",
     },
     sendDisabled: { opacity: 0.4 },
+    actions: {
+      flexDirection: "row",
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.xxl,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: palette.border,
+    },
+    linkNote: {
+      fontSize: 12,
+      color: palette.textMuted,
+      textAlign: "center",
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.lg,
+      marginTop: -spacing.lg,
+    },
   });
 }

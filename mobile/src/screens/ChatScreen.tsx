@@ -4,9 +4,7 @@ import {
   AppState,
   FlatList,
   Image,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -32,6 +30,7 @@ import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
 import type { RealtimeEvent } from "../services/realtime";
 import { useTypingIndicators, useTypingReporter } from "../hooks/useRealtime";
+import { useKeyboardLift } from "../hooks/useKeyboardLift";
 import {
   BulletinRequestError,
   ChatMessage,
@@ -167,6 +166,81 @@ export function ChatScreen({
   const inputRef = useRef<TextInput | null>(null);
   const firstPageLoaded = useRef(false);
 
+  /**
+   * The parent's callbacks, held in refs.
+   *
+   * ── The bug this fixes ────────────────────────────────────────────────────
+   *
+   * `refresh` is a useCallback. It used to list `onRead`, `onToast` and
+   * `onBack` among its dependencies, and the reset effect below listed
+   * `refresh` among its own. The shell passes `onRead` as an inline arrow and
+   * `showToast` as a plain function, so both get a new identity on every shell
+   * render — and the shell re-renders constantly: balance polls, transaction
+   * polls, the notification feed, the unread poll, every AppState change.
+   *
+   * So several times a minute `refresh` changed identity, the reset effect
+   * re-ran, and it does this:
+   *
+   *     setConversation(null); setMessages([]); setDraft(""); setMode("text");
+   *
+   * which blanks the thread and reloads it (the flicker), closes the send-SFLUV
+   * pad or the attachment tray mid-use, and throws away whatever the person had
+   * typed. The draft loss is the worst of it and was silent.
+   *
+   * Refs fix it at this end rather than by asking the shell to memoize
+   * everything: a screen that resets itself when its parent re-renders is
+   * broken regardless of how carefully the parent is written, and the next
+   * callback added to the shell would have reintroduced it.
+   */
+  const onReadRef = useRef(onRead);
+  onReadRef.current = onRead;
+  const onToastRef = useRef(onToast);
+  onToastRef.current = onToast;
+  const onBackRef = useRef(onBack);
+  onBackRef.current = onBack;
+
+  const {
+    ref: keyboardRef,
+    onLayout: measureKeyboardGap,
+    lift,
+  } = useKeyboardLift();
+
+  /**
+   * A link found in what the person is typing, and its scraped card.
+   *
+   * ── Why this replaced a tray option ──────────────────────────────────────
+   *
+   * "Link" used to be a button in the attachment tray that read the clipboard
+   * and asked for confirmation. That is backwards: nobody decides to attach a
+   * link, they paste one into the message they are already writing. So the
+   * draft is watched instead, and the card appears above the composer the way
+   * every other chat app does it — which also means the sender sees what the
+   * recipient will see before sending, which the tray version never offered.
+   *
+   * `dismissed` is kept per URL so that closing a card does not just make it
+   * reappear on the next keystroke.
+   */
+  const [linkPreview, setLinkPreview] = useState<{
+    /**
+     * The URL exactly as `firstURL` produced it from the draft.
+     *
+     * Kept alongside the server's normalized `url` because the two can differ
+     * — the server may add a trailing slash, drop a default port, or follow a
+     * redirect — and everything that compares a preview against the current
+     * draft has to compare like with like. Keying on the server's version
+     * instead caused two bugs: dismissing a card did not stick, and the
+     * "already previewed this" guard never matched, so the effect refetched
+     * every 600ms for as long as the link sat in the draft.
+     */
+    detectedUrl: string;
+    url: string;
+    title: string;
+    description: string;
+    imageUrl: string;
+    siteName: string;
+  } | null>(null);
+  const [dismissedLinks, setDismissedLinks] = useState<string[]>([]);
+
   const typing = useTypingIndicators(conversationId, subscribe);
   const reportTyping = useTypingReporter(conversationId, sendTyping);
 
@@ -203,24 +277,30 @@ export function ChatScreen({
           setHasMore(page.has_more);
         }
         void backendClient.markConversationRead(conversationId).catch(() => {});
-        onRead?.(conversationId);
+        onReadRef.current?.(conversationId);
       } catch (e) {
         if (e instanceof BulletinRequestError && e.status === 404) {
-          onToast(e.message, "error");
-          onBack();
+          onToastRef.current(e.message, "error");
+          onBackRef.current();
           return;
         }
         if (!options?.silent) {
           // A failed load leaves whatever was already on screen. An empty
           // thread and an unreachable one are different things, and showing
           // the first for the second is how a chat looks deleted.
-          onToast("Couldn't refresh this conversation.", "error");
+          onToastRef.current("Couldn't refresh this conversation.", "error");
         }
       }
     },
-    [backendClient, conversationId, onBack, onRead, onToast],
+    // Only what changes WHAT is fetched. The callbacks are read through refs
+    // above precisely so they cannot land here — see the note on those refs.
+    [backendClient, conversationId],
   );
 
+  // Resets only when the THREAD changes. `refresh` is deliberately not a
+  // dependency: it is stable now, but listing it here is what made a parent
+  // re-render wipe the composer, and nothing should be able to do that again.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     setConversation(null);
     setMessages([]);
@@ -229,7 +309,7 @@ export function ChatScreen({
     setMode("text");
     firstPageLoaded.current = false;
     void refresh({ silent: true });
-  }, [conversationId, refresh]);
+  }, [conversationId]);
 
   // Applied after the reset above rather than with it, so switching threads
   // cannot wipe a draft that was handed in for the thread being opened. Cleared
@@ -273,7 +353,7 @@ export function ChatScreen({
         // Reading it is implied by having it on screen, so the unread state is
         // cleared here rather than waiting for the next poll.
         void backendClient?.markConversationRead(conversationId).catch(() => {});
-        onRead?.(conversationId);
+        onReadRef.current?.(conversationId);
         return;
       }
       if (event.kind === "message.reaction") {
@@ -296,7 +376,8 @@ export function ChatScreen({
         void refresh({ silent: true });
       }
     });
-  }, [backendClient, conversationId, onRead, refresh, subscribe]);
+    // onRead is read through its ref, for the reason given on those refs.
+  }, [backendClient, conversationId, refresh, subscribe]);
 
   // Chats open ready to type. See the header note on why this is the default
   // and when it is not.
@@ -307,6 +388,76 @@ export function ChatScreen({
     const timer = setTimeout(() => inputRef.current?.focus(), 320);
     return () => clearTimeout(timer);
   }, [autoFocus, conversationId]);
+
+  /**
+   * Watches the draft for a URL and fetches its card.
+   *
+   * Debounced, because this runs per keystroke and each fetch makes the server
+   * reach out to somebody else's site. Only the FIRST url in the draft is
+   * previewed: a message with three links is a message, not three cards, and
+   * picking the first is both predictable and what the recipient's own card
+   * will show.
+   */
+  useEffect(() => {
+    const found = firstURL(draft);
+    if (!found) {
+      setLinkPreview(null);
+      return;
+    }
+    if (dismissedLinks.includes(found)) {
+      setLinkPreview(null);
+      return;
+    }
+    if (linkPreview?.detectedUrl === found) {
+      return;
+    }
+    if (!backendClient) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void backendClient
+        .previewLink(found)
+        .then((meta) => {
+          if (cancelled) {
+            return;
+          }
+          setLinkPreview({
+            detectedUrl: found,
+            // The server's normalized url is what gets stored on the message,
+            // so that is what gets SENT; `found` is only for comparing against
+            // the draft.
+            url: meta.url || found,
+            title: meta.title,
+            description: meta.description,
+            imageUrl: meta.image_url,
+            siteName: meta.site_name,
+          });
+        })
+        .catch(() => {
+          if (cancelled) {
+            return;
+          }
+          // A link we cannot read is still a link worth sending. The card shows
+          // the bare URL rather than vanishing, so the sender can see it was
+          // recognised.
+          setLinkPreview({
+            detectedUrl: found,
+            url: found,
+            title: "",
+            description: "",
+            imageUrl: "",
+            siteName: "",
+          });
+        });
+    }, 600);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [backendClient, dismissedLinks, draft, linkPreview?.detectedUrl]);
 
   const loadOlder = async () => {
     if (!backendClient || !hasMore || loadingOlder || messages.length === 0) {
@@ -334,10 +485,23 @@ export function ChatScreen({
     setSending(true);
     const replyTo = replyingTo?.id ?? null;
     try {
-      const message = await backendClient.sendConversationMessage(conversationId, body, replyTo);
+      // A detected link is sent as a link attachment with the message as its
+      // caption, so the recipient gets the card rather than a bare URL. The
+      // server re-scrapes and stores the metadata itself — what is sent here is
+      // the url, not the preview, so a card cannot be forged by the sender.
+      const message = linkPreview
+        ? await backendClient.attachConversationReference(conversationId, {
+            kind: "link",
+            link_url: linkPreview.url,
+            body,
+            reply_to_id: replyTo,
+          })
+        : await backendClient.sendConversationMessage(conversationId, body, replyTo);
       setMessages((current) => [...current, message]);
       setDraft("");
       setReplyingTo(null);
+      setLinkPreview(null);
+      setDismissedLinks([]);
       reportTyping(false);
     } catch (e) {
       onToast(e instanceof BulletinRequestError ? e.message : "Couldn't send. Try again.", "error");
@@ -479,27 +643,6 @@ export function ChatScreen({
                 fileName: asset.name,
               })),
             );
-          })();
-        },
-      },
-      {
-        id: "link",
-        label: "Link",
-        icon: "link-outline",
-        onPress: () => {
-          void (async () => {
-            // Offered from the clipboard rather than as a text field: somebody
-            // attaching a link has almost always just copied one, and a field
-            // would mean typing a URL on a phone.
-            const clip = (await Clipboard.getStringAsync()).trim();
-            if (!clip) {
-              onToast("Copy a link first, then tap Link.", "info");
-              return;
-            }
-            Alert.alert("Share this link?", clip, [
-              { text: "Cancel", style: "cancel" },
-              { text: "Share", onPress: () => void sendLink(clip) },
-            ]);
           })();
         },
       },
@@ -769,10 +912,13 @@ export function ChatScreen({
         </Pressable>
       </View>
 
-      <KeyboardAvoidingView
-        style={styles.body}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
+      {/* The measured keyboard lift, not a KeyboardAvoidingView.
+          KAV with "padding" adds the keyboard height measured from the WINDOW
+          bottom, but this view's bottom edge is already above it — the shell
+          wraps every screen in a SafeAreaView — so it overshot by the bottom
+          inset and left a band of background under the composer. See
+          useKeyboardLift. */}
+      <View ref={keyboardRef} onLayout={measureKeyboardGap} style={[styles.body, { paddingBottom: lift }]}>
         <FlatList
           // Inverted: index 0 is the newest message, so the resting position is
           // the bottom and the keyboard cannot fight a scroll-to-end. See the
@@ -871,11 +1017,21 @@ export function ChatScreen({
                 : null
             }
             onCancelReply={() => setReplyingTo(null)}
+            linkPreview={linkPreview}
+            onDismissLinkPreview={() => {
+              // Remembered per URL, so dismissing does not just make the card
+              // come back on the next keystroke.
+              if (linkPreview) {
+                // The DETECTED url, which is what the effect compares against.
+                setDismissedLinks((current) => [...current, linkPreview.detectedUrl]);
+              }
+              setLinkPreview(null);
+            }}
             hapticsEnabled={hapticsEnabled}
             inputRef={inputRef}
           />
         )}
-      </KeyboardAvoidingView>
+      </View>
 
       {/* ── Long-press actions ────────────────────────────────────────────── */}
       <Modal
@@ -1088,6 +1244,30 @@ function ImageViewer({ uri, onClose }: { uri: string; onClose: () => void }) {
       </Pressable>
     </View>
   );
+}
+
+/**
+ * The first URL in a draft, or null.
+ *
+ * Deliberately conservative. It matches an explicit http(s):// prefix, or a
+ * bare `host.tld/...` with a recognisable dot — not every string containing a
+ * dot, because "see you at 3.30" and "that costs 1.50" are not links and a card
+ * appearing under them would be absurd. A sender whose link is not detected can
+ * still send it as text; a false positive makes us fetch a URL that somebody
+ * did not share, which is the worse error.
+ */
+function firstURL(text: string): string | null {
+  const match = text.match(
+    /(?:https?:\/\/[^\s<>"']+)|(?:\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?:\/[^\s<>"']*)?)/i,
+  );
+  if (!match) {
+    return null;
+  }
+  const candidate = match[0].replace(/[.,;:!?)\]]+$/, "");
+  if (!candidate) {
+    return null;
+  }
+  return /^https?:\/\//i.test(candidate) ? candidate : `https://${candidate}`;
 }
 
 export function formatSfluvAmount(base?: string | null): string {
