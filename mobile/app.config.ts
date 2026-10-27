@@ -61,7 +61,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // the exact native code it was built against, so an update can never reach a
   // build whose native side it does not match; native changes (new native
   // packages, permissions, SDK upgrades) still need a store release.
-  runtimeVersion: { policy: "fingerprint" },
+  runtimeVersion: { policy: "appVersion" },
   updates: {
     url: `https://u.expo.dev/${resolveEasProjectId(config)}`,
     // Download in the background on launch and apply on the next one, so a
