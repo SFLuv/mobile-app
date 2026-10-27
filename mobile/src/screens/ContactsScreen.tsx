@@ -8,7 +8,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -17,11 +16,12 @@ import {
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
-import { SfluvQRCode, prewarmQRCode } from "../components/SfluvQRCode";
+import { prewarmQRCode } from "../components/SfluvQRCode";
 import { ethers } from "ethers";
 import { ScannerCornerGuide } from "../components/ScannerCornerGuide";
 import { SegmentedTabs } from "../components/SegmentedTabs";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
+import { useDockLift } from "../hooks/useDockLift";
 import { AppClientConfig, AppContact } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { buildUniversalAddContactLink, parseSendTarget, parseSfluvUniversalLink } from "../utils/universalLinks";
@@ -37,13 +37,36 @@ type Props = {
   onUpdateContact: (contact: AppContact) => Promise<void>;
   onToggleFavorite: (contact: AppContact) => Promise<void>;
   onDeleteContact: (contactID: number) => Promise<void>;
+  /**
+   * The My Profile pane, rendered by the shell.
+   *
+   * Passed in rather than built here because it needs the backend client and
+   * the toast, neither of which this screen has — and because the shell is
+   * where every other screen is assembled.
+   */
+  profileElement?: React.ReactNode;
+  /**
+   * Opens one contact's card. When absent, the rows keep their inline edit
+   * controls, so this screen still works wherever it is rendered without the
+   * detail route wired up.
+   */
+  onOpenContact?: (contact: AppContact) => void;
 };
 
-type ContactMode = "contacts" | "my-qr";
+/**
+ * The two halves of this tab.
+ *
+ * "profile" was "my-qr", which held a QR code and a share button and nothing
+ * else — while the public profile that code identifies was edited from a small
+ * icon in the Messages search bar. The two halves of "how people find and
+ * recognise me" lived on different screens, and the half with the name in it was
+ * effectively hidden. They are one screen now; see MyProfileScreen.
+ */
+type ContactMode = "contacts" | "profile";
 
 const CONTACT_TABS: Array<{ value: ContactMode; label: string }> = [
   { value: "contacts", label: "My Contacts" },
-  { value: "my-qr", label: "My QR" },
+  { value: "profile", label: "My Profile" },
 ];
 
 function shortAddress(address: string): string {
@@ -91,6 +114,8 @@ export function ContactsScreen({
   onUpdateContact,
   onToggleFavorite,
   onDeleteContact,
+  profileElement,
+  onOpenContact,
 }: Props) {
   const { palette, shadows } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
@@ -106,22 +131,17 @@ export function ContactsScreen({
   // The sheet is a transparent modal, which iOS does not move for the keyboard,
   // so it is lifted by hand to keep the paste field in view.
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  // How far the bottom of this screen sits above the bottom of the display: the
-  // home-indicator inset on Face ID phones, none on Home-button phones. The dock
-  // is pinned to the display rather than to this screen, so on a Home-button
-  // phone the dock reaches further into the screen and everything that has to
-  // clear it needs that much more room.
-  const [screenBottomGap, setScreenBottomGap] = useState(HOME_INDICATOR_INSET);
-  const screenRef = useRef<View>(null);
-  // iOS only: Android lays the dock out against its own bottom inset.
-  const dockLift = Platform.OS === "ios" ? Math.max(0, HOME_INDICATOR_INSET - screenBottomGap) : 0;
+  // How much extra room the floating button and the list need to clear the dock.
+  // Extracted into a hook when the Chats tab grew a button of its own — two
+  // copies of a measurement this fiddly is two places for it to be fixed on one
+  // screen and not the other. See useDockLift.
+  const { ref: screenRef, onLayout: measureScreenBottom, lift: dockLift } = useDockLift();
   const [editingID, setEditingID] = useState<number | null>(null);
   const [editingName, setEditingName] = useState("");
   const [editingAddress, setEditingAddress] = useState("");
   const [busyID, setBusyID] = useState<number | "scan" | null>(null);
   const [listErrorMessage, setListErrorMessage] = useState<string | null>(null);
   const [scanErrorMessage, setScanErrorMessage] = useState<string | null>(null);
-  const [shareErrorMessage, setShareErrorMessage] = useState<string | null>(null);
   const [pendingScannedAddress, setPendingScannedAddress] = useState<string | null>(null);
   const [pendingScannedName, setPendingScannedName] = useState("");
   const [permission, requestPermission] = useCameraPermissions();
@@ -259,15 +279,6 @@ export function ContactsScreen({
     };
   }, [addSheetOpen]);
 
-  const measureScreenBottom = () => {
-    screenRef.current?.measureInWindow((_x, y, _width, height) => {
-      if (!height) {
-        return;
-      }
-      setScreenBottomGap(Math.max(0, Dimensions.get("window").height - (y + height)));
-    });
-  };
-
   const openAddSheet = () => {
     setAddSheetOpen(true);
     addSheetAnim.setValue(0);
@@ -364,29 +375,6 @@ export function ContactsScreen({
     setScanErrorMessage(null);
   };
 
-  const handleShareContact = async () => {
-    if (!shareQRValue) {
-      setShareErrorMessage("Your wallet is still loading, so there is no contact link to share yet.");
-      return;
-    }
-
-    setShareErrorMessage(null);
-    try {
-      await Share.share(
-        Platform.OS === "ios"
-          ? {
-              title: "SFLuv contact",
-              url: shareQRValue,
-            }
-          : {
-              title: "SFLuv contact",
-              message: shareQRValue,
-            },
-      );
-    } catch (error) {
-      setShareErrorMessage((error as Error)?.message || "Unable to open the share sheet right now.");
-    }
-  };
 
   return (
     <View ref={screenRef} style={styles.screen} onLayout={measureScreenBottom}>
@@ -429,30 +417,12 @@ export function ContactsScreen({
           ) : null}
         </View>
 
-        {shareQRValue ? (
-          <View
-            style={contactMode === "my-qr" ? styles.qrCard : styles.qrCardHidden}
-            pointerEvents={contactMode === "my-qr" ? "auto" : "none"}
-          >
-            <SfluvQRCode value={shareQRValue} />
-              <Text style={styles.qrAddress}>{shortAddress(shareAddress || "")}</Text>
-              <Pressable style={[styles.primaryButton, styles.shareButton]} onPress={() => void handleShareContact()}>
-                <View style={styles.primaryButtonContent}>
-                  <Ionicons name="share-social-outline" size={16} color={palette.white} />
-                  <Text style={styles.primaryButtonText}>Share contact</Text>
-                </View>
-              </Pressable>
-            {shareErrorMessage ? <Text style={styles.errorText}>{shareErrorMessage}</Text> : null}
-          </View>
-        ) : null}
-
-        {contactMode === "my-qr" ? (
-          shareQRValue ? null : (
-            <View style={styles.emptyStateCard}>
-              <Ionicons name="wallet-outline" size={20} color={palette.textMuted} />
-              <Text style={styles.body}>Your wallet is still loading. Once it is ready, your contact QR will appear here.</Text>
-            </View>
-          )
+        {/* The QR code used to be kept mounted and merely hidden, so it did
+            not have to be regenerated on every tab switch. The profile pane
+            renders its own, and prewarmQRCode below still covers the cost of
+            the first one — so there is nothing left to keep alive here. */}
+        {contactMode === "profile" ? (
+          profileElement ?? null
         ) : (
           <View style={styles.contactsPane}>
           <Animated.View
@@ -490,6 +460,59 @@ export function ContactsScreen({
           visibleContacts.map((contact) => {
             const editing = editingID === contact.id;
             const busy = busyID === contact.id;
+
+            // With the detail route wired up, a row is a card that opens it —
+            // the inline Edit/Delete buttons moved onto that screen, where
+            // there is also room for notes and a picture. Without it, the row
+            // keeps its old controls so this screen still works standalone.
+            if (onOpenContact) {
+              return (
+                <Pressable
+                  key={contact.id}
+                  style={styles.contactRow}
+                  onPress={() => onOpenContact(contact)}
+                  accessibilityRole="button"
+                  accessibilityLabel={contact.name}
+                  accessibilityHint="Opens this contact's details"
+                >
+                  <ContactAvatar contact={contact} />
+                  <View style={styles.contactRowBody}>
+                    <Text style={styles.contactName} numberOfLines={1}>
+                      {contact.name}
+                    </Text>
+                    <Text style={styles.meta} numberOfLines={1}>
+                      {[shortAddress(contact.address), contact.notes?.trim() ? "Note" : ""]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </Text>
+                  </View>
+                  <Pressable
+                    hitSlop={8}
+                    disabled={busy}
+                    onPress={async () => {
+                      setBusyID(contact.id);
+                      setListErrorMessage(null);
+                      try {
+                        await onToggleFavorite(contact);
+                      } catch (error) {
+                        setListErrorMessage((error as Error).message || "Unable to update favorite.");
+                      } finally {
+                        setBusyID(null);
+                      }
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={contact.isFavorite ? "Remove from favorites" : "Mark as favorite"}
+                  >
+                    <Ionicons
+                      name={contact.isFavorite ? "star" : "star-outline"}
+                      size={18}
+                      color={contact.isFavorite ? palette.primaryStrong : palette.textMuted}
+                    />
+                  </Pressable>
+                  <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
+                </Pressable>
+              );
+            }
 
             return (
               <View key={contact.id} style={styles.contactCard}>
@@ -807,11 +830,51 @@ export function ContactsScreen({
   );
 }
 
-/** The bottom safe-area inset on Face ID iPhones, which the dock layout is built around. */
-const HOME_INDICATOR_INSET = 34;
+/**
+ * A contact's picture, or their initials.
+ *
+ * Only fetched when the contact actually has one, which is what `hasAvatar`
+ * on the row is for: a list of fifty contacts would otherwise be fifty requests
+ * that mostly 404.
+ */
+function ContactAvatar({ contact }: { contact: AppContact }) {
+  const { palette } = useAppTheme();
+  const initials =
+    contact.name
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0])
+      .join("")
+      .toUpperCase() || "?";
+
+  return (
+    <View
+      style={{
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        backgroundColor: palette.primaryMuted,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Text style={{ color: palette.primaryStrong, fontWeight: "700", fontSize: 15 }}>{initials}</Text>
+    </View>
+  );
+}
 
 function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) {
   return StyleSheet.create({
+    contactRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.sm,
+    },
+    contactRowBody: { flex: 1 },
     screen: {
       flex: 1,
     },

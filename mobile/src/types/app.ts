@@ -77,6 +77,19 @@ export interface AppContact {
   name: string;
   address: string;
   isFavorite: boolean;
+  /** Private notes the owner wrote. Never shown to the contact. */
+  notes?: string;
+  /**
+   * The SFLuv account this address belongs to, when it belongs to one.
+   *
+   * Resolved by the server when the contact is saved. Deliberately never
+   * surfaced as a fact about the contact — the app does not say "this person has
+   * an account". What it does is let the new-message picker offer them under the
+   * name you saved, which is the only place the link is visible at all.
+   */
+  userId?: string;
+  /** Whether a picture has been uploaded, so a list knows whether to fetch one. */
+  hasAvatar?: boolean;
 }
 
 /** One continuous stretch a location is open, in minutes from midnight. */

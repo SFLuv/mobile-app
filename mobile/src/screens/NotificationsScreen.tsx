@@ -62,6 +62,17 @@ type Props = {
   onAction: (notificationId: number, action: string) => Promise<string | null>;
   /** Taps on an ordinary notification route by its payload, as a push would. */
   onOpen: (item: AppNotificationItem) => void;
+  /**
+   * Opens a chat with whoever submitted a support request, behind the "Message"
+   * button on a support alert.
+   *
+   * Absent when messaging is off for this account, in which case the button's
+   * instruction falls through to the "update the app" branch — which is wrong
+   * wording for that case, but the server only puts the button on an alert when
+   * the SENDER has chat, so a staff member without it is the rarer mismatch and
+   * the message still points somewhere sensible.
+   */
+  onOpenSupportChat?: (requestId: number) => Promise<void>;
   onClose: () => void;
 };
 
@@ -95,6 +106,7 @@ export function NotificationsScreen({
   onAction,
   onOpen,
   onClose,
+  onOpenSupportChat,
 }: Props) {
   const { palette, shadows } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
@@ -153,9 +165,27 @@ export function NotificationsScreen({
 
   const runAction = useCallback(
     async (item: AppNotificationItem, action: AppAlertAction) => {
-      // A link button is handled by the device. Nothing is posted back and the
-      // alert stays where it is — replying to somebody is not the same as
-      // being finished with their request.
+      // An "sfluv:" URL is an instruction to the app rather than something for
+      // the device to open. The server has no way to call back into a screen —
+      // a notification action returns a sentence for the history row, not a
+      // destination — so a button that has to END somewhere carries one of
+      // these instead. See supportReplyChatLink in notification_actions.go.
+      if (action.url?.startsWith("sfluv:")) {
+        const instruction = action.url.slice("sfluv:".length);
+        const supportReply = instruction.match(/^support-reply\/(\d+)$/);
+        if (supportReply && onOpenSupportChat) {
+          await onOpenSupportChat(Number(supportReply[1]));
+          return;
+        }
+        // An instruction this build does not know: a newer server added one.
+        // Saying so beats a button that silently does nothing.
+        RNAlert.alert("Update SFLuv", "This needs a newer version of the app.");
+        return;
+      }
+
+      // Any other link button is handled by the device. Nothing is posted back
+      // and the alert stays where it is — replying to somebody is not the same
+      // as being finished with their request.
       if (action.url) {
         try {
           await Linking.openURL(action.url);
@@ -187,7 +217,7 @@ export function NotificationsScreen({
       }
       await run();
     },
-    [onAction],
+    [onAction, onOpenSupportChat],
   );
 
   const rows = useMemo<Row[]>(() => {

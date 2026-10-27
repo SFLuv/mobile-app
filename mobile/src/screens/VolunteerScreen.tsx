@@ -54,6 +54,11 @@ type Props = {
   backendClient?: AppBackendClient | null;
   tokenSymbol: string;
   hapticsEnabled?: boolean;
+  /**
+   * Offers "Send to a chat" on an event. Absent when messaging is off for this
+   * account, which is also what hides the button.
+   */
+  onShareEvent?: (event: AppVolunteerEvent) => void;
   /** Deep link target: opens straight into an event detail when it changes. */
   requestedEventId?: string | null;
   requestedEventNonce?: number;
@@ -244,6 +249,7 @@ export function VolunteerScreen({
   volunteerListOptIn,
   onVolunteerListOptInChange,
   onToast,
+  onShareEvent,
 }: Props) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
@@ -870,6 +876,7 @@ export function VolunteerScreen({
         onCoverSwiping={setCoverSwiping}
         onBack={dismissDetail}
         onExternalSignup={openExternalSignup}
+        onShareEvent={onShareEvent}
         onOpenSignupSheet={() => {
           haptics();
           // Show what the account already is, not a hopeful default — a user
@@ -1356,6 +1363,7 @@ function EventDetail({
   onCoverSwiping,
   onBack,
   onExternalSignup,
+  onShareEvent,
   onOpenSignupSheet,
   onOpenOrganizer,
   onCancelSignup,
@@ -1381,6 +1389,8 @@ function EventDetail({
   onCoverSwiping: (active: boolean) => void;
   onBack: () => void;
   onExternalSignup: (event: AppVolunteerEvent) => void;
+  /** Offers "Send to a chat". Absent when messaging is off for this account. */
+  onShareEvent?: (event: AppVolunteerEvent) => void;
   onOpenSignupSheet: () => void;
   onOpenOrganizer: (event: AppVolunteerEvent) => void;
   onCancelSignup: () => void;
@@ -1610,6 +1620,22 @@ function EventDetail({
                   <Ionicons name="arrow-forward" size={16} color={palette.white} />
                 </Pressable>
               )}
+
+              {/* "Who wants to come?" is the most common thing to do with an
+                  event after reading it, and it had no button. The reference
+                  goes into the chat as a card the recipient taps to land back
+                  on this page. */}
+              {onShareEvent ? (
+                <Pressable
+                  style={styles.secondaryButton}
+                  onPress={() => onShareEvent(event)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Send ${event.title} to a chat`}
+                >
+                  <Ionicons name="paper-plane-outline" size={16} color={palette.primaryStrong} />
+                  <Text style={styles.secondaryButtonText}>Send to a chat</Text>
+                </Pressable>
+              ) : null}
             </View>
           </>
         )}
@@ -1673,7 +1699,14 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
   return StyleSheet.create({
     container: {
       paddingHorizontal: spacing.lg,
-      paddingTop: spacing.sm,
+      // Was 2, then spacing.sm, now spacing.md.
+      //
+      // The shell's header sits directly above this, and its own bottom padding
+      // is small — so the gap between "Volunteer" and the first card is the sum
+      // of two tight values, which on a device with a tall status area reads as
+      // the content being jammed under the title. spacing.md is the same step
+      // the rest of the app leaves between a heading and what it introduces.
+      paddingTop: spacing.md,
       gap: spacing.md,
       paddingBottom: 140,
     },
@@ -2067,10 +2100,12 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>, 
     detailPage: {
       flex: 1,
       paddingHorizontal: spacing.lg,
-      // Was 2, which put the back button flush against the app header above
-      // it — on a device with a tall status area that reads as crowding the
-      // top of the screen rather than as a row of its own.
-      paddingTop: spacing.sm,
+      // Was 2, which put the back button flush against the app header above it.
+      // spacing.sm fixed that but left the row still reading as crowded on a
+      // tall status area, because the header's own padding is small too and the
+      // two tight values add up. spacing.md gives the back button a row of its
+      // own, which is what it looked like it was missing.
+      paddingTop: spacing.md,
       paddingBottom: 128,
       gap: 10,
     },

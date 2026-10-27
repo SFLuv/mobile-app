@@ -65,7 +65,11 @@ import {
   BulletinPostPatch,
   BulletinRequestError,
   ChatMessage,
+  AttachmentKind,
   Conversation,
+  ConversationFile,
+  ConversationRole,
+  MessageReaction,
   MessagesPage,
   ReportReason,
   UserProfile,
@@ -162,6 +166,9 @@ type GetUserResponse = {
     name: string;
     address: string;
     is_favorite: boolean;
+    notes?: string;
+    user_id?: string | null;
+    has_avatar?: boolean;
   }>;
   locations: Array<Record<string, unknown>>;
   improver?: ImproverResponse | null;
@@ -1974,6 +1981,11 @@ function mapContact(input: GetUserResponse["contacts"][number]): AppContact {
     name: input.name,
     address: ethers.utils.getAddress(input.address),
     isFavorite: input.is_favorite,
+    notes: typeof input.notes === "string" ? input.notes : "",
+    // Present only when this address belongs to an SFLuv account. Never shown
+    // as a fact about the contact — see the note on AppContact.userId.
+    userId: typeof input.user_id === "string" && input.user_id.trim() ? input.user_id : undefined,
+    hasAvatar: input.has_avatar === true,
   };
 }
 
@@ -4049,19 +4061,333 @@ export class AppBackendClient {
     return this.bulletinRequest(`/conversations/${conversationId}/messages${query}`, {}, "Unable to load messages");
   }
 
-  sendConversationMessage(conversationId: number, body: string): Promise<ChatMessage> {
+  sendConversationMessage(conversationId: number, body: string, replyToId?: number | null): Promise<ChatMessage> {
     return this.bulletinRequest(
       `/conversations/${conversationId}/messages`,
-      this.jsonInit("POST", { body }),
+      this.jsonInit("POST", { body, reply_to_id: replyToId ?? null }),
       "Unable to send your message",
     );
   }
 
-  attachConversationPayment(conversationId: number, txHash: string): Promise<ChatMessage> {
+  /**
+   * Records a transfer the wallet has already broadcast.
+   *
+   * `amountSfluvBase` is what the sender meant to send, shown in the bubble as
+   * "(confirming)" until the indexer answers and replaces it with the real
+   * figure. Passing it is what lets the Apple-Cash-style composer show an amount
+   * immediately instead of a blank bubble.
+   */
+  attachConversationPayment(
+    conversationId: number,
+    txHash: string,
+    options?: { amountSfluvBase?: string; note?: string },
+  ): Promise<ChatMessage> {
     return this.bulletinRequest(
       `/conversations/${conversationId}/payments`,
-      this.jsonInit("POST", { tx_hash: txHash }),
+      this.jsonInit("POST", {
+        tx_hash: txHash,
+        amount_sfluv_base: options?.amountSfluvBase,
+        note: options?.note,
+      }),
       "Unable to add the payment to this conversation",
+    );
+  }
+
+  // ── Reactions and replies ──────────────────────────────────────────────────
+
+  /**
+   * Adds or removes one emoji on one message. The response says which way it
+   * went, so the client settles on the server's answer rather than its own
+   * optimistic guess.
+   */
+  toggleMessageReaction(
+    conversationId: number,
+    messageId: number,
+    emoji: string,
+  ): Promise<{ added: boolean; reactions: MessageReaction[] }> {
+    return this.bulletinRequest(
+      `/conversations/${conversationId}/messages/${messageId}/reactions`,
+      this.jsonInit("POST", { emoji }),
+      "Unable to react to that message",
+    );
+  }
+
+  // ── Attachments ────────────────────────────────────────────────────────────
+
+  /**
+   * Sends photos or files as one message.
+   *
+   * Several at once because sending four photos is one action to the person
+   * doing it, and four messages would read as four.
+   */
+  uploadConversationAttachments(
+    conversationId: number,
+    files: Array<{ uri: string; mimeType?: string | null; fileName?: string | null }>,
+    options?: { body?: string; replyToId?: number | null },
+  ): Promise<ChatMessage> {
+    const form = new FormData();
+    files.forEach((file, index) => {
+      form.append("files", {
+        uri: file.uri,
+        name: file.fileName || `attachment-${index}`,
+        type: file.mimeType || "application/octet-stream",
+      } as unknown as Blob);
+    });
+    if (options?.body) {
+      form.append("body", options.body);
+    }
+    if (options?.replyToId) {
+      form.append("reply_to_id", String(options.replyToId));
+    }
+    return this.bulletinRequest(
+      `/conversations/${conversationId}/attachments`,
+      { method: "POST", body: form },
+      "Unable to send that attachment",
+    );
+  }
+
+  /**
+   * Attaches something that already exists rather than uploading bytes: a
+   * transaction, a merchant, an event, a support ticket, or a link to scrape.
+   */
+  attachConversationReference(
+    conversationId: number,
+    input: {
+      kind: Exclude<AttachmentKind, "image" | "file">;
+      body?: string;
+      tx_hash?: string;
+      location_id?: number;
+      event_id?: string;
+      support_request_id?: number;
+      link_url?: string;
+      reply_to_id?: number | null;
+    },
+  ): Promise<ChatMessage> {
+    return this.bulletinRequest(
+      `/conversations/${conversationId}/references`,
+      this.jsonInit("POST", input),
+      "Unable to share that",
+    );
+  }
+
+  /**
+   * An attachment's bytes, as a data URI.
+   *
+   * Fetched with the session rather than used as a plain image URL, because the
+   * route is authenticated — an <Image source={{uri}}> would send no token and
+   * get a 404.
+   */
+  async getConversationAttachmentDataUri(conversationId: number, attachmentId: number): Promise<string | null> {
+    const response = await this.authFetch(`/conversations/${conversationId}/attachments/${attachmentId}`);
+    if (!response.ok) {
+      return null;
+    }
+    const contentType = response.headers.get("Content-Type") || "application/octet-stream";
+    const buffer = await response.arrayBuffer();
+    return `data:${contentType};base64,${Buffer.from(buffer).toString("base64")}`;
+  }
+
+  /** The photos and files shared in a thread, for the info screen. */
+  searchConversationFiles(conversationId: number, query?: string): Promise<ConversationFile[]> {
+    const search = query?.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
+    return this.bulletinRequest(
+      `/conversations/${conversationId}/files${search}`,
+      {},
+      "Unable to load this conversation's files",
+    );
+  }
+
+  // ── Group chats ────────────────────────────────────────────────────────────
+
+  createGroupConversation(title: string, userIds: string[]): Promise<Conversation> {
+    return this.bulletinRequest(
+      "/conversations/groups",
+      this.jsonInit("POST", { title, user_ids: userIds }),
+      "Unable to create that group",
+    );
+  }
+
+  updateGroupConversation(
+    conversationId: number,
+    patch: { title?: string; clear_icon?: boolean },
+  ): Promise<Conversation> {
+    return this.bulletinRequest(
+      `/conversations/${conversationId}/group`,
+      this.jsonInit("PATCH", patch),
+      "Unable to update that group",
+    );
+  }
+
+  uploadGroupIcon(
+    conversationId: number,
+    photo: { uri: string; mimeType?: string | null; fileName?: string | null },
+  ): Promise<{ icon_attachment_id: number }> {
+    const form = new FormData();
+    form.append("photo", {
+      uri: photo.uri,
+      name: photo.fileName || "group-icon.jpg",
+      type: photo.mimeType || "image/jpeg",
+    } as unknown as Blob);
+    return this.bulletinRequest(
+      `/conversations/${conversationId}/group/icon`,
+      { method: "POST", body: form },
+      "Unable to set the group picture",
+    );
+  }
+
+  addGroupMember(conversationId: number, userId: string): Promise<void> {
+    return this.bulletinRequest(
+      `/conversations/${conversationId}/group/members`,
+      this.jsonInit("POST", { user_id: userId }),
+      "Unable to add them to the group",
+    );
+  }
+
+  /** Removing yourself is leaving. The server treats it as the same call. */
+  removeGroupMember(conversationId: number, userId: string): Promise<void> {
+    return this.bulletinRequest(
+      `/conversations/${conversationId}/group/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE" },
+      "Unable to remove them from the group",
+    );
+  }
+
+  setGroupMemberRole(conversationId: number, userId: string, role: ConversationRole): Promise<void> {
+    return this.bulletinRequest(
+      `/conversations/${conversationId}/group/members/${encodeURIComponent(userId)}/role`,
+      this.jsonInit("PUT", { user_id: userId, role }),
+      "Unable to change their role",
+    );
+  }
+
+  // ── Profile pictures ───────────────────────────────────────────────────────
+
+  uploadMyProfileAvatar(photo: {
+    uri: string;
+    mimeType?: string | null;
+    fileName?: string | null;
+  }): Promise<void> {
+    const form = new FormData();
+    form.append("photo", {
+      uri: photo.uri,
+      name: photo.fileName || "avatar.jpg",
+      type: photo.mimeType || "image/jpeg",
+    } as unknown as Blob);
+    return this.bulletinRequest(
+      "/me/profile/avatar",
+      { method: "PUT", body: form },
+      "Unable to save your picture",
+    );
+  }
+
+  deleteMyProfileAvatar(): Promise<void> {
+    return this.bulletinRequest("/me/profile/avatar", { method: "DELETE" }, "Unable to remove your picture");
+  }
+
+  async getUserAvatarDataUri(userId: string): Promise<string | null> {
+    const response = await this.authFetch(`/users/${encodeURIComponent(userId)}/avatar`);
+    if (!response.ok) {
+      return null;
+    }
+    const contentType = response.headers.get("Content-Type") || "image/jpeg";
+    const buffer = await response.arrayBuffer();
+    return `data:${contentType};base64,${Buffer.from(buffer).toString("base64")}`;
+  }
+
+  // ── Contact cards ──────────────────────────────────────────────────────────
+
+  async getContactDetail(contactId: number): Promise<AppContact> {
+    const body = await this.bulletinRequest<GetUserResponse["contacts"][number]>(
+      `/contacts/${contactId}`,
+      {},
+      "Unable to load that contact",
+    );
+    return mapContact(body);
+  }
+
+  async patchContact(
+    contactId: number,
+    patch: { name?: string; address?: string; is_favorite?: boolean; notes?: string },
+  ): Promise<AppContact> {
+    const body = await this.bulletinRequest<GetUserResponse["contacts"][number]>(
+      `/contacts/${contactId}`,
+      this.jsonInit("PATCH", patch),
+      "Unable to save that contact",
+    );
+    return mapContact(body);
+  }
+
+  uploadContactAvatar(
+    contactId: number,
+    photo: { uri: string; mimeType?: string | null; fileName?: string | null },
+  ): Promise<void> {
+    const form = new FormData();
+    form.append("photo", {
+      uri: photo.uri,
+      name: photo.fileName || "contact.jpg",
+      type: photo.mimeType || "image/jpeg",
+    } as unknown as Blob);
+    return this.bulletinRequest(
+      `/contacts/${contactId}/avatar`,
+      { method: "PUT", body: form },
+      "Unable to save that picture",
+    );
+  }
+
+  async getContactAvatarDataUri(contactId: number): Promise<string | null> {
+    const response = await this.authFetch(`/contacts/${contactId}/avatar`);
+    if (!response.ok) {
+      return null;
+    }
+    const contentType = response.headers.get("Content-Type") || "image/jpeg";
+    const buffer = await response.arrayBuffer();
+    return `data:${contentType};base64,${Buffer.from(buffer).toString("base64")}`;
+  }
+
+  deleteContactAvatar(contactId: number): Promise<void> {
+    return this.bulletinRequest(`/contacts/${contactId}/avatar`, { method: "DELETE" }, "Unable to remove that picture");
+  }
+
+  // ── Support replies ────────────────────────────────────────────────────────
+
+  /**
+   * Opens a chat with whoever submitted a support request, posts the ticket as
+   * a reference card, and returns a draft opening line for the composer.
+   *
+   * Admin-only on the server. Refuses a request that came from the website,
+   * which has no account to message.
+   */
+  openSupportConversation(requestId: number): Promise<{
+    conversation_id: number;
+    user_id: string;
+    draft: string;
+    message?: ChatMessage;
+  }> {
+    return this.bulletinRequest(
+      `/admin/support-requests/${requestId}/conversation`,
+      { method: "POST" },
+      "Unable to open a chat with them",
+    );
+  }
+
+  /**
+   * Submits a support request from inside the app.
+   *
+   * Goes through authFetch, which is the whole point: the signed-in caller is
+   * what lets the alert offer staff a "Message" button rather than only an
+   * email reply.
+   */
+  submitSupportRequest(input: {
+    email: string;
+    name: string;
+    subject: string;
+    subject_slug: string;
+    message: string;
+  }): Promise<{ reference: string }> {
+    return this.bulletinRequest(
+      "/support/requests",
+      this.jsonInit("POST", input),
+      "Unable to send your message",
     );
   }
 

@@ -23,6 +23,15 @@ type Props = {
   tokenSymbol: string;
   explorerURL?: string;
   onClose: () => void;
+  /**
+   * Offers "Send to a chat". Absent when messaging is off for this account.
+   *
+   * What travels is the hash, which the chat resolves against the chain index —
+   * so the recipient sees the amount and the parties, and never the memo. A
+   * memo is a private note the sender wrote for their own records, and sharing
+   * a transaction is not a decision to publish it.
+   */
+  onShare?: (txHash: string) => void;
 };
 
 function formatDate(timestamp: number): string {
@@ -48,7 +57,14 @@ function explorerUrl(hash: string, explorerURL?: string): string | null {
   return `${baseURL}/tx/${hash}`;
 }
 
-export function TransactionDetailsModal({ visible, details, tokenSymbol, explorerURL, onClose }: Props) {
+export function TransactionDetailsModal({
+  visible,
+  details,
+  tokenSymbol,
+  explorerURL,
+  onClose,
+  onShare,
+}: Props) {
   const { palette, shadows } = useAppTheme();
   const { height: windowHeight } = useWindowDimensions();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);

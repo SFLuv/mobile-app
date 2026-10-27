@@ -1,0 +1,467 @@
+import React, { useMemo, useState } from "react";
+import {
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+
+import { Palette, radii, spacing, useAppTheme } from "../theme";
+import { triggerClickHaptic } from "../utils/haptics";
+
+/**
+ * The bottom of a chat: a text field, an attachment tray, and an amount pad.
+ *
+ * ── Three modes, one bar ────────────────────────────────────────────────────
+ *
+ * The composer is one row that becomes one of three things, rather than a row
+ * with a growing collection of buttons crammed beside the text field:
+ *
+ *   "text"    the field and a send button
+ *   "attach"  the field is REPLACED by a grid of options
+ *   "amount"  the field is REPLACED by an amount pad
+ *
+ * Replacing rather than expanding is the iMessage/Telegram behaviour and the
+ * reason it works on a small phone: the options get the full width instead of
+ * three icons squeezed next to a shrinking text field. Tapping anywhere off the
+ * tray brings the text field back, so no mode is a trap.
+ *
+ * ── Why "Send SFLUV" is a mode and not a screen ─────────────────────────────
+ *
+ * It used to open the wallet's send screen, which meant leaving the
+ * conversation, filling in a form designed for paying a merchant, and coming
+ * back. For paying the person you are already talking to, the amount is the only
+ * thing not already known — so the composer becomes a keypad, the way Apple Cash
+ * does it, and the transfer arrives as a message in the thread.
+ *
+ * Direct threads only. There is no single recipient in a group, so the option is
+ * absent — and the server refuses it there too, rather than trusting this.
+ */
+
+export type ComposerMode = "text" | "attach" | "amount";
+
+export type AttachmentOption = {
+  id: string;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  onPress: () => void;
+  /** Shown greyed with a reason, for anything this build cannot do. */
+  disabledReason?: string;
+};
+
+export function ChatComposer({
+  mode,
+  onModeChange,
+  draft,
+  onDraftChange,
+  onSend,
+  sending,
+  attachmentOptions,
+  /** Omitted in groups, which removes the amount mode entirely. */
+  onSendAmount,
+  tokenSymbol,
+  availableBalance,
+  replyingTo,
+  onCancelReply,
+  hapticsEnabled,
+  inputRef,
+  placeholder = "Message",
+}: {
+  mode: ComposerMode;
+  onModeChange: (mode: ComposerMode) => void;
+  draft: string;
+  onDraftChange: (value: string) => void;
+  onSend: () => void;
+  sending: boolean;
+  attachmentOptions: AttachmentOption[];
+  onSendAmount?: (amount: string, note: string) => Promise<void>;
+  tokenSymbol: string;
+  availableBalance?: string;
+  replyingTo?: { id: number; senderName: string; body: string } | null;
+  onCancelReply?: () => void;
+  hapticsEnabled: boolean;
+  inputRef?: React.RefObject<TextInput | null>;
+  placeholder?: string;
+}) {
+  const { palette } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette), [palette]);
+
+  return (
+    <View style={styles.wrap}>
+      {replyingTo ? (
+        <View style={styles.replyBar}>
+          <View style={styles.replyStripe} />
+          <View style={styles.replyText}>
+            <Text style={styles.replyName} numberOfLines={1}>
+              {replyingTo.senderName}
+            </Text>
+            <Text style={styles.replyBody} numberOfLines={1}>
+              {replyingTo.body}
+            </Text>
+          </View>
+          <Pressable onPress={onCancelReply} hitSlop={10} accessibilityLabel="Cancel reply">
+            <Ionicons name="close" size={16} color={palette.textMuted} />
+          </Pressable>
+        </View>
+      ) : null}
+
+      {mode === "amount" && onSendAmount ? (
+        <AmountPad
+          tokenSymbol={tokenSymbol}
+          availableBalance={availableBalance}
+          hapticsEnabled={hapticsEnabled}
+          onCancel={() => onModeChange("text")}
+          onSend={onSendAmount}
+        />
+      ) : mode === "attach" ? (
+        <View style={styles.tray}>
+          <View style={styles.trayGrid}>
+            {attachmentOptions.map((option) => (
+              <Pressable
+                key={option.id}
+                style={[styles.trayOption, option.disabledReason ? styles.trayOptionDisabled : undefined]}
+                onPress={() => {
+                  if (option.disabledReason) {
+                    return;
+                  }
+                  triggerClickHaptic(hapticsEnabled);
+                  option.onPress();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={option.label}
+                accessibilityHint={option.disabledReason}
+              >
+                <View style={styles.trayIcon}>
+                  <Ionicons name={option.icon} size={22} color={palette.primaryStrong} />
+                </View>
+                <Text style={styles.trayLabel} numberOfLines={2}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <Pressable
+            style={styles.trayClose}
+            onPress={() => onModeChange("text")}
+            accessibilityRole="button"
+            accessibilityLabel="Close attachment options"
+          >
+            <Text style={styles.trayCloseText}>Cancel</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.bar}>
+          <Pressable
+            style={styles.plusButton}
+            onPress={() => {
+              triggerClickHaptic(hapticsEnabled);
+              onModeChange("attach");
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Attach something"
+          >
+            <Ionicons name="add" size={22} color={palette.primaryStrong} />
+          </Pressable>
+          <TextInput
+            ref={inputRef}
+            style={styles.input}
+            value={draft}
+            onChangeText={onDraftChange}
+            placeholder={placeholder}
+            placeholderTextColor={palette.textMuted}
+            multiline
+            maxLength={2000}
+          />
+          <Pressable
+            style={[styles.sendButton, (!draft.trim() || sending) && styles.sendButtonIdle]}
+            onPress={() => void onSend()}
+            disabled={!draft.trim() || sending}
+            accessibilityRole="button"
+            accessibilityLabel="Send message"
+          >
+            <Ionicons name="arrow-up" size={18} color={palette.white} />
+          </Pressable>
+        </View>
+      )}
+    </View>
+  );
+}
+
+/**
+ * The amount pad.
+ *
+ * Its own keypad rather than a TextInput with a numeric keyboard, for the reason
+ * Apple Cash has one: the amount is the whole interaction, so it should be the
+ * whole screen area, in digits big enough to check at a glance before sending
+ * money. A system number pad would also put a "done" key where a decimal point
+ * belongs on some locales.
+ */
+function AmountPad({
+  tokenSymbol,
+  availableBalance,
+  hapticsEnabled,
+  onCancel,
+  onSend,
+}: {
+  tokenSymbol: string;
+  availableBalance?: string;
+  hapticsEnabled: boolean;
+  onCancel: () => void;
+  onSend: (amount: string, note: string) => Promise<void>;
+}) {
+  const { palette } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette), [palette]);
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const press = (key: string) => {
+    triggerClickHaptic(hapticsEnabled);
+    setError(null);
+    setAmount((current) => {
+      if (key === "del") {
+        return current.slice(0, -1);
+      }
+      if (key === ".") {
+        // One decimal point, and never a leading one.
+        return current.includes(".") ? current : current === "" ? "0." : current + ".";
+      }
+      // Two decimal places: the token has six, but nobody hands somebody
+      // 1.234567 of anything, and a long tail here is almost always a slip.
+      const [, decimals] = current.split(".");
+      if (decimals !== undefined && decimals.length >= 2) {
+        return current;
+      }
+      if (current === "0" && key !== ".") {
+        return key;
+      }
+      // A cap on digits, so the display cannot be pushed out of its own row.
+      if (current.replace(".", "").length >= 9) {
+        return current;
+      }
+      return current + key;
+    });
+  };
+
+  const numeric = Number(amount);
+  const balance = availableBalance ? Number(availableBalance) : undefined;
+  const overBalance = balance !== undefined && Number.isFinite(balance) && numeric > balance;
+  const ready = Number.isFinite(numeric) && numeric > 0 && !overBalance && !sending;
+
+  const send = async () => {
+    if (!ready) {
+      return;
+    }
+    setSending(true);
+    setError(null);
+    try {
+      await onSend(amount, note.trim());
+    } catch (e) {
+      setError((e as Error)?.message || "Couldn't send that. Try again.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <View style={styles.pad}>
+      <View style={styles.padHeader}>
+        <Pressable onPress={onCancel} hitSlop={10} accessibilityLabel="Cancel payment">
+          <Ionicons name="chevron-down" size={22} color={palette.textMuted} />
+        </Pressable>
+        <Text style={styles.padTitle}>Send {tokenSymbol}</Text>
+        <View style={{ width: 22 }} />
+      </View>
+
+      <View style={styles.padAmountRow}>
+        <Text style={styles.padAmount} numberOfLines={1} adjustsFontSizeToFit>
+          {amount || "0"}
+        </Text>
+        <Text style={styles.padSymbol}>{tokenSymbol}</Text>
+      </View>
+      {overBalance ? (
+        <Text style={styles.padError}>That&apos;s more than your balance.</Text>
+      ) : availableBalance ? (
+        <Text style={styles.padBalance}>
+          {availableBalance} {tokenSymbol} available
+        </Text>
+      ) : null}
+
+      <TextInput
+        style={styles.padNote}
+        value={note}
+        onChangeText={setNote}
+        placeholder="What's it for? (optional)"
+        placeholderTextColor={palette.textMuted}
+        maxLength={200}
+      />
+
+      <View style={styles.padKeys}>
+        {[["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"], [".", "0", "del"]].map((row) => (
+          <View key={row.join()} style={styles.padRow}>
+            {row.map((key) => (
+              <Pressable
+                key={key}
+                style={styles.padKey}
+                onPress={() => press(key)}
+                accessibilityRole="button"
+                accessibilityLabel={key === "del" ? "Delete" : key}
+              >
+                {key === "del" ? (
+                  <Ionicons name="backspace-outline" size={20} color={palette.text} />
+                ) : (
+                  <Text style={styles.padKeyText}>{key}</Text>
+                )}
+              </Pressable>
+            ))}
+          </View>
+        ))}
+      </View>
+
+      {error ? <Text style={styles.padError}>{error}</Text> : null}
+
+      <Pressable
+        style={[styles.padSend, !ready && styles.padSendDisabled]}
+        onPress={() => void send()}
+        disabled={!ready}
+        accessibilityRole="button"
+        accessibilityLabel={`Send ${amount || "0"} ${tokenSymbol}`}
+      >
+        <Text style={styles.padSendText}>
+          {sending ? "Sending…" : `Send ${amount || "0"} ${tokenSymbol}`}
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function createStyles(palette: Palette) {
+  return StyleSheet.create({
+    wrap: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: palette.border,
+      backgroundColor: palette.background,
+    },
+    bar: {
+      flexDirection: "row",
+      alignItems: "flex-end",
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    plusButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: palette.primaryMuted,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    input: {
+      flex: 1,
+      minHeight: 36,
+      maxHeight: 120,
+      borderRadius: radii.lg,
+      backgroundColor: palette.surface,
+      borderWidth: 1,
+      borderColor: palette.border,
+      paddingHorizontal: 14,
+      paddingVertical: Platform.OS === "ios" ? 9 : 6,
+      fontSize: 15,
+      color: palette.text,
+    },
+    sendButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: palette.primary,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    sendButtonIdle: { opacity: 0.4 },
+
+    replyBar: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.sm,
+    },
+    replyStripe: { width: 3, height: 32, borderRadius: 2, backgroundColor: palette.primary },
+    replyText: { flex: 1 },
+    replyName: { fontSize: 12, fontWeight: "700", color: palette.primaryStrong },
+    replyBody: { fontSize: 13, color: palette.textMuted, marginTop: 1 },
+
+    tray: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+    trayGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+    trayOption: {
+      // Four across on a narrow phone, with the gap accounted for, so nothing
+      // is clipped on a 320pt screen.
+      width: "22%",
+      minWidth: 68,
+      alignItems: "center",
+      paddingVertical: spacing.sm,
+    },
+    trayOptionDisabled: { opacity: 0.35 },
+    trayIcon: {
+      width: 48,
+      height: 48,
+      borderRadius: radii.md,
+      backgroundColor: palette.primaryMuted,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 6,
+    },
+    trayLabel: { fontSize: 11, color: palette.textMuted, textAlign: "center" },
+    trayClose: { alignItems: "center", paddingVertical: spacing.sm },
+    trayCloseText: { fontSize: 14, color: palette.textMuted, fontWeight: "600" },
+
+    pad: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
+    padHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingVertical: spacing.sm,
+    },
+    padTitle: { fontSize: 15, fontWeight: "700", color: palette.text },
+    padAmountRow: {
+      flexDirection: "row",
+      alignItems: "baseline",
+      justifyContent: "center",
+      gap: 6,
+      marginTop: spacing.xs,
+    },
+    padAmount: { fontSize: 44, fontWeight: "700", color: palette.text, fontVariant: ["tabular-nums"] },
+    padSymbol: { fontSize: 18, fontWeight: "600", color: palette.textMuted },
+    padBalance: { fontSize: 12, color: palette.textMuted, textAlign: "center", marginTop: 4 },
+    padError: { fontSize: 12, color: palette.danger, textAlign: "center", marginTop: 4 },
+    padNote: {
+      marginTop: spacing.sm,
+      borderRadius: radii.lg,
+      backgroundColor: palette.surface,
+      borderWidth: 1,
+      borderColor: palette.border,
+      paddingHorizontal: 14,
+      paddingVertical: 9,
+      fontSize: 14,
+      color: palette.text,
+    },
+    padKeys: { marginTop: spacing.sm },
+    padRow: { flexDirection: "row" },
+    padKey: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 11 },
+    padKeyText: { fontSize: 24, fontWeight: "500", color: palette.text, fontVariant: ["tabular-nums"] },
+    padSend: {
+      marginTop: spacing.xs,
+      borderRadius: radii.pill,
+      backgroundColor: palette.primary,
+      paddingVertical: 13,
+      alignItems: "center",
+    },
+    padSendDisabled: { opacity: 0.4 },
+    padSendText: { color: palette.white, fontWeight: "700", fontSize: 15 },
+  });
+}

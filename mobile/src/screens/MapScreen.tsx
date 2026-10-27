@@ -44,6 +44,16 @@ type Props = {
    * land, and there is nothing to reset afterwards.
    */
   recenterNonce?: number;
+  /**
+   * A listing to open the merchant sheet on, set when a merchant card in a chat
+   * is tapped. Cleared through onFocusHandled as soon as it is acted on — a
+   * prop left set would reopen the sheet on the next render, making it
+   * impossible to dismiss.
+   */
+  focusLocationId?: number | null;
+  onFocusHandled?: () => void;
+  /** Offers "Send to a chat" on the merchant sheet. Absent when chat is off. */
+  onShareLocation?: (location: AppLocation) => void;
 };
 
 type DisplayLocation = {
@@ -302,7 +312,16 @@ function coordinatesForDisplay(displayLocations: DisplayLocation[], userLocation
   return points;
 }
 
-export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode, recenterNonce = 0 }: Props) {
+export function MapScreen({
+  locations,
+  onPayLocation,
+  viewMode,
+  onChangeViewMode,
+  recenterNonce = 0,
+  focusLocationId,
+  onFocusHandled,
+  onShareLocation,
+}: Props) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
   // Once per render rather than per row, so every line is judged against the
@@ -349,6 +368,28 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
       useNativeDriver: true,
     }).start(() => setSelectedLocation(null));
   };
+
+  /**
+   * Opens the sheet for a listing somebody reached from somewhere else — today,
+   * a merchant card in a chat.
+   *
+   * The request is cleared as soon as it is acted on, so the sheet can then be
+   * closed: a prop left set would reopen it on the next render and the sheet
+   * would be impossible to dismiss.
+   */
+  useEffect(() => {
+    if (!focusLocationId) {
+      return;
+    }
+    const match = locations.find((location) => location.id === focusLocationId);
+    if (match) {
+      openMerchantSheet(match);
+    }
+    onFocusHandled?.();
+    // openMerchantSheet is stable enough for this: it only closes over setState
+    // and an Animated.Value, both of which are referentially stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusLocationId, locations, onFocusHandled]);
   const [mapReady, setMapReady] = useState(false);
   const [mapFrame, setMapFrame] = useState({ width: 0, height: 0 });
   const mapRef = useRef<MapView | null>(null);
@@ -769,6 +810,25 @@ export function MapScreen({ locations, onPayLocation, viewMode, onChangeViewMode
                     >
                       <Ionicons name="globe-outline" size={16} color={palette.primaryStrong} />
                       <Text style={styles.secondaryActionText}>Open website</Text>
+                    </Pressable>
+                  ) : null}
+                  {/* Sending a shop to a friend is the thing people do with
+                      a map, and it had no button. The reference goes into the
+                      chat as the same card the chat already renders, so the
+                      recipient lands back on this sheet rather than on a URL. */}
+                  {onShareLocation ? (
+                    <Pressable
+                      style={styles.secondaryAction}
+                      onPress={() => {
+                        const target = selectedLocation;
+                        closeMerchantSheet();
+                        onShareLocation(target);
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Send ${selectedLocation.name} to a chat`}
+                    >
+                      <Ionicons name="paper-plane-outline" size={16} color={palette.primaryStrong} />
+                      <Text style={styles.secondaryActionText}>Send to a chat</Text>
                     </Pressable>
                   ) : null}
                   <Pressable

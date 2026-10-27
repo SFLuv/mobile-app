@@ -79,6 +79,8 @@ type Props = {
   onEnableMerchantMode?: (locationID: number) => Promise<void>;
   onDeleteAccount?: () => void;
   onLogout?: () => void;
+  /** Opens the contact form. Absent when the backend is unavailable. */
+  onContactSupport?: () => void;
 };
 
 type SettingsSection = "general" | "wallets" | "account" | "merchant" | "improver";
@@ -903,6 +905,7 @@ export function SettingsScreen({
   onEnableMerchantMode,
   onDeleteAccount,
   onLogout,
+  onContactSupport,
 }: Props) {
   const { palette, shadows } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
@@ -1235,6 +1238,29 @@ export function SettingsScreen({
               onPress={appleLinkedNow ? onDisconnectApple : onLinkApple}
             />
           </View>
+
+          {/* Writing to SFLuv, from inside the app.
+              Above Log out and the danger zone, because needing help is the
+              common reason somebody reaches the bottom of Settings — and
+              because a support request written here carries the account, which
+              is what lets us answer in a chat rather than only by email. */}
+          {onContactSupport ? (
+            <Pressable
+              style={styles.supportButton}
+              onPress={onContactSupport}
+              accessibilityRole="button"
+              accessibilityLabel="Contact SFLuv"
+            >
+              <Ionicons name="help-buoy-outline" size={18} color={palette.primaryStrong} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.supportButtonText}>Contact SFLuv</Text>
+                <Text style={styles.supportButtonHint}>
+                  Questions, problems, or anything else.
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
+            </Pressable>
+          ) : null}
 
           {onLogout ? (
             <Pressable style={styles.logoutButton} onPress={onLogout}>
@@ -2128,6 +2154,20 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       color: palette.success,
       lineHeight: 20,
     },
+    supportButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      backgroundColor: palette.surface,
+      borderWidth: 1,
+      borderColor: palette.border,
+      borderRadius: radii.lg,
+      paddingHorizontal: spacing.md,
+      paddingVertical: 14,
+      marginTop: spacing.md,
+    },
+    supportButtonText: { fontSize: 15, fontWeight: "600", color: palette.text },
+    supportButtonHint: { fontSize: 12, color: palette.textMuted, marginTop: 2 },
     logoutButton: {
       minHeight: 52,
       marginTop: spacing.sm,

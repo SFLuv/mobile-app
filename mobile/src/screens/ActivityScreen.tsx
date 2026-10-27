@@ -17,6 +17,11 @@ type Props = {
   transactions: AppTransaction[];
   tokenSymbol: string;
   explorerURL?: string;
+  /**
+   * Offers "Send to a chat" on the transaction sheet. Absent when messaging is
+   * off for this account. See TransactionDetailsModal for what travels.
+   */
+  onShareTransaction?: (txHash: string) => void;
   faucetAddress?: string;
   transactionsLoaded: boolean;
   contacts: AppContact[];
@@ -60,6 +65,7 @@ export function ActivityScreen({
   canLoadMore,
   onRefresh,
   onLoadMore,
+  onShareTransaction,
 }: Props) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
@@ -262,6 +268,7 @@ export function ActivityScreen({
         tokenSymbol={tokenSymbol}
         explorerURL={explorerURL}
         onClose={() => setSelectedTransaction(null)}
+        onShare={onShareTransaction}
       />
     </SwipeBack>
   );

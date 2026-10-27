@@ -61,7 +61,7 @@ import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { ContactsScreen } from "./src/screens/ContactsScreen";
 import { BulletinScreen } from "./src/screens/BulletinScreen";
 import { MessagesScreen } from "./src/screens/MessagesScreen";
-import { BulletinPost, Conversation } from "./src/types/bulletin";
+import { BulletinPost, BulletinRequestError, ChatMessage, Conversation } from "./src/types/bulletin";
 import { ImproverScreen } from "./src/screens/ImproverScreen";
 import { NotificationsScreen } from "./src/screens/NotificationsScreen";
 import { VolunteerScreen } from "./src/screens/VolunteerScreen";
@@ -109,6 +109,16 @@ import {
 } from "./src/types/app";
 import { useNotificationInbox } from "./src/hooks/useNotificationInbox";
 import { useNotificationFeed } from "./src/hooks/useNotificationFeed";
+import { useRealtime } from "./src/hooks/useRealtime";
+import { ChatScreen } from "./src/screens/ChatScreen";
+import { ChatInfoScreen } from "./src/screens/ChatInfoScreen";
+import { NewMessageScreen } from "./src/screens/NewMessageScreen";
+import { ContactDetailScreen } from "./src/screens/ContactDetailScreen";
+import { MyProfileScreen } from "./src/screens/MyProfileScreen";
+import { ProfileSetupModal } from "./src/components/ProfileSetupModal";
+import { InAppBanner, type BannerNotification } from "./src/components/InAppBanner";
+import { ShareToChatSheet, type ShareTarget } from "./src/components/ShareToChatSheet";
+import { ContactSupportModal } from "./src/components/ContactSupportModal";
 import { loadBootCache, rememberSignedIn, saveBootCache } from "./src/services/bootCache";
 import { cachedBetaFor, emptyBetaAccess, primeBetaCache, saveBetaCache } from "./src/services/betaCache";
 import type { AppNotificationFeed } from "./src/types/notifications";
@@ -118,7 +128,17 @@ import {
   targetFromData,
 } from "./src/services/notificationInbox";
 import { AppPreferences, defaultAppPreferences } from "./src/types/preferences";
-import { SfluvUniversalLink, parseSfluvUniversalLink } from "./src/utils/universalLinks";
+import {
+  SfluvUniversalLink,
+  buildUniversalAddContactLink,
+  parseSfluvUniversalLink,
+} from "./src/utils/universalLinks";
+import { TransactionDetailsModal } from "./src/components/TransactionDetailsModal";
+import {
+  buildAddressNameMaps,
+  buildTransactionDetailPayload,
+  type TransactionDetailPayload,
+} from "./src/utils/transactions";
 import {
   AppThemeProvider,
   Palette,
@@ -1490,6 +1510,7 @@ function WalletAppShell({
   showRecoveryFundsNotice,
   onDismissRecoveryFundsNotice,
   onPolicyRequired,
+  getAccessToken,
 }: {
   clientConfig: AppClientConfig;
   runtime: RuntimeState;
@@ -1498,6 +1519,15 @@ function WalletAppShell({
   onLogout?: () => void;
   backendClient?: AppBackendClient | null;
   backendBootstrapReady: boolean;
+  /**
+   * The session token, for the realtime socket.
+   *
+   * Passed rather than taken from the backend client because the socket is not
+   * an HTTP request: it presents the token itself, in its first frame, and the
+   * client's own getter is private to it. See the backend's Serve for why the
+   * credential travels that way.
+   */
+  getAccessToken: () => Promise<string | null>;
   walletPreferences: StoredWalletPreferences;
   onWalletPreferencesSync: (user: AppUser, wallets: AppWallet[]) => void;
   pendingLinkIntent: PendingLinkIntent | null;
@@ -1535,6 +1565,7 @@ function WalletAppShell({
       onLogout={onLogout}
       backendClient={backendClient}
       backendBootstrapReady={backendBootstrapReady}
+      getAccessToken={getAccessToken}
       walletPreferences={walletPreferences}
       onWalletPreferencesSync={onWalletPreferencesSync}
       pendingLinkIntent={pendingLinkIntent}
@@ -1605,6 +1636,7 @@ function WalletAppShellContent({
   showRecoveryFundsNotice,
   onDismissRecoveryFundsNotice,
   onPolicyRequired,
+  getAccessToken,
 }: {
   clientConfig: AppClientConfig;
   runtime: RuntimeState;
@@ -1613,6 +1645,8 @@ function WalletAppShellContent({
   onLogout?: () => void;
   backendClient?: AppBackendClient | null;
   backendBootstrapReady: boolean;
+  /** The session token, for the realtime socket. See WalletAppShell. */
+  getAccessToken: () => Promise<string | null>;
   walletPreferences: StoredWalletPreferences;
   onWalletPreferencesSync: (user: AppUser, wallets: AppWallet[]) => void;
   pendingLinkIntent: PendingLinkIntent | null;
@@ -1682,6 +1716,60 @@ function WalletAppShellContent({
   // finished transfer can be added to that conversation.
   const pendingChatPaymentRef = useRef<{ conversationId: number; recipient: string } | null>(null);
   const chatPaymentSentRef = useRef(false);
+
+  // ── Chat routes ───────────────────────────────────────────────────────────
+  //
+  // A conversation, its info screen, the new-message picker and a contact card
+  // are SCREENS now, not modals, so the shell has to own which one is up — it
+  // is the shell that hides the top bar and the dock for them. Each is a
+  // separate piece of state rather than one "route" union because they stack:
+  // a chat can be open behind its info screen, which can be open behind the
+  // add-people picker, and backing out of each should land on the one below.
+  const [chatRoute, setChatRoute] = useState<{
+    conversationId: number;
+    /**
+     * False when the chat was reached from a notification. Somebody who tapped
+     * a message came to READ it, and opening the keyboard over what they came
+     * to read is the wrong greeting.
+     */
+    autoFocus: boolean;
+  } | null>(null);
+  const [chatInfoRoute, setChatInfoRoute] = useState<Conversation | null>(null);
+  const [newMessageRoute, setNewMessageRoute] = useState<{
+    mode: "choose" | "group" | "add";
+    conversationId?: number;
+  } | null>(null);
+  const [contactDetailRoute, setContactDetailRoute] = useState<AppContact | null>(null);
+  const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null);
+  /**
+   * An opening line to prefill the composer with, used once.
+   *
+   * Set when a staff member presses "Message" on a support alert: the ticket
+   * card is already in the thread, and this is the sentence they edit before
+   * sending. Deliberately a draft and not a sent message — the card says we
+   * have the request; what we say about it should be a person's words.
+   */
+  const [supportReplyDraft, setSupportReplyDraft] = useState<string | null>(null);
+  const [contactSupportOpen, setContactSupportOpen] = useState(false);
+  // The in-app banner currently showing, if any.
+  const [banner, setBanner] = useState<BannerNotification | null>(null);
+  /**
+   * A transaction opened from a chat card.
+   *
+   * The shell's own copy of the sheet the wallet and Activity already use: a
+   * chat is reachable from any tab, so the sheet cannot live on one of them.
+   * Same component, same payload builder — this is a third entrance, not a
+   * third implementation.
+   */
+  const [chatTransaction, setChatTransaction] = useState<TransactionDetailPayload | null>(null);
+  /** A merchant opened from a chat card, shown on the map's own sheet. */
+  const [mapFocusLocationId, setMapFocusLocationId] = useState<number | null>(null);
+  // Whether the profile gate has been put up this session, and where to send
+  // somebody who declines it.
+  const [profileGateOpen, setProfileGateOpen] = useState(false);
+  const [profileExists, setProfileExists] = useState<boolean | null>(null);
+  const profileGateAskedRef = useRef(false);
+  const tabBeforeChatRef = useRef<Tab>("wallet");
   const [volunteerReminderPreferences, setVolunteerReminderPreferences] =
     useState<AppVolunteerReminderPreferences | null>(null);
   const [improverNotifications, setImproverNotifications] = useState<AppImproverNotificationFeed | null>(null);
@@ -2092,6 +2180,19 @@ function WalletAppShellContent({
   // has no such side effect.
   const bulletinEnabled = betaAccess.available.bulletin === true;
   const chatEnabled = betaAccess.available.chat === true;
+
+  // ── The live connection ───────────────────────────────────────────────────
+  //
+  // Held for as long as the app is foregrounded and somebody is signed in. NOT
+  // gated on chatEnabled: one of the things it carries is "your beta access
+  // changed", and a socket that required the beta could never deliver the event
+  // saying you now have it. See the backend's ServeRealtime.
+  const { subscribe: subscribeRealtime, sendTyping } = useRealtime({
+    baseURL: mobileConfig.appBackendURL,
+    getToken: getAccessToken,
+    enabled: Boolean(appUser) && Boolean(backendClient),
+  });
+
   const showVolunteerNav = canAccessVolunteerPanel && preferences.showVolunteerPanel;
   // Participate is one slot leading to one or two panels. With both available
   // it opens a chooser; with one it goes straight there; with neither the slot
@@ -3230,10 +3331,119 @@ function WalletAppShellContent({
     setTab("volunteer");
   }, []);
 
-  const openConversation = useCallback((conversationId: number | null) => {
-    setMessagesRouteRequest((current) => ({ conversationId, nonce: current.nonce + 1 }));
-    setTab("messages");
-  }, []);
+  /**
+   * Opens a conversation as a screen.
+   *
+   * Remembers which tab we came from, because the chat covers the whole screen
+   * including the dock — backing out of it has to land somewhere, and "wherever
+   * you were" is the only answer that is right for a chat reached from a push,
+   * from the Bulletin, and from the inbox alike.
+   */
+  const openChat = useCallback(
+    (conversationId: number, options?: { autoFocus?: boolean }) => {
+      if (!conversationId) {
+        return;
+      }
+      setChatRoute({ conversationId, autoFocus: options?.autoFocus ?? true });
+      setChatInfoRoute(null);
+    },
+    [],
+  );
+
+  const openConversation = useCallback(
+    (conversationId: number | null) => {
+      if (!conversationId) {
+        setMessagesRouteRequest((current) => ({ conversationId: null, nonce: current.nonce + 1 }));
+        setTab("messages");
+        return;
+      }
+      // Reached from a push or a deep link: they came to READ it, so the
+      // keyboard stays down. See ChatScreen's note on autoFocus.
+      tabBeforeChatRef.current = tab === "messages" || tab === "contacts" ? "messages" : tab;
+      openChat(conversationId, { autoFocus: false });
+    },
+    [openChat, tab],
+  );
+
+  /** Backs out of the chat stack, one layer at a time. */
+  const closeChatRoute = useCallback(() => {
+    setChatRoute(null);
+    // The tab underneath was never changed, so there is nothing to restore
+    // unless the chat was opened from outside Messages — in which case go to
+    // the inbox rather than back to, say, the map, which would make a push feel
+    // like it had done nothing.
+    setTab((current) =>
+      current === "messages" || current === "contacts" ? current : chatEnabled ? "messages" : current,
+    );
+  }, [chatEnabled]);
+
+  /** Opens, or reopens, a direct thread with somebody and shows it. */
+  const startConversationWith = useCallback(
+    async (userId: string) => {
+      if (!backendClient) {
+        return;
+      }
+      try {
+        const conversation = await backendClient.startConversation(userId, null);
+        setNewMessageRoute(null);
+        openChat(conversation.id, { autoFocus: true });
+      } catch (error) {
+        if (error instanceof BulletinRequestError && error.code === "profile_required") {
+          // The gate, not an error: they have no public profile yet, and the
+          // modal is what fixes it.
+          setProfileGateOpen(true);
+          return;
+        }
+        showToast(
+          error instanceof BulletinRequestError ? error.message : "Couldn't start a conversation.",
+          "error",
+        );
+      }
+    },
+    [backendClient, openChat],
+  );
+
+  // Whether this account has a public profile. Read once per session, and
+  // again after the gate saves one, because it decides whether the gate fires.
+  useEffect(() => {
+    if (!backendClient || !appUser || !chatEnabled) {
+      return;
+    }
+    let cancelled = false;
+    void backendClient
+      .getMyProfile()
+      .then((profile) => {
+        if (!cancelled) {
+          setProfileExists(profile.exists);
+        }
+      })
+      .catch(() => {
+        // Unknown rather than false: guessing "no profile" would put the gate
+        // in front of somebody who already has one, on a dropped request.
+        if (!cancelled) {
+          setProfileExists(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [appUser, backendClient, chatEnabled]);
+
+  /**
+   * The Chats tab was looked at. Puts the profile gate up the first time, if
+   * there is no public profile yet.
+   *
+   * Asked once per launch rather than every visit: somebody who declined has
+   * said so, and re-asking on every tap would be nagging. The gate comes back
+   * on the next launch, and the Profile tab can set one up at any time.
+   */
+  const handleChatsOpened = useCallback(() => {
+    if (!chatEnabled || profileGateAskedRef.current || profileExists !== false) {
+      return;
+    }
+    profileGateAskedRef.current = true;
+    setProfileGateOpen(true);
+  }, [chatEnabled, profileExists]);
 
   const navigateToNotificationTarget = useCallback(
     (target: NotificationTarget) => {
@@ -3313,6 +3523,7 @@ function WalletAppShellContent({
   const { resolveTarget: resolveNotificationTarget } = useNotificationInbox({
     onNavigate: navigateToNotificationTarget,
   });
+
 
   // Reading a message handles its notification, the same way tapping the push
   // would: the shade clears with the unread dot rather than keeping something
@@ -3583,10 +3794,17 @@ function WalletAppShellContent({
     return () => clearInterval(interval);
   }, [appUser, backendClient, chatEnabled, refreshMessagesUnread]);
 
-  // The push is the trigger, the same way the till's incoming-payment
-  // confirmation is: the badge moves when the message lands rather than at the
-  // top of some interval. Filtered to message pushes so nothing else re-reads
-  // the inbox summary.
+  // The badge, for a device with no live socket.
+  //
+  // This was the main path. It is now the fallback: the backend suppresses a
+  // message push for any device holding a socket, and the socket's own handler
+  // moves the badge instead. What is left for this is the device that has just
+  // been woken, or whose socket has dropped without reconnecting yet — which is
+  // exactly the case a push is for.
+  //
+  // Both paths re-read the server's count rather than incrementing, because two
+  // messages in one conversation are one unread conversation and only the
+  // server knows that.
   useEffect(() => {
     if (!backendClient || !appUser) {
       return;
@@ -3603,6 +3821,102 @@ function WalletAppShellContent({
     });
     return () => subscription.remove();
   }, [appUser, backendClient, refreshMessagesUnread]);
+
+  // ── In-app banners ────────────────────────────────────────────────────────
+  //
+  // The backend suppresses a push for any device holding a live socket and
+  // sends the event here instead, so this is where a notification becomes
+  // visible while the app is open. Two rules decide whether a banner is drawn:
+  //
+  //   1. Never for a message in the conversation that is already on screen.
+  //      That is the whole point — a banner over the chat you are reading is
+  //      the thing the system notification was doing wrong.
+  //   2. Never for something you did. The server already excludes the actor
+  //      from a message fan-out; this covers the rest.
+  //
+  // A tap routes through the same navigateToNotificationTarget a real push
+  // does, so there is one destination table and both paths use it.
+  useEffect(() => {
+    return subscribeRealtime((event) => {
+      if (event.kind === "message.new") {
+        const message = event.data as ChatMessage | undefined;
+        const conversationId = event.conversation_id;
+        if (!message || !conversationId) {
+          return;
+        }
+        // Rule 1.
+        if (chatRoute?.conversationId === conversationId) {
+          return;
+        }
+        // The badge. This used to be the push listener's job, and the backend
+        // now suppresses that push for any device holding this socket — so
+        // without this line the count simply stops moving for anybody with the
+        // app open, which is everybody this event reaches.
+        void refreshMessagesUnread();
+
+        const preview =
+          message.kind === "payment"
+            ? "Sent you SFLUV"
+            : message.body?.trim() || "Sent an attachment";
+        setBanner({
+          id: `message:${message.id}`,
+          title: message.sender_name?.trim() || "New message",
+          body: preview,
+          icon: "chatbubble",
+          onPress: () => openConversation(conversationId),
+        });
+        return;
+      }
+
+      if (event.kind === "notification") {
+        const payload = event.data as
+          | { title?: string; body?: string; data?: Record<string, string> }
+          | undefined;
+        if (!payload?.title && !payload?.body) {
+          return;
+        }
+        const target = targetFromData(payload?.data);
+        setBanner({
+          id: `notification:${Date.now()}`,
+          title: payload?.title || "SFLuv",
+          body: payload?.body || "",
+          icon: "notifications",
+          onPress: () => {
+            navigateToNotificationTarget(target);
+            resolveNotificationTarget(target);
+          },
+        });
+        return;
+      }
+
+      if (event.kind === "beta.changed") {
+        // Messaging turning on mid-session. Re-read rather than trusting the
+        // event's list, so the dock is built from the same source it always is.
+        void (async () => {
+          if (!backendClient || !betaUserId) {
+            return;
+          }
+          try {
+            const access = await backendClient.getMyBetaAccess();
+            setBetaAccess(access);
+            void saveBetaCache(betaUserId, access);
+          } catch {
+            // The next launch picks it up.
+          }
+        })();
+      }
+    });
+  }, [
+    backendClient,
+    betaUserId,
+    chatRoute?.conversationId,
+    navigateToNotificationTarget,
+    openConversation,
+    refreshMessagesUnread,
+    resolveNotificationTarget,
+    subscribeRealtime,
+  ]);
+
 
   const handleMarkImproverNotificationsSeen = useCallback(async () => {
     // Ungated for the same reason the fetch is: a non-improver can hold a tax
@@ -5036,6 +5350,69 @@ function WalletAppShellContent({
     return result;
   };
 
+  /**
+   * The Apple-Cash-style send: an amount typed in the chat composer.
+   *
+   * Reuses handleSend above, which is what makes "paid in chat" and "paid
+   * through the wallet screen" the same transfer with the same verification —
+   * the only difference is where the number was typed. The claimed amount goes
+   * up alongside the hash so the bubble can show a figure while the indexer
+   * catches up; the server replaces it with the indexed one.
+   *
+   * Direct threads only. The server refuses it in a group, so this does not
+   * have to — but the composer does not offer it there either, because a
+   * control that returns an error is worse than no control.
+   */
+  const handleSendInChat = async ({
+    conversationId,
+    payAddress,
+    amount,
+    note,
+  }: {
+    conversationId: number;
+    payAddress: string;
+    amount: string;
+    note: string;
+  }) => {
+    if (!runtime.service) {
+      throw new Error("Your wallet isn't ready yet.");
+    }
+    if (!backendClient) {
+      throw new Error("You're not signed in.");
+    }
+
+    // Marked BEFORE the transfer, so handleSend's own attach path knows this
+    // one is already accounted for and does not attach it twice.
+    pendingChatPaymentRef.current = null;
+    chatPaymentSentRef.current = true;
+
+    const result = await runtime.service.sendSFLUV(payAddress, amount, "token");
+    if (!result.txHash) {
+      throw new Error("The transfer didn't go through. Nothing was sent.");
+    }
+
+    // Base units, which is what the server stores. Six decimals, floored —
+    // rounding up would claim more than was sent.
+    const claimed = BigInt(Math.floor(Number(amount) * 1_000_000)).toString();
+    try {
+      await backendClient.attachConversationPayment(conversationId, result.txHash, {
+        amountSfluvBase: claimed,
+        note,
+      });
+    } catch {
+      // The money moved; only the chat bubble failed. Saying so is important —
+      // somebody who sees nothing in the thread will send again.
+      showToast("Payment sent, but it couldn't be added to the chat.", "error");
+    }
+
+    const activeAddress = smartAddressRef.current || selectedCandidate?.accountAddress || "";
+    void refreshSelectedWalletBalance({ silent: true });
+    if (activeAddress) {
+      void refreshWalletTransactionsFromBackend(activeAddress, { silent: true });
+      void refreshActivityTransactionsFromBackend(activeAddress, { silent: true });
+    }
+  };
+
   const refreshEverything = async () => {
     const activeAddress = smartAddressRef.current;
     await refreshSelectedWalletBalance({ silent: true });
@@ -5100,7 +5477,38 @@ function WalletAppShellContent({
       : tab === "notifications"
         ? "Notifications"
           : "Settings";
-  const showBlockingWalletState = runtime.loading && !runtime.service;
+  /**
+   * Whether the wallet signer is still being prepared.
+   *
+   * ── Why this no longer blocks the whole app ─────────────────────────────────
+   *
+   * It used to replace the entire content area with a centred spinner over
+   * "Preparing your wallet…", for every tab, until the signer was ready. The
+   * dock was drawn and tappable, so the app looked open — and then every tab
+   * showed the same spinner, which is worse than looking closed.
+   *
+   * Most of the app does not need the signer. The map, Activity, the Bulletin,
+   * Messages, Contacts and Settings all need `backendClient`, which exists as
+   * soon as Privy has answered. Only sending needs a signer, so only the wallet
+   * waits for one — and it waits behind its own content, with whatever balance
+   * was cached, rather than behind a blank screen.
+   *
+   * The case this most matters for is a message notification. Opening one used
+   * to land on the spinner and sit there until the wallet finished bootstrapping
+   * — a second or more of nothing, to read a message that needed none of it. The
+   * chat stack is now rendered before this check is reached at all, so a tapped
+   * notification goes straight to the thread.
+   */
+  const walletSignerPending = runtime.loading && !runtime.service;
+  // The wallet pane is the only surface that cannot usefully be drawn without a
+  // signer, because its primary action is to sign something.
+  const showBlockingWalletState = walletSignerPending && tab === "wallet";
+  /**
+   * Anything still loading in the background, for the quiet spinner in the top
+   * bar. Deliberately NOT a blocking state: it is there so that an app showing
+   * cached data is honest about the fact, not so that somebody waits for it.
+   */
+  const backgroundLoading = walletSignerPending || !backendBootstrapReady;
   // A boot that never finishes is indistinguishable from a crash to the user.
   // After a grace period the blocking spinner offers the same way out the error
   // state does, so a wedged startup can always be escaped.
@@ -5116,8 +5524,41 @@ function WalletAppShellContent({
   // The send pane keeps the header (it is not a separate context) but takes the
   // dock's space, since its keypad reaches the bottom of the screen.
   const sendPaneActive = tab === "wallet" && walletPane === "send";
-  const showStandardChrome = true;
+
+  /**
+   * The chat stack, innermost first. Each of these is a full screen with its own
+   * header, so the shell's top bar and dock are both hidden for them.
+   *
+   * Hiding the top bar is the point of doing it this way. A chat that kept it
+   * had two headers — the app's brand row above the conversation's own — which
+   * is what the old modal did and what made it look like a sheet over the app
+   * rather than a place in it.
+   */
+  const chatStackActive = Boolean(
+    chatRoute || chatInfoRoute || newMessageRoute || contactDetailRoute,
+  );
+  // The same maps Activity and the wallet build, so a transaction opened from a
+  // chat card labels its parties identically to the same transfer opened from
+  // the history list.
+  const { contactNameByAddress, merchantNameByAddress } = useMemo(
+    () => buildAddressNameMaps(contacts, locations, merchantLabelsByAddress),
+    [contacts, locations, merchantLabelsByAddress],
+  );
+  const showStandardChrome = !chatStackActive;
   const RootContainer = showStandardChrome ? SafeAreaView : View;
+  /**
+   * Shares a transaction into a chat.
+   *
+   * One handler for every entrance — the wallet's recent list, Activity, and a
+   * card in a chat — so the sheet it opens is the same from all of them.
+   */
+  const shareTransactionToChat = useCallback(
+    (txHash: string) => {
+      setShareTarget({ kind: "transaction", txHash, label: "Transaction" });
+    },
+    [],
+  );
+
   const walletHomeContent = (
     <WalletHomeScreen
       w9Status={w9Status}
@@ -5126,6 +5567,7 @@ function WalletAppShellContent({
       balance={smartBalance === "..." ? smartBalance : formatDisplayBalance(smartBalance, clientConfig.tokenDecimals)}
       tokenSymbol={clientConfig.tokenSymbol}
       explorerURL={clientConfig.explorerURL}
+      onShareTransaction={chatEnabled ? shareTransactionToChat : undefined}
       faucetAddress={clientConfig.faucetAddress}
       smartAddress={smartAddress}
       selectedWalletLabel={selectedWalletLabel}
@@ -5290,6 +5732,21 @@ function WalletAppShellContent({
   // Contacts renders in two places and must behave the same in both: as a
   // segment inside Messages when the community features are on, and as its own
   // dock screen when they are off. Built once here so the two cannot drift.
+  // The add-contact link this account's QR encodes. Built here as well as in
+  // ContactsScreen because the Profile pane is assembled by the shell.
+  const contactShareLink = useMemo(() => {
+    if (!smartAddress) {
+      return null;
+    }
+    try {
+      return buildUniversalAddContactLink({ address: smartAddress }, clientConfig);
+    } catch {
+      // An address the link builder will not checksum. Nothing to show rather
+      // than a QR code for a malformed address.
+      return null;
+    }
+  }, [clientConfig, smartAddress]);
+
   const contactsScreenElement = (
     <ContactsScreen
       clientConfig={clientConfig}
@@ -5332,6 +5789,16 @@ function WalletAppShellContent({
         const updatedContacts = await backendClient.getContacts();
         setContacts(updatedContacts);
       }}
+      onOpenContact={setContactDetailRoute}
+      profileElement={
+        <MyProfileScreen
+          backendClient={backendClient ?? null}
+          shareQRValue={contactShareLink}
+          shareAddress={smartAddress}
+          chatEnabled={chatEnabled}
+          onToast={showToast}
+        />
+      }
     />
   );
 
@@ -5343,6 +5810,18 @@ function WalletAppShellContent({
         <View style={styles.topOrbSmall} />
       </View>
 
+      {/* Notifications while the app is open, drawn OVER the top bar rather
+          than pushing it down — displacing the layout would move whatever the
+          person was about to tap. Hidden during the chat stack, which has its
+          own header and no top bar to sit on. */}
+      {showStandardChrome ? (
+        <InAppBanner
+          notification={banner}
+          onDismiss={(id) => setBanner((current) => (current?.id === id ? null : current))}
+          hapticsEnabled={preferences.hapticsEnabled}
+        />
+      ) : null}
+
       {showStandardChrome ? (
         <View style={styles.topBar}>
           <View style={styles.topTitleWrap}>
@@ -5350,6 +5829,22 @@ function WalletAppShellContent({
             <Text style={styles.brand}>{activeTitle}</Text>
           </View>
           <View style={styles.topActions}>
+            {/* The quiet "still loading" indicator.
+                The app is usable while this is up — that is the point of it. It
+                replaces a full-screen spinner that made every tab wait for the
+                wallet signer, and it sits beside the title rather than over the
+                content so nothing moves when it goes away. No label: there is
+                nothing for anybody to do about it, and a word here would be
+                read as a problem. */}
+            {backgroundLoading ? (
+              <View
+                style={styles.topLoading}
+                accessibilityRole="progressbar"
+                accessibilityLabel="Still loading your latest data"
+              >
+                <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
+              </View>
+            ) : null}
             {!merchantKiosk && !accountRoutingPending ? (
               <Pressable
                 style={styles.iconButton}
@@ -5422,6 +5917,227 @@ function WalletAppShellContent({
       ) : null}
 
       <View style={[styles.contentShell, !showStandardChrome ? styles.contentShellFullscreen : undefined]}>
+        {/* ── The chat stack ───────────────────────────────────────────────
+            Rendered instead of the tab content, innermost last so it draws on
+            top. Each layer's back action pops exactly one, so info → chat →
+            inbox works the way the swipe gesture implies it should. */}
+        {chatStackActive ? (
+          <View style={styles.content}>
+            {chatRoute ? (
+              <ChatScreen
+                conversationId={chatRoute.conversationId}
+                backendClient={backendClient ?? null}
+                tokenSymbol={clientConfig.tokenSymbol}
+                hapticsEnabled={preferences.hapticsEnabled}
+                availableBalance={
+                  smartBalance === "..."
+                    ? undefined
+                    : formatDisplayBalance(smartBalance, clientConfig.tokenDecimals)
+                }
+                autoFocus={chatRoute.autoFocus}
+                initialDraft={supportReplyDraft}
+                onInitialDraftApplied={() => setSupportReplyDraft(null)}
+                onBack={closeChatRoute}
+                onOpenInfo={setChatInfoRoute}
+                onSendPayment={handleSendInChat}
+                onOpenTransaction={(txHash) => {
+                  // The wallet and Activity already have this sheet; the shell
+                  // finds the row and shows the same one rather than building a
+                  // third copy of it.
+                  const match = [...walletTransactions, ...activityTransactions].find(
+                    (transaction) => transaction.hash?.toLowerCase() === txHash.toLowerCase(),
+                  );
+                  if (!match) {
+                    // Only the signed-in person's own transfers are in their
+                    // history, so somebody else's shared transaction has no row
+                    // here. The card still shows the amount and the parties,
+                    // which came from the chain index.
+                    showToast("That transaction isn't in your history.", "info");
+                    return;
+                  }
+                  setChatTransaction(
+                    buildTransactionDetailPayload(
+                      match,
+                      smartAddress,
+                      contactNameByAddress,
+                      merchantNameByAddress,
+                      clientConfig.faucetAddress,
+                    ),
+                  );
+                }}
+                onOpenMerchant={(locationId) => {
+                  const match = locations.find((location) => location.id === locationId);
+                  if (!match) {
+                    showToast("That merchant isn't listed right now.", "info");
+                    return;
+                  }
+                  // Opens the map's own merchant sheet. One sheet in the app,
+                  // reached from a second place, rather than a second sheet.
+                  setChatRoute(null);
+                  setMapFocusLocationId(locationId);
+                  setTab("map");
+                }}
+                onOpenEvent={(eventId) => {
+                  setChatRoute(null);
+                  openVolunteerPanel(eventId);
+                }}
+                subscribe={subscribeRealtime}
+                sendTyping={sendTyping}
+                onToast={showToast}
+                onRead={(conversationId) => {
+                  // Two things, both of which "reading it" should do: move the
+                  // badge, and clear the OS notification for that thread — the
+                  // same way tapping the push would have. A notification for a
+                  // message already on screen is the thing this whole path is
+                  // for getting rid of.
+                  void refreshMessagesUnread();
+                  handleConversationOpened(conversationId);
+                }}
+              />
+            ) : null}
+
+            {chatInfoRoute ? (
+              <View style={StyleSheet.absoluteFill}>
+                <ChatInfoScreen
+                  conversation={chatInfoRoute}
+                  myUserId={appUser?.id ?? ""}
+                  backendClient={backendClient ?? null}
+                  hapticsEnabled={preferences.hapticsEnabled}
+                  onBack={() => setChatInfoRoute(null)}
+                  onConversationChanged={() => {
+                    void (async () => {
+                      if (!backendClient) {
+                        return;
+                      }
+                      try {
+                        setChatInfoRoute(await backendClient.getConversation(chatInfoRoute.id));
+                      } catch {
+                        // The screen keeps what it has; the thread behind it
+                        // re-reads on its own socket event.
+                      }
+                    })();
+                  }}
+                  onLeft={() => {
+                    // Left the group or archived the thread: there is nothing
+                    // to go back to, so the whole stack closes.
+                    setChatInfoRoute(null);
+                    setChatRoute(null);
+                    setTab(chatEnabled ? "messages" : "wallet");
+                  }}
+                  onOpenMember={(userId) => {
+                    setChatInfoRoute(null);
+                    void startConversationWith(userId);
+                  }}
+                  onAddMembers={(conversationId) =>
+                    setNewMessageRoute({ mode: "add", conversationId })
+                  }
+                  onToast={showToast}
+                />
+              </View>
+            ) : null}
+
+            {newMessageRoute ? (
+              <View style={StyleSheet.absoluteFill}>
+                <NewMessageScreen
+                  backendClient={backendClient ?? null}
+                  hapticsEnabled={preferences.hapticsEnabled}
+                  mode={newMessageRoute.mode}
+                  addingToConversationId={newMessageRoute.conversationId}
+                  onBack={() => setNewMessageRoute(null)}
+                  onStartDirect={(userId) => void startConversationWith(userId)}
+                  onCreateGroup={async (title, userIds) => {
+                    if (!backendClient) {
+                      return;
+                    }
+                    const group = await backendClient.createGroupConversation(title, userIds);
+                    setNewMessageRoute(null);
+                    openChat(group.id, { autoFocus: true });
+                  }}
+                  onAddToGroup={async (conversationId, userIds) => {
+                    if (!backendClient) {
+                      return;
+                    }
+                    // One at a time: the endpoint adds one person, and doing
+                    // them in sequence means a refusal names who was refused.
+                    for (const userId of userIds) {
+                      await backendClient.addGroupMember(conversationId, userId);
+                    }
+                    setNewMessageRoute(null);
+                    if (chatInfoRoute) {
+                      setChatInfoRoute(await backendClient.getConversation(conversationId));
+                    }
+                  }}
+                  onToast={showToast}
+                />
+              </View>
+            ) : null}
+
+            {contactDetailRoute ? (
+              <View style={StyleSheet.absoluteFill}>
+                <ContactDetailScreen
+                  contact={contactDetailRoute}
+                  clientConfig={clientConfig}
+                  backendClient={backendClient ?? null}
+                  onBack={() => setContactDetailRoute(null)}
+                  onChanged={() => {
+                    void (async () => {
+                      if (!backendClient) {
+                        return;
+                      }
+                      try {
+                        const updated = await backendClient.getContacts();
+                        setContacts(updated);
+                        const fresh = updated.find(
+                          (contact) => contact.id === contactDetailRoute.id,
+                        );
+                        if (fresh) {
+                          setContactDetailRoute(fresh);
+                        }
+                      } catch {
+                        // The card keeps what it has.
+                      }
+                    })();
+                  }}
+                  onDeleted={() => {
+                    const contactID = contactDetailRoute.id;
+                    setContactDetailRoute(null);
+                    void (async () => {
+                      if (!backendClient) {
+                        return;
+                      }
+                      try {
+                        await backendClient.deleteContact(contactID);
+                        setContacts(await backendClient.getContacts());
+                      } catch {
+                        showToast("Couldn't delete that contact.", "error");
+                      }
+                    })();
+                  }}
+                  onSend={(contact) => {
+                    setContactDetailRoute(null);
+                    openSendDraft({
+                      recipient: contact.address,
+                      recipientLabel: contact.name,
+                      recipientKind: "contact",
+                    });
+                  }}
+                  onMessage={
+                    chatEnabled
+                      ? (contact) => {
+                          if (!contact.userId) {
+                            return;
+                          }
+                          setContactDetailRoute(null);
+                          void startConversationWith(contact.userId);
+                        }
+                      : undefined
+                  }
+                  onToast={showToast}
+                />
+              </View>
+            ) : null}
+          </View>
+        ) : (
         <Animated.View
           style={[styles.content, { opacity: tabFade, transform: [{ translateX: tabSlideX }] }]}
         >
@@ -5515,6 +6231,7 @@ function WalletAppShellContent({
               transactions={activityTransactions}
               tokenSymbol={clientConfig.tokenSymbol}
               explorerURL={clientConfig.explorerURL}
+              onShareTransaction={chatEnabled ? shareTransactionToChat : undefined}
               faucetAddress={clientConfig.faucetAddress}
               transactionsLoaded={activityTransactionsLoaded}
               contacts={contacts}
@@ -5563,6 +6280,11 @@ function WalletAppShellContent({
               backendClient={backendClient}
               tokenSymbol={clientConfig.tokenSymbol}
               hapticsEnabled={preferences.hapticsEnabled}
+              onShareEvent={
+                chatEnabled
+                  ? (event) => setShareTarget({ kind: "event", eventId: event.id, label: event.title })
+                  : undefined
+              }
               requestedEventId={volunteerRouteRequest.eventId}
               requestedEventNonce={volunteerRouteRequest.nonce}
               volunteerListOptIn={appUser?.volunteerListOptIn}
@@ -5577,6 +6299,18 @@ function WalletAppShellContent({
               viewMode={merchantMapViewMode}
               onChangeViewMode={setMerchantMapViewMode}
               recenterNonce={mapRecenterNonce}
+              focusLocationId={mapFocusLocationId}
+              onFocusHandled={() => setMapFocusLocationId(null)}
+              onShareLocation={
+                chatEnabled
+                  ? (location) =>
+                      setShareTarget({
+                        kind: "merchant",
+                        locationId: location.id,
+                        label: location.name,
+                      })
+                  : undefined
+              }
               onPayLocation={(location) => {
                 if (!location.payToAddress) {
                   showToast("Payment is not available for this merchant right now.", "error");
@@ -5630,6 +6364,31 @@ function WalletAppShellContent({
               }}
               onLoadMore={loadMoreNotifications}
               onAction={runNotificationAction}
+              onOpenSupportChat={
+                chatEnabled
+                  ? async (requestId) => {
+                      if (!backendClient) {
+                        return;
+                      }
+                      try {
+                        // One call does all of it: opens or reopens the thread,
+                        // posts the ticket as a reference card so both ends can
+                        // see which request they are talking about, and returns
+                        // a draft opening line.
+                        const opened = await backendClient.openSupportConversation(requestId);
+                        setSupportReplyDraft(opened.draft);
+                        openChat(opened.conversation_id, { autoFocus: true });
+                      } catch (error) {
+                        showToast(
+                          error instanceof BulletinRequestError
+                            ? error.message
+                            : "Couldn't open a chat with them.",
+                          "error",
+                        );
+                      }
+                    }
+                  : undefined
+              }
               onOpen={(item) => {
                 // Routed by the push payload the notification was sent with,
                 // so a history row lands in the same place tapping the real
@@ -5647,32 +6406,12 @@ function WalletAppShellContent({
               hapticsEnabled={preferences.hapticsEnabled}
               requestedSegment={tab === "contacts" ? "contacts" : undefined}
               requestedSegmentNonce={tab === "contacts" ? messagesRouteRequest.nonce : undefined}
-              requestedConversationId={messagesRouteRequest.conversationId}
-              requestedConversationNonce={messagesRouteRequest.nonce}
               onUnreadChange={setMessagesUnread}
-              onConversationOpened={handleConversationOpened}
-              onToast={showToast}
-              onPayInConversation={(conversation: Conversation) => {
-                if (!conversation.pay_address) {
-                  showToast("Payment isn't available in this conversation.", "error");
-                  return;
-                }
-                pendingChatPaymentRef.current = { conversationId: conversation.id, recipient: conversation.pay_address };
-                chatPaymentSentRef.current = false;
-                const post = conversation.post;
-                openSendDraft(
-                  {
-                    recipient: conversation.pay_address,
-                    amount:
-                      post && post.category === "for_sale" && post.accepts_sfluv && post.price_sfluv
-                        ? post.price_sfluv
-                        : undefined,
-                    recipientLabel: conversation.other_user.public_name,
-                    recipientKind: "contact",
-                  },
-                  { returnTab: "messages" },
-                );
-              }}
+              onChatsOpened={handleChatsOpened}
+              onOpenConversation={(conversationId) => openChat(conversationId, { autoFocus: true })}
+              onStartConversation={(userId) => void startConversationWith(userId)}
+              onNewMessage={() => setNewMessageRoute({ mode: "choose" })}
+              subscribe={subscribeRealtime}
               contactsElement={contactsScreenElement}
             />
           ) : tab === "contacts" ? (
@@ -5680,6 +6419,7 @@ function WalletAppShellContent({
           ) : (
             <SettingsScreen
               user={appUser}
+              onContactSupport={backendClient ? () => setContactSupportOpen(true) : undefined}
               tokenSymbol={clientConfig.tokenSymbol}
               improver={appImprover}
               wallets={settingsWallets}
@@ -5748,6 +6488,68 @@ function WalletAppShellContent({
             />
           )}
         </Animated.View>
+        )}
+
+        {/* ── The profile gate ────────────────────────────────────────────
+            Required the first time Chats is opened, because a message from an
+            account with no name is worse for the person receiving it than a
+            form is for the person sending it. Cancelling returns them to the
+            tab they came from — see ProfileSetupModal's own note. */}
+        <ProfileSetupModal
+          visible={profileGateOpen}
+          client={backendClient ?? null}
+          mode={profileExists ? "edit" : "required"}
+          onCancel={() => {
+            setProfileGateOpen(false);
+            // Back where they were. Leaving them on a Chats tab they cannot use
+            // would be a dead end with no way to get the prompt back.
+            if (profileExists === false && (tab === "messages" || tab === "contacts")) {
+              setTab(tabBeforeChatRef.current === "messages" ? "wallet" : tabBeforeChatRef.current);
+            }
+          }}
+          onSaved={() => {
+            setProfileGateOpen(false);
+            setProfileExists(true);
+          }}
+        />
+
+        {/* Writing to SFLuv. Submitted through the authenticated client, which
+            is what attributes the request to this account — see the note on
+            ContactSupportModal. */}
+        <ContactSupportModal
+          visible={contactSupportOpen}
+          backendClient={backendClient ?? null}
+          defaultEmail={appUser?.contactEmail ?? undefined}
+          defaultName={appUser?.name ?? undefined}
+          onClose={() => setContactSupportOpen(false)}
+        />
+
+        {/* Sharing a merchant, event or transaction into a chat. */}
+        <ShareToChatSheet
+          target={shareTarget}
+          backendClient={backendClient ?? null}
+          hapticsEnabled={preferences.hapticsEnabled}
+          onClose={() => setShareTarget(null)}
+          onShared={(conversationIds) => {
+            // One chat: go there, because that is almost certainly where the
+            // conversation continues. Several: stay put, since there is no one
+            // destination and jumping to an arbitrary one would be wrong.
+            if (conversationIds.length === 1) {
+              openChat(conversationIds[0], { autoFocus: false });
+            }
+          }}
+          onToast={showToast}
+        />
+
+        {/* A transaction opened from a chat card. Rendered by the shell rather
+            than by a tab, because a chat is reachable from any of them. */}
+        <TransactionDetailsModal
+          visible={Boolean(chatTransaction)}
+          details={chatTransaction}
+          tokenSymbol={clientConfig.tokenSymbol}
+          explorerURL={clientConfig.explorerURL}
+          onClose={() => setChatTransaction(null)}
+        />
 
         {toast ? (
           <View
@@ -7575,6 +8377,7 @@ function PrivyWalletApp({
       }}
       backendClient={backendClient}
       backendBootstrapReady={backendBootstrapReady}
+      getAccessToken={async () => (await getAccessTokenRef.current()) ?? null}
       walletPreferences={walletPreferences}
       onWalletPreferencesSync={syncWalletPreferences}
       pendingLinkIntent={pendingLinkIntent}
@@ -8271,10 +9074,28 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     fontSize: 10,
     fontWeight: "800",
   },
+  topLoading: {
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   topBar: {
     paddingHorizontal: spacing.lg,
     paddingTop: 6,
-    paddingBottom: 6,
+    // ── Why this is 12 and not 6 ─────────────────────────────────────────────
+    //
+    // This is the other half of the "crowded at the top" fix. Every screen sets
+    // its own small top padding, and the visible gap between the title and the
+    // first card is the sum of that and this — two tight values, which on a
+    // device with a tall status area reads as the content being jammed under
+    // the heading.
+    //
+    // Raising it here rather than on each screen is deliberate: the complaint
+    // was about several screens, the cause is shared, and bumping ten screens
+    // individually would leave the eleventh wrong. Screens with their own
+    // reason to sit tighter still override it.
+    paddingBottom: 12,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
