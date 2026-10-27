@@ -16,6 +16,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
 
 import { AppBackendClient } from "../services/appBackend";
 import { SwipeBack } from "../components/SwipeBack";
@@ -29,7 +30,6 @@ import {
 import { ChatComposer, type AttachmentOption, type ComposerMode } from "../components/ChatComposer";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
-import { pickDocuments } from "../utils/documentPicker";
 import type { RealtimeEvent } from "../services/realtime";
 import { useTypingIndicators, useTypingReporter } from "../hooks/useRealtime";
 import {
@@ -457,14 +457,28 @@ export function ChatScreen({
         icon: "document-outline",
         onPress: () => {
           void (async () => {
-            const picked = await pickDocuments();
-            if (picked === "unavailable") {
-              onToast("Sending files needs a newer version of SFLuv.", "info");
+            const result = await DocumentPicker.getDocumentAsync({
+              multiple: true,
+              // Everything, filtered server-side against the allowlist in
+              // app_chat_attachment.go. Restricting the picker here too would
+              // mean two lists to keep in step, and the one that matters for
+              // safety is the server's.
+              type: "*/*",
+              // Copied into the app's cache so the URI is still readable when
+              // the upload runs: a document-provider URI can expire the moment
+              // the picker closes.
+              copyToCacheDirectory: true,
+            });
+            if (result.canceled || result.assets.length === 0) {
               return;
             }
-            if (picked.length > 0) {
-              await sendAttachments(picked);
-            }
+            await sendAttachments(
+              result.assets.map((asset) => ({
+                uri: asset.uri,
+                mimeType: asset.mimeType,
+                fileName: asset.name,
+              })),
+            );
           })();
         },
       },

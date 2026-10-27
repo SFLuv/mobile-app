@@ -52,15 +52,43 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   name: "SFLuv",
   slug: expoSlug,
   owner: expoOwner,
-  version: "2.1.0",
+  // 2.2.0, and the bump is load-bearing rather than ceremonial.
+  //
+  // runtimeVersion below is `policy: "appVersion"`, so THIS STRING is the
+  // over-the-air compatibility boundary: an update is delivered to any build on
+  // the same channel whose runtime version matches. 2.2 adds a native module
+  // (expo-document-picker, for chat file attachments) which the 2.1 build in
+  // the store does not have, and expo-document-picker throws at import when its
+  // native side is missing — so an update left on 2.1.0 would be shipped to
+  // 2.1 installs and stop them booting.
+  //
+  // Leaving this at 2.1.0 for a release that adds native code is therefore not
+  // an untidy version number; it is a way to brick the installed base.
+  version: "2.2.0",
   description:
     "This app is a nonprofit-run community hub for managing and spending your SFLUV, redeeming perks, and coordinating verified improvers. Improvers can sign up to complete real-world tasks in San Francisco and be rewarded with SFLUV.",
   scheme: "sfluv",
   // Over-the-air updates. A JavaScript-only fix ships with `eas update` in
-  // minutes, without store review. The fingerprint policy ties every update to
-  // the exact native code it was built against, so an update can never reach a
-  // build whose native side it does not match; native changes (new native
-  // packages, permissions, SDK upgrades) still need a store release.
+  // minutes, without store review.
+  //
+  // ── What this policy does and does not guarantee ───────────────────────────
+  //
+  // This comment used to say the *fingerprint* policy was in use and that "an
+  // update can never reach a build whose native side it does not match". The
+  // policy is `appVersion`, which does not provide that: it matches on the
+  // `version` string above and nothing else, so two builds with different
+  // native code and the same version string are treated as interchangeable.
+  //
+  // The safety property therefore rests on discipline — bump `version` whenever
+  // native code changes — and that discipline is now written next to `version`
+  // itself, where somebody about to edit it will see it.
+  //
+  // `policy: "fingerprint"` would make it structural instead: it hashes the
+  // native project, so adding a package changes the runtime version
+  // automatically and a mismatched update becomes undeliverable rather than
+  // merely discouraged. That is almost certainly what was intended here. It is
+  // left as a deliberate decision rather than changed in passing, because it
+  // alters which builds a hotfix can reach.
   runtimeVersion: { policy: "appVersion" },
   updates: {
     url: `https://u.expo.dev/${resolveEasProjectId(config)}`,
