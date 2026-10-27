@@ -1,5 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
+  Easing,
   Image,
   Platform,
   Pressable,
@@ -127,6 +129,42 @@ export function ChatComposer({
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
 
+  /**
+   * The tray's entrance.
+   *
+   * ── Why it slides DOWN into view, not up ─────────────────────────────────
+   *
+   * Opening the tray dismisses the keyboard, and the keyboard leaves downward.
+   * A tray that rose up as the keyboard fell would be two things crossing in
+   * opposite directions in the same strip of screen, which is the "funky" part
+   * — it reads as a fight rather than a handover.
+   *
+   * So the tray enters from above its own resting position and settles down
+   * into the space the keyboard is vacating, travelling the same way the
+   * keyboard is. The timing is matched to iOS's keyboard animation (250ms,
+   * ease-out) rather than chosen for its own sake.
+   */
+  const trayEnter = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const opening = mode !== "text";
+    Animated.timing(trayEnter, {
+      toValue: opening ? 1 : 0,
+      duration: opening ? 250 : 160,
+      easing: opening ? Easing.out(Easing.cubic) : Easing.in(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [mode, trayEnter]);
+
+  const trayStyle = {
+    opacity: trayEnter,
+    transform: [
+      {
+        translateY: trayEnter.interpolate({ inputRange: [0, 1], outputRange: [-18, 0] }),
+      },
+    ],
+  };
+
   return (
     <View style={styles.wrap}>
       {/* Staged attachments, as thumbnails. Topmost in the stack because they
@@ -210,6 +248,7 @@ export function ChatComposer({
       ) : null}
 
       {mode === "amount" && onSendAmount ? (
+        <Animated.View style={trayStyle}>
         <AmountPad
           tokenSymbol={tokenSymbol}
           availableBalance={availableBalance}
@@ -217,8 +256,9 @@ export function ChatComposer({
           onCancel={() => onModeChange("text")}
           onSend={onSendAmount}
         />
+        </Animated.View>
       ) : mode === "attach" ? (
-        <View style={styles.tray}>
+        <Animated.View style={[styles.tray, trayStyle]}>
           <View style={styles.trayGrid}>
             {attachmentOptions.map((option) => (
               <Pressable
@@ -252,7 +292,7 @@ export function ChatComposer({
           >
             <Text style={styles.trayCloseText}>Cancel</Text>
           </Pressable>
-        </View>
+        </Animated.View>
       ) : (
         <View style={styles.bar}>
           <Pressable

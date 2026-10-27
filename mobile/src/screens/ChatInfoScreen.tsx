@@ -19,6 +19,8 @@ import { SegmentedTabs } from "../components/SegmentedTabs";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { Avatar, BadgeLine } from "../components/BulletinParts";
 import { formatFileSize } from "../components/MessageAttachmentCard";
+import { AttachmentPreview } from "../components/AttachmentPreview";
+import { fileTypeIcon } from "../utils/attachmentFiles";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
 import {
@@ -532,6 +534,8 @@ function ConversationFiles({
   const styles = useMemo(() => createStyles(palette), [palette]);
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<ConversationFile[] | null>(null);
+  /** The file open in the full-screen preview, with its save button. */
+  const [preview, setPreview] = useState<ConversationFile | null>(null);
 
   const load = useCallback(
     async (search: string) => {
@@ -591,27 +595,55 @@ function ConversationFiles({
             </View>
           )
         }
-        renderItem={({ item }) => (
-          <View style={styles.fileRow}>
-            <View style={styles.fileIcon}>
-              <Ionicons
-                name={item.kind === "image" ? "image-outline" : "document-outline"}
-                size={19}
-                color={palette.primaryStrong}
-              />
-            </View>
-            <View style={styles.memberBody}>
-              <Text style={styles.memberName} numberOfLines={1}>
-                {item.file_name || (item.kind === "image" ? "Photo" : "File")}
-              </Text>
-              <Text style={styles.memberMeta} numberOfLines={1}>
-                {[item.sender_name, formatFileSize(item.size_bytes), formatDate(item.created_at)]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </Text>
-            </View>
-          </View>
-        )}
+        renderItem={({ item }) => {
+          // An icon per file TYPE, not per category. "Find the CSV Maria sent"
+          // is the errand this list exists for, and a spreadsheet that looks
+          // like a PDF does not help with it.
+          const typeInfo = fileTypeIcon(item);
+          return (
+            <Pressable
+              style={styles.fileRow}
+              onPress={() => setPreview(item)}
+              accessibilityRole="button"
+              accessibilityLabel={`${typeInfo.label}: ${item.file_name || "file"}`}
+            >
+              <View style={styles.fileIcon}>
+                <Ionicons
+                  name={typeInfo.icon as keyof typeof Ionicons.glyphMap}
+                  size={19}
+                  color={palette.primaryStrong}
+                />
+              </View>
+              <View style={styles.memberBody}>
+                <Text style={styles.memberName} numberOfLines={1}>
+                  {item.file_name || (item.kind === "image" ? "Photo" : "File")}
+                </Text>
+                <Text style={styles.memberMeta} numberOfLines={1}>
+                  {[
+                    typeInfo.label,
+                    formatFileSize(item.size_bytes),
+                    item.sender_name,
+                    formatDate(item.created_at),
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={15} color={palette.textMuted} />
+            </Pressable>
+          );
+        }}
+      />
+
+      {/* The same preview the thread uses, so a file found by search opens
+          exactly as it would from the message it arrived in. */}
+      <AttachmentPreview
+        attachment={preview}
+        conversationId={conversationId}
+        client={backendClient}
+        senderName={preview?.sender_name}
+        onClose={() => setPreview(null)}
+        onToast={onToast}
       />
     </View>
   );

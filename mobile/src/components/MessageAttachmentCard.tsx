@@ -201,35 +201,31 @@ export function MessageAttachmentCard({
       // Both open the same transaction sheet.
       return (
         <Pressable
-          style={[styles.card, mine ? styles.cardMine : undefined]}
+          style={[styles.referenceCard, mine ? styles.cardMine : undefined]}
           onPress={() => attachment.tx_hash && handlers.onOpenTransaction?.(attachment.tx_hash)}
           onLongPress={onLongPress}
           delayLongPress={280}
           accessibilityRole="button"
           accessibilityLabel="Transaction record"
         >
-          <View style={styles.iconWrap}>
-            <Ionicons name="receipt-outline" size={20} color={palette.primaryStrong} />
+          <View style={styles.referenceBanner}>
+            <Ionicons name="receipt-outline" size={15} color={palette.primaryStrong} />
+            <Text style={styles.referenceKicker}>Transaction record</Text>
           </View>
-          <View style={styles.cardBody}>
-            <Text style={styles.cardTitle} numberOfLines={1}>
-              Transaction record
-            </Text>
-            <Text style={styles.cardMeta} numberOfLines={1}>
+          <View style={styles.referenceBody}>
+            <Text style={styles.referenceTitle} numberOfLines={1}>
               {/* "Confirming" rather than "missing": a transfer shared seconds
                   after it was made is simply not indexed yet, and the two are
                   indistinguishable from here. */}
               {attachment.unavailable
                 ? "Confirming on the network…"
-                : [
-                    `${formatBaseAmount(attachment.tx_amount_sfluv_base)} ${tokenSymbol}`,
-                    attachment.tx_at ? formatTxDate(attachment.tx_at) : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
+                : `${formatBaseAmount(attachment.tx_amount_sfluv_base)} ${tokenSymbol}`}
             </Text>
+            {!attachment.unavailable && attachment.tx_at ? (
+              <Text style={styles.referenceDetail}>{formatTxDate(attachment.tx_at)}</Text>
+            ) : null}
+            <Text style={styles.referenceAction}>View transaction</Text>
           </View>
-          <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
         </Pressable>
       );
 
@@ -313,7 +309,7 @@ export function MessageAttachmentCard({
     case "support":
       return (
         <Pressable
-          style={[styles.card, styles.supportCard]}
+          style={[styles.referenceCard, styles.supportCard]}
           onPress={() =>
             attachment.support_request_id && handlers.onOpenSupport?.(attachment.support_request_id)
           }
@@ -322,15 +318,21 @@ export function MessageAttachmentCard({
           accessibilityRole="button"
           accessibilityLabel="Support request"
         >
-          <View style={styles.iconWrap}>
-            <Ionicons name="help-buoy" size={20} color={palette.primaryStrong} />
+          <View style={styles.referenceBanner}>
+            <Ionicons name="help-buoy" size={15} color={palette.primaryStrong} />
+            <Text style={styles.referenceKicker} numberOfLines={1}>
+              {attachment.support_reference
+                ? `Support · ${attachment.support_reference}`
+                : "Support request"}
+            </Text>
           </View>
-          <View style={styles.cardBody}>
-            <Text style={styles.cardTitle} numberOfLines={2}>
+          <View style={styles.referenceBody}>
+            <Text style={styles.referenceTitle} numberOfLines={2}>
               {attachment.support_subject || "Your message to SFLuv"}
             </Text>
-            <Text style={styles.cardMeta} numberOfLines={1}>
-              {attachment.support_reference ? `Request ${attachment.support_reference}` : "Support request"}
+            <Text style={styles.referenceDetail}>
+              {/* Never the body or the email — see resolveSupportCard. */}
+              We have your request and someone is looking at it.
             </Text>
           </View>
         </Pressable>

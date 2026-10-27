@@ -6564,6 +6564,7 @@ function WalletAppShellContent({
               onOpenConversation={(conversationId) => openChat(conversationId, { autoFocus: true })}
               onStartConversation={(userId) => void startConversationWith(userId)}
               onNewMessage={() => setNewMessageRoute({ mode: "choose" })}
+              onToast={showToast}
               subscribe={subscribeRealtime}
               contactsElement={contactsScreenElement}
             />

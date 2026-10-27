@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AppState,
   FlatList,
+  Modal,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -16,11 +17,12 @@ import { SegmentedTabs } from "../components/SegmentedTabs";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { Avatar, BadgeLine, CATEGORY_ICONS, formatAgo } from "../components/BulletinParts";
 import { attachmentKindLabel } from "../components/MessageAttachmentCard";
+import { SwipeableRow } from "../components/SwipeableRow";
 import { useDockLift } from "../hooks/useDockLift";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
 import type { RealtimeEvent } from "../services/realtime";
-import { Conversation, MessageAttachment, PublicUser } from "../types/bulletin";
+import { BulletinRequestError, Conversation, MessageAttachment, PublicUser } from "../types/bulletin";
 
 /**
  * The inbox.
@@ -70,6 +72,7 @@ type Props = {
   onOpenConversation: (conversationId: number) => void;
   onStartConversation: (userId: string) => void;
   onNewMessage: () => void;
+  onToast: (message: string, tone?: "info" | "success" | "error") => void;
   subscribe: (listener: (event: RealtimeEvent) => void) => () => void;
 };
 
@@ -85,6 +88,7 @@ export function MessagesScreen({
   onOpenConversation,
   onStartConversation,
   onNewMessage,
+  onToast,
   subscribe,
 }: Props) {
   const { palette, shadows } = useAppTheme();
@@ -99,6 +103,19 @@ export function MessagesScreen({
   const [merchantResults, setMerchantResults] = useState<
     Array<{ location_id: number; name: string; owner_user_id: string }>
   >([]);
+  /**
+   * The conversation a swipe action is asking about.
+   *
+   * Every action here is destructive or sticky enough to confirm — deleting for
+   * everybody removes a thread from somebody else's phone, and "mute forever"
+   * is easy to forget you did. The sheet names what each option actually does
+   * rather than relying on the button's own label.
+   */
+  const [rowAction, setRowAction] = useState<{
+    conversation: Conversation;
+    kind: "delete" | "mute";
+  } | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
 
   useEffect(() => {
     if (requestedSegment) {
@@ -192,6 +209,61 @@ export function MessagesScreen({
    * Written from the reader's side throughout. "You sent 5 SFLUV", not
    * "payment"; "Maria shared an event", not "attachment:event".
    */
+  /** Mutes for a number of minutes, or clears it when minutes is 0. */
+  const changeMute = async (conversation: Conversation, minutes: number) => {
+    if (!backendClient || actionBusy) {
+      return;
+    }
+    setActionBusy(true);
+    try {
+      await backendClient.muteConversation(conversation.id, minutes);
+      // Patched locally so the row's bell flips immediately; the next inbox
+      // read confirms it.
+      setConversations((current) =>
+        (current ?? []).map((entry) =>
+          entry.id === conversation.id ? { ...entry, muted: minutes > 0 } : entry,
+        ),
+      );
+      setRowAction(null);
+    } catch {
+      onToast("Couldn't change notifications for that conversation.", "error");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  /** Removes a conversation from the inbox, by whichever route was chosen. */
+  const runDelete = async (
+    conversation: Conversation,
+    mode: "me" | "everyone" | "leave" | "leave-and-clear",
+  ) => {
+    if (!backendClient || actionBusy) {
+      return;
+    }
+    setActionBusy(true);
+    try {
+      if (mode === "me") {
+        // Archiving. The thread and its history come back intact the moment
+        // either person sends again, which is exactly what was asked for.
+        await backendClient.archiveConversation(conversation.id);
+      } else if (mode === "everyone") {
+        await backendClient.deleteConversationForEveryone(conversation.id);
+      } else {
+        await backendClient.leaveGroup(conversation.id, mode === "leave-and-clear");
+      }
+      setConversations((current) => (current ?? []).filter((entry) => entry.id !== conversation.id));
+      setRowAction(null);
+      void loadInbox();
+    } catch (e) {
+      onToast(
+        e instanceof BulletinRequestError ? e.message : "Couldn't do that. Try again.",
+        "error",
+      );
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
   const previewFor = (conversation: Conversation): string => {
     const last = conversation.last_message;
     if (!last) {
@@ -250,6 +322,37 @@ export function MessagesScreen({
     const unread = item.unread_count > 0;
 
     return (
+      <SwipeableRow
+        hapticsEnabled={hapticsEnabled}
+        actions={[
+          {
+            key: "mute",
+            // The icon states the CURRENT state's inverse, which is what the
+            // button does — a bell-off on an unmuted row, a bell on a muted one.
+            label: item.muted ? "Unmute" : "Mute",
+            icon: item.muted ? "notifications" : "notifications-off",
+            tone: "neutral",
+            onPress: () => {
+              if (item.muted) {
+                // Already muted: the action is simply to stop, so there is
+                // nothing to ask.
+                void changeMute(item, 0);
+                return;
+              }
+              setRowAction({ conversation: item, kind: "mute" });
+            },
+          },
+          {
+            key: "delete",
+            // A group is left, not deleted — the conversation belongs to
+            // everybody in it, and the icon says which of the two this is.
+            label: isGroup ? "Leave" : "Delete",
+            icon: isGroup ? "exit-outline" : "trash-outline",
+            tone: "danger",
+            onPress: () => setRowAction({ conversation: item, kind: "delete" }),
+          },
+        ]}
+      >
       <Pressable
         style={styles.row}
         onPress={() => {
@@ -289,14 +392,21 @@ export function MessagesScreen({
         </View>
         {/* The per-chat unread dot. The tab's own badge is the count of rows
             that have one, which the shell reads from onUnreadChange. */}
+        {/* A muted thread still shows its unread count — muting silences the
+            phone, it does not pretend nothing arrived. The bell says why it
+            was quiet. */}
+        {item.muted ? (
+          <Ionicons name="notifications-off" size={14} color={palette.textMuted} />
+        ) : null}
         {unread ? (
-          <View style={styles.unreadBadge}>
+          <View style={[styles.unreadBadge, item.muted && styles.unreadBadgeMuted]}>
             <Text style={styles.unreadBadgeText}>
               {item.unread_count > 9 ? "9+" : item.unread_count}
             </Text>
           </View>
         ) : null}
       </Pressable>
+      </SwipeableRow>
     );
   };
 
@@ -310,6 +420,116 @@ export function MessagesScreen({
           hapticsEnabled={hapticsEnabled}
         />
       </View>
+
+      {/* ── The swipe actions' confirmations ──────────────────────────────
+          Centred sheets rather than Alerts, because each option needs a
+          sentence explaining what it actually does: "delete for both" removes
+          a conversation from somebody else's phone, and that is not obvious
+          from a two-word button. */}
+      <Modal
+        visible={rowAction !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRowAction(null)}
+      >
+        <Pressable style={styles.sheetBackdrop} onPress={() => setRowAction(null)}>
+          <Pressable style={styles.sheet} onPress={() => {}}>
+            {rowAction?.kind === "mute" ? (
+              <>
+                <Text style={styles.sheetTitle}>Mute notifications</Text>
+                <Text style={styles.sheetBody}>
+                  Messages still arrive and still show as unread — your phone just
+                  won&apos;t buzz.
+                </Text>
+                {[
+                  { label: "For one hour", minutes: 60 },
+                  { label: "For a day", minutes: 60 * 24 },
+                  // A hundred years. The server caps it; "forever" is a long
+                  // deadline rather than a separate mode.
+                  { label: "Until I turn it back on", minutes: 60 * 24 * 365 * 100 },
+                ].map((option) => (
+                  <Pressable
+                    key={option.label}
+                    style={styles.sheetOption}
+                    disabled={actionBusy}
+                    onPress={() => void changeMute(rowAction.conversation, option.minutes)}
+                  >
+                    <Ionicons name="notifications-off-outline" size={18} color={palette.text} />
+                    <Text style={styles.sheetOptionText}>{option.label}</Text>
+                  </Pressable>
+                ))}
+              </>
+            ) : rowAction?.conversation.kind === "group" ? (
+              <>
+                <Text style={styles.sheetTitle}>Leave this group?</Text>
+                <Text style={styles.sheetBody}>
+                  You&apos;ll stop receiving its messages. The group carries on without
+                  you.
+                </Text>
+                <Pressable
+                  style={styles.sheetOption}
+                  disabled={actionBusy}
+                  onPress={() => void runDelete(rowAction.conversation, "leave")}
+                >
+                  <Ionicons name="exit-outline" size={18} color={palette.text} />
+                  <Text style={styles.sheetOptionText}>Leave</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.sheetOption}
+                  disabled={actionBusy}
+                  onPress={() => void runDelete(rowAction.conversation, "leave-and-clear")}
+                >
+                  <Ionicons name="trash-outline" size={18} color={palette.danger} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.sheetOptionText, { color: palette.danger }]}>
+                      Delete my messages and leave
+                    </Text>
+                    <Text style={styles.sheetOptionHint}>
+                      Everything you sent shows as deleted to the people still there.
+                    </Text>
+                  </View>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Text style={styles.sheetTitle}>Delete this conversation?</Text>
+                <Pressable
+                  style={styles.sheetOption}
+                  disabled={actionBusy}
+                  onPress={() => void runDelete(rowAction!.conversation, "me")}
+                >
+                  <Ionicons name="eye-off-outline" size={18} color={palette.text} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.sheetOptionText}>Delete for me</Text>
+                    <Text style={styles.sheetOptionHint}>
+                      Hides it from your inbox. It comes back, with its history, if
+                      either of you sends a message.
+                    </Text>
+                  </View>
+                </Pressable>
+                <Pressable
+                  style={styles.sheetOption}
+                  disabled={actionBusy}
+                  onPress={() => void runDelete(rowAction!.conversation, "everyone")}
+                >
+                  <Ionicons name="trash-outline" size={18} color={palette.danger} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.sheetOptionText, { color: palette.danger }]}>
+                      Delete for both of us
+                    </Text>
+                    <Text style={styles.sheetOptionHint}>
+                      Removes it from their inbox too. This can&apos;t be undone.
+                    </Text>
+                  </View>
+                </Pressable>
+              </>
+            )}
+            <Pressable style={styles.sheetCancel} onPress={() => setRowAction(null)}>
+              <Text style={styles.sheetCancelText}>Cancel</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {segment === "contacts" ? (
         <View style={{ flex: 1 }}>{contactsElement}</View>
@@ -548,6 +768,7 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       justifyContent: "center",
     },
     unreadBadgeText: { color: palette.white, fontSize: 11, fontWeight: "800" },
+    unreadBadgeMuted: { backgroundColor: palette.borderStrong },
 
     centerState: { alignItems: "center", paddingVertical: spacing.xxl, gap: spacing.sm },
     emptyTitle: { fontSize: 16, fontWeight: "700", color: palette.text },
@@ -559,6 +780,34 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       paddingHorizontal: spacing.lg,
     },
 
+    sheetBackdrop: {
+      flex: 1,
+      backgroundColor: palette.overlay,
+      alignItems: "center",
+      justifyContent: "center",
+      padding: spacing.lg,
+    },
+    sheet: {
+      width: "100%",
+      maxWidth: 420,
+      backgroundColor: palette.surface,
+      borderRadius: radii.xl,
+      padding: spacing.lg,
+    },
+    sheetTitle: { fontSize: 17, fontWeight: "700", color: palette.text, marginBottom: 4 },
+    sheetBody: { fontSize: 13, color: palette.textMuted, lineHeight: 19, marginBottom: spacing.sm },
+    sheetOption: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingVertical: 13,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: palette.border,
+    },
+    sheetOptionText: { fontSize: 15, fontWeight: "600", color: palette.text },
+    sheetOptionHint: { fontSize: 12, color: palette.textMuted, marginTop: 2, lineHeight: 17 },
+    sheetCancel: { alignItems: "center", paddingTop: spacing.md },
+    sheetCancelText: { fontSize: 15, fontWeight: "600", color: palette.textMuted },
     fab: {
       position: "absolute",
       right: spacing.lg,

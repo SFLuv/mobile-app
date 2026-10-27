@@ -266,6 +266,20 @@ export interface Conversation {
   members?: ConversationMember[];
   member_count?: number;
 
+  /**
+   * This member has silenced its pushes.
+   *
+   * Only the pushes: the thread still appears, still counts as unread, and
+   * still shows a badge. Muting is about the phone, not about hiding.
+   */
+  muted?: boolean;
+  /**
+   * How far the other members have read, so your own messages can show
+   * Delivered or Read. The minimum across them in a group — "read" meaning
+   * everybody, not whoever got there first.
+   */
+  other_last_read_message_id?: number;
+
   post: ConversationPostChip | null;
   last_message: ChatMessage | null;
   /**

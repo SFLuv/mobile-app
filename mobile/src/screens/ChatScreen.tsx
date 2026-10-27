@@ -2,9 +2,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Alert,
   Animated,
+  Easing,
   AppState,
   FlatList,
-  Image,
   Modal,
   PanResponder,
   Pressable,
@@ -28,6 +28,8 @@ import {
   type AttachmentHandlers,
 } from "../components/MessageAttachmentCard";
 import { ChatComposer, type AttachmentOption, type ComposerMode } from "../components/ChatComposer";
+import { AttachmentPreview } from "../components/AttachmentPreview";
+import { saveAttachment } from "../utils/attachmentFiles";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
 import type { RealtimeEvent } from "../services/realtime";
@@ -176,7 +178,13 @@ export function ChatScreen({
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [actionTarget, setActionTarget] = useState<ChatMessage | null>(null);
   const [reactionPickerFor, setReactionPickerFor] = useState<ChatMessage | null>(null);
-  const [viewerImage, setViewerImage] = useState<{ uri: string; name?: string } | null>(null);
+  /**
+   * The attachment open in the full-screen preview.
+   *
+   * One surface for photos and files, replacing a bare image viewer with no
+   * save button and a toast saying files were "coming soon".
+   */
+  const [previewAttachment, setPreviewAttachment] = useState<MessageAttachment | null>(null);
   /** The message being edited, if any. Its text is loaded into the composer. */
   const [editing, setEditing] = useState<ChatMessage | null>(null);
   /**
@@ -368,6 +376,18 @@ export function ChatScreen({
   }, [messages]);
 
   const isGroup = conversation?.kind === "group";
+  /**
+   * The id of your own newest message, which is the only one that shows a
+   * delivery state.
+   */
+  const lastOwnMessageId = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].is_mine && messages[index].kind !== "system") {
+        return messages[index].id;
+      }
+    }
+    return null;
+  }, [messages]);
 
   // ── Loading ───────────────────────────────────────────────────────────────
 
@@ -872,6 +892,73 @@ export function ChatScreen({
     }
   };
 
+  /**
+   * Resolves a tap on a message into single, double or long.
+   *
+   * ── Why this is hand-rolled rather than two onPress handlers ──────────────
+   *
+   * A double tap is two single taps as far as Pressable is concerned, so
+   * "double tap to like" and "tap to open the link" fight: the first tap of a
+   * like would open the link and leave the thread. The single-tap action is
+   * therefore DELAYED by the double-tap window and cancelled if a second tap
+   * arrives — which is the only way to tell the two apart, and is why opening
+   * a reference feels a fraction slower than it did.
+   *
+   * Long-press is handled separately by Pressable and must also not open
+   * anything: holding something to react to it should not navigate away from
+   * the thread you are reacting in.
+   */
+  const DOUBLE_TAP_MS = 240;
+  const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTapRef = useRef(0);
+
+  useEffect(
+    () => () => {
+      if (tapTimer.current) {
+        clearTimeout(tapTimer.current);
+      }
+    },
+    [],
+  );
+
+  const handleMessageTap = (message: ChatMessage, openSingle?: () => void) => {
+    // Selection mode owns every tap: picking messages is the only thing
+    // happening, and opening something mid-selection would lose the selection.
+    if (selectedIds !== null) {
+      if (!message.deleted) {
+        setSelectedIds((current) =>
+          current?.includes(message.id)
+            ? current.filter((id) => id !== message.id)
+            : [...(current ?? []), message.id],
+        );
+      }
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastTapRef.current < DOUBLE_TAP_MS) {
+      // Second tap: cancel the pending single and react instead.
+      lastTapRef.current = 0;
+      if (tapTimer.current) {
+        clearTimeout(tapTimer.current);
+        tapTimer.current = null;
+      }
+      if (!message.deleted) {
+        void toggleReaction(message, DEFAULT_REACTIONS[0]);
+      }
+      return;
+    }
+
+    lastTapRef.current = now;
+    if (!openSingle) {
+      return;
+    }
+    tapTimer.current = setTimeout(() => {
+      tapTimer.current = null;
+      openSingle();
+    }, DOUBLE_TAP_MS);
+  };
+
   /** How long a message stays editable. Mirrors the server's EditWindow. */
   const EDIT_WINDOW_MS = 5 * 60 * 1000;
 
@@ -987,16 +1074,8 @@ export function ChatScreen({
 
   const attachmentHandlers: AttachmentHandlers = useMemo(
     () => ({
-      onOpenImage: (_attachment, uri) => setViewerImage({ uri, name: _attachment.file_name }),
-      onOpenFile: (attachment) => {
-        // Nothing opens a stored file in place yet. Saying so is better than a
-        // tap that does nothing — and better than pretending, which is what an
-        // empty handler would do.
-        onToast(
-          `${attachment.file_name || "This file"} — opening files in the app is coming soon.`,
-          "info",
-        );
-      },
+      onOpenImage: (attachment) => setPreviewAttachment(attachment),
+      onOpenFile: (attachment) => setPreviewAttachment(attachment),
       onOpenTransaction,
       onOpenMerchant,
       onOpenEvent,
@@ -1008,6 +1087,27 @@ export function ChatScreen({
     }),
     [onOpenEvent, onOpenMerchant, onOpenTransaction, onToast],
   );
+
+  /**
+   * The attachment handlers for one message, with every open routed through the
+   * tap dispatcher.
+   *
+   * Built per message rather than once, because the dispatcher needs to know
+   * WHICH message a double tap should heart — and the card only knows about its
+   * own attachment.
+   */
+  const cardHandlersFor = (message: ChatMessage): AttachmentHandlers => ({
+    onOpenImage: (attachment) =>
+      handleMessageTap(message, () => setPreviewAttachment(attachment)),
+    onOpenFile: (attachment) => handleMessageTap(message, () => setPreviewAttachment(attachment)),
+    onOpenTransaction: (txHash) =>
+      handleMessageTap(message, () => attachmentHandlers.onOpenTransaction?.(txHash)),
+    onOpenMerchant: (locationId) =>
+      handleMessageTap(message, () => attachmentHandlers.onOpenMerchant?.(locationId)),
+    onOpenEvent: (eventId) =>
+      handleMessageTap(message, () => attachmentHandlers.onOpenEvent?.(eventId)),
+    onOpenSupport: () => handleMessageTap(message),
+  });
 
   const renderRow = ({ item: row }: { item: ChatRow }) => {
     if (row.kind === "separator") {
@@ -1058,18 +1158,9 @@ export function ChatScreen({
               triggerClickHaptic(hapticsEnabled);
               setActionTarget(item);
             }}
-            onPress={() => {
-              // In selection mode a plain tap picks, so a long-press is not
-              // needed for every message after the first.
-              if (selectedIds === null || item.deleted) {
-                return;
-              }
-              setSelectedIds((current) =>
-                current?.includes(item.id)
-                  ? current.filter((id) => id !== item.id)
-                  : [...(current ?? []), item.id],
-              );
-            }}
+            // Through the dispatcher: a double tap hearts the message, and a
+            // single tap on a bubble with nothing to open does nothing.
+            onPress={() => handleMessageTap(item)}
             delayLongPress={280}
             style={selectedIds?.includes(item.id) ? styles.selectedRow : undefined}
           >
@@ -1119,7 +1210,9 @@ export function ChatScreen({
               // away from either.
               <Pressable
                 style={styles.paymentBubble}
-                onPress={() => item.tx_hash && onOpenTransaction?.(item.tx_hash)}
+                onPress={() =>
+                  handleMessageTap(item, () => item.tx_hash && onOpenTransaction?.(item.tx_hash))
+                }
                 accessibilityRole="button"
                 accessibilityLabel={`Payment, ${formatSfluvAmount(item.amount_sfluv_base)} ${tokenSymbol}`}
               >
@@ -1190,11 +1283,15 @@ export function ChatScreen({
                         client={backendClient}
                         tokenSymbol={tokenSymbol}
                         mine={item.is_mine}
-                        handlers={attachmentHandlers}
-                        // Cards get the same long-press as a bubble: there is no
-                        // reason you can react to "nice" and not to the photo it
-                        // was about.
+                        // The card's own open action is routed through the tap
+                        // dispatcher, so a double tap hearts the message instead
+                        // of opening the thing twice, and a long press menus it
+                        // instead of navigating away from the thread.
+                        handlers={cardHandlersFor(item)}
                         onLongPress={() => {
+                          if (item.deleted) {
+                            return;
+                          }
                           triggerClickHaptic(hapticsEnabled);
                           setActionTarget(item);
                         }}
@@ -1205,6 +1302,19 @@ export function ChatScreen({
               })()
             )}
           </Pressable>
+
+          {/* Delivery state, on your own most recent message only.
+              iMessage's placement, and for its reason: a status under every
+              bubble is noise, and the only one anybody checks is the last one
+              they sent. "Read" needs everybody in a group, not whoever opened
+              it first — see OtherMemberReadState. */}
+          {item.is_mine && !item.deleted && item.id === lastOwnMessageId ? (
+            <Text style={styles.deliveryState}>
+              {conversation && (conversation.other_last_read_message_id ?? 0) >= item.id
+                ? "Read"
+                : "Delivered"}
+            </Text>
+          ) : null}
 
           {item.edited_at && !item.deleted ? (
             <Text style={[styles.editedMark, item.is_mine && styles.editedMarkMine]}>edited</Text>
@@ -1360,6 +1470,14 @@ export function ChatScreen({
             ) : null
           }
         />
+
+        {/* The sending indicator.
+            A hairline above the composer rather than a spinner over the
+            thread: sending is usually instant and occasionally is not, and the
+            case worth showing is an attachment upload — which should not stop
+            somebody reading while it finishes. Indeterminate because the
+            upload reports no progress; it says "working", not "40%". */}
+        {sending ? <SendingBar /> : null}
 
         {/* Selection mode replaces the composer: you are deleting, not
             writing, and leaving a text field up invites typing into a mode
@@ -1551,6 +1669,33 @@ export function ChatScreen({
                 }}
               />
             ) : null}
+            {actionTarget?.attachments?.some(
+              (a) => a.kind === "image" || a.kind === "file",
+            ) ? (
+              <ActionRow
+                icon="download-outline"
+                label={
+                  actionTarget.attachments?.[0]?.kind === "image" ? "Save to photos" : "Save file"
+                }
+                onPress={() => {
+                  const target = actionTarget?.attachments?.find(
+                    (a) => a.kind === "image" || a.kind === "file",
+                  );
+                  setActionTarget(null);
+                  if (!target || !backendClient) {
+                    return;
+                  }
+                  void (async () => {
+                    const outcome = await saveAttachment(backendClient, conversationId, target);
+                    if (outcome.status === "saved-to-photos") {
+                      onToast("Saved to your photos.", "success");
+                    } else if (outcome.status === "denied" || outcome.status === "failed") {
+                      onToast(outcome.message, "error");
+                    }
+                  })();
+                }}
+              />
+            ) : null}
             {actionTarget?.is_mine ? (
               <ActionRow
                 icon="trash-outline"
@@ -1644,19 +1789,18 @@ export function ChatScreen({
         </Pressable>
       </Modal>
 
-      {/* ── Full-size photo ──────────────────────────────────────────────── */}
-      <Modal
-        visible={Boolean(viewerImage)}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setViewerImage(null)}
-      >
-        <Pressable style={styles.viewerBackdrop} onPress={() => setViewerImage(null)}>
-          {viewerImage ? (
-            <ImageViewer uri={viewerImage.uri} onClose={() => setViewerImage(null)} />
-          ) : null}
-        </Pressable>
-      </Modal>
+      {/* ── An attachment, full screen, with a way to keep it ───────────── */}
+      <AttachmentPreview
+        attachment={previewAttachment}
+        conversationId={conversationId}
+        client={backendClient}
+        senderName={
+          messages.find((m) => m.attachments?.some((a) => a.id === previewAttachment?.id))
+            ?.sender_name
+        }
+        onClose={() => setPreviewAttachment(null)}
+        onToast={onToast}
+      />
     </SwipeBack>
   );
 }
@@ -1692,6 +1836,51 @@ function ActionRow({
   );
 }
 
+/**
+ * A hairline that sweeps while a message is in flight.
+ *
+ * Indeterminate on purpose: the upload gives no progress events, and a bar
+ * that pretends to measure something it cannot is worse than one that only
+ * says "still going".
+ */
+function SendingBar() {
+  const { palette } = useAppTheme();
+  const slide = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(slide, {
+        toValue: 1,
+        duration: 900,
+        easing: Easing.inOut(Easing.quad),
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [slide]);
+
+  return (
+    <View style={{ height: 2, overflow: "hidden", backgroundColor: palette.surfaceStrong }}>
+      <Animated.View
+        style={{
+          height: 2,
+          width: "40%",
+          backgroundColor: palette.primary,
+          transform: [
+            {
+              translateX: slide.interpolate({
+                inputRange: [0, 1],
+                outputRange: [-120, 420],
+              }),
+            },
+          ],
+        }}
+      />
+    </View>
+  );
+}
+
 /** Three dots that fade in sequence, which is what "typing" looks like. */
 function TypingDots() {
   const { palette } = useAppTheme();
@@ -1718,30 +1907,6 @@ function TypingDots() {
   );
 }
 
-function ImageViewer({ uri, onClose }: { uri: string; onClose: () => void }) {
-  const { palette } = useAppTheme();
-  return (
-    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", width: "100%" }}>
-      {/* The Pressable wrapping this fills the backdrop, so a tap anywhere
-          outside the photo closes the viewer. */}
-      <Image
-        source={{ uri }}
-        style={{ width: "92%", height: "70%" }}
-        resizeMode="contain"
-        accessibilityLabel="Photo"
-      />
-      <Pressable
-        onPress={onClose}
-        style={{ position: "absolute", top: 48, right: 24 }}
-        hitSlop={12}
-        accessibilityRole="button"
-        accessibilityLabel="Close photo"
-      >
-        <Ionicons name="close" size={28} color={palette.white} />
-      </Pressable>
-    </View>
-  );
-}
 
 /**
  * The centred date/time shown between two messages, or null for none.
@@ -2004,6 +2169,13 @@ function createStyles(palette: Palette) {
       borderStyle: "dashed",
     },
     deletedText: { fontSize: 14, color: palette.textMuted, fontStyle: "italic" },
+    deliveryState: {
+      fontSize: 10,
+      color: palette.textMuted,
+      textAlign: "right",
+      marginRight: 10,
+      marginTop: 3,
+    },
     editedMark: { fontSize: 10, color: palette.textMuted, marginTop: 3, marginLeft: 10 },
     editedMarkMine: { textAlign: "right", marginRight: 10, marginLeft: 0 },
     messageStamp: {

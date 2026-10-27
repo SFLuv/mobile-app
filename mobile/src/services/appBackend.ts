@@ -4450,6 +4450,44 @@ export class AppBackendClient {
     return this.bulletinRequest(`/conversations/${conversationId}/read`, { method: "POST" }, "Unable to update messages");
   }
 
+  /**
+   * Silences a thread's pushes for a while. 0 clears the mute.
+   *
+   * Minutes rather than a timestamp, so the client does not have to agree with
+   * the server about the current time.
+   */
+  muteConversation(conversationId: number, minutes: number): Promise<{ muted: boolean }> {
+    return this.bulletinRequest(
+      `/conversations/${conversationId}/mute`,
+      this.jsonInit("POST", { minutes }),
+      "Unable to change notifications for this conversation",
+    );
+  }
+
+  /**
+   * Hides a thread from everybody in it.
+   *
+   * A soft delete on the server — the rows stay so a report against a message
+   * in it can still be answered — but it is gone for every member, which is a
+   * capability any one of them has over everybody else's copy.
+   */
+  deleteConversationForEveryone(conversationId: number): Promise<void> {
+    return this.bulletinRequest(
+      `/conversations/${conversationId}`,
+      { method: "DELETE" },
+      "Unable to delete that conversation",
+    );
+  }
+
+  /** Leaves a group, optionally tombstoning everything you said in it. */
+  leaveGroup(conversationId: number, deleteMyMessages = false): Promise<void> {
+    return this.bulletinRequest(
+      `/conversations/${conversationId}/group/leave`,
+      this.jsonInit("POST", { delete_my_messages: deleteMyMessages }),
+      "Unable to leave that group",
+    );
+  }
+
   archiveConversation(conversationId: number): Promise<void> {
     return this.bulletinRequest(`/conversations/${conversationId}/archive`, { method: "POST" }, "Unable to archive");
   }
