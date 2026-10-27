@@ -52,7 +52,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   name: "SFLuv",
   slug: expoSlug,
   owner: expoOwner,
-  version: "1.0.3",
+  version: "2.1.0",
   description:
     "This app is a nonprofit-run community hub for managing and spending your SFLUV, redeeming perks, and coordinating verified improvers. Improvers can sign up to complete real-world tasks in San Francisco and be rewarded with SFLUV.",
   scheme: "sfluv",
