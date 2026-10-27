@@ -178,6 +178,8 @@ export interface MessageQuote {
   kind: MessageKind;
   body: string;
   attachment_kind?: AttachmentKind;
+  /** The quoted message was deleted; the reply keeps its block and says so. */
+  deleted?: boolean;
 }
 
 export interface ChatMessage {
@@ -193,6 +195,19 @@ export interface ChatMessage {
   amount_sfluv_base?: string | null;
   payment_verified: boolean;
   created_at: string;
+
+  /** When the sender last edited it. Absent means never. */
+  edited_at?: string;
+  /**
+   * The sender removed it for everybody.
+   *
+   * The body and any attachment detail are already blanked by the server, so
+   * there is nothing to hide client-side — the row is a tombstone and renders
+   * as "Message was deleted". An ADMIN removal does not appear at all, which is
+   * a deliberate difference: a gap that announces itself tells the whole thread
+   * something was actioned.
+   */
+  deleted?: boolean;
 
   reply_to_id?: number;
   reply_to?: MessageQuote;

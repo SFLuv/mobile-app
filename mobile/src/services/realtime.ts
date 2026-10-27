@@ -43,6 +43,7 @@ export type RealtimeEventKind =
   | "pong"
   | "message.new"
   | "message.reaction"
+  | "message.updated"
   | "message.deleted"
   | "typing"
   | "conversation.updated"

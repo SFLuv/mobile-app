@@ -172,29 +172,44 @@ export function MessageAttachmentCard({
       );
 
     case "transaction":
+      // ── A RECORD, not a payment ──────────────────────────────────────────
+      //
+      // This is somebody sharing a transaction out of their history. A payment
+      // made inside the chat is a different thing and renders differently, in
+      // ChatScreen: a dollar sign and the amount alone.
+      //
+      // The two were nearly identical and that was the problem — "I paid you
+      // 5 SFLUV just now" and "look at this transfer from March" are not the
+      // same claim, and a reader should not have to work out which one they are
+      // looking at. So a record gets the receipt icon, a title, and the amount
+      // demoted to the subtitle; a payment gets the amount and nothing else.
+      // Both open the same transaction sheet.
       return (
         <Pressable
           style={[styles.card, mine ? styles.cardMine : undefined]}
           onPress={() => attachment.tx_hash && handlers.onOpenTransaction?.(attachment.tx_hash)}
           accessibilityRole="button"
-          accessibilityLabel="Transaction"
+          accessibilityLabel="Transaction record"
         >
           <View style={styles.iconWrap}>
-            <Ionicons name="swap-horizontal" size={20} color={palette.primaryStrong} />
+            <Ionicons name="receipt-outline" size={20} color={palette.primaryStrong} />
           </View>
           <View style={styles.cardBody}>
             <Text style={styles.cardTitle} numberOfLines={1}>
-              {attachment.unavailable
-                ? "Transaction"
-                : `${formatBaseAmount(attachment.tx_amount_sfluv_base)} ${tokenSymbol}`}
+              Transaction record
             </Text>
             <Text style={styles.cardMeta} numberOfLines={1}>
-              {/* "Confirming" rather than "missing": a transfer attached seconds
-                  ago is simply not indexed yet, and the two are
+              {/* "Confirming" rather than "missing": a transfer shared seconds
+                  after it was made is simply not indexed yet, and the two are
                   indistinguishable from here. */}
               {attachment.unavailable
                 ? "Confirming on the network…"
-                : shortHash(attachment.tx_hash)}
+                : [
+                    `${formatBaseAmount(attachment.tx_amount_sfluv_base)} ${tokenSymbol}`,
+                    attachment.tx_at ? formatTxDate(attachment.tx_at) : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
@@ -387,9 +402,13 @@ function AttachmentImage({
   );
 }
 
-function shortHash(hash?: string): string {
-  if (!hash) return "";
-  return `${hash.slice(0, 10)}…${hash.slice(-6)}`;
+/** The date a shared transaction happened, for the record card's subtitle. */
+function formatTxDate(seconds: number): string {
+  return new Date(seconds * 1000).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: new Date(seconds * 1000).getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+  });
 }
 
 function formatBaseAmount(base?: string): string {

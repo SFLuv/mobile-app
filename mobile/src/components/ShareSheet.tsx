@@ -83,6 +83,7 @@ export function ShareSheet({
   target,
   backendClient,
   clientConfig,
+  chatEnabled,
   hapticsEnabled,
   onClose,
   onShared,
@@ -93,6 +94,15 @@ export function ShareSheet({
   backendClient: AppBackendClient | null;
   /** Needed to build the universal link that copy and external share hand out. */
   clientConfig: AppClientConfig;
+  /**
+   * Whether this account can message at all.
+   *
+   * False hides the chat row and leaves copy-link and external share, which is
+   * the point: those two have nothing to do with messaging, and gating the
+   * whole sheet on the chat beta meant somebody without it could not copy a
+   * link to a merchant — a thing the website publishes to everybody.
+   */
+  chatEnabled: boolean;
   hapticsEnabled: boolean;
   onClose: () => void;
   /** Lets the caller offer "View" — the sheet itself does not navigate. */
@@ -108,7 +118,7 @@ export function ShareSheet({
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
-    if (!target || !backendClient) {
+    if (!target || !backendClient || !chatEnabled) {
       return;
     }
     setSelected([]);
@@ -130,7 +140,7 @@ export function ShareSheet({
     return () => {
       cancelled = true;
     };
-  }, [backendClient, target]);
+  }, [backendClient, chatEnabled, target]);
 
   /**
    * The universal link for whatever is being shared.
@@ -274,6 +284,7 @@ export function ShareSheet({
             </Pressable>
           </View>
 
+          {chatEnabled ? (
           <FlatList
             data={conversations ?? []}
             keyExtractor={(item) => String(item.id)}
@@ -329,6 +340,7 @@ export function ShareSheet({
               );
             }}
           />
+          ) : null}
 
           {/* The composer row only matters once a chat is picked. Hidden
               otherwise, so the sheet opens as "share this" rather than as a

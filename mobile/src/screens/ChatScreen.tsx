@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Animated,
   AppState,
   FlatList,
   Image,
   Modal,
+  PanResponder,
   Pressable,
   StyleSheet,
   Text,
@@ -17,7 +19,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 
 import { AppBackendClient } from "../services/appBackend";
-import { SwipeBack } from "../components/SwipeBack";
+import { SwipeBack, type SwipeBackHandle } from "../components/SwipeBack";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { Avatar, BadgeLine } from "../components/BulletinParts";
 import {
@@ -75,6 +77,14 @@ import {
  * exception is a thread reached from a notification, where the person came to
  * READ — so that case is passed `autoFocus: false` by the shell.
  */
+
+/**
+ * How far the thread slides to reveal timestamps, and how wide the column is.
+ *
+ * One constant for both, because they are the same measurement: the reveal is
+ * complete exactly when the column is fully on screen.
+ */
+const STAMP_COLUMN_WIDTH = 56;
 
 /** iMessage's six, which cover almost every reaction anybody actually sends. */
 const DEFAULT_REACTIONS = ["❤️", "👍", "👎", "😂", "‼️", "❓"];
@@ -162,8 +172,57 @@ export function ChatScreen({
   const [actionTarget, setActionTarget] = useState<ChatMessage | null>(null);
   const [reactionPickerFor, setReactionPickerFor] = useState<ChatMessage | null>(null);
   const [viewerImage, setViewerImage] = useState<{ uri: string; name?: string } | null>(null);
+  /** The message being edited, if any. Its text is loaded into the composer. */
+  const [editing, setEditing] = useState<ChatMessage | null>(null);
+  /**
+   * Multi-select for bulk deletion.
+   *
+   * null means not in selection mode at all, which is different from an empty
+   * set: entering the mode changes the header and the composer, so "no messages
+   * picked yet" has to be distinguishable from "not selecting".
+   */
+  const [selectedIds, setSelectedIds] = useState<number[] | null>(null);
 
   const inputRef = useRef<TextInput | null>(null);
+  const swipeRef = useRef<SwipeBackHandle>(null);
+
+  /**
+   * Swipe the thread left to reveal each message's time.
+   *
+   * iMessage's gesture, and the reason it is a gesture rather than a permanent
+   * column: a timestamp on every bubble is clutter 95% of the time and exactly
+   * what you want the other 5%. The whole list slides as one so the times line
+   * up in a column, rather than each bubble growing a label.
+   *
+   * Horizontal-and-leftward only, and it gives up the touch unless the movement
+   * is clearly sideways — the same ratio test SwipeBack uses, mirrored, so the
+   * two gestures cannot both claim a drag. Released, it springs back.
+   */
+  const stampReveal = useRef(new Animated.Value(0)).current;
+  const stampResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_event, gesture) =>
+          gesture.dx < -8 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 2,
+        onPanResponderMove: (_event, gesture) => {
+          // Capped: past the width of the stamp column there is nothing more to
+          // reveal, and letting it drag further just feels loose.
+          stampReveal.setValue(Math.max(-STAMP_COLUMN_WIDTH, Math.min(0, gesture.dx)));
+        },
+        onPanResponderRelease: () => {
+          Animated.spring(stampReveal, {
+            toValue: 0,
+            useNativeDriver: true,
+            friction: 9,
+            tension: 110,
+          }).start();
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(stampReveal, { toValue: 0, useNativeDriver: true, friction: 9, tension: 110 }).start();
+        },
+      }),
+    [stampReveal],
+  );
   const firstPageLoaded = useRef(false);
 
   /**
@@ -354,6 +413,32 @@ export function ChatScreen({
         // cleared here rather than waiting for the next poll.
         void backendClient?.markConversationRead(conversationId).catch(() => {});
         onReadRef.current?.(conversationId);
+        return;
+      }
+      if (event.kind === "message.updated") {
+        const updated = event.data as ChatMessage | undefined;
+        if (!updated?.id) {
+          return;
+        }
+        // Replaced in place, not appended: this is the same message with new
+        // text, and appending would show it twice.
+        setMessages((current) => current.map((m) => (m.id === updated.id ? updated : m)));
+        return;
+      }
+      if (event.kind === "message.deleted") {
+        const data = event.data as { message_id?: number } | undefined;
+        if (!data?.message_id) {
+          return;
+        }
+        // Turned into a tombstone rather than removed, matching what the
+        // server's own read path returns.
+        setMessages((current) =>
+          current.map((m) =>
+            m.id === data.message_id
+              ? { ...m, deleted: true, body: "", attachments: [], reactions: [] }
+              : m,
+          ),
+        );
         return;
       }
       if (event.kind === "message.reaction") {
@@ -689,6 +774,81 @@ export function ChatScreen({
     }
   };
 
+  /** How long a message stays editable. Mirrors the server's EditWindow. */
+  const EDIT_WINDOW_MS = 5 * 60 * 1000;
+
+  const canEdit = (message: ChatMessage): boolean =>
+    message.is_mine &&
+    !message.deleted &&
+    (message.kind === "text" || message.kind === "attachment") &&
+    Date.now() - new Date(message.created_at).getTime() < EDIT_WINDOW_MS;
+
+  const submitEdit = async () => {
+    const target = editing;
+    const body = draft.trim();
+    if (!target || !body || !backendClient || sending) {
+      return;
+    }
+    setSending(true);
+    try {
+      const updated = await backendClient.editConversationMessage(conversationId, target.id, body);
+      setMessages((current) => current.map((m) => (m.id === updated.id ? updated : m)));
+      setEditing(null);
+      setDraft("");
+    } catch (e) {
+      onToast(
+        e instanceof BulletinRequestError ? e.message : "Couldn't save that edit.",
+        "error",
+      );
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const deleteMessages = async (ids: number[]) => {
+    if (!backendClient || ids.length === 0) {
+      return;
+    }
+    const failed: number[] = [];
+    for (const id of ids) {
+      try {
+        await backendClient.deleteConversationMessage(conversationId, id);
+        // Marked locally rather than removed: the server keeps a tombstone, and
+        // dropping the row here would make the thread disagree with itself
+        // until the next read.
+        setMessages((current) =>
+          current.map((m) =>
+            m.id === id
+              ? { ...m, deleted: true, body: "", attachments: [], reactions: [] }
+              : m,
+          ),
+        );
+      } catch {
+        failed.push(id);
+      }
+    }
+    setSelectedIds(null);
+    if (failed.length > 0) {
+      onToast(
+        failed.length === ids.length
+          ? "Couldn't delete that."
+          : `Deleted ${ids.length - failed.length} of ${ids.length}.`,
+        "error",
+      );
+    }
+  };
+
+  const confirmDelete = (ids: number[]) => {
+    Alert.alert(
+      ids.length === 1 ? "Delete this message?" : `Delete ${ids.length} messages?`,
+      "This removes it for everyone in the chat. They'll see that a message was deleted.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: () => void deleteMessages(ids) },
+      ],
+    );
+  };
+
   const copyMessage = async (message: ChatMessage) => {
     setActionTarget(null);
     const text = message.body?.trim();
@@ -727,11 +887,22 @@ export function ChatScreen({
   );
 
   const renderMessage = ({ item, index }: { item: ChatMessage; index: number }) => {
+    // The list is rendered reversed, so the message BEFORE this one in time is
+    // at the next index up.
+    const previousInTime = orderedMessages[index + 1];
+    // A centred date when a conversation picks up after a gap, the way iMessage
+    // does it. Rendered as part of this row rather than as a separate list item
+    // so the inverted list's ordering stays trivially correct.
+    const separator = sessionSeparator(previousInTime, item);
+
     if (item.kind === "system") {
       return (
-        <View style={styles.systemLine}>
-          <Text style={styles.systemText}>{item.body}</Text>
-        </View>
+        <>
+          {separator ? <Text style={styles.daySeparator}>{separator}</Text> : null}
+          <View style={styles.systemLine}>
+            <Text style={styles.systemText}>{item.body}</Text>
+          </View>
+        </>
       );
     }
 
@@ -747,51 +918,106 @@ export function ChatScreen({
     const isPayment = item.kind === "payment";
 
     return (
-      <View style={[styles.messageRow, item.is_mine ? styles.messageRowMine : undefined]}>
+      <Animated.View
+        style={[
+          styles.messageRow,
+          item.is_mine ? styles.messageRowMine : undefined,
+          { transform: [{ translateX: stampReveal }] },
+        ]}
+      >
+        {separator ? <Text style={styles.daySeparator}>{separator}</Text> : null}
         <View style={styles.messageColumn}>
           {showSender ? <Text style={styles.senderName}>{item.sender_name}</Text> : null}
 
           <Pressable
             onLongPress={() => {
+              // A deleted message has no actions worth offering.
+              if (item.deleted) {
+                return;
+              }
               triggerClickHaptic(hapticsEnabled);
               setActionTarget(item);
             }}
+            onPress={() => {
+              // In selection mode a plain tap picks, so a long-press is not
+              // needed for every message after the first.
+              if (selectedIds === null || item.deleted) {
+                return;
+              }
+              setSelectedIds((current) =>
+                current?.includes(item.id)
+                  ? current.filter((id) => id !== item.id)
+                  : [...(current ?? []), item.id],
+              );
+            }}
             delayLongPress={280}
+            style={selectedIds?.includes(item.id) ? styles.selectedRow : undefined}
           >
-            {item.reply_to ? (
+            {/* A deleted message keeps its place.
+                Removing the row would turn any reply to it into a
+                non-sequitur, and would quietly change what the conversation
+                looks like it was. The body is already blanked by the server —
+                there is nothing here to hide. */}
+            {item.deleted ? (
+              <View style={styles.deletedBubble}>
+                <Text style={styles.deletedText}>Message was deleted</Text>
+              </View>
+            ) : null}
+
+            {!item.deleted && item.reply_to ? (
               <View style={[styles.quote, item.is_mine ? styles.quoteMine : undefined]}>
                 <View style={styles.quoteStripe} />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.quoteName} numberOfLines={1}>
                     {item.reply_to.sender_name || "Message"}
                   </Text>
-                  <Text style={styles.quoteBody} numberOfLines={2}>
-                    {item.reply_to.body?.trim() || attachmentKindLabel(item.reply_to.attachment_kind)}
+                  <Text
+                    style={[styles.quoteBody, item.reply_to.deleted && styles.quoteBodyDeleted]}
+                    numberOfLines={2}
+                  >
+                    {item.reply_to.deleted
+                      ? "Message was deleted"
+                      : item.reply_to.body?.trim() ||
+                        attachmentKindLabel(item.reply_to.attachment_kind)}
                   </Text>
                 </View>
               </View>
             ) : null}
 
-            {isPayment ? (
+            {item.deleted ? null : isPayment ? (
+              // ── A PAYMENT, not a record ────────────────────────────────────
+              //
+              // Money moving inside this conversation. Deliberately shaped
+              // nothing like the transaction-record card in
+              // MessageAttachmentCard: a dollar sign rather than a receipt, and
+              // the amount is the whole content rather than a subtitle under a
+              // title. "I just paid you 5 SFLUV" and "here is a transfer from
+              // March" are different claims and should not have to be told
+              // apart by reading carefully.
+              //
+              // Both open the same transaction sheet, so the detail is one tap
+              // away from either.
               <Pressable
                 style={styles.paymentBubble}
                 onPress={() => item.tx_hash && onOpenTransaction?.(item.tx_hash)}
                 accessibilityRole="button"
-                accessibilityLabel="Payment"
+                accessibilityLabel={`Payment, ${formatSfluvAmount(item.amount_sfluv_base)} ${tokenSymbol}`}
               >
-                <Ionicons
-                  name={item.payment_verified ? "checkmark-circle" : "time-outline"}
-                  size={18}
-                  color={item.payment_verified ? palette.success : palette.textMuted}
-                />
+                <View style={styles.paymentIcon}>
+                  <Ionicons name="logo-usd" size={17} color={palette.white} />
+                </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.paymentAmount}>
-                    {item.is_mine ? "You sent" : "Sent you"}{" "}
-                    {formatSfluvAmount(item.amount_sfluv_base) || ""} {tokenSymbol}
+                    {formatSfluvAmount(item.amount_sfluv_base) || "—"} {tokenSymbol}
                   </Text>
+                  {/* The sender's note, when they wrote one. Kept because the
+                      amount pad offers the field — not a "detail" we added, but
+                      something they chose to say. */}
                   {item.body ? <Text style={styles.paymentNote}>{item.body}</Text> : null}
+                  {/* A state, not a detail: an unconfirmed amount must not read
+                      as a settled one. */}
                   {!item.payment_verified ? (
-                    <Text style={styles.paymentPending}>Confirming on the network…</Text>
+                    <Text style={styles.paymentPending}>Confirming…</Text>
                   ) : null}
                 </View>
                 <Ionicons name="chevron-forward" size={15} color={palette.textMuted} />
@@ -835,6 +1061,10 @@ export function ChatScreen({
             )}
           </Pressable>
 
+          {item.edited_at && !item.deleted ? (
+            <Text style={[styles.editedMark, item.is_mine && styles.editedMarkMine]}>edited</Text>
+          ) : null}
+
           {item.reactions?.length ? (
             <View style={[styles.reactionRow, item.is_mine ? styles.reactionRowMine : undefined]}>
               {item.reactions.map((reaction) => (
@@ -854,7 +1084,11 @@ export function ChatScreen({
             </View>
           ) : null}
         </View>
-      </View>
+
+        {/* The revealed time. Positioned just off the right edge, so it slides
+            into view as the thread moves left and occupies no space at rest. */}
+        <Text style={styles.messageStamp}>{formatMessageStamp(item.created_at)}</Text>
+      </Animated.View>
     );
   };
 
@@ -872,11 +1106,19 @@ export function ChatScreen({
       : null;
 
   return (
-    <SwipeBack onBack={onBack} style={styles.screen} enabled={mode === "text"}>
+    <SwipeBack ref={swipeRef} onBack={onBack} style={styles.screen} enabled={mode === "text"}>
       {/* The chat's own header. The shell hides its top bar for this screen, so
           this is the only one — see the note at the top of the file. */}
       <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
+        {/* The animated close, not onBack directly: a button that snaps the
+            screen away while the swipe glides it away is the same exit looking
+            like two different things. */}
+        <Pressable
+          onPress={() => swipeRef.current?.close()}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+        >
           <Ionicons name="chevron-back" size={26} color={palette.text} />
         </Pressable>
         <Pressable
@@ -920,6 +1162,7 @@ export function ChatScreen({
           useKeyboardLift. */}
       <View ref={keyboardRef} onLayout={measureKeyboardGap} style={[styles.body, { paddingBottom: lift }]}>
         <FlatList
+          {...stampResponder.panHandlers}
           // Inverted: index 0 is the newest message, so the resting position is
           // the bottom and the keyboard cannot fight a scroll-to-end. See the
           // note at the top of the file.
@@ -973,11 +1216,56 @@ export function ChatScreen({
           }
         />
 
-        {composerDisabledReason ? (
+        {/* Selection mode replaces the composer: you are deleting, not
+            writing, and leaving a text field up invites typing into a mode
+            that would discard it. */}
+        {selectedIds !== null ? (
+          <View style={styles.selectionBar}>
+            <Pressable onPress={() => setSelectedIds(null)} hitSlop={8}>
+              <Text style={styles.selectionCount}>Cancel</Text>
+            </Pressable>
+            <Text style={styles.selectionCount}>
+              {selectedIds.length} selected
+            </Text>
+            <Pressable
+              style={[
+                styles.selectionDelete,
+                selectedIds.length === 0 && styles.selectionDeleteDisabled,
+              ]}
+              onPress={() => confirmDelete(selectedIds)}
+              disabled={selectedIds.length === 0}
+              accessibilityRole="button"
+              accessibilityLabel={`Delete ${selectedIds.length} messages`}
+            >
+              <Ionicons name="trash-outline" size={16} color={palette.white} />
+              <Text style={styles.selectionDeleteText}>Delete</Text>
+            </Pressable>
+          </View>
+        ) : composerDisabledReason ? (
           <View style={styles.blockedBar}>
             <Text style={styles.blockedText}>{composerDisabledReason}</Text>
           </View>
         ) : (
+          <>
+          {editing ? (
+            <View style={styles.editBanner}>
+              <Ionicons name="pencil" size={13} color={palette.primaryStrong} />
+              <Text style={styles.editBannerText} numberOfLines={1}>
+                Editing a message
+              </Text>
+              <Pressable
+                onPress={() => {
+                  setEditing(null);
+                  setDraft("");
+                }}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Stop editing"
+              >
+                <Ionicons name="close" size={16} color={palette.textMuted} />
+              </Pressable>
+            </View>
+          ) : null}
           <ChatComposer
             mode={mode}
             onModeChange={setMode}
@@ -986,7 +1274,7 @@ export function ChatScreen({
               setDraft(value);
               reportTyping(value.trim().length > 0);
             }}
-            onSend={() => void send()}
+            onSend={() => void (editing ? submitEdit() : send())}
             sending={sending}
             attachmentOptions={attachmentOptions}
             onSendAmount={
@@ -1029,7 +1317,9 @@ export function ChatScreen({
             }}
             hapticsEnabled={hapticsEnabled}
             inputRef={inputRef}
+            placeholder={editing ? "Edit your message" : "Message"}
           />
+          </>
         )}
       </View>
 
@@ -1082,6 +1372,53 @@ export function ChatScreen({
               label="Copy"
               onPress={() => actionTarget && void copyMessage(actionTarget)}
             />
+            {/* Editing is offered only inside the window, and the window is
+                checked again by the server — this hides an option that would
+                be refused rather than relying on the client's clock to
+                enforce it. */}
+            {actionTarget && canEdit(actionTarget) ? (
+              <ActionRow
+                icon="pencil-outline"
+                label="Edit"
+                onPress={() => {
+                  const target = actionTarget;
+                  setActionTarget(null);
+                  setEditing(target);
+                  setDraft(target.body ?? "");
+                  setReplyingTo(null);
+                  setMode("text");
+                  setTimeout(() => inputRef.current?.focus(), 120);
+                }}
+              />
+            ) : null}
+            {actionTarget?.is_mine ? (
+              <ActionRow
+                icon="trash-outline"
+                label="Delete"
+                destructive
+                onPress={() => {
+                  const target = actionTarget;
+                  setActionTarget(null);
+                  if (target) {
+                    confirmDelete([target.id]);
+                  }
+                }}
+              />
+            ) : null}
+            {actionTarget?.is_mine ? (
+              <ActionRow
+                icon="checkmark-circle-outline"
+                label="Select more…"
+                onPress={() => {
+                  const target = actionTarget;
+                  setActionTarget(null);
+                  // Seeded with the message that was long-pressed, so the
+                  // first tap after entering the mode adds a second rather
+                  // than starting over.
+                  setSelectedIds(target ? [target.id] : []);
+                }}
+              />
+            ) : null}
             {actionTarget && !actionTarget.is_mine ? (
               <ActionRow
                 icon="flag-outline"
@@ -1247,6 +1584,59 @@ function ImageViewer({ uri, onClose }: { uri: string; onClose: () => void }) {
 }
 
 /**
+ * The centred date/time shown between two messages, or null for none.
+ *
+ * iMessage's rule, approximately: a line appears when the conversation resumes
+ * after a real gap, not between every message. An hour is the threshold —
+ * shorter than that is one sitting and a line would just be clutter; longer and
+ * "when was this" becomes a question worth answering without making somebody
+ * swipe for it.
+ *
+ * Always shown before the first message, so a thread never opens with no date
+ * at all.
+ */
+function sessionSeparator(previous: ChatMessage | undefined, current: ChatMessage): string | null {
+  const at = new Date(current.created_at);
+  if (!previous) {
+    return formatSessionStamp(at);
+  }
+  const gap = at.getTime() - new Date(previous.created_at).getTime();
+  const SESSION_GAP_MS = 60 * 60 * 1000;
+  if (gap < SESSION_GAP_MS) {
+    return null;
+  }
+  return formatSessionStamp(at);
+}
+
+/** "Today 14:32", "Yesterday 09:10", "Mon 3 Mar 18:45". */
+function formatSessionStamp(at: Date): string {
+  const time = at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const now = new Date();
+  const sameDay = at.toDateString() === now.toDateString();
+  if (sameDay) {
+    return `Today ${time}`;
+  }
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (at.toDateString() === yesterday.toDateString()) {
+    return `Yesterday ${time}`;
+  }
+  const sameYear = at.getFullYear() === now.getFullYear();
+  const day = at.toLocaleDateString(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    ...(sameYear ? {} : { year: "numeric" }),
+  });
+  return `${day} ${time}`;
+}
+
+/** The per-message time revealed by swiping the thread left. */
+function formatMessageStamp(at: string): string {
+  return new Date(at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+/**
  * The first URL in a draft, or null.
  *
  * Deliberately conservative. It matches an explicit http(s):// prefix, or a
@@ -1336,6 +1726,7 @@ function createStyles(palette: Palette) {
     quoteStripe: { width: 3, borderRadius: 2, backgroundColor: palette.primary },
     quoteName: { fontSize: 11, fontWeight: "700", color: palette.primaryStrong },
     quoteBody: { fontSize: 12, color: palette.textMuted, marginTop: 1 },
+    quoteBodyDeleted: { fontStyle: "italic" },
 
     paymentBubble: {
       flexDirection: "row",
@@ -1349,7 +1740,17 @@ function createStyles(palette: Palette) {
       paddingVertical: 10,
       minWidth: 210,
     },
-    paymentAmount: { fontSize: 15, fontWeight: "700", color: palette.text },
+    paymentIcon: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      backgroundColor: palette.success,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    // Larger than a record card's title: on a payment the amount IS the
+    // content, so it carries the weight a title would.
+    paymentAmount: { fontSize: 19, fontWeight: "800", color: palette.text },
     paymentNote: { fontSize: 13, color: palette.textMuted, marginTop: 2 },
     paymentPending: { fontSize: 11, color: palette.textMuted, marginTop: 3 },
 
@@ -1370,6 +1771,72 @@ function createStyles(palette: Palette) {
     reactionEmoji: { fontSize: 13 },
     reactionCount: { fontSize: 11, color: palette.textMuted, fontWeight: "600" },
 
+    daySeparator: {
+      textAlign: "center",
+      fontSize: 11,
+      fontWeight: "700",
+      color: palette.textMuted,
+      paddingVertical: spacing.sm,
+      // No scaleY here, deliberately. An inverted FlatList applies the inverse
+      // transform to each CELL, so anything inside renderItem is already the
+      // right way up — adding one would flip the date upside down. Only
+      // ListEmptyComponent misses that treatment, which is why `empty` below
+      // carries the flip and this does not.
+    },
+    deletedBubble: {
+      borderRadius: radii.lg,
+      paddingHorizontal: 13,
+      paddingVertical: 9,
+      backgroundColor: palette.surfaceMuted,
+      borderWidth: 1,
+      borderColor: palette.border,
+      borderStyle: "dashed",
+    },
+    deletedText: { fontSize: 14, color: palette.textMuted, fontStyle: "italic" },
+    editedMark: { fontSize: 10, color: palette.textMuted, marginTop: 3, marginLeft: 10 },
+    editedMarkMine: { textAlign: "right", marginRight: 10, marginLeft: 0 },
+    messageStamp: {
+      fontSize: 10,
+      color: palette.textMuted,
+      alignSelf: "center",
+      width: STAMP_COLUMN_WIDTH,
+      textAlign: "right",
+      fontVariant: ["tabular-nums"],
+      // Parked off the right edge so it costs no width at rest; the row's
+      // translateX is what brings it into view.
+      position: "absolute",
+      right: -STAMP_COLUMN_WIDTH,
+    },
+    selectedRow: { backgroundColor: palette.primaryMuted, borderRadius: radii.sm },
+    selectionBar: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: spacing.md,
+      padding: spacing.md,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: palette.border,
+    },
+    selectionCount: { fontSize: 14, fontWeight: "600", color: palette.text },
+    selectionDelete: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      backgroundColor: palette.danger,
+      borderRadius: radii.pill,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+    },
+    selectionDeleteText: { color: palette.white, fontWeight: "700", fontSize: 14 },
+    selectionDeleteDisabled: { opacity: 0.4 },
+    editBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.sm,
+    },
+    editBannerText: { flex: 1, fontSize: 12, color: palette.primaryStrong, fontWeight: "600" },
     systemLine: { alignItems: "center", paddingVertical: spacing.sm },
     systemText: { fontSize: 12, color: palette.textMuted, textAlign: "center" },
 

@@ -4112,6 +4112,30 @@ export class AppBackendClient {
     );
   }
 
+  /**
+   * Changes a message's text, within the five-minute window.
+   *
+   * The window is enforced on the server; this will be refused with
+   * `edit_window_closed` once it has passed, which is what the client shows
+   * rather than hiding the option based on its own clock.
+   */
+  editConversationMessage(conversationId: number, messageId: number, body: string): Promise<ChatMessage> {
+    return this.bulletinRequest(
+      `/conversations/${conversationId}/messages/${messageId}`,
+      this.jsonInit("PATCH", { body }),
+      "Unable to edit that message",
+    );
+  }
+
+  /** Removes a message for everybody, leaving a tombstone in the thread. */
+  deleteConversationMessage(conversationId: number, messageId: number): Promise<void> {
+    return this.bulletinRequest(
+      `/conversations/${conversationId}/messages/${messageId}`,
+      { method: "DELETE" },
+      "Unable to delete that message",
+    );
+  }
+
   // ── Attachments ────────────────────────────────────────────────────────────
 
   /**

@@ -5641,7 +5641,7 @@ function WalletAppShellContent({
       balance={smartBalance === "..." ? smartBalance : formatDisplayBalance(smartBalance, clientConfig.tokenDecimals)}
       tokenSymbol={clientConfig.tokenSymbol}
       explorerURL={clientConfig.explorerURL}
-      onShareTransaction={chatEnabled ? shareTransactionToChat : undefined}
+      onShareTransaction={shareTransactionToChat}
       faucetAddress={clientConfig.faucetAddress}
       smartAddress={smartAddress}
       selectedWalletLabel={selectedWalletLabel}
@@ -5937,9 +5937,19 @@ function WalletAppShellContent({
   return (
     <RootContainer style={[styles.safe, !showStandardChrome ? styles.safeFullscreen : undefined]}>
       <StatusBar style={isDark ? "light" : "dark"} />
+      {/* The decorative orbs behind the top bar.
+          Hidden for the chat stack: those screens have no top bar, so the orbs
+          showed in the safe-area strip above the chat's own header — a band of
+          tinted colour over the pill on a Face ID phone, which read as the
+          screen being cut off at the top. The backdrop itself stays, so the
+          strip is flat background and continuous with the header below it. */}
       <View style={styles.topBackdrop}>
-        <View style={styles.topOrbLarge} />
-        <View style={styles.topOrbSmall} />
+        {showStandardChrome ? (
+          <>
+            <View style={styles.topOrbLarge} />
+            <View style={styles.topOrbSmall} />
+          </>
+        ) : null}
       </View>
 
       {/* Notifications while the app is open, drawn OVER the top bar rather
@@ -6361,7 +6371,7 @@ function WalletAppShellContent({
               transactions={activityTransactions}
               tokenSymbol={clientConfig.tokenSymbol}
               explorerURL={clientConfig.explorerURL}
-              onShareTransaction={chatEnabled ? shareTransactionToChat : undefined}
+              onShareTransaction={shareTransactionToChat}
               faucetAddress={clientConfig.faucetAddress}
               transactionsLoaded={activityTransactionsLoaded}
               contacts={contacts}
@@ -6410,10 +6420,8 @@ function WalletAppShellContent({
               backendClient={backendClient}
               tokenSymbol={clientConfig.tokenSymbol}
               hapticsEnabled={preferences.hapticsEnabled}
-              onShareEvent={
-                chatEnabled
-                  ? (event) => setShareTarget({ kind: "event", eventId: event.id, label: event.title })
-                  : undefined
+              onShareEvent={(event) =>
+                setShareTarget({ kind: "event", eventId: event.id, label: event.title })
               }
               requestedEventId={volunteerRouteRequest.eventId}
               requestedEventNonce={volunteerRouteRequest.nonce}
@@ -6431,15 +6439,8 @@ function WalletAppShellContent({
               recenterNonce={mapRecenterNonce}
               focusLocationId={mapFocusLocationId}
               onFocusHandled={() => setMapFocusLocationId(null)}
-              onShareLocation={
-                chatEnabled
-                  ? (location) =>
-                      setShareTarget({
-                        kind: "merchant",
-                        locationId: location.id,
-                        label: location.name,
-                      })
-                  : undefined
+              onShareLocation={(location) =>
+                setShareTarget({ kind: "merchant", locationId: location.id, label: location.name })
               }
               onPayLocation={(location) => {
                 if (!location.payToAddress) {
@@ -6659,6 +6660,7 @@ function WalletAppShellContent({
           target={shareTarget}
           backendClient={backendClient ?? null}
           clientConfig={clientConfig}
+          chatEnabled={chatEnabled}
           hapticsEnabled={preferences.hapticsEnabled}
           onClose={() => setShareTarget(null)}
           onShared={(conversationIds: number[]) => {
