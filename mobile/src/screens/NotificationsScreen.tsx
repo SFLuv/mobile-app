@@ -12,9 +12,11 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
+import { SupportRequestModal } from "../components/SupportRequestModal";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import type { AppAlertAction, AppNotificationFeed, AppNotificationItem } from "../types/notifications";
+import { supportRequestDetails } from "../utils/supportRequests";
 
 /**
  * The notification screen.
@@ -94,6 +96,10 @@ export function NotificationsScreen({
 
   const [refreshing, setRefreshing] = useState(false);
   const [busyAction, setBusyAction] = useState<string>("");
+  // The support request open in the detail sheet, by notification id. Looked
+  // up in the feed on every render, so archiving it from the sheet shows the
+  // settled version rather than a stale copy with buttons that no longer work.
+  const [openSupportId, setOpenSupportId] = useState<number | null>(null);
   // Guards against onEndReached firing repeatedly while a page is in flight,
   // which FlatList will happily do on a fast scroll.
   const loadingMoreRef = useRef(false);
@@ -204,6 +210,17 @@ export function NotificationsScreen({
     return out;
   }, [feed]);
 
+  const openSupportItem = useMemo(() => {
+    if (openSupportId === null || !feed) {
+      return null;
+    }
+    return [...feed.active, ...feed.history].find((item) => item.id === openSupportId) ?? null;
+  }, [feed, openSupportId]);
+  const openSupport = useMemo(
+    () => (openSupportItem ? supportRequestDetails(openSupportItem) : null),
+    [openSupportItem],
+  );
+
   const renderRow = useCallback(
     ({ item: row }: { item: Row }) => {
       if (row.kind === "header") {
@@ -229,7 +246,11 @@ export function NotificationsScreen({
       const internal = item.internal;
       const resolved = internal?.resolved ?? false;
       const settled = resolved || (internal === null && item.seen);
+      const support = supportRequestDetails(item);
       const routable = internal === null && !item.seen;
+      // A support request opens its own sheet: the card is a summary, and the
+      // reply needs the full message, the address and the ticket number.
+      const opensDetail = Boolean(support);
 
       return (
         <View
@@ -243,9 +264,9 @@ export function NotificationsScreen({
             // An ordinary notification is a destination; an alert is read in
             // place. Tapping an alert used to navigate somewhere unrelated,
             // which is how a merchant approval ended up opening the wallet.
-            disabled={!routable}
-            onPress={() => onOpen(item)}
-            accessibilityRole={routable ? "button" : undefined}
+            disabled={!routable && !opensDetail}
+            onPress={() => (opensDetail ? setOpenSupportId(item.id) : onOpen(item))}
+            accessibilityRole={routable || opensDetail ? "button" : undefined}
             accessibilityLabel={item.body ? `${item.title}. ${item.body}` : item.title}
           >
             <View style={styles.cardHead}>
@@ -260,14 +281,23 @@ export function NotificationsScreen({
                     <Text style={styles.setLabel}>{internal.setLabel || internal.set}</Text>
                   </View>
                 ) : null}
-                <Text style={styles.cardTitle}>{item.title}</Text>
+                <Text style={styles.cardTitle}>{support ? support.subject : item.title}</Text>
+                {support ? (
+                  <Text style={styles.supportMeta} numberOfLines={1}>
+                    {[support.name || support.email, support.reference].filter(Boolean).join(" · ")}
+                  </Text>
+                ) : null}
               </View>
               <Text style={styles.cardTime}>{relativeTime(item.createdAt)}</Text>
             </View>
 
-            {item.body ? <Text style={styles.cardBody}>{item.body}</Text> : null}
+            {item.body ? (
+              <Text style={styles.cardBody} numberOfLines={support ? 3 : undefined}>
+                {item.body}
+              </Text>
+            ) : null}
 
-            {internal && internal.fields.length > 0 ? (
+            {!support && internal && internal.fields.length > 0 ? (
               <View style={styles.fields}>
                 {internal.fields.map((field) => (
                   <View key={`${field.label}:${field.value}`} style={styles.fieldRow}>
@@ -290,9 +320,9 @@ export function NotificationsScreen({
               </View>
             ) : null}
 
-            {routable ? (
+            {routable || opensDetail ? (
               <View style={styles.openHint}>
-                <Text style={styles.openHintText}>Tap to open</Text>
+                <Text style={styles.openHintText}>{opensDetail ? "Tap for details" : "Tap to open"}</Text>
                 <Ionicons name="chevron-forward" size={13} color={palette.textMuted} />
               </View>
             ) : null}
@@ -394,6 +424,23 @@ export function NotificationsScreen({
           onEndReachedThreshold={0.5}
         />
       )}
+
+      <SupportRequestModal
+        visible={Boolean(openSupportItem && openSupport)}
+        request={openSupport}
+        actions={openSupportItem?.internal?.resolved ? [] : openSupportItem?.internal?.actions ?? []}
+        busyActionId={
+          openSupportItem && busyAction.startsWith(`${openSupportItem.id}:`)
+            ? busyAction.slice(`${openSupportItem.id}:`.length)
+            : ""
+        }
+        onAction={(action) => {
+          if (openSupportItem) {
+            void runAction(openSupportItem, action);
+          }
+        }}
+        onClose={() => setOpenSupportId(null)}
+      />
     </View>
   );
 }
@@ -526,6 +573,11 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>) 
       fontSize: 15,
       fontWeight: "700",
       color: palette.text,
+    },
+    supportMeta: {
+      fontSize: 12,
+      color: palette.textMuted,
+      marginTop: 2,
     },
     cardTime: {
       fontSize: 11,
