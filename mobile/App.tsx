@@ -10114,10 +10114,14 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     paddingVertical: 12,
     borderWidth: 1,
     ...shadows.card,
-    // Above the dock (20), which is drawn later and used to cover it. After
-    // the shadow spread, which carries an elevation of its own.
-    zIndex: 30,
-    elevation: 30,
+    // Above the dock (20) and the chat stack's overlay (40). The overlay sits
+    // inside chromeStack, but chromeStack is layout-only, so Fabric flattens
+    // it and the overlay's 40 competes with this directly: at 30, every toast
+    // raised from a chat, a contact or a group's details was drawn under the
+    // screen that raised it, and only appeared once that screen was closed.
+    // After the shadow spread, which carries an elevation of its own.
+    zIndex: 50,
+    elevation: 50,
   },
   toastCardInfo: {
     backgroundColor: palette.surface,

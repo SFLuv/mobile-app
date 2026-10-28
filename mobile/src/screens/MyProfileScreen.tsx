@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Image,
   Pressable,
@@ -12,8 +13,6 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import * as Clipboard from "expo-clipboard";
-import * as ImagePicker from "expo-image-picker";
 
 import { AppBackendClient } from "../services/appBackend";
 import { SfluvQRCode } from "../components/SfluvQRCode";
@@ -21,6 +20,8 @@ import { Avatar } from "../components/BulletinParts";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { BulletinRequestError, UserProfile } from "../types/bulletin";
+import { pickAvatarPhoto } from "../utils/avatarPicker";
+import { useCopyFeedback } from "../hooks/useCopyFeedback";
 
 /**
  * "My Profile" — what used to be "My QR".
@@ -70,6 +71,9 @@ export function MyProfileScreen({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** From the tap until the picture is saved or the picker is cancelled. */
+  const [pictureBusy, setPictureBusy] = useState(false);
+  const { copied: addressCopied, copy } = useCopyFeedback();
 
   const load = useCallback(async () => {
     if (!backendClient) {
@@ -130,42 +134,37 @@ export function MyProfileScreen({
   };
 
   const changePicture = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      onToast("SFLuv needs photo access to set your picture.", "error");
+    if (pictureBusy || !backendClient) {
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.85,
-    });
-    if (result.canceled || !result.assets[0] || !backendClient) {
-      return;
-    }
+    setPictureBusy(true);
     try {
-      await backendClient.uploadMyProfileAvatar({
-        uri: result.assets[0].uri,
-        mimeType: result.assets[0].mimeType,
-        fileName: result.assets[0].fileName,
-      });
-      setAvatarUri(result.assets[0].uri);
+      const picked = await pickAvatarPhoto();
+      if (!picked) {
+        return;
+      }
+      await backendClient.uploadMyProfileAvatar(picked);
+      setAvatarUri(picked.uri);
       onToast("Picture saved.", "success");
     } catch {
       onToast("Couldn't save that picture.", "error");
+    } finally {
+      setPictureBusy(false);
     }
   };
 
   const removePicture = async () => {
-    if (!backendClient) {
+    if (pictureBusy || !backendClient) {
       return;
     }
+    setPictureBusy(true);
     try {
       await backendClient.deleteMyProfileAvatar();
       setAvatarUri(null);
     } catch {
       onToast("Couldn't remove that picture.", "error");
+    } finally {
+      setPictureBusy(false);
     }
   };
 
@@ -199,15 +198,16 @@ export function MyProfileScreen({
             </Pressable>
             <Pressable
               style={styles.qrAction}
-              onPress={() => {
-                void Clipboard.setStringAsync(shareAddress || shareQRValue);
-                onToast("Copied.", "success");
-              }}
+              onPress={() => void copy(shareAddress || shareQRValue, "Address copied")}
               accessibilityRole="button"
               accessibilityLabel="Copy your wallet address"
             >
-              <Ionicons name="copy-outline" size={16} color={palette.primaryStrong} />
-              <Text style={styles.qrActionText}>Copy address</Text>
+              <Ionicons
+                name={addressCopied ? "checkmark" : "copy-outline"}
+                size={16}
+                color={palette.primaryStrong}
+              />
+              <Text style={styles.qrActionText}>{addressCopied ? "Copied" : "Copy address"}</Text>
             </Pressable>
           </View>
         </View>
@@ -245,14 +245,21 @@ export function MyProfileScreen({
                     ])
                   : void changePicture()
               }
+              disabled={pictureBusy}
               accessibilityRole="button"
               accessibilityLabel="Your profile picture"
+              accessibilityState={{ busy: pictureBusy }}
             >
               {avatarUri ? (
                 <Image source={{ uri: avatarUri }} style={styles.avatar} />
               ) : (
                 <Avatar name={name || "?"} size={64} />
               )}
+              {pictureBusy ? (
+                <View style={styles.avatarBusy}>
+                  <ActivityIndicator color={palette.white} />
+                </View>
+              ) : null}
               <View style={styles.avatarBadge}>
                 <Ionicons name="camera" size={12} color={palette.white} />
               </View>
@@ -393,6 +400,13 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     avatarRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginBottom: spacing.sm },
     avatar: { width: 64, height: 64, borderRadius: 32, backgroundColor: palette.surfaceStrong },
+    avatarBusy: {
+      ...StyleSheet.absoluteFillObject,
+      borderRadius: 32,
+      backgroundColor: palette.overlay,
+      alignItems: "center",
+      justifyContent: "center",
+    },
     avatarBadge: {
       position: "absolute",
       right: -2,

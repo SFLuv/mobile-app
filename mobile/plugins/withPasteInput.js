@@ -14,6 +14,13 @@
  * return, where `factory` is in scope. Marked, so prebuilding twice does not
  * insert it twice. Android needs nothing: autolinking covers it.
  *
+ * That call alone was not enough. The library read the factory's React host
+ * once, there, and with expo-updates the host does not exist yet: it is made
+ * after launch, once the update to run is chosen. So it found no views and
+ * photos still never pasted. patches/@mattermost+react-native-paste-input+
+ * 2.0.1.patch keeps the factory and reads its host when a field registers,
+ * and keeps rich text pasting as text.
+ *
  * ── And the Podfile ─────────────────────────────────────────────────────────
  *
  * The library's podspec refuses to install unless RCT_NEW_ARCH_ENABLED is "1".

@@ -1,0 +1,97 @@
+diff --git a/node_modules/@mattermost/react-native-paste-input/ios/PasteInputModule.mm b/node_modules/@mattermost/react-native-paste-input/ios/PasteInputModule.mm
+index 59ff531..5993c1a 100644
+--- a/node_modules/@mattermost/react-native-paste-input/ios/PasteInputModule.mm
++++ b/node_modules/@mattermost/react-native-paste-input/ios/PasteInputModule.mm
+@@ -42,6 +42,11 @@ @interface PasteInputModule ()
+ @end
+ 
+ static id _reactHost = nil;
++// sfluv: the factory, kept so its host can be read when a view is looked up.
++// With expo-updates (and expo-dev-client) the app's React host is created
++// after didFinishLaunching returns, so the host captured by setup: is nil and
++// no text input was ever found: paste interception silently never attached.
++static RCTRootViewFactory *_rootViewFactory = nil;
+ 
+ @implementation PasteInputModule
+ 
+@@ -54,6 +59,7 @@ + (BOOL)requiresMainQueueSetup
+ 
+ + (void)setup:(RCTRootViewFactory *)rootViewFactory
+ {
++    _rootViewFactory = rootViewFactory;
+ #ifdef RCT_NEW_ARCH_ENABLED
+     _reactHost = rootViewFactory.reactHost;
+ #endif
+@@ -174,8 +180,9 @@ - (nullable id)getSurfacePresenter
+ {
+ #ifdef RCT_NEW_ARCH_ENABLED
+     // Try bridgeless mode first (if reactHost is set)
+-    if (_reactHost) {
+-        return [_reactHost performSelector:@selector(surfacePresenter)];
++    id host = _rootViewFactory.reactHost ?: _reactHost;
++    if (host) {
++        return [host performSelector:@selector(surfacePresenter)];
+     }
+     // Fallback to bridge mode (Fabric with bridge enabled)
+     else if (self.bridge) {
+@@ -223,6 +230,13 @@ - (nullable UIView *)findBackingTextViewForTag:(NSNumber *)viewRef
+     }
+ #endif
+ 
++    // sfluv: Fabric gives every component view its React tag as its UIView
++    // tag, so the input can also be found from the windows when the surface
++    // presenter cannot be reached.
++    if (!view) {
++        view = [self findTextInputViewInWindowsWithTag:[viewRef integerValue]];
++    }
++
+     if (!view) {
+         return nil;
+     }
+@@ -265,6 +279,24 @@ - (nullable UIView *)findViewWithNativeID:(NSString *)nativeID inView:(UIView *)
+     return nil;
+ }
+ 
++// sfluv: only a TextInput's own component view is accepted. A tag is a
++// small integer, and UIKit's views use tags too.
++- (nullable UIView *)findTextInputViewInWindowsWithTag:(NSInteger)tag
++{
++    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
++        if (![scene isKindOfClass:[UIWindowScene class]]) {
++            continue;
++        }
++        for (UIWindow *window in ((UIWindowScene *)scene).windows) {
++            UIView *match = [window viewWithTag:tag];
++            if (match && [NSStringFromClass([match class]) hasPrefix:@"RCTTextInputComponentView"]) {
++                return match;
++            }
++        }
++    }
++    return nil;
++}
++
+ /**
+  * Recursively search for UITextView or UITextField in view hierarchy
+  */
+@@ -450,6 +482,21 @@ static void pasteInputInterceptedPasteIMP(id self, SEL _cmd, id sender)
+     // back to the system paste handler — that's our signal that the pasteboard
+     // only contained text/rich-text representations.
+     UIPasteboard *pasteboard = [UIPasteboard generalPasteboard];
++
++    // sfluv: text is pasted as text. Rich text from Notes, Mail or a web page
++    // carries RTF and HTML as raw bytes beside its plain string, and the scan
++    // below can detect the RTF as a file and attach a .rtf instead of pasting
++    // the words. Only a clipboard with an image, or with no text at all, goes
++    // looking for files.
++    if (pasteboard.hasStrings && !pasteboard.hasImages) {
++        struct objc_super superData = {
++            .receiver = self,
++            .super_class = originalClass
++        };
++        ((void(*)(struct objc_super *, SEL, id))objc_msgSendSuper)(&superData, _cmd, sender);
++        return;
++    }
++
+     NSArray<NSDictionary *> *files = [pasteboard getCopiedFiles];
+ 
+     if (files.count == 0) {

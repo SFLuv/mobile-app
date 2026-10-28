@@ -3,6 +3,7 @@ import {
   Animated,
   Easing,
   Image,
+  Keyboard,
   Platform,
   Pressable,
   StyleSheet,
@@ -15,7 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
 import { displayFileName, fileTypeIconFor } from "../utils/attachmentFiles";
-import { PasteButton, PastedContent } from "./PasteControl";
+import { reportHandledError } from "../services/observability";
 
 /**
  * The message field, as a native paste-aware input where the build has one.
@@ -23,23 +24,27 @@ import { PasteButton, PastedContent } from "./PasteControl";
  * React Native's TextInput can only paste text. @mattermost/react-native-paste-
  * input is a drop-in replacement whose own Paste — the field's long-press menu,
  * or ⌘V on a keyboard — also delivers photos and files, which the composer
- * stages like anything picked from the library. That replaced a "photo on your
- * clipboard" chip that guessed at the clipboard, popped up for things that were
- * not photos, and sat in the way.
+ * stages like anything picked from the library. That is the only way to paste
+ * one: there is no Paste button anywhere else, the way Telegram and Messages
+ * have none.
  *
  * Loaded defensively: its module looks itself up at import and throws on a
  * binary built without it — a 2.3 build, or a dev client older than this
- * code. Then the field is the plain TextInput and text still pastes.
+ * code. Then the field is the plain TextInput and text still pastes, and the
+ * first composer to mount reports it, so a build that silently lost photo
+ * paste shows up in Sentry rather than in a bug report.
  */
 type PasteInputComponentType = typeof import("@mattermost/react-native-paste-input").default;
 // Type-only, so it is erased and cannot trigger the import-time lookup below.
 type PasteTextInputInstance = import("@mattermost/react-native-paste-input").PasteTextInputInstance;
 let NativePasteInput: PasteInputComponentType | null = null;
+let nativePasteInputError: unknown = null;
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   NativePasteInput = require("@mattermost/react-native-paste-input").default as PasteInputComponentType;
-} catch {
+} catch (error) {
   NativePasteInput = null;
+  nativePasteInputError = error;
 }
 
 /** A photo or file pasted into the message field. */
@@ -115,9 +120,7 @@ export function ChatComposer({
   hapticsEnabled,
   inputRef,
   placeholder = "Message",
-  onPaste,
   onPasteFiles,
-  pasteDisabledReason,
 }: {
   mode: ComposerMode;
   onModeChange: (mode: ComposerMode) => void;
@@ -168,21 +171,20 @@ export function ChatComposer({
   inputRef?: React.RefObject<TextInput | null>;
   placeholder?: string;
   /**
-   * A photo, link or text pasted through the Paste tile or the clipboard chip.
-   * See PasteControl for why the text field's own paste cannot take a photo.
-   */
-  onPaste?: (content: PastedContent) => void;
-  /**
    * Photos and files pasted into the message field itself, through its native
    * Paste. Text pastes into the field as text, as it always has.
    */
   onPasteFiles?: (files: PastedFileForStaging[]) => void;
-  /** Why pasting is unavailable right now — a payment is staged, say. */
-  pasteDisabledReason?: string;
 }) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
 
+  useEffect(() => {
+    // At mount rather than at import: the import runs before Sentry starts.
+    if (nativePasteInputError) {
+      reportHandledError("composer.pasteInput", nativePasteInputError);
+    }
+  }, []);
 
   /**
    * The tray's entrance.
@@ -198,6 +200,15 @@ export function ChatComposer({
    * into the space the keyboard is vacating, travelling the same way the
    * keyboard is. The timing is matched to iOS's keyboard animation (250ms,
    * ease-out) rather than chosen for its own sake.
+   *
+   * ── Except when the keyboard is up ─────────────────────────────────────────
+   *
+   * Then the tray mounts already faded in, and the composer sliding down with
+   * the keyboard is the whole motion. Faded in on the native driver, it came
+   * out invisible: the keyboard's LayoutAnimation moves the composer at the
+   * same moment, and when that finishes Fabric re-applies the props React last
+   * rendered — opacity 0 — over the faded-in view. The tray took up its space
+   * with nothing in it.
    */
   const trayEnter = useRef(new Animated.Value(0)).current;
 
@@ -362,27 +373,6 @@ export function ChatComposer({
                 </Text>
               </Pressable>
             ))}
-            {onPaste ? (
-              <View
-                style={[styles.trayOption, pasteDisabledReason ? styles.trayOptionDisabled : undefined]}
-                pointerEvents={pasteDisabledReason ? "none" : "auto"}
-                accessibilityHint={pasteDisabledReason}
-              >
-                <PasteButton
-                  size={{ width: 48, height: 48 }}
-                  style={{ marginBottom: 6 }}
-                  background={palette.primaryMuted}
-                  foreground={palette.primaryStrong}
-                  onPaste={(content) => {
-                    triggerClickHaptic(hapticsEnabled);
-                    onPaste(content);
-                  }}
-                />
-                <Text style={styles.trayLabel} numberOfLines={2}>
-                  Paste
-                </Text>
-              </View>
-            ) : null}
           </View>
           <Pressable
             style={styles.trayClose}
@@ -399,6 +389,9 @@ export function ChatComposer({
             style={styles.plusButton}
             onPress={() => {
               triggerClickHaptic(hapticsEnabled);
+              if (Keyboard.isVisible()) {
+                trayEnter.setValue(1);
+              }
               onModeChange("attach");
             }}
             accessibilityRole="button"

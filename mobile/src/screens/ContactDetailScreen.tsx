@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Image,
   Pressable,
@@ -11,8 +12,6 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import * as Clipboard from "expo-clipboard";
-import * as ImagePicker from "expo-image-picker";
 
 import { AppBackendClient } from "../services/appBackend";
 import { SwipeBack } from "../components/SwipeBack";
@@ -22,6 +21,8 @@ import type { PublicUser } from "../types/bulletin";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { AppClientConfig, AppContact } from "../types/app";
 import { buildUniversalAddContactLink } from "../utils/universalLinks";
+import { pickAvatarPhoto } from "../utils/avatarPicker";
+import { useCopyFeedback } from "../hooks/useCopyFeedback";
 
 /**
  * One person: what you saved about them, and what they published about
@@ -103,6 +104,14 @@ export function ContactDetailScreen({
   /** Their public profile, when this contact's address belongs to an account. */
   const [profile, setProfile] = useState<PublicUser | null>(null);
   const [profileAvatarUri, setProfileAvatarUri] = useState<string | null>(null);
+  /**
+   * From the tap until the picture is saved or the picker is cancelled. The
+   * spinner shows on the picture at once, so the moment before the picker
+   * appears reads as working rather than as a tap that missed, and it is
+   * still there, behind the picker, for the upload once a photo is chosen.
+   */
+  const [pictureBusy, setPictureBusy] = useState(false);
+  const { copied: addressCopied, copy } = useCopyFeedback();
 
   useEffect(() => {
     if (!backendClient || !contact.userId) {
@@ -176,43 +185,38 @@ export function ContactDetailScreen({
   };
 
   const changePicture = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      onToast("SFLuv needs photo access to set a picture.", "error");
+    if (pictureBusy || !backendClient) {
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.85,
-    });
-    if (result.canceled || !result.assets[0] || !backendClient) {
-      return;
-    }
+    setPictureBusy(true);
     try {
-      await backendClient.uploadContactAvatar(contact.id, {
-        uri: result.assets[0].uri,
-        mimeType: result.assets[0].mimeType,
-        fileName: result.assets[0].fileName,
-      });
-      setAvatarUri(result.assets[0].uri);
+      const picked = await pickAvatarPhoto();
+      if (!picked) {
+        return;
+      }
+      await backendClient.uploadContactAvatar(contact.id, picked);
+      setAvatarUri(picked.uri);
       onChanged();
     } catch {
       onToast("Couldn't save that picture.", "error");
+    } finally {
+      setPictureBusy(false);
     }
   };
 
   const removePicture = async () => {
-    if (!backendClient) {
+    if (pictureBusy || !backendClient) {
       return;
     }
+    setPictureBusy(true);
     try {
       await backendClient.deleteContactAvatar(contact.id);
       setAvatarUri(null);
       onChanged();
     } catch {
       onToast("Couldn't remove that picture.", "error");
+    } finally {
+      setPictureBusy(false);
     }
   };
 
@@ -256,14 +260,21 @@ export function ContactDetailScreen({
                   ])
                 : void changePicture()
             }
+            disabled={pictureBusy}
             accessibilityRole="button"
             accessibilityLabel="Contact picture"
+            accessibilityState={{ busy: pictureBusy }}
           >
             {avatarUri ? (
               <Image source={{ uri: avatarUri }} style={styles.avatar} />
             ) : (
               <Avatar name={contact.name || "?"} size={86} />
             )}
+            {pictureBusy ? (
+              <View style={styles.avatarBusy}>
+                <ActivityIndicator color={palette.white} />
+              </View>
+            ) : null}
             <View style={styles.avatarBadge}>
               <Ionicons name="camera" size={13} color={palette.white} />
             </View>
@@ -332,17 +343,18 @@ export function ContactDetailScreen({
         <Text style={styles.label}>Wallet address</Text>
         <Pressable
           style={styles.addressRow}
-          onPress={() => {
-            void Clipboard.setStringAsync(contact.address);
-            onToast("Address copied.", "success");
-          }}
+          onPress={() => void copy(contact.address, "Address copied")}
           accessibilityRole="button"
           accessibilityLabel="Copy wallet address"
         >
           <Text style={styles.address} numberOfLines={2}>
             {contact.address}
           </Text>
-          <Ionicons name="copy-outline" size={17} color={palette.textMuted} />
+          <Ionicons
+            name={addressCopied ? "checkmark" : "copy-outline"}
+            size={17}
+            color={addressCopied ? palette.success : palette.textMuted}
+          />
         </Pressable>
 
         {/* Their profile. Read-only, and labelled as theirs — the fields above
@@ -463,6 +475,13 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
 
     identity: { alignItems: "center", paddingVertical: spacing.lg },
     avatar: { width: 86, height: 86, borderRadius: 43, backgroundColor: palette.surfaceStrong },
+    avatarBusy: {
+      ...StyleSheet.absoluteFillObject,
+      borderRadius: 43,
+      backgroundColor: palette.overlay,
+      alignItems: "center",
+      justifyContent: "center",
+    },
     avatarBadge: {
       position: "absolute",
       right: -2,

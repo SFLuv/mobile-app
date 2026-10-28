@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   Image,
@@ -11,7 +12,6 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import * as ImagePicker from "expo-image-picker";
 
 import { AppBackendClient } from "../services/appBackend";
 import { SwipeBack } from "../components/SwipeBack";
@@ -22,6 +22,7 @@ import { ChatAvatar } from "../components/ChatAvatar";
 import { formatFileSize } from "../components/MessageAttachmentCard";
 import { AttachmentPreview } from "../components/AttachmentPreview";
 import { displayFileName, fileTypeIcon } from "../utils/attachmentFiles";
+import { pickAvatarPhoto } from "../utils/avatarPicker";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
 import {
@@ -105,6 +106,8 @@ export function ChatInfoScreen({
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(conversation.title ?? "");
   const [busy, setBusy] = useState(false);
+  /** A picture being picked or saved: a spinner on the picture itself. */
+  const [pictureBusy, setPictureBusy] = useState(false);
   const [iconUri, setIconUri] = useState<string | null>(null);
 
   const isGroup = conversation.kind === "group";
@@ -164,25 +167,16 @@ export function ChatInfoScreen({
 
   const changePicture = () =>
     run(async () => {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        onToast("SFLuv needs photo access to set a group picture.", "error");
-        return;
+      setPictureBusy(true);
+      try {
+        const picked = await pickAvatarPhoto();
+        if (!picked) {
+          return;
+        }
+        await backendClient?.uploadGroupIcon(conversation.id, picked);
+      } finally {
+        setPictureBusy(false);
       }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ["images"],
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.85,
-      });
-      if (result.canceled || !result.assets[0]) {
-        return;
-      }
-      await backendClient?.uploadGroupIcon(conversation.id, {
-        uri: result.assets[0].uri,
-        mimeType: result.assets[0].mimeType,
-        fileName: result.assets[0].fileName,
-      });
     }, "Couldn't set the group picture.");
 
   const confirmLeave = () => {
@@ -257,6 +251,11 @@ export function ChatInfoScreen({
                   userId={isGroup ? null : conversation.other_user.user_id}
                 />
               )}
+              {pictureBusy ? (
+                <View style={styles.iconBusy}>
+                  <ActivityIndicator color={palette.white} />
+                </View>
+              ) : null}
               {isGroup && canAdminister ? (
                 <View style={styles.iconBadge}>
                   <Ionicons name="camera" size={13} color={palette.white} />
@@ -679,6 +678,13 @@ function createStyles(palette: Palette) {
 
     identity: { alignItems: "center", paddingVertical: spacing.lg, gap: 6 },
     icon: { width: 76, height: 76, borderRadius: 38, backgroundColor: palette.surfaceStrong },
+    iconBusy: {
+      ...StyleSheet.absoluteFillObject,
+      borderRadius: 38,
+      backgroundColor: palette.overlay,
+      alignItems: "center",
+      justifyContent: "center",
+    },
     iconBadge: {
       position: "absolute",
       right: -2,

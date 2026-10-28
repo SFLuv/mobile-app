@@ -21,7 +21,6 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
-import { File, Paths } from "expo-file-system";
 
 import { AppBackendClient } from "../services/appBackend";
 import { useStuckWatch } from "../services/observability";
@@ -34,7 +33,6 @@ import {
   type AttachmentHandlers,
 } from "../components/MessageAttachmentCard";
 import { ChatAvatar } from "../components/ChatAvatar";
-import type { PastedContent } from "../components/PasteControl";
 import { seedAttachment } from "../services/attachmentCache";
 import { cachedConversation, cachedThread, cachedThreadNow, saveThread } from "../services/chatCache";
 import { DerivedLinkCard, LinkifiedText } from "../components/MessageLinks";
@@ -819,41 +817,6 @@ export function ChatScreen({
       // second photo should not move where the text splits.
       splitAt: current?.splitAt ?? caretRef.current,
     }));
-    setTimeout(() => inputRef.current?.focus(), 120);
-  };
-
-  /**
-   * Something pasted through the composer's Paste tile or clipboard chip.
-   *
-   * A photo is written to the cache and staged like one picked from the
-   * library — same chip, same caption split, same send. Text, which includes a
-   * link, goes into the draft at the caret, so pasting into the middle of a
-   * sentence works the way it does in the field itself.
-   */
-  const pasteContent = (content: PastedContent) => {
-    if (content.kind === "image") {
-      try {
-        const png = content.dataUri.startsWith("data:image/png");
-        const extension = png ? "png" : "jpg";
-        const file = new File(Paths.cache, `pasted-${Date.now()}.${extension}`);
-        file.create();
-        file.write(content.dataUri.slice(content.dataUri.indexOf(",") + 1), { encoding: "base64" });
-        stageAttachments([
-          {
-            uri: file.uri,
-            mimeType: png ? "image/png" : "image/jpeg",
-            fileName: `Pasted image.${extension}`,
-            isImage: true,
-          },
-        ]);
-      } catch {
-        onToast("Couldn't paste that image.", "error");
-      }
-      return;
-    }
-    const at = Math.min(caretRef.current ?? draft.length, draft.length);
-    setDraft(draft.slice(0, at) + content.text + draft.slice(at));
-    setMode("text");
     setTimeout(() => inputRef.current?.focus(), 120);
   };
 
@@ -2009,12 +1972,10 @@ export function ChatScreen({
             hapticsEnabled={hapticsEnabled}
             inputRef={inputRef}
             placeholder={editing ? "Edit your message" : "Message"}
-            // Not while editing: an edit changes words, it cannot gain a photo.
-            onPaste={editing ? undefined : pasteContent}
             // Photos and files pasted into the field itself — staged like any
-            // picked from the library, through the same payment guard.
+            // picked from the library, through the same payment guard. Not
+            // while editing: an edit changes words, it cannot gain a photo.
             onPasteFiles={editing ? undefined : (files) => stageAttachments(files)}
-            pasteDisabledReason={staged?.payment ? "Send or remove the payment first." : undefined}
           />
           </>
         )}
