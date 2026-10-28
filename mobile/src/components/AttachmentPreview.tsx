@@ -7,7 +7,7 @@ import { WebView } from "react-native-webview";
 import { AppBackendClient } from "../services/appBackend";
 import { ThemedActivityIndicator } from "./ThemedActivityIndicator";
 import { formatFileSize } from "./MessageAttachmentCard";
-import { cacheAttachment, fileTypeIcon, saveAttachment } from "../utils/attachmentFiles";
+import { cacheAttachment, displayFileName, fileTypeIcon, saveAttachment } from "../utils/attachmentFiles";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import type { MessageAttachment } from "../types/bulletin";
 
@@ -164,7 +164,7 @@ export function AttachmentPreview({
           {showTitle ? (
             <View style={styles.headerTitleWrap}>
               <Text style={styles.headerTitle} numberOfLines={1}>
-                {attachment?.file_name || "File"}
+                {displayFileName(attachment?.file_name) || "File"}
               </Text>
               <Text style={styles.headerMeta} numberOfLines={1}>
                 {[typeInfo?.label, formatFileSize(attachment?.size_bytes)].filter(Boolean).join(" · ")}
@@ -297,7 +297,7 @@ function FileCard({
         />
       </View>
       <Text style={styles.fileName} numberOfLines={3}>
-        {attachment.file_name || "File"}
+        {displayFileName(attachment.file_name) || "File"}
       </Text>
       <Text style={styles.fileMeta}>
         {[typeInfo?.label, formatFileSize(attachment.size_bytes), senderName].filter(Boolean).join(" · ")}

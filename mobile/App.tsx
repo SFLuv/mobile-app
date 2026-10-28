@@ -70,6 +70,7 @@ import { W9CompleteModal } from "./src/components/W9CompleteModal";
 import { W9TierModal } from "./src/components/W9TierModal";
 import { mobileConfig } from "./src/config";
 import {
+  expectArrival,
   initSentry,
   recordStep,
   reportHandledError,
@@ -116,6 +117,7 @@ import {
   AppWallet,
   MerchantToday,
 } from "./src/types/app";
+import { reportDockTop, useDockTop } from "./src/hooks/useDockLift";
 import { useNotificationInbox } from "./src/hooks/useNotificationInbox";
 import { useNotificationFeed } from "./src/hooks/useNotificationFeed";
 import { useRealtime } from "./src/hooks/useRealtime";
@@ -1326,6 +1328,10 @@ function BottomDock({
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const [barHeight, setBarHeight] = useState(0);
+  // Screens lift their floating buttons off the dock by however far they reach
+  // below its top edge (useDockLift), so the dock says where that edge is.
+  const barRef = useRef<View>(null);
+  useEffect(() => () => reportDockTop(null), []);
   // Each slot reports its own laid-out position. Deriving them arithmetically
   // from the bar width drifted against Yoga's pixel rounding, and the error
   // accumulated across the row — visible as an off-centre bubble on the last tab.
@@ -1435,8 +1441,16 @@ function BottomDock({
 
   return (
     <View
+      ref={barRef}
       style={styles.bottomDock}
-      onLayout={(event) => setBarHeight(event.nativeEvent.layout.height)}
+      onLayout={(event) => {
+        setBarHeight(event.nativeEvent.layout.height);
+        barRef.current?.measureInWindow((_x, y, _width, height) => {
+          if (height) {
+            reportDockTop(y);
+          }
+        });
+      }}
     >
       <View pointerEvents="none" style={styles.bottomDockGlassLayer} />
       <View pointerEvents="none" style={styles.bottomDockGlassSheen} />
@@ -1975,6 +1989,9 @@ function WalletAppShellContent({
   const [walletPaneBackSwipeEnabled, setWalletPaneBackSwipeEnabled] = useState(true);
   const [redeemFlow, setRedeemFlow] = useState<RedeemFlowState | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
+  // Toasts sit just above the dock, wherever the dock is on this phone. The
+  // fixed offset they used put an error under the dock on a Home-button iPhone.
+  const dockTop = useDockTop();
   const walletSurfaceRequestRef = useRef(0);
   const appIsActiveRef = useRef(AppState.currentState === "active");
   const transferRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -3372,8 +3389,16 @@ function WalletAppShellContent({
     return null;
   }, [bulletinEnabled, chatEnabled, participateActive, tab]);
 
+  // The tab as of now, for checks that run after a render or two.
+  const currentTabRef = useRef(tab);
+  currentTabRef.current = tab;
+
   const handleDockSelect = useCallback(
     (key: DockTabKey) => {
+      if (key !== "participate" || participateTargets.length === 1) {
+        const expected = key === "participate" ? participateTargets[0] : key;
+        expectArrival(`dock: ${key}`, () => currentTabRef.current === expected, { from: tab });
+      }
       if (key === "participate") {
         // One destination goes straight there; two offers the choice, in the
         // same sheet style the displaced tabs used to use.
@@ -3765,13 +3790,35 @@ function WalletAppShellContent({
   // prefix rather than an explicit list means a new kind routes correctly
   // without an app release. Covers a warm tap and the cold start where the
   // notification is what launched the app.
+  //
+  // Each tap is routed once. The OS keeps answering getLastNotificationResponse
+  // with the notification that launched the app for as long as the app runs,
+  // and the callbacks below are rebuilt on most renders, so without this every
+  // tab change re-ran the launch tap and pulled the person straight back to
+  // where it pointed: the dock looked dead after opening a payment push.
+  // A notification that points at a tab should leave the person on it.
+  const expectNotificationArrival = useCallback((target: NotificationTarget, from: "push" | "list") => {
+    const expected =
+      target.kind === "activity" ? "activity" : target.kind === "tax" ? "wallet" : target.kind === "bulletin" ? "bulletin" : null;
+    if (expected) {
+      expectArrival(`notification: ${target.kind}`, () => currentTabRef.current === expected, { from });
+    }
+  }, []);
+  const routedNotificationResponsesRef = useRef(new Set<string>());
   useEffect(() => {
     const routeFromResponse = (response: Notifications.NotificationResponse | null) => {
       if (!response) {
         return;
       }
+      const key = `${response.notification.request.identifier}:${response.actionIdentifier}`;
+      if (routedNotificationResponsesRef.current.has(key)) {
+        return;
+      }
+      routedNotificationResponsesRef.current.add(key);
       const data = response.notification.request.content.data as Record<string, unknown> | undefined;
       const target = targetFromData(data);
+      recordStep("notification", "opened from a push", { target: target.kind });
+      expectNotificationArrival(target, "push");
       navigateToNotificationTarget(target);
       resolveNotificationTarget(target);
     };
@@ -3783,7 +3830,7 @@ function WalletAppShellContent({
       });
     const subscription = Notifications.addNotificationResponseReceivedListener(routeFromResponse);
     return () => subscription.remove();
-  }, [navigateToNotificationTarget, resolveNotificationTarget]);
+  }, [expectNotificationArrival, navigateToNotificationTarget, resolveNotificationTarget]);
 
   const handleImproverUpdated = useCallback((nextImprover: AppImprover) => {
     setAppImprover(nextImprover);
@@ -6713,6 +6760,7 @@ function WalletAppShellContent({
                 // push would have.
                 const target = targetFromData(item.data);
                 recordStep("notification", "opened from the list", { target: target.kind });
+                expectNotificationArrival(target, "list");
                 navigateToNotificationTarget(target);
                 resolveNotificationTarget(target);
               }}
@@ -6872,20 +6920,6 @@ function WalletAppShellContent({
           onClose={() => setChatTransaction(null)}
         />
 
-        {toast ? (
-          <View
-            style={[
-              styles.toastCard,
-              toast.tone === "error"
-                ? styles.toastCardError
-                : toast.tone === "success"
-                  ? styles.toastCardSuccess
-                  : styles.toastCardInfo,
-            ]}
-          >
-            <Text style={styles.toastText}>{toast.message}</Text>
-          </View>
-        ) : null}
       </View>
 
       <PaymentReceivedOverlay receipt={paymentReceipt} onDismiss={() => setPaymentReceipt(null)} />
@@ -6901,6 +6935,24 @@ function WalletAppShellContent({
           />
           <View pointerEvents="none" style={styles.bottomDockLiquidLayer} />
           <BottomDock tabs={dockTabs} activeKey={activeDockKey} onSelect={handleDockSelect} />
+        </View>
+      ) : null}
+      {toast ? (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.toastCard,
+            dockTop !== null
+              ? { bottom: Dimensions.get("window").height - dockTop + spacing.sm }
+              : undefined,
+            toast.tone === "error"
+              ? styles.toastCardError
+              : toast.tone === "success"
+                ? styles.toastCardSuccess
+                : styles.toastCardInfo,
+          ]}
+        >
+          <Text style={styles.toastText}>{toast.message}</Text>
         </View>
       ) : null}
 
@@ -9513,6 +9565,10 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     paddingVertical: 12,
     borderWidth: 1,
     ...shadows.card,
+    // Above the dock (20), which is drawn later and used to cover it. After
+    // the shadow spread, which carries an elevation of its own.
+    zIndex: 30,
+    elevation: 30,
   },
   toastCardInfo: {
     backgroundColor: palette.surface,

@@ -14,7 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
-import { fileTypeIconFor } from "../utils/attachmentFiles";
+import { displayFileName, fileTypeIconFor } from "../utils/attachmentFiles";
 
 /** SFLuv's own mark, so a staged payment names the currency it is in. */
 const SFLUV_MARK = require("../../assets/qr-logo.png");
@@ -249,7 +249,7 @@ export function ChatComposer({
                   </View>
                   <View style={styles.stagedFileText}>
                     <Text style={styles.stagedFileName} numberOfLines={2}>
-                      {item.fileName || "File"}
+                      {displayFileName(item.fileName) || "File"}
                     </Text>
                     <Text style={styles.stagedFileKind} numberOfLines={1}>
                       {
@@ -267,7 +267,7 @@ export function ChatComposer({
                 onPress={() => onRemoveStaged?.(index)}
                 hitSlop={8}
                 accessibilityRole="button"
-                accessibilityLabel={`Remove ${item.fileName || "attachment"}`}
+                accessibilityLabel={`Remove ${displayFileName(item.fileName) || "attachment"}`}
               >
                 <Ionicons name="close" size={12} color={palette.white} />
               </Pressable>

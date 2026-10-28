@@ -32,6 +32,7 @@ trail bottom-up.
 | Crash or render error | Any uncaught error, native or JS | Stack trace |
 | Request failure | A backend answer the app treats as an error (`throwRequestError`), or a failed `pm_sponsorUserOperation` / `eth_sendUserOperation` | Method, route, status |
 | Still waiting | A watched wait passes 15s (payments: 150s) | What was being waited on |
+| Tap went nowhere | A dock tab, or a notification pointing at a tab, did not leave the person on that tab 2.5s later. Nothing throws when a button does nothing, so this is how such bugs reach Sentry | Which tap |
 | Handled error | Errors the app catches and shows as a message, where wired with `reportHandledError` | Where + message |
 
 Every event carries the trail: tab changes, notification taps, each request
@@ -39,6 +40,10 @@ Every event carries the trail: tab changes, notification taps, each request
 Successful network calls the SDK sees on its own (mostly the Celo balance poll,
 every two seconds) are left out so they do not push the useful steps off the
 end; failed ones stay.
+
+To check that some other tap lands where it should, call
+`expectArrival(label, () => <are we there?>)` in its handler; read current
+state through a ref, since the check runs after a few renders.
 
 Watched waits: notifications feed, activity list, opening a chat, sending a
 chat message, the chat list, starting a conversation, and payments. Add one

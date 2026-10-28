@@ -24,6 +24,26 @@ import type { MessageAttachment } from "../types/bulletin";
  */
 
 /**
+ * A file's name as a person should read it.
+ *
+ * iOS document providers hand back percent-encoded names ("My%20Doc.pdf"), and
+ * attachments sent before the picker decoded them are stored that way, so every
+ * place a name is shown goes through this. A name that only looks encoded, or
+ * is malformed, is left alone.
+ */
+export function displayFileName(name: string | null | undefined): string {
+  const raw = name?.trim() ?? "";
+  if (!/%[0-9A-Fa-f]{2}/.test(raw)) {
+    return raw;
+  }
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/**
  * A filename safe to write to disk, derived from what the sender called it.
  *
  * The sender's name has already been sanitised server-side; this guards the
@@ -31,7 +51,7 @@ import type { MessageAttachment } from "../types/bulletin";
  * offers something a person can identify.
  */
 function safeName(attachment: MessageAttachment): string {
-  const raw = attachment.file_name?.trim() || `attachment-${attachment.id}`;
+  const raw = displayFileName(attachment.file_name) || `attachment-${attachment.id}`;
   return raw.replace(/[^\w.\- ]+/g, "_").slice(0, 120);
 }
 
@@ -113,7 +133,7 @@ export async function saveAttachment(
   try {
     await Sharing.shareAsync(localUri, {
       mimeType: attachment.content_type || undefined,
-      dialogTitle: attachment.file_name || "Save file",
+      dialogTitle: displayFileName(attachment.file_name) || "Save file",
     });
     return { status: "shared" };
   } catch (error) {

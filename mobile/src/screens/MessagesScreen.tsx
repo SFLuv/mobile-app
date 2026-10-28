@@ -24,6 +24,7 @@ import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
 import type { RealtimeEvent } from "../services/realtime";
 import { BulletinRequestError, Conversation, MessageAttachment, PublicUser } from "../types/bulletin";
+import { displayFileName } from "../utils/attachmentFiles";
 
 /**
  * The inbox.
@@ -688,7 +689,7 @@ function attachmentPreviewLabel(attachment: MessageAttachment, count: number): s
     case "image":
       return count > 1 ? `📷 ${count} photos` : "📷 Photo";
     case "file":
-      return count > 1 ? `📎 ${count} files` : `📎 ${attachment.file_name || "File"}`;
+      return count > 1 ? `📎 ${count} files` : `📎 ${displayFileName(attachment.file_name) || "File"}`;
     case "link":
       return `🔗 ${attachment.link_title || attachment.link_site_name || "Link"}`;
     case "transaction":

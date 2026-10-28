@@ -445,6 +445,39 @@ export function useStuckWatch(
 }
 
 /**
+ * A tap that should change what is on screen. If `arrived()` is still false
+ * after `timeoutMs`, it is reported as "Tap went nowhere", grouped by label.
+ *
+ * Nothing throws when a button does nothing, so this is the only way such a
+ * bug reaches Sentry: the check is "did we end up where the tap asked to go",
+ * not "did something fail". `arrived` is read when the timer fires, so pass a
+ * function over a ref or other current state rather than a captured value.
+ */
+export function expectArrival(
+  label: string,
+  arrived: () => boolean,
+  context?: Record<string, string | number | boolean | undefined>,
+  timeoutMs = 2500,
+): void {
+  if (!enabled()) {
+    return;
+  }
+  recordStep("tap", label, context);
+  setTimeout(() => {
+    if (arrived() || !shouldSend(`nowhere|${label}`)) {
+      return;
+    }
+    Sentry.withScope((scope) => {
+      scope.setLevel("warning");
+      scope.setFingerprint(["tap-went-nowhere", label]);
+      scope.setTag("tap_went_nowhere", label);
+      scope.setContext("tap", { label, waited_ms: timeoutMs, ...context });
+      Sentry.captureMessage(`Tap went nowhere: ${label}`);
+    });
+  }, timeoutMs);
+}
+
+/**
  * A handled error worth knowing about: caught, shown to the user as a message,
  * and otherwise lost. `where` names the code path and groups the issue.
  */

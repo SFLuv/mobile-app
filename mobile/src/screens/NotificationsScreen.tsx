@@ -220,10 +220,36 @@ export function NotificationsScreen({
     [onAction, onOpenSupportChat],
   );
 
+  /**
+   * What New and History show while this visit lasts.
+   *
+   * Opening the screen marks ordinary notifications seen, and the server then
+   * files them under history, so New used to empty the moment it was looked
+   * at. Everything that was new during this visit stays under New until the
+   * screen closes (it unmounts, so the set starts fresh next time). Internal
+   * alerts are not held: they leave New by being dealt with, and an alert that
+   * has just been handled should go.
+   */
+  const heldNewIdsRef = useRef(new Set<number>());
+  const { active, history } = useMemo(() => {
+    const held = heldNewIdsRef.current;
+    const liveActive = feed?.active ?? [];
+    for (const item of liveActive) {
+      if (item.internal === null) {
+        held.add(item.id);
+      }
+    }
+    const liveIds = new Set(liveActive.map((item) => item.id));
+    const allHistory = feed?.history ?? [];
+    const kept = allHistory.filter((item) => held.has(item.id) && !liveIds.has(item.id));
+    return {
+      active: [...liveActive, ...kept],
+      history: allHistory.filter((item) => !held.has(item.id)),
+    };
+  }, [feed]);
+
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [];
-    const active = feed?.active ?? [];
-    const history = feed?.history ?? [];
 
     // No section headers any more: the tab is the heading, and repeating it
     // inside the list was the duplicate title this screen already had too much
@@ -252,7 +278,7 @@ export function NotificationsScreen({
       out.push({ kind: "footer", key: "footer:more" });
     }
     return out;
-  }, [feed, activeTab]);
+  }, [active, history, feed?.nextCursor, activeTab]);
 
   const openSupportItem = useMemo(() => {
     if (openSupportId === null || !feed) {
@@ -423,7 +449,7 @@ export function NotificationsScreen({
         <View style={styles.tabRow}>
           {(["new", "history"] as const).map((key) => {
             const selected = activeTab === key;
-            const count = key === "new" ? (feed?.active.length ?? 0) : 0;
+            const count = key === "new" ? active.length : 0;
             return (
               <Pressable
                 key={key}

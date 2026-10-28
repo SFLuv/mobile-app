@@ -20,7 +20,7 @@ import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { Avatar, BadgeLine } from "../components/BulletinParts";
 import { formatFileSize } from "../components/MessageAttachmentCard";
 import { AttachmentPreview } from "../components/AttachmentPreview";
-import { fileTypeIcon } from "../utils/attachmentFiles";
+import { displayFileName, fileTypeIcon } from "../utils/attachmentFiles";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
 import {
@@ -605,7 +605,7 @@ function ConversationFiles({
               style={styles.fileRow}
               onPress={() => setPreview(item)}
               accessibilityRole="button"
-              accessibilityLabel={`${typeInfo.label}: ${item.file_name || "file"}`}
+              accessibilityLabel={`${typeInfo.label}: ${displayFileName(item.file_name) || "file"}`}
             >
               <View style={styles.fileIcon}>
                 <Ionicons
@@ -616,7 +616,7 @@ function ConversationFiles({
               </View>
               <View style={styles.memberBody}>
                 <Text style={styles.memberName} numberOfLines={1}>
-                  {item.file_name || (item.kind === "image" ? "Photo" : "File")}
+                  {displayFileName(item.file_name) || (item.kind === "image" ? "Photo" : "File")}
                 </Text>
                 <Text style={styles.memberMeta} numberOfLines={1}>
                   {[

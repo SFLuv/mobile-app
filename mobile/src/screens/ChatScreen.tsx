@@ -38,7 +38,7 @@ import {
 } from "../utils/universalLinks";
 import { ChatComposer, type AttachmentOption, type ComposerMode } from "../components/ChatComposer";
 import { AttachmentPreview } from "../components/AttachmentPreview";
-import { saveAttachment } from "../utils/attachmentFiles";
+import { displayFileName, saveAttachment } from "../utils/attachmentFiles";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
 import type { RealtimeEvent } from "../services/realtime";
@@ -104,6 +104,9 @@ import {
  * complete exactly when the column is fully on screen.
  */
 const STAMP_COLUMN_WIDTH = 56;
+
+/** Sideways travel before the timestamp swipe takes the touch at all. */
+const STAMP_SWIPE_SLOP = 16;
 
 /** One row of the thread: a message, or a date between sessions. */
 type ChatRow =
@@ -280,11 +283,15 @@ export function ChatScreen({
     () =>
       PanResponder.create({
         onMoveShouldSetPanResponder: (_event, gesture) =>
-          gesture.dx < -8 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 2,
+          gesture.dx < -STAMP_SWIPE_SLOP && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 2,
         onPanResponderMove: (_event, gesture) => {
-          // Capped: past the width of the stamp column there is nothing more to
-          // reveal, and letting it drag further just feels loose.
-          stampReveal.setValue(Math.max(-STAMP_COLUMN_WIDTH, Math.min(0, gesture.dx)));
+          // Resisted, not one-to-one: the thread trails the finger and eases
+          // into the width of the stamp column instead of stopping dead at it,
+          // so a sideways brush while scrolling barely moves it. Past the
+          // column there is nothing more to reveal.
+          const pulled = Math.max(0, -gesture.dx - STAMP_SWIPE_SLOP);
+          const eased = STAMP_COLUMN_WIDTH * (1 - Math.exp(-pulled / (STAMP_COLUMN_WIDTH * 2.2)));
+          stampReveal.setValue(-eased);
         },
         onPanResponderRelease: () => {
           Animated.spring(stampReveal, {
@@ -743,14 +750,36 @@ export function ChatScreen({
       // caption, so the recipient gets the card rather than a bare URL. The
       // server re-scrapes and stores the metadata itself — what is sent here is
       // the url, not the preview, so a card cannot be forged by the sender.
-      const message = linkPreview
-        ? await backendClient.attachConversationReference(conversationId, {
-            kind: "link",
-            link_url: linkPreview.url,
-            body,
-            reply_to_id: replyTo,
-          })
-        : await backendClient.sendConversationMessage(conversationId, body, replyTo);
+      //
+      // Read from the draft at send time rather than from the preview card,
+      // which only appears 600ms after typing stops: sent before then, a link
+      // used to go out as plain text. The card's normalized url is used when
+      // it is in hand for this same link.
+      const detected = firstURL(body);
+      const linkUrl =
+        detected && !dismissedLinks.includes(detected)
+          ? linkPreview?.detectedUrl === detected
+            ? linkPreview.url
+            : detected
+          : null;
+      const sendPlain = () => backendClient.sendConversationMessage(conversationId, body, replyTo);
+      const message = linkUrl
+        ? await backendClient
+            .attachConversationReference(conversationId, {
+              kind: "link",
+              link_url: linkUrl,
+              body,
+              reply_to_id: replyTo,
+            })
+            // Something that only looked like a link ("notes.md") is refused
+            // as one; it is still a message.
+            .catch((e: unknown) => {
+              if (e instanceof BulletinRequestError && e.code === "bad_link") {
+                return sendPlain();
+              }
+              throw e;
+            })
+        : await sendPlain();
       setMessages((current) => [...current, message]);
       setDraft("");
       setReplyingTo(null);
@@ -981,7 +1010,7 @@ export function ChatScreen({
               result.assets.map((asset) => ({
                 uri: asset.uri,
                 mimeType: asset.mimeType,
-                fileName: asset.name,
+                fileName: displayFileName(asset.name),
                 isImage: Boolean(asset.mimeType?.startsWith("image/")),
               })),
             );
@@ -1373,8 +1402,31 @@ export function ChatScreen({
             // single tap on a bubble with nothing to open does nothing.
             onPress={() => handleMessageTap(item)}
             delayLongPress={280}
-            style={selectedIds?.includes(item.id) ? styles.selectedRow : undefined}
+            style={
+              selectedIds === null
+                ? undefined
+                : selectedIds.includes(item.id)
+                  ? styles.selectedRow
+                  : styles.unselectedRow
+            }
           >
+            {/* Select mode: every message gets a check, filled on the picked
+                ones, and the rest dim. A tint alone was too faint to tell at a
+                glance which of several messages were picked. */}
+            {selectedIds !== null && !item.deleted ? (
+              <View
+                pointerEvents="none"
+                style={[
+                  styles.selectCheck,
+                  item.is_mine ? styles.selectCheckMine : styles.selectCheckTheirs,
+                  selectedIds.includes(item.id) ? styles.selectCheckOn : undefined,
+                ]}
+              >
+                {selectedIds.includes(item.id) ? (
+                  <Ionicons name="checkmark" size={14} color={palette.white} />
+                ) : null}
+              </View>
+            ) : null}
             {/* A deleted message keeps its place.
                 Removing the row would turn any reply to it into a
                 non-sequitur, and would quietly change what the conversation
@@ -2105,6 +2157,9 @@ function ActionRow({
  * finish. The creep is still not a measurement, and is honest about that by
  * decelerating instead of advancing steadily.
  */
+/** How long a send runs before the bar appears. */
+const SENDING_BAR_DELAY_MS = 200;
+
 function SendingBar({ active }: { active: boolean }) {
   const { palette } = useAppTheme();
   const progress = useRef(new Animated.Value(0)).current;
@@ -2117,19 +2172,24 @@ function SendingBar({ active }: { active: boolean }) {
 
   useEffect(() => {
     if (active) {
-      running.current = true;
-      setMounted(true);
-      progress.setValue(0);
-      fade.setValue(1);
-      Animated.timing(progress, {
-        toValue: 0.9,
-        duration: 2400,
-        // Decelerating: fast off the mark, then slower and slower short of the
-        // end. A linear creep to 90% looks like a measurement of something.
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: false,
-      }).start();
-      return;
+      // Only for a send that is visibly taking time. Most land within a couple
+      // of hundred milliseconds, and a bar flashing on every one of those is
+      // noise; a send that resolves inside the delay never shows it at all.
+      const timer = setTimeout(() => {
+        running.current = true;
+        setMounted(true);
+        progress.setValue(0);
+        fade.setValue(1);
+        Animated.timing(progress, {
+          toValue: 0.9,
+          duration: 2400,
+          // Decelerating: fast off the mark, then slower and slower short of the
+          // end. A linear creep to 90% looks like a measurement of something.
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: false,
+        }).start();
+      }, SENDING_BAR_DELAY_MS);
+      return () => clearTimeout(timer);
     }
 
     if (!running.current) {
@@ -2565,7 +2625,31 @@ function createStyles(palette: Palette) {
       position: "absolute",
       right: -STAMP_COLUMN_WIDTH,
     },
-    selectedRow: { backgroundColor: palette.primaryMuted, borderRadius: radii.sm },
+    selectedRow: {
+      backgroundColor: palette.primaryMuted,
+      borderRadius: radii.md,
+      borderWidth: 2,
+      borderColor: palette.primaryStrong,
+      padding: 3,
+      margin: -5,
+    },
+    unselectedRow: { opacity: 0.45 },
+    selectCheck: {
+      position: "absolute",
+      top: -8,
+      zIndex: 2,
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      borderWidth: 2,
+      borderColor: palette.primaryStrong,
+      backgroundColor: palette.surface,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    selectCheckMine: { left: -8 },
+    selectCheckTheirs: { right: -8 },
+    selectCheckOn: { backgroundColor: palette.primaryStrong },
     selectionBar: {
       flexDirection: "row",
       alignItems: "center",

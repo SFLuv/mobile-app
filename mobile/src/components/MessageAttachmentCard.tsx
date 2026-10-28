@@ -6,6 +6,7 @@ import { AppBackendClient } from "../services/appBackend";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import type { ChatTransactionRef } from "../utils/transactions";
 import type { AttachmentKind, MessageAttachment } from "../types/bulletin";
+import { displayFileName } from "../utils/attachmentFiles";
 
 /**
  * One card under a message: a photo, a file, a link preview, or a reference to
@@ -142,14 +143,14 @@ export function MessageAttachmentCard({
           onLongPress={onLongPress}
           delayLongPress={280}
           accessibilityRole="button"
-          accessibilityLabel={`File: ${attachment.file_name ?? "attachment"}`}
+          accessibilityLabel={`File: ${displayFileName(attachment.file_name) || "attachment"}`}
         >
           <View style={styles.iconWrap}>
             <Ionicons name={fileIcon(attachment.content_type)} size={20} color={palette.primaryStrong} />
           </View>
           <View style={styles.cardBody}>
             <Text style={styles.cardTitle} numberOfLines={2}>
-              {attachment.file_name || "Attachment"}
+              {displayFileName(attachment.file_name) || "Attachment"}
             </Text>
             {formatFileSize(attachment.size_bytes) ? (
               <Text style={styles.cardMeta}>{formatFileSize(attachment.size_bytes)}</Text>
@@ -460,7 +461,7 @@ function AttachmentImage({
       onLongPress={onLongPress}
       delayLongPress={280}
       accessibilityRole="imagebutton"
-      accessibilityLabel={attachment.file_name || "Photo"}
+      accessibilityLabel={displayFileName(attachment.file_name) || "Photo"}
     >
       {/* The placeholder stays underneath rather than being swapped out, so the
           bubble is the right size from the first frame and the photo fades onto
