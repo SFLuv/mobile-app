@@ -1,5 +1,5 @@
 import "./src/polyfills";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   AppState,
@@ -121,6 +121,9 @@ import { reportDockTop, useDockTop } from "./src/hooks/useDockLift";
 import { useNotificationInbox } from "./src/hooks/useNotificationInbox";
 import { useNotificationFeed } from "./src/hooks/useNotificationFeed";
 import { useRealtime } from "./src/hooks/useRealtime";
+import type { RealtimeEvent } from "./src/services/realtime";
+import { useShareIntent } from "expo-share-intent";
+import { discardSharedFiles, shareTargetFromIntent } from "./src/utils/sharedIntent";
 import { ChatScreen } from "./src/screens/ChatScreen";
 import { ChatInfoScreen } from "./src/screens/ChatInfoScreen";
 import { NewMessageScreen } from "./src/screens/NewMessageScreen";
@@ -132,6 +135,16 @@ import { ShareSheet, type ShareTarget } from "./src/components/ShareSheet";
 import { ContactSupportModal } from "./src/components/ContactSupportModal";
 import { loadBootCache, rememberSignedIn, saveBootCache } from "./src/services/bootCache";
 import { cachedBetaFor, emptyBetaAccess, primeBetaCache, saveBetaCache } from "./src/services/betaCache";
+import { clearChatCache, primeChatCache, setChatCacheUser } from "./src/services/chatCache";
+import { clearAttachmentCache } from "./src/services/attachmentCache";
+import { clearLinkPreviews } from "./src/services/linkPreviews";
+import {
+  cachedProfile,
+  clearProfileCache,
+  primeProfileCache,
+  saveProfileCache,
+  setProfileCacheUser,
+} from "./src/services/profileCache";
 import type { AppNotificationFeed } from "./src/types/notifications";
 import {
   InboxNotification,
@@ -703,6 +716,24 @@ function walletBalanceCacheKey(address: string): string {
   return `${BALANCE_CACHE_STORAGE_KEY_PREFIX}:${address.trim().toLowerCase()}`;
 }
 
+/**
+ * The first page of a wallet's history, kept so Wallet and Activity open on
+ * the list they showed last time rather than a spinner. Keyed by address like
+ * the balance beside it, painted from the same early seed, and replaced by the
+ * first poll. Deleted on sign-out.
+ */
+const TRANSACTION_CACHE_STORAGE_KEY_PREFIX = "sfluv-wallet:tx-cache:v1";
+function walletTransactionsCacheKey(address: string): string {
+  return `${TRANSACTION_CACHE_STORAGE_KEY_PREFIX}:${address.trim().toLowerCase()}`;
+}
+
+/**
+ * Merchant locations, which the map, the transaction labels and the merchant
+ * sheets all read. Public data — the same for everybody — so not keyed by
+ * user; cached so the map opens with its pins.
+ */
+const PUBLIC_LOCATIONS_CACHE_KEY = "sfluv-wallet:public-locations:v1";
+
 function linkSignature(link: SfluvUniversalLink): string {
   switch (link.type) {
     case "pay":
@@ -998,6 +1029,20 @@ function transactionLookupKey(tx: Pick<AppTransaction, "id" | "hash" | "amount" 
   return `identity:${transactionIdentity(tx)}`;
 }
 
+/** What `ensureUser` returns, which is what the profile cache holds. */
+type AppProfileResponse = Awaited<ReturnType<AppBackendClient["ensureUser"]>>;
+
+/**
+ * Folds a fresh page of transactions into the ones already held.
+ *
+ * Returns `primary` ITSELF when nothing changed, and that is load-bearing: the
+ * wallet and activity screens poll every two seconds, and this used to return
+ * a new array — with every matched row rebuilt as a new object — on every
+ * poll. A new array is a state change, so the whole app shell re-rendered every
+ * two seconds on Wallet or Activity, including under an open chat, whether or
+ * not a single transaction had moved. Handing back the same reference lets
+ * React skip the render entirely.
+ */
 function mergeTransactions(primary: AppTransaction[], secondary: AppTransaction[], limit = 25): AppTransaction[] {
   const secondaryByIdentity = new Map(secondary.map((tx) => [transactionIdentity(tx), tx]));
   const merged = primary.map((tx) => {
@@ -1005,11 +1050,11 @@ function mergeTransactions(primary: AppTransaction[], secondary: AppTransaction[
     if (!secondaryTx) {
       return tx;
     }
-    return {
-      ...tx,
-      id: secondaryTx.id || tx.id,
-      memo: secondaryTx.memo || tx.memo,
-    };
+    const id = secondaryTx.id || tx.id;
+    const memo = secondaryTx.memo || tx.memo;
+    // Rebuilt only when something actually differs, so an unchanged row keeps
+    // its identity and the equality check below can see that nothing moved.
+    return id === tx.id && memo === tx.memo ? tx : { ...tx, id, memo };
   });
 
   const seen = new Set(merged.map((tx) => transactionIdentity(tx)));
@@ -1021,7 +1066,7 @@ function mergeTransactions(primary: AppTransaction[], secondary: AppTransaction[
     }
   }
 
-  return merged
+  const result = merged
     .sort((left, right) => {
       if (left.timestamp !== right.timestamp) {
         return right.timestamp - left.timestamp;
@@ -1032,6 +1077,7 @@ function mergeTransactions(primary: AppTransaction[], secondary: AppTransaction[
       return left.hash < right.hash ? 1 : -1;
     })
     .slice(0, limit);
+  return result.length === primary.length && result.every((tx, index) => tx === primary[index]) ? primary : result;
 }
 
 function hasNewTransactions(current: AppTransaction[], incoming: AppTransaction[]): boolean {
@@ -1764,6 +1810,13 @@ function WalletAppShellContent({
   const walletPaneAnimatingRef = useRef(false);
   const walletPaneAnimationIDRef = useRef(0);
   const [smartAddress, setSmartAddress] = useState("");
+  /**
+   * The address whose cached balance or history is on screen before discovery
+   * finishes.
+   * Discovery arriving with the SAME address is not a change of wallet, and
+   * must not wipe the list it is about to refresh.
+   */
+  const seededTransactionsAddressRef = useRef<string | null>(null);
   const [smartBalance, setSmartBalance] = useState("...");
   const [walletTransactions, setWalletTransactions] = useState<AppTransaction[]>([]);
   const [activityTransactions, setActivityTransactions] = useState<AppTransaction[]>([]);
@@ -1779,13 +1832,24 @@ function WalletAppShellContent({
       setActivityFocusHash(null);
     }
   }, [tab]);
-  const [contacts, setContacts] = useState<AppContact[]>([]);
+  // The last profile the server returned, if it was this person's — see
+  // profileCache.ts. Read once, at mount, to seed the state below so the shell
+  // draws the person's own app on its first frame; loadAppProfile replaces all
+  // of it when the live profile lands.
+  const bootProfile = useRef(cachedProfile<AppProfileResponse>()).current;
+  const [contacts, setContacts] = useState<AppContact[]>(() => bootProfile?.contacts ?? []);
   const [locations, setLocations] = useState<AppLocation[]>([]);
-  const [ownedLocations, setOwnedLocations] = useState<AppOwnedLocation[]>([]);
-  const [backendWallets, setBackendWallets] = useState<AppWallet[]>([]);
+  const [ownedLocations, setOwnedLocations] = useState<AppOwnedLocation[]>(() => bootProfile?.locations ?? []);
+  const [backendWallets, setBackendWallets] = useState<AppWallet[]>(() => bootProfile?.wallets ?? []);
   const [merchantLabelsByAddress, setMerchantLabelsByAddress] = useState<Record<string, string>>({});
-  const [appUser, setAppUser] = useState<AppUser | null>(null);
-  const [appImprover, setAppImprover] = useState<AppImprover | null>(null);
+  const [appUser, setAppUser] = useState<AppUser | null>(() => bootProfile?.user ?? null);
+  const [appImprover, setAppImprover] = useState<AppImprover | null>(() => bootProfile?.improver ?? null);
+  /**
+   * Whether the profile on screen has been confirmed by the server this
+   * session. False while it is the cached copy; the top-bar spinner stays up
+   * until it is true, so a cached profile is never presented as current.
+   */
+  const [profileFresh, setProfileFresh] = useState(false);
   const [improverRouteRequest, setImproverRouteRequest] = useState<{
     section: "workflows" | "credentials";
     nonce: number;
@@ -2002,6 +2066,18 @@ function WalletAppShellContent({
   const [walletPaneBackSwipeEnabled, setWalletPaneBackSwipeEnabled] = useState(true);
   const [redeemFlow, setRedeemFlow] = useState<RedeemFlowState | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
+  // Stable for the life of the shell. It is handed to nearly every screen as
+  // onToast, and as a plain function it was a new identity on every shell
+  // render — so every effect a screen keyed on it re-ran with each balance
+  // poll, socket frame and tab change. It only touches a state setter, which
+  // never changes.
+  const showToast = useCallback((message: string, tone: ToastState["tone"] = "info") => {
+    setToast({
+      id: Date.now(),
+      tone,
+      message,
+    });
+  }, []);
   // Toasts sit just above the dock, wherever the dock is on this phone. The
   // fixed offset they used put an error under the dock on a Home-button iPhone.
   const dockTop = useDockTop();
@@ -2286,6 +2362,12 @@ function WalletAppShellContent({
         if (cancelled) {
           return;
         }
+        // An empty answer is what a failed read returns, not "no betas": the
+        // server always names every surface. Applying it would hide tabs and
+        // overwrite a good cache with nothing.
+        if (Object.keys(access.available).length === 0) {
+          return;
+        }
         setBetaAccess(access);
         void saveBetaCache(betaUserId, access);
       } catch {
@@ -2306,6 +2388,9 @@ function WalletAppShellContent({
   // has no such side effect.
   const bulletinEnabled = betaAccess.available.bulletin === true;
   const chatEnabled = betaAccess.available.chat === true;
+  /** Whether the answer above is real yet, from the cache or the server. */
+  const betaKnown = Object.keys(betaAccess.available).length > 0;
+
 
   // ── The live connection ───────────────────────────────────────────────────
   //
@@ -2404,7 +2489,103 @@ function WalletAppShellContent({
    */
   const accountRoutingUnresolved =
     (Boolean(backendClient) && !appUser && !runtime.error) ||
-    (merchantAccount && !merchantModeActive && !merchantSetupReady);
+    (merchantAccount && !merchantModeActive && !merchantSetupReady) ||
+    // An owner whose shop is live may be holding a till. Until this device's
+    // merchant-mode answer is in, it is not known whether to show the till or
+    // the owner's own app — and the profile cache now puts appUser on screen
+    // before the bootstrap, so without this a till opened as the owner's
+    // personal app, chats and Send included, on every cold start.
+    (Boolean(appUser?.isMerchant) && merchantModeStatus === null);
+
+  // Asked as soon as a merchant profile is on screen, cached or not, rather
+  // than after the wallet bootstrap — so the cover above lasts one round trip,
+  // as it did before the profile was cached.
+  useEffect(() => {
+    if (!backendClient || !appUser?.isMerchant || merchantModeStatus !== null) {
+      return;
+    }
+    void refreshMerchantModeStatus(appUser).catch((error) => {
+      console.warn("Unable to load merchant mode status", error);
+    });
+    // Once per merchant profile and client; the poll keeps it current after.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appUser?.id, appUser?.isMerchant, backendClient]);
+
+  // ── Shared from another app ───────────────────────────────────────────────
+  //
+  // "SFLuv" in another app's share sheet hands a photo, file, link or text to
+  // the app, which opens the same share sheet used for sharing a merchant or an
+  // event — pick chats, add a note, send. One sheet, so sharing in and sharing
+  // out look and behave the same.
+  //
+  // resetOnBackground is off: the default wipes a share whenever the app goes
+  // inactive, and a sign-in sheet, a Face ID prompt or the document picker all
+  // do that — the share would be gone before anybody saw it. It is held in the
+  // native store until it can be handled, copied into state, and reset here.
+  //
+  // Held until beta access is known, so a cold start does not answer "Messages
+  // isn't available" for somebody who has it and whose access simply has not
+  // loaded yet.
+  //
+  // Not on a till. A device in merchant mode is a shop counter that anybody
+  // can pick up, and a share would hand them the account's chats — and, from
+  // a chat, its payments.
+  //
+  // If beta access never resolves (a failed /me/beta on a first launch, with
+  // nothing cached), the share is not held for the whole session: after a few
+  // seconds it is answered with what is known.
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent({ resetOnBackground: false });
+  const sharedFileUris = useRef<string[]>([]);
+  const [shareWaitExpired, setShareWaitExpired] = useState(false);
+  useEffect(() => {
+    if (!hasShareIntent || betaKnown) {
+      setShareWaitExpired(false);
+      return;
+    }
+    const timer = setTimeout(() => setShareWaitExpired(true), 6000);
+    return () => clearTimeout(timer);
+  }, [betaKnown, hasShareIntent]);
+  useEffect(() => {
+    if (!hasShareIntent || (!betaKnown && !shareWaitExpired)) {
+      return;
+    }
+    const target = shareTargetFromIntent(shareIntent);
+    resetShareIntent();
+    if (!target) {
+      return;
+    }
+    const incomingFiles = target.kind === "files" ? target.files.map((file) => file.uri) : [];
+    if (merchantKiosk || merchantModeActive) {
+      showToast("Sharing to chats is off while this device is a till.", "info");
+      discardSharedFiles(incomingFiles);
+      return;
+    }
+    if (!chatEnabled) {
+      showToast(
+        betaKnown
+          ? "Messages isn't on for your account yet, so there's no chat to share that to."
+          : "Couldn't reach Messages to share that. Try again in a moment.",
+        "info",
+      );
+      discardSharedFiles(incomingFiles);
+      return;
+    }
+    // A second share while the sheet is open replaces the first; its copies go.
+    discardSharedFiles(sharedFileUris.current);
+    sharedFileUris.current = incomingFiles;
+    setShareTarget(target);
+  }, [
+    betaKnown,
+    chatEnabled,
+    hasShareIntent,
+    merchantKiosk,
+    merchantModeActive,
+    resetShareIntent,
+    shareIntent,
+    shareWaitExpired,
+    showToast,
+  ]);
+
   // A cover that can outlive its answer is just a hang, and merchantSetupReady
   // has no timeout of its own — a failed merchant-mode call leaves it false for
   // good. So the cover expires and lets the app render rather than holding the
@@ -2436,8 +2617,14 @@ function WalletAppShellContent({
   const merchantSetupFlow =
     accountRoutingPending || merchantDeviceEnrollable || merchantOnboardingState !== null;
   const walletSyncReady = backendBootstrapReady && Boolean(appUser) && Boolean(runtime.discovery);
-  const walletHistoryActive = tab === "wallet" && walletPane === "home";
-  const activityHistoryActive = tab === "activity";
+  // Not while a chat covers the screen. Opening a chat does not change the
+  // tab, so a chat opened from a banner over Wallet kept the two-second
+  // history poll running underneath — re-rendering everything, the open
+  // thread included, every two seconds. Closing the chat re-enables the poll,
+  // and the poll's effect fetches immediately, so nothing is left stale.
+  const chatCovering = Boolean(chatRoute || chatInfoRoute || newMessageRoute || contactDetailRoute);
+  const walletHistoryActive = tab === "wallet" && walletPane === "home" && !chatCovering;
+  const activityHistoryActive = tab === "activity" && !chatCovering;
 
   // The wallet used to be re-pinned here on every render while merchant mode was
   // on, which made the selection impossible to change: selectedCandidateKey was
@@ -2546,13 +2733,6 @@ function WalletAppShellContent({
     };
   }, [toast]);
 
-  const showToast = (message: string, tone: ToastState["tone"] = "info") => {
-    setToast({
-      id: Date.now(),
-      tone,
-      message,
-    });
-  };
 
   useEffect(() => {
     setMerchantLabelsByAddress((current) => {
@@ -2792,6 +2972,7 @@ function WalletAppShellContent({
     try {
       const nextLocations = await publicBackendClient.getPublicLocations();
       setLocations(nextLocations);
+      void AsyncStorage.setItem(PUBLIC_LOCATIONS_CACHE_KEY, JSON.stringify(nextLocations)).catch(() => {});
     } catch (error) {
       console.warn("Unable to load public locations", error);
     }
@@ -2809,7 +2990,11 @@ function WalletAppShellContent({
       setMerchantModeInstallationID(installationID);
     }
     const status = await backendClient.getMerchantModeStatus(installationID);
-    setMerchantModeStatus(status);
+    // Kept when unchanged: this polls every fifteen seconds for merchants, and a
+    // fresh object every poll re-rendered the whole shell for nothing.
+    setMerchantModeStatus((current) =>
+      current && JSON.stringify(current) === JSON.stringify(status) ? current : status,
+    );
 
     // The server turns merchant mode off when the shop closes, loses approval,
     // or loses its payment wallet. The device finds out here, on its next poll,
@@ -2847,10 +3032,16 @@ function WalletAppShellContent({
       return;
     }
     try {
-      setW9Status(await backendClient.getW9Status());
+      const next = await backendClient.getW9Status();
+      // Replaced only when it changed. This polls every eight seconds, and a
+      // fresh object each time re-rendered the whole shell on every poll.
+      setW9Status((current) => (current && JSON.stringify(current) === JSON.stringify(next) ? current : next));
     } catch {
-      // A failed load only costs the tax card. It must never break a panel.
-      setW9Status(null);
+      // Keeps the last good answer. Clearing it made a dropped request look
+      // like "no W-9 situation": the tax card vanished and the tier modal
+      // closed, then both came back on the next good poll — a network blip
+      // made the modal flap. A failed load must never break a panel, and
+      // neither should it rewrite one.
     }
   };
 
@@ -3269,6 +3460,11 @@ function WalletAppShellContent({
       setOwnedLocations(profile.locations);
       onWalletPreferencesSync(profile.user, profile.wallets);
       setContacts(profile.contacts);
+      setProfileFresh(true);
+      // Filed under the profile's own user, not whoever is signed in when the
+      // response lands — a load that resolves after a sign-out and a different
+      // sign-in must not seed the next person's app with this one's.
+      saveProfileCache(profile.user.id, profile);
       if (profile.user.isMerchant) {
         void refreshMerchantModeStatus(profile.user).catch((error) => {
           console.warn("Unable to load merchant mode status", error);
@@ -3280,6 +3476,9 @@ function WalletAppShellContent({
       backendAuthFailureHandledRef.current = false;
     } catch (error) {
       console.warn("Unable to load app profile", error);
+      // Settled, if not fresh: the spinner is for work in flight, and a failed
+      // read is not in flight. The next foreground retries it.
+      setProfileFresh(true);
       if (error instanceof AppBackendPolicyRequiredError && error.policyStatus) {
         setSyncNotice(null);
         onPolicyRequired?.(error.policyStatus);
@@ -3465,7 +3664,12 @@ function WalletAppShellContent({
   const tabSlideX = useRef(new Animated.Value(0)).current;
   const tabFade = useRef(new Animated.Value(1)).current;
   const previousTabOrderRef = useRef(TAB_SLIDE_ORDER.indexOf("wallet"));
-  useEffect(() => {
+  // A layout effect, so the start position is set BEFORE the new tab is
+  // painted. As an ordinary effect it ran after the commit, and whenever React
+  // did not flush it synchronously — a tab change from a notification, a link,
+  // anything async — the new screen painted one frame at rest, then jumped
+  // sideways and dimmed, then slid back: a flicker on the change itself.
+  useLayoutEffect(() => {
     const nextOrder = TAB_SLIDE_ORDER.indexOf(tab);
     const previousOrder = previousTabOrderRef.current;
     if (nextOrder < 0 || nextOrder === previousOrder) {
@@ -3506,7 +3710,12 @@ function WalletAppShellContent({
         return;
       }
       setChatRoute({ conversationId, autoFocus: options?.autoFocus ?? true });
+      // Everything that draws above a chat. A banner can now be tapped while
+      // any of these is open, and the chat it opens must land on top rather
+      // than underneath them.
       setChatInfoRoute(null);
+      setNewMessageRoute(null);
+      setContactDetailRoute(null);
     },
     [],
   );
@@ -4046,9 +4255,7 @@ function WalletAppShellContent({
   // Holding the body in a ref that is refreshed on every render instead gives
   // both halves: the handler always reads current values, and the socket is
   // subscribed once for the life of the connection.
-  const bannerHandlerRef = useRef<(event: { kind: string; conversation_id?: number; data?: unknown }) => void>(
-    () => {},
-  );
+  const bannerHandlerRef = useRef<(event: RealtimeEvent) => void>(() => {});
   bannerHandlerRef.current = (event) => {
       if (event.kind === "message.new") {
         const message = event.data as ChatMessage | undefined;
@@ -4066,17 +4273,35 @@ function WalletAppShellContent({
         // app open, which is everybody this event reaches.
         void refreshMessagesUnread();
 
-        const preview =
-          message.kind === "payment"
-            ? "Sent you SFLUV"
-            : message.body?.trim() || "Sent an attachment";
+        // A muted thread still counts — the badge above — but does not
+        // interrupt. The server marks it, by the same rules its push follows.
+        if (event.notice?.silent) {
+          return;
+        }
+
+        // Worded by the server, the same title and line its push carries —
+        // Telegram's shape, with the group as the title and "Maria: " on the
+        // line in a group, the person as the title in a direct thread. The
+        // fallback is only for a server too old to send a notice.
+        const notice = event.notice;
+        const fallbackLine =
+          message.kind === "payment" ? "Sent you SFLUV" : message.body?.trim() || "Sent an attachment";
+        const title = notice?.title || message.sender_name?.trim() || "New message";
         // Keyed on the message row, which is the same key the push path uses,
         // so a message that arrives down both is banner'd once.
         showBanner({
           id: `message:${message.id}`,
-          title: message.sender_name?.trim() || "New message",
-          body: preview,
-          icon: "chatbubble",
+          title,
+          body: notice?.body || fallbackLine,
+          spoken: notice?.spoken,
+          hint: notice?.is_group ? `In ${title}. Opens the conversation.` : "Opens the conversation.",
+          // The group's picture for a group, the person's for a direct thread.
+          avatar: notice?.is_group
+            ? { name: title, conversationId, iconAttachmentId: notice.icon_attachment_id }
+            : {
+                name: notice?.sender_name || message.sender_name || title,
+                userId: notice?.sender_id || message.sender_id,
+              },
           onPress: () => openConversation(conversationId),
         });
         return;
@@ -4103,6 +4328,13 @@ function WalletAppShellContent({
           body: payload?.body || "",
           icon: "notifications",
           onPress: () => {
+            // The banner shows over a chat now, and these targets are tabs: the
+            // chat stack is closed first, or the navigation happens invisibly
+            // underneath it and closing the chat then sends you to Messages.
+            setChatRoute(null);
+            setChatInfoRoute(null);
+            setNewMessageRoute(null);
+            setContactDetailRoute(null);
             navigateToNotificationTarget(target);
             resolveNotificationTarget(target);
           },
@@ -4678,6 +4910,14 @@ function WalletAppShellContent({
     walletSurfaceRequestRef.current = requestID;
 
     if (!runtime.service) {
+      // Still booting, with cached figures painted from the early seed: keep
+      // them. This branch re-runs whenever the effect does before the wallet
+      // exists — a candidate key settling, the app coming to the front — and
+      // clearing here wiped a correct cached balance and history back to a
+      // spinner for the rest of the bootstrap.
+      if (seededTransactionsAddressRef.current) {
+        return;
+      }
       setSmartAddress("");
       setSmartBalance("...");
       setWalletTransactions([]);
@@ -4700,7 +4940,12 @@ function WalletAppShellContent({
       const previousAddress = smartAddressRef.current;
       const addressChanged = previousAddress.toLowerCase() !== nextAddress.toLowerCase();
       setSmartAddress(nextAddress);
-      if (addressChanged) {
+      // A real change of wallet starts the history over. Discovery landing on
+      // the address the cached history was painted from is not one — wiping
+      // there would replace a correct list with a spinner for one round trip.
+      const keepSeededHistory = seededTransactionsAddressRef.current === nextAddress.toLowerCase();
+      seededTransactionsAddressRef.current = null;
+      if (addressChanged && !keepSeededHistory) {
         setWalletTransactions([]);
         setActivityTransactions([]);
         setWalletTransactionsLoaded(false);
@@ -4731,8 +4976,32 @@ function WalletAppShellContent({
   };
 
   useEffect(() => {
+    // The cached pins first, so the map is never empty on open; the fetch
+    // replaces them. Applied only over an empty list, so a fetch that somehow
+    // landed first is never overwritten by the older copy.
+    void AsyncStorage.getItem(PUBLIC_LOCATIONS_CACHE_KEY)
+      .then((raw) => {
+        const cached = raw ? (JSON.parse(raw) as AppLocation[]) : null;
+        if (Array.isArray(cached) && cached.length > 0) {
+          setLocations((current) => (current.length > 0 ? current : cached));
+        }
+      })
+      .catch(() => {});
     void loadPublicLocations();
   }, []);
+
+  // The newest page of history, written back whenever it actually changes —
+  // which, since mergeTransactions keeps its identity when nothing moved, is
+  // only when something did.
+  useEffect(() => {
+    if (!smartAddress || !walletTransactionsLoaded || walletTransactions.length === 0) {
+      return;
+    }
+    void AsyncStorage.setItem(
+      walletTransactionsCacheKey(smartAddress),
+      JSON.stringify(walletTransactions.slice(0, WALLET_TRANSACTION_LIMIT)),
+    ).catch(() => {});
+  }, [smartAddress, walletTransactions, walletTransactionsLoaded]);
 
   useEffect(() => {
     if (!backendBootstrapReady) {
@@ -5244,6 +5513,17 @@ function WalletAppShellContent({
           console.warn("Unable to disable push notifications before logout", error);
         }
       }
+      // Somebody else may sign in on this phone next. Their inbox must not be
+      // the first thing they see, nor this person's photos be in the cache.
+      void clearChatCache(null);
+      clearAttachmentCache();
+      void clearProfileCache();
+      void clearLinkPreviews();
+      // This person's transaction history, under whichever addresses it was
+      // cached for.
+      void AsyncStorage.getAllKeys()
+        .then((keys) => AsyncStorage.multiRemove(keys.filter((key) => key.startsWith(TRANSACTION_CACHE_STORAGE_KEY_PREFIX))))
+        .catch(() => {});
       onLogout?.();
     })();
   };
@@ -5795,7 +6075,7 @@ function WalletAppShellContent({
    * bar. Deliberately NOT a blocking state: it is there so that an app showing
    * cached data is honest about the fact, not so that somebody waits for it.
    */
-  const backgroundLoading = walletSignerPending || !backendBootstrapReady;
+  const backgroundLoading = walletSignerPending || !backendBootstrapReady || !profileFresh;
   // A boot that never finishes is indistinguishable from a crash to the user.
   // After a grace period the blocking spinner offers the same way out the error
   // state does, so a wedged startup can always be escaped.
@@ -5832,6 +6112,7 @@ function WalletAppShellContent({
     [contacts, locations, merchantLabelsByAddress],
   );
   const showStandardChrome = !chatStackActive;
+  const dockVisible = showStandardChrome && !sendPaneActive;
   /**
    * Always a SafeAreaView, including for the chat stack.
    *
@@ -6085,15 +6366,27 @@ function WalletAppShellContent({
     let cancelled = false;
     void (async () => {
       try {
-        const cachedBalance = await AsyncStorage.getItem(walletBalanceCacheKey(seeded));
+        const [cachedBalance, cachedTransactions] = await Promise.all([
+          AsyncStorage.getItem(walletBalanceCacheKey(seeded)),
+          AsyncStorage.getItem(walletTransactionsCacheKey(seeded)),
+        ]);
         if (cancelled) {
           return;
         }
-        // Only the balance is seeded, not smartAddress itself: letting the
-        // real discovery own that field keeps one writer for it and avoids a
-        // race where a seeded value is mistaken for a confirmed one.
+        // Only the balance and history are seeded, not smartAddress itself:
+        // letting the real discovery own that field keeps one writer for it and
+        // avoids a race where a seeded value is mistaken for a confirmed one.
         if (cachedBalance?.trim()) {
+          seededTransactionsAddressRef.current = seeded.toLowerCase();
           setSmartBalance((current) => (current === "..." ? cachedBalance.trim() : current));
+        }
+        const history = cachedTransactions ? (JSON.parse(cachedTransactions) as AppTransaction[]) : null;
+        if (Array.isArray(history) && history.length > 0) {
+          seededTransactionsAddressRef.current = seeded.toLowerCase();
+          setWalletTransactions((current) => (current.length > 0 ? current : history));
+          setActivityTransactions((current) => (current.length > 0 ? current : history));
+          setWalletTransactionsLoaded(true);
+          setActivityTransactionsLoaded(true);
         }
       } catch {
         // No cache is the first-run case, and the screen reads "..." for a
@@ -6178,119 +6471,577 @@ function WalletAppShellContent({
         ) : null}
       </View>
 
-      {showStandardChrome ? (
-        <View style={styles.topBar}>
-          {/* Notifications while the app is open, drawn OVER the top bar rather
-              than pushing it down — displacing the layout would move whatever
-              the person was about to tap. Hidden during the chat stack, which
-              has its own header and no top bar to sit on.
+      {/* ── The in-app banner's anchor ───────────────────────────────────────
 
-              It lives INSIDE the top bar, which is what puts it in the right
-              place: it is absolutely positioned at top: 0 of this view, so it
-              comes down exactly where the title bar is on every device. As an
-              absolute child of the root it sat behind the Dynamic Island —
-              InAppBanner's wrap style carries the full explanation. Being
-              absolute it is out of flow, so it does not disturb this row. */}
-          {/* Always mounted, never conditional: the card holds its own copy of
-              the notification so it can finish sliding out after the shell has
-              cleared it, and unmounting it here would cut that short. It
-              renders nothing when there is nothing to show. */}
-          <InAppBanner
-            notification={banner}
-            onDismiss={dismissBanner}
-            hapticsEnabled={preferences.hapticsEnabled}
-          />
-          <View style={styles.topTitleWrap}>
-            <Text style={styles.brandKicker}>SFLuv</Text>
-            <Text style={styles.brand}>{activeTitle}</Text>
-          </View>
-          <View style={styles.topActions}>
-            {!merchantKiosk && !accountRoutingPending ? (
-              <Pressable
-                style={styles.iconButton}
-                onPress={openNotificationPanel}
-                accessibilityRole="button"
-                accessibilityLabel={
-                  backgroundLoading
-                    ? "Notifications, still loading"
-                    : panelNotificationCount > 0
-                      ? `Notifications, ${panelNotificationCount} outstanding`
-                      : "Notifications"
-                }
-              >
-                {/* The bell IS the loading indicator while anything is still
-                    arriving.
-                    Better than a spinner of its own beside it, for a reason
-                    that is about meaning rather than space: notifications are
-                    exactly the thing that cannot be trusted until there is a
-                    live connection, so a spinner in their place is saying
-                    something true about that control. A second spinner
-                    elsewhere would just be saying "busy". */}
-                {backgroundLoading ? (
-                  <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
-                ) : (
+          Notifications while the app is open, drawn OVER whatever is at the top
+          of the screen rather than pushing it down — displacing the layout
+          would move whatever the person was about to tap.
+
+          A zero-height view in normal flow, with the banner absolutely
+          positioned inside it. In flow is what puts it in the right place: this
+          root is core SafeAreaView, which applies the inset as padding, and an
+          absolute child of the ROOT ignores padding and sits behind the Dynamic
+          Island (InAppBanner's wrap style has the full story). A flow child
+          starts below the padding, so the banner comes down exactly where the
+          top bar begins on every device — and, having no height, it moves
+          nothing.
+
+          Here rather than inside the top bar, which is where it used to live.
+          The top bar unmounts while a chat is open, so the banner went with
+          it: one showing when a chat opened replayed when the chat closed, and
+          one for ANOTHER conversation that arrived mid-chat waited until you
+          left. Mounted for the life of the shell, it shows over a chat header
+          as readily as over the top bar, which is where Telegram puts it.
+
+          Always mounted, never conditional, for the reason it always was: the
+          card keeps its own copy of the notification so it can finish sliding
+          out after the shell has cleared it. */}
+      <View style={styles.bannerAnchor} pointerEvents="box-none">
+        <InAppBanner
+          notification={banner}
+          onDismiss={dismissBanner}
+          hapticsEnabled={preferences.hapticsEnabled}
+          client={backendClient ?? null}
+        />
+      </View>
+
+      {/* ── The top bar and the content, as one stack ─────────────────────
+
+          The chat stack overlays BOTH, from inside this wrapper. It used to
+          overlay only the content, so the top bar had to be unmounted to give
+          the chat the full height — and the content area grew upward by the
+          bar's height in the same commit the chat began sliding in, so the
+          inbox visibly jumped up beside the incoming chat, then back down when
+          it closed. Now the bar stays mounted, inert and hidden from VoiceOver
+          under the chat, nothing underneath moves, and the chat slides in over
+          an intact screen the way a navigation push does.
+
+          The wrapper is in normal flow, so its top is below the safe-area
+          inset that the root SafeAreaView applies as padding — which is why
+          the overlay can be an absolute fill of it without landing behind the
+          Dynamic Island, as an absolute child of the root would. */}
+      <View style={styles.chromeStack}>
+        <View
+          style={styles.topBar}
+          pointerEvents={showStandardChrome ? "auto" : "none"}
+          accessibilityElementsHidden={!showStandardChrome}
+          importantForAccessibility={showStandardChrome ? "auto" : "no-hide-descendants"}
+        >
+            <View style={styles.topTitleWrap}>
+              <Text style={styles.brandKicker}>SFLuv</Text>
+              <Text style={styles.brand}>{activeTitle}</Text>
+            </View>
+            <View style={styles.topActions}>
+              {!merchantKiosk && !accountRoutingPending ? (
+                <Pressable
+                  style={styles.iconButton}
+                  onPress={openNotificationPanel}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    backgroundLoading
+                      ? "Notifications, still loading"
+                      : panelNotificationCount > 0
+                        ? `Notifications, ${panelNotificationCount} outstanding`
+                        : "Notifications"
+                  }
+                >
+                  {/* The bell IS the loading indicator while anything is still
+                      arriving.
+                      Better than a spinner of its own beside it, for a reason
+                      that is about meaning rather than space: notifications are
+                      exactly the thing that cannot be trusted until there is a
+                      live connection, so a spinner in their place is saying
+                      something true about that control. A second spinner
+                      elsewhere would just be saying "busy". */}
+                  {backgroundLoading ? (
+                    <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
+                  ) : (
+                    <Ionicons
+                      name={panelNotificationCount > 0 ? "notifications" : "notifications-outline"}
+                      size={18}
+                      color={palette.primaryStrong}
+                    />
+                  )}
+                  {panelNotificationCount > 0 && !backgroundLoading ? (
+                    <View style={styles.topBadge}>
+                      <Text style={styles.topBadgeText}>
+                        {panelNotificationCount > 9 ? "9+" : panelNotificationCount}
+                      </Text>
+                    </View>
+                  ) : null}
+                </Pressable>
+              ) : null}
+              {merchantSetupFlow ? (
+                /* The one control that must exist on every screen of the setup
+                   flow. Settings cannot be opened from any of them, so the button
+                   that used to sit here did nothing; and on the first-run screens
+                   there was no button at all, which is how a device could end up
+                   with no way to leave the account from the chrome. */
+                <Pressable
+                  style={styles.iconButton}
+                  onPress={confirmLogout}
+                  accessibilityRole="button"
+                  accessibilityLabel="Log out"
+                  accessibilityHint="Signs this device out of the SFLuv account"
+                >
+                  <Ionicons name="log-out-outline" size={18} color={palette.primaryStrong} />
+                </Pressable>
+              ) : !merchantDeviceEnrollable ? (
+                <Pressable
+                  style={[styles.iconButton, tab === "settings" ? styles.iconButtonActive : undefined]}
+                  // Icon-only, and in merchant mode it is the ONLY control on the
+                  // screen — without a label it reaches VoiceOver as a bare glyph.
+                  accessibilityRole="button"
+                  accessibilityLabel={merchantModeActive ? "Merchant mode options" : "Settings"}
+                  accessibilityHint={
+                    merchantModeActive ? "Move this device to another location, or sign out" : undefined
+                  }
+                  onPress={() => {
+                    if (merchantModeActive) {
+                      setMerchantModeExitOpen(true);
+                      return;
+                    }
+                    setTab("settings");
+                  }}
+                >
                   <Ionicons
-                    name={panelNotificationCount > 0 ? "notifications" : "notifications-outline"}
+                    name={
+                      merchantModeActive ? "lock-closed-outline" : tab === "settings" ? "settings" : "settings-outline"
+                    }
                     size={18}
                     color={palette.primaryStrong}
                   />
-                )}
-                {panelNotificationCount > 0 && !backgroundLoading ? (
-                  <View style={styles.topBadge}>
-                    <Text style={styles.topBadgeText}>
-                      {panelNotificationCount > 9 ? "9+" : panelNotificationCount}
-                    </Text>
-                  </View>
+                </Pressable>
+              ) : null}
+            </View>
+        </View>
+
+        <View
+          style={styles.contentShell}
+          // Covered by the chat, so out of the accessibility tree as well as
+          // out of sight — VoiceOver could otherwise walk into the inbox
+          // underneath the conversation.
+          accessibilityElementsHidden={chatStackActive}
+          importantForAccessibility={chatStackActive ? "no-hide-descendants" : "auto"}
+        >
+          <Animated.View
+            style={[styles.content, { opacity: tabFade, transform: [{ translateX: tabSlideX }] }]}
+          >
+            {showBlockingWalletState ? (
+              <View style={styles.centerState}>
+                <ThemedActivityIndicator size="large" color={palette.primaryStrong} />
+                <Text style={styles.stateText}>
+                  {runtime.loadingMessage || "Preparing your wallet..."}
+                </Text>
+                {bootStalled ? (
+                  <>
+                    <Text style={styles.stateText}>This is taking longer than usual.</Text>
+                    <Pressable style={styles.connectionStateButton} onPress={onRetryConnection}>
+                      <Text style={styles.connectionStateButtonText}>Try again</Text>
+                    </Pressable>
+                    <Pressable onPress={handleLogout}>
+                      <Text style={styles.connectionStateLogoutText}>Log out</Text>
+                    </Pressable>
+                  </>
                 ) : null}
-              </Pressable>
-            ) : null}
-            {merchantSetupFlow ? (
-              /* The one control that must exist on every screen of the setup
-                 flow. Settings cannot be opened from any of them, so the button
-                 that used to sit here did nothing; and on the first-run screens
-                 there was no button at all, which is how a device could end up
-                 with no way to leave the account from the chrome. */
-              <Pressable
-                style={styles.iconButton}
-                onPress={confirmLogout}
-                accessibilityRole="button"
-                accessibilityLabel="Log out"
-                accessibilityHint="Signs this device out of the SFLuv account"
-              >
-                <Ionicons name="log-out-outline" size={18} color={palette.primaryStrong} />
-              </Pressable>
-            ) : !merchantDeviceEnrollable ? (
-              <Pressable
-                style={[styles.iconButton, tab === "settings" ? styles.iconButtonActive : undefined]}
-                // Icon-only, and in merchant mode it is the ONLY control on the
-                // screen — without a label it reaches VoiceOver as a bare glyph.
-                accessibilityRole="button"
-                accessibilityLabel={merchantModeActive ? "Merchant mode options" : "Settings"}
-                accessibilityHint={
-                  merchantModeActive ? "Move this device to another location, or sign out" : undefined
+              </View>
+            ) : runtime.error ? (
+              <View style={styles.centerState}>
+                {runtimeOffline ? (
+                  <View style={styles.connectionStateCard}>
+                    <View style={styles.connectionStateIconWrap}>
+                      <Ionicons name="cloud-offline-outline" size={26} color={palette.primaryStrong} />
+                    </View>
+                    <Text style={styles.connectionStateTitle}>No Connection</Text>
+                    <Text style={styles.connectionStateBody}>
+                      We couldn&apos;t load your account because the app appears to be offline. Reconnect and try again.
+                    </Text>
+                    <Pressable style={styles.connectionStateButton} onPress={onRetryConnection}>
+                      <Text style={styles.connectionStateButtonText}>Try again</Text>
+                    </Pressable>
+                    <Pressable onPress={handleLogout}>
+                      <Text style={styles.connectionStateLogoutText}>Log out</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <View style={styles.connectionStateCard}>
+                    <View style={styles.connectionStateIconWrap}>
+                      <Ionicons name="alert-circle-outline" size={26} color={palette.primaryStrong} />
+                    </View>
+                    <Text style={styles.connectionStateTitle}>
+                      {runtimeNodeIssue ? "Network hiccup" : "Something went wrong"}
+                    </Text>
+                    <Text style={styles.connectionStateBody}>
+                      {runtimeNodeIssue
+                        ? "The network node had trouble responding. This usually clears up if you try again."
+                        : "We could not finish setting up your wallet."}
+                    </Text>
+                    <ScrollView
+                      style={styles.errorScroll}
+                      contentContainerStyle={styles.errorScrollContent}
+                      showsVerticalScrollIndicator
+                      nestedScrollEnabled
+                    >
+                      <Text style={styles.errorText}>{runtime.error}</Text>
+                    </ScrollView>
+                    <Pressable style={styles.connectionStateButton} onPress={onRetryConnection}>
+                      <Text style={styles.connectionStateButtonText}>Try again</Text>
+                    </Pressable>
+                    <Pressable onPress={handleLogout}>
+                      <Text style={styles.connectionStateLogoutText}>Log out</Text>
+                    </Pressable>
+                  </View>
+                )}
+              </View>
+            ) : accountRoutingPending ? (
+              // Ahead of everything, including the merchant screens themselves:
+              // until the profile and the merchant-mode calls answer, rendering
+              // anything at all means guessing which app this account gets, and
+              // the guess that shows is the one a merchant is never given.
+              <View style={styles.centerState}>
+                <ThemedActivityIndicator size="large" color={palette.primaryStrong} />
+                <Text style={styles.stateText}>Loading your account...</Text>
+              </View>
+            ) : merchantOnboardingContent ? (
+              // Ahead of every tab: a merchant account with no till has no app to
+              // be given, only the application or the wait.
+              merchantOnboardingContent
+            ) : merchantDeviceEnrollable ? (
+              merchantSetupContent
+            ) : merchantModeActive ? (
+              merchantTodayContent
+            ) : tab === "wallet" ? (
+              walletTabContent
+            ) : tab === "activity" ? (
+              <ActivityScreen
+                transactions={activityTransactions}
+                tokenSymbol={clientConfig.tokenSymbol}
+                explorerURL={clientConfig.explorerURL}
+                onShareTransaction={shareTransactionToChat}
+                faucetAddress={clientConfig.faucetAddress}
+                transactionsLoaded={activityTransactionsLoaded}
+                contacts={contacts}
+                merchants={locations}
+                merchantLabels={merchantLabelsByAddress}
+                activeAddress={smartAddress}
+                selectedWalletLabel={selectedWalletLabel}
+                focusTxHash={activityFocusHash}
+                onFocusHandled={clearActivityFocus}
+                onBack={() => {
+                  setTab("wallet");
+                  setWalletPane("home");
+                }}
+                refreshing={refreshingActivity}
+                loadingMore={loadingMoreActivity}
+                canLoadMore={activityHasMore}
+                onRefresh={async () => {
+                  setRefreshingActivity(true);
+                  try {
+                    if (smartAddressRef.current) {
+                      await refreshActivityTransactionsFromBackend(smartAddressRef.current, { silent: true });
+                    }
+                    await refreshSelectedWalletBalance({ silent: true });
+                  } finally {
+                    setRefreshingActivity(false);
+                  }
+                }}
+                onLoadMore={loadMoreActivityTransactions}
+              />
+            ) : tab === "improver" ? (
+              <ImproverScreen
+                user={appUser}
+                improver={appImprover}
+                tokenSymbol={clientConfig.tokenSymbol}
+                backendClient={backendClient}
+                hapticsEnabled={preferences.hapticsEnabled}
+                onRefreshProfile={loadAppProfile}
+                onImproverUpdated={handleImproverUpdated}
+                requestedSection={improverRouteRequest.section}
+                requestedSectionNonce={improverRouteRequest.nonce}
+                onCredentialDataUpdated={handleImproverCredentialDataUpdated}
+              />
+            ) : tab === "volunteer" ? (
+              <VolunteerScreen
+                w9Status={w9Status}
+                w9Busy={w9Busy}
+                onStartW9={handleStartW9}
+                backendClient={backendClient}
+                tokenSymbol={clientConfig.tokenSymbol}
+                hapticsEnabled={preferences.hapticsEnabled}
+                onShareEvent={(event) =>
+                  setShareTarget({ kind: "event", eventId: event.id, label: event.title })
                 }
-                onPress={() => {
-                  if (merchantModeActive) {
-                    setMerchantModeExitOpen(true);
+                requestedEventId={volunteerRouteRequest.eventId}
+                requestedEventNonce={volunteerRouteRequest.nonce}
+                volunteerListOptIn={appUser?.volunteerListOptIn}
+                onVolunteerListOptInChange={(volunteerListOptIn) => {
+                  setAppUser((current) => (current ? { ...current, volunteerListOptIn } : current));
+                }}
+                onToast={showToast}
+              />
+            ) : tab === "map" ? (
+              <MapScreen
+                locations={locations}
+                viewMode={merchantMapViewMode}
+                onChangeViewMode={setMerchantMapViewMode}
+                recenterNonce={mapRecenterNonce}
+                focusLocationId={mapFocusLocationId}
+                onFocusHandled={() => setMapFocusLocationId(null)}
+                onShareLocation={(location) =>
+                  setShareTarget({ kind: "merchant", locationId: location.id, label: location.name })
+                }
+                onPayLocation={(location) => {
+                  if (!location.payToAddress) {
+                    showToast("Payment is not available for this merchant right now.", "error");
                     return;
                   }
-                  setTab("settings");
+                  openSendDraft({
+                    recipient: location.payToAddress,
+                    tipToAddress:
+                      location.tipToAddress &&
+                      location.tipToAddress.toLowerCase() !== location.payToAddress.toLowerCase()
+                        ? location.tipToAddress
+                        : undefined,
+                    recipientLabel: location.name,
+                    recipientKind: "merchant",
+                  }, { returnTab: "map" });
                 }}
-              >
-                <Ionicons
-                  name={
-                    merchantModeActive ? "lock-closed-outline" : tab === "settings" ? "settings" : "settings-outline"
+              />
+            ) : tab === "bulletin" ? (
+              <BulletinScreen
+                backendClient={backendClient ?? null}
+                tokenSymbol={clientConfig.tokenSymbol}
+                locations={locations}
+                hapticsEnabled={preferences.hapticsEnabled}
+                onMessageAboutPost={async (post: BulletinPost) => {
+                  if (!backendClient) {
+                    throw new Error("Backend not configured.");
                   }
-                  size={18}
-                  color={palette.primaryStrong}
-                />
-              </Pressable>
-            ) : null}
-          </View>
-        </View>
-      ) : null}
+                  const conversation = await backendClient.startConversation(post.author.user_id, post.id);
+                  openConversation(conversation.id);
+                }}
+                onOpenEvent={(eventId) => {
+                  if (canAccessVolunteerPanel) {
+                    openVolunteerPanel(eventId);
+                  } else {
+                    showToast("Volunteer events aren't available right now.", "info");
+                  }
+                }}
+                onToast={showToast}
+              />
+            ) : tab === "notifications" ? (
+              <NotificationsScreen
+                feed={screenNotificationFeed}
+                loading={notificationsLoading}
+                loadingMore={notificationsLoadingMore}
+                error={notificationsError}
+                onRefresh={async () => {
+                  await refreshNotificationFeed({ silent: true });
+                  await markNotificationsSeen();
+                  await refreshImproverNotifications();
+                  await handleMarkImproverNotificationsSeen();
+                }}
+                onLoadMore={loadMoreNotifications}
+                onAction={runNotificationAction}
+                onOpenSupportChat={
+                  chatEnabled
+                    ? async (requestId) => {
+                        if (!backendClient) {
+                          return;
+                        }
+                        try {
+                          // One call does all of it: opens or reopens the thread,
+                          // posts the ticket as a reference card so both ends can
+                          // see which request they are talking about, and returns
+                          // a draft opening line.
+                          const opened = await backendClient.openSupportConversation(requestId);
+                          setSupportReplyDraft(opened.draft);
+                          openChat(opened.conversation_id, { autoFocus: true });
+                        } catch (error) {
+                          showToast(
+                            error instanceof BulletinRequestError
+                              ? error.message
+                              : "Couldn't open a chat with them.",
+                            "error",
+                          );
+                        }
+                      }
+                    : undefined
+                }
+                onOpen={(item) => {
+                  // Routed by the push payload the notification was sent with,
+                  // so a history row lands in the same place tapping the real
+                  // push would have.
+                  const target = targetFromData(item.data);
+                  recordStep("notification", "opened from the list", { target: target.kind });
+                  expectNotificationArrival(target, "list");
+                  navigateToNotificationTarget(target);
+                  resolveNotificationTarget(target);
+                }}
+                onClose={() => setTab("wallet")}
+              />
+            ) : chatEnabled && (tab === "messages" || tab === "contacts") ? (
+              <MessagesScreen
+                backendClient={backendClient ?? null}
+                tokenSymbol={clientConfig.tokenSymbol}
+                hapticsEnabled={preferences.hapticsEnabled}
+                requestedSegment={tab === "contacts" ? "contacts" : undefined}
+                requestedSegmentNonce={tab === "contacts" ? messagesRouteRequest.nonce : undefined}
+                onUnreadChange={setMessagesUnread}
+                onChatsOpened={handleChatsOpened}
+                onOpenConversation={(conversationId) => openChat(conversationId, { autoFocus: true })}
+                onStartConversation={(userId) => void startConversationWith(userId)}
+                onNewMessage={() => setNewMessageRoute({ mode: "choose" })}
+                onToast={showToast}
+                subscribe={subscribeRealtime}
+                contactsElement={contactsScreenElement}
+              />
+            ) : tab === "contacts" ? (
+              contactsScreenElement
+            ) : (
+              <SettingsScreen
+                user={appUser}
+                onContactSupport={backendClient ? () => setContactSupportOpen(true) : undefined}
+                tokenSymbol={clientConfig.tokenSymbol}
+                improver={appImprover}
+                wallets={settingsWallets}
+                ownedLocations={ownedLocations}
+                merchantModeLocations={merchantModeLocations}
+                primaryWalletAddress={appUser?.primaryWalletAddress}
+                syncNotice={syncNotice}
+                preferences={preferences}
+                notificationPermissionStatus={pushSyncState.permissionStatus}
+                notificationSyncState={pushSyncState.syncState}
+                notificationTokenRegistered={Boolean(pushSyncState.token)}
+                notificationAddressCount={pushSyncState.addressCount}
+                notificationSubscribedCount={pushSyncState.subscribedCount}
+                notificationStatusMessage={pushSyncState.message}
+                onSyncNotifications={handleSyncPushNotifications}
+                onLogout={confirmLogout}
+                googleLinked={googleLinked}
+                googleLinkedEmail={googleLinkedEmail}
+                googleActionBusy={googleActionBusy}
+                googleMessage={googleMessage}
+                googleCanDisconnect={googleCanDisconnect}
+                googleDisconnectDisabledReason={googleDisconnectDisabledReason}
+                onLinkGoogle={onLinkGoogle}
+                onDisconnectGoogle={onDisconnectGoogle}
+                appleLinked={appleLinked}
+                appleLinkedEmail={appleLinkedEmail}
+                appleLinkBusy={appleLinkBusy}
+                appleLinkMessage={appleLinkMessage}
+                appleCanDisconnect={appleCanDisconnect}
+                appleDisconnectDisabledReason={appleDisconnectDisabledReason}
+                onLinkApple={onLinkApple}
+                onDisconnectApple={onDisconnectApple}
+                onRenameWallet={handleRenameWallet}
+                onSetPrimaryWallet={handleSetPrimaryWallet}
+                onSetWalletVisibility={handleSetWalletVisibility}
+                merchantModeStatus={merchantModeStatus}
+                merchantModeBusy={merchantModeBusy}
+                merchantModeMessage={merchantModeMessage}
+                credentialRequests={improverCredentialRequests}
+                credentialTypes={improverCredentialTypes}
+                credentialRequestsLoading={improverCredentialRequestsLoading}
+                onSetMerchantModePin={handleSetMerchantModePin}
+                onEnableMerchantMode={handleEnableMerchantMode}
+                accountDeletionBusy={accountDeletionBusy}
+                accountDeletionMessage={accountDeletionMessage}
+                onUpdateImproverRewardsWallet={async (address) => {
+                  if (!backendClient) {
+                    throw new Error("Backend not configured.");
+                  }
+                  await backendClient.updateImproverPrimaryRewardsAccount(address.trim());
+                  await loadAppProfile();
+                }}
+                volunteerPanelAvailable={canAccessVolunteerPanel}
+                volunteerReminderPreferences={volunteerReminderPreferences}
+                onUpdateVolunteerReminderPreferences={(next) => {
+                  void handleUpdateVolunteerReminderPreferences(next);
+                }}
+                onOpenImprover={() => {
+                  openImproverPanel("workflows");
+                }}
+                onOpenImproverCredentials={() => {
+                  openImproverPanel("credentials");
+                }}
+                onDeleteAccount={handleDeleteAccount}
+                onUpdatePreferences={handleUpdatePreferences}
+              />
+            )}
+          </Animated.View>
 
-      <View style={[styles.contentShell, !showStandardChrome ? styles.contentShellFullscreen : undefined]}>
+          {/* ── The profile gate ────────────────────────────────────────────
+              Required the first time Chats is opened, because a message from an
+              account with no name is worse for the person receiving it than a
+              form is for the person sending it. Cancelling returns them to the
+              tab they came from — see ProfileSetupModal's own note. */}
+          <ProfileSetupModal
+            visible={profileGateOpen}
+            client={backendClient ?? null}
+            mode={profileExists ? "edit" : "required"}
+            onCancel={() => {
+              setProfileGateOpen(false);
+              // Back where they were. Leaving them on a Chats tab they cannot use
+              // would be a dead end with no way to get the prompt back.
+              if (profileExists === false && (tab === "messages" || tab === "contacts")) {
+                setTab(tabBeforeChatRef.current === "messages" ? "wallet" : tabBeforeChatRef.current);
+              }
+            }}
+            onSaved={() => {
+              setProfileGateOpen(false);
+              setProfileExists(true);
+            }}
+          />
+
+          {/* Writing to SFLuv. Submitted through the authenticated client, which
+              is what attributes the request to this account — see the note on
+              ContactSupportModal. */}
+          <ContactSupportModal
+            visible={contactSupportOpen}
+            backendClient={backendClient ?? null}
+            defaultEmail={appUser?.contactEmail ?? undefined}
+            defaultName={appUser?.name ?? undefined}
+            onClose={() => setContactSupportOpen(false)}
+          />
+
+          {/* Sharing a merchant, event or transaction into a chat. */}
+          <ShareSheet
+            target={shareTarget}
+            backendClient={backendClient ?? null}
+            clientConfig={clientConfig}
+            chatEnabled={chatEnabled}
+            hapticsEnabled={preferences.hapticsEnabled}
+            onClose={() => {
+              setShareTarget(null);
+              // A file shared in from another app is a copy SFLuv was handed
+              // (on iOS, in the app-group container, where nothing else cleans
+              // it up). Sent or not, it is done with once the sheet closes.
+              discardSharedFiles(sharedFileUris.current);
+              sharedFileUris.current = [];
+            }}
+            onShared={(conversationIds: number[]) => {
+              // One chat: go there, because that is almost certainly where the
+              // conversation continues. Several: stay put, since there is no one
+              // destination and jumping to an arbitrary one would be wrong.
+              if (conversationIds.length === 1) {
+                openChat(conversationIds[0], { autoFocus: false });
+              }
+            }}
+            onToast={showToast}
+          />
+
+          {/* A transaction opened from a chat card. Rendered by the shell rather
+              than by a tab, because a chat is reachable from any of them. */}
+          <TransactionDetailsModal
+            visible={Boolean(chatTransaction)}
+            details={chatTransaction}
+            tokenSymbol={clientConfig.tokenSymbol}
+            explorerURL={clientConfig.explorerURL}
+            onClose={() => setChatTransaction(null)}
+          />
+        </View>
+
         {/* ── The chat stack ───────────────────────────────────────────────
             Rendered instead of the tab content, innermost last so it draws on
             top. Each layer's back action pops exactly one, so info → chat →
@@ -6549,424 +7300,24 @@ function WalletAppShellContent({
             ) : null}
           </View>
         ) : null}
-
-        <Animated.View
-          style={[styles.content, { opacity: tabFade, transform: [{ translateX: tabSlideX }] }]}
-        >
-          {showBlockingWalletState ? (
-            <View style={styles.centerState}>
-              <ThemedActivityIndicator size="large" color={palette.primaryStrong} />
-              <Text style={styles.stateText}>
-                {runtime.loadingMessage || "Preparing your wallet..."}
-              </Text>
-              {bootStalled ? (
-                <>
-                  <Text style={styles.stateText}>This is taking longer than usual.</Text>
-                  <Pressable style={styles.connectionStateButton} onPress={onRetryConnection}>
-                    <Text style={styles.connectionStateButtonText}>Try again</Text>
-                  </Pressable>
-                  <Pressable onPress={handleLogout}>
-                    <Text style={styles.connectionStateLogoutText}>Log out</Text>
-                  </Pressable>
-                </>
-              ) : null}
-            </View>
-          ) : runtime.error ? (
-            <View style={styles.centerState}>
-              {runtimeOffline ? (
-                <View style={styles.connectionStateCard}>
-                  <View style={styles.connectionStateIconWrap}>
-                    <Ionicons name="cloud-offline-outline" size={26} color={palette.primaryStrong} />
-                  </View>
-                  <Text style={styles.connectionStateTitle}>No Connection</Text>
-                  <Text style={styles.connectionStateBody}>
-                    We couldn&apos;t load your account because the app appears to be offline. Reconnect and try again.
-                  </Text>
-                  <Pressable style={styles.connectionStateButton} onPress={onRetryConnection}>
-                    <Text style={styles.connectionStateButtonText}>Try again</Text>
-                  </Pressable>
-                  <Pressable onPress={handleLogout}>
-                    <Text style={styles.connectionStateLogoutText}>Log out</Text>
-                  </Pressable>
-                </View>
-              ) : (
-                <View style={styles.connectionStateCard}>
-                  <View style={styles.connectionStateIconWrap}>
-                    <Ionicons name="alert-circle-outline" size={26} color={palette.primaryStrong} />
-                  </View>
-                  <Text style={styles.connectionStateTitle}>
-                    {runtimeNodeIssue ? "Network hiccup" : "Something went wrong"}
-                  </Text>
-                  <Text style={styles.connectionStateBody}>
-                    {runtimeNodeIssue
-                      ? "The network node had trouble responding. This usually clears up if you try again."
-                      : "We could not finish setting up your wallet."}
-                  </Text>
-                  <ScrollView
-                    style={styles.errorScroll}
-                    contentContainerStyle={styles.errorScrollContent}
-                    showsVerticalScrollIndicator
-                    nestedScrollEnabled
-                  >
-                    <Text style={styles.errorText}>{runtime.error}</Text>
-                  </ScrollView>
-                  <Pressable style={styles.connectionStateButton} onPress={onRetryConnection}>
-                    <Text style={styles.connectionStateButtonText}>Try again</Text>
-                  </Pressable>
-                  <Pressable onPress={handleLogout}>
-                    <Text style={styles.connectionStateLogoutText}>Log out</Text>
-                  </Pressable>
-                </View>
-              )}
-            </View>
-          ) : accountRoutingPending ? (
-            // Ahead of everything, including the merchant screens themselves:
-            // until the profile and the merchant-mode calls answer, rendering
-            // anything at all means guessing which app this account gets, and
-            // the guess that shows is the one a merchant is never given.
-            <View style={styles.centerState}>
-              <ThemedActivityIndicator size="large" color={palette.primaryStrong} />
-              <Text style={styles.stateText}>Loading your account...</Text>
-            </View>
-          ) : merchantOnboardingContent ? (
-            // Ahead of every tab: a merchant account with no till has no app to
-            // be given, only the application or the wait.
-            merchantOnboardingContent
-          ) : merchantDeviceEnrollable ? (
-            merchantSetupContent
-          ) : merchantModeActive ? (
-            merchantTodayContent
-          ) : tab === "wallet" ? (
-            walletTabContent
-          ) : tab === "activity" ? (
-            <ActivityScreen
-              transactions={activityTransactions}
-              tokenSymbol={clientConfig.tokenSymbol}
-              explorerURL={clientConfig.explorerURL}
-              onShareTransaction={shareTransactionToChat}
-              faucetAddress={clientConfig.faucetAddress}
-              transactionsLoaded={activityTransactionsLoaded}
-              contacts={contacts}
-              merchants={locations}
-              merchantLabels={merchantLabelsByAddress}
-              activeAddress={smartAddress}
-              selectedWalletLabel={selectedWalletLabel}
-              focusTxHash={activityFocusHash}
-              onFocusHandled={clearActivityFocus}
-              onBack={() => {
-                setTab("wallet");
-                setWalletPane("home");
-              }}
-              refreshing={refreshingActivity}
-              loadingMore={loadingMoreActivity}
-              canLoadMore={activityHasMore}
-              onRefresh={async () => {
-                setRefreshingActivity(true);
-                try {
-                  if (smartAddressRef.current) {
-                    await refreshActivityTransactionsFromBackend(smartAddressRef.current, { silent: true });
-                  }
-                  await refreshSelectedWalletBalance({ silent: true });
-                } finally {
-                  setRefreshingActivity(false);
-                }
-              }}
-              onLoadMore={loadMoreActivityTransactions}
-            />
-          ) : tab === "improver" ? (
-            <ImproverScreen
-              user={appUser}
-              improver={appImprover}
-              tokenSymbol={clientConfig.tokenSymbol}
-              backendClient={backendClient}
-              hapticsEnabled={preferences.hapticsEnabled}
-              onRefreshProfile={loadAppProfile}
-              onImproverUpdated={handleImproverUpdated}
-              requestedSection={improverRouteRequest.section}
-              requestedSectionNonce={improverRouteRequest.nonce}
-              onCredentialDataUpdated={handleImproverCredentialDataUpdated}
-            />
-          ) : tab === "volunteer" ? (
-            <VolunteerScreen
-              w9Status={w9Status}
-              w9Busy={w9Busy}
-              onStartW9={handleStartW9}
-              backendClient={backendClient}
-              tokenSymbol={clientConfig.tokenSymbol}
-              hapticsEnabled={preferences.hapticsEnabled}
-              onShareEvent={(event) =>
-                setShareTarget({ kind: "event", eventId: event.id, label: event.title })
-              }
-              requestedEventId={volunteerRouteRequest.eventId}
-              requestedEventNonce={volunteerRouteRequest.nonce}
-              volunteerListOptIn={appUser?.volunteerListOptIn}
-              onVolunteerListOptInChange={(volunteerListOptIn) => {
-                setAppUser((current) => (current ? { ...current, volunteerListOptIn } : current));
-              }}
-              onToast={showToast}
-            />
-          ) : tab === "map" ? (
-            <MapScreen
-              locations={locations}
-              viewMode={merchantMapViewMode}
-              onChangeViewMode={setMerchantMapViewMode}
-              recenterNonce={mapRecenterNonce}
-              focusLocationId={mapFocusLocationId}
-              onFocusHandled={() => setMapFocusLocationId(null)}
-              onShareLocation={(location) =>
-                setShareTarget({ kind: "merchant", locationId: location.id, label: location.name })
-              }
-              onPayLocation={(location) => {
-                if (!location.payToAddress) {
-                  showToast("Payment is not available for this merchant right now.", "error");
-                  return;
-                }
-                openSendDraft({
-                  recipient: location.payToAddress,
-                  tipToAddress:
-                    location.tipToAddress &&
-                    location.tipToAddress.toLowerCase() !== location.payToAddress.toLowerCase()
-                      ? location.tipToAddress
-                      : undefined,
-                  recipientLabel: location.name,
-                  recipientKind: "merchant",
-                }, { returnTab: "map" });
-              }}
-            />
-          ) : tab === "bulletin" ? (
-            <BulletinScreen
-              backendClient={backendClient ?? null}
-              tokenSymbol={clientConfig.tokenSymbol}
-              locations={locations}
-              hapticsEnabled={preferences.hapticsEnabled}
-              onMessageAboutPost={async (post: BulletinPost) => {
-                if (!backendClient) {
-                  throw new Error("Backend not configured.");
-                }
-                const conversation = await backendClient.startConversation(post.author.user_id, post.id);
-                openConversation(conversation.id);
-              }}
-              onOpenEvent={(eventId) => {
-                if (canAccessVolunteerPanel) {
-                  openVolunteerPanel(eventId);
-                } else {
-                  showToast("Volunteer events aren't available right now.", "info");
-                }
-              }}
-              onToast={showToast}
-            />
-          ) : tab === "notifications" ? (
-            <NotificationsScreen
-              feed={screenNotificationFeed}
-              loading={notificationsLoading}
-              loadingMore={notificationsLoadingMore}
-              error={notificationsError}
-              onRefresh={async () => {
-                await refreshNotificationFeed({ silent: true });
-                await markNotificationsSeen();
-                await refreshImproverNotifications();
-                await handleMarkImproverNotificationsSeen();
-              }}
-              onLoadMore={loadMoreNotifications}
-              onAction={runNotificationAction}
-              onOpenSupportChat={
-                chatEnabled
-                  ? async (requestId) => {
-                      if (!backendClient) {
-                        return;
-                      }
-                      try {
-                        // One call does all of it: opens or reopens the thread,
-                        // posts the ticket as a reference card so both ends can
-                        // see which request they are talking about, and returns
-                        // a draft opening line.
-                        const opened = await backendClient.openSupportConversation(requestId);
-                        setSupportReplyDraft(opened.draft);
-                        openChat(opened.conversation_id, { autoFocus: true });
-                      } catch (error) {
-                        showToast(
-                          error instanceof BulletinRequestError
-                            ? error.message
-                            : "Couldn't open a chat with them.",
-                          "error",
-                        );
-                      }
-                    }
-                  : undefined
-              }
-              onOpen={(item) => {
-                // Routed by the push payload the notification was sent with,
-                // so a history row lands in the same place tapping the real
-                // push would have.
-                const target = targetFromData(item.data);
-                recordStep("notification", "opened from the list", { target: target.kind });
-                expectNotificationArrival(target, "list");
-                navigateToNotificationTarget(target);
-                resolveNotificationTarget(target);
-              }}
-              onClose={() => setTab("wallet")}
-            />
-          ) : chatEnabled && (tab === "messages" || tab === "contacts") ? (
-            <MessagesScreen
-              backendClient={backendClient ?? null}
-              tokenSymbol={clientConfig.tokenSymbol}
-              hapticsEnabled={preferences.hapticsEnabled}
-              requestedSegment={tab === "contacts" ? "contacts" : undefined}
-              requestedSegmentNonce={tab === "contacts" ? messagesRouteRequest.nonce : undefined}
-              onUnreadChange={setMessagesUnread}
-              onChatsOpened={handleChatsOpened}
-              onOpenConversation={(conversationId) => openChat(conversationId, { autoFocus: true })}
-              onStartConversation={(userId) => void startConversationWith(userId)}
-              onNewMessage={() => setNewMessageRoute({ mode: "choose" })}
-              onToast={showToast}
-              subscribe={subscribeRealtime}
-              contactsElement={contactsScreenElement}
-            />
-          ) : tab === "contacts" ? (
-            contactsScreenElement
-          ) : (
-            <SettingsScreen
-              user={appUser}
-              onContactSupport={backendClient ? () => setContactSupportOpen(true) : undefined}
-              tokenSymbol={clientConfig.tokenSymbol}
-              improver={appImprover}
-              wallets={settingsWallets}
-              ownedLocations={ownedLocations}
-              merchantModeLocations={merchantModeLocations}
-              primaryWalletAddress={appUser?.primaryWalletAddress}
-              syncNotice={syncNotice}
-              preferences={preferences}
-              notificationPermissionStatus={pushSyncState.permissionStatus}
-              notificationSyncState={pushSyncState.syncState}
-              notificationTokenRegistered={Boolean(pushSyncState.token)}
-              notificationAddressCount={pushSyncState.addressCount}
-              notificationSubscribedCount={pushSyncState.subscribedCount}
-              notificationStatusMessage={pushSyncState.message}
-              onSyncNotifications={handleSyncPushNotifications}
-              onLogout={confirmLogout}
-              googleLinked={googleLinked}
-              googleLinkedEmail={googleLinkedEmail}
-              googleActionBusy={googleActionBusy}
-              googleMessage={googleMessage}
-              googleCanDisconnect={googleCanDisconnect}
-              googleDisconnectDisabledReason={googleDisconnectDisabledReason}
-              onLinkGoogle={onLinkGoogle}
-              onDisconnectGoogle={onDisconnectGoogle}
-              appleLinked={appleLinked}
-              appleLinkedEmail={appleLinkedEmail}
-              appleLinkBusy={appleLinkBusy}
-              appleLinkMessage={appleLinkMessage}
-              appleCanDisconnect={appleCanDisconnect}
-              appleDisconnectDisabledReason={appleDisconnectDisabledReason}
-              onLinkApple={onLinkApple}
-              onDisconnectApple={onDisconnectApple}
-              onRenameWallet={handleRenameWallet}
-              onSetPrimaryWallet={handleSetPrimaryWallet}
-              onSetWalletVisibility={handleSetWalletVisibility}
-              merchantModeStatus={merchantModeStatus}
-              merchantModeBusy={merchantModeBusy}
-              merchantModeMessage={merchantModeMessage}
-              credentialRequests={improverCredentialRequests}
-              credentialTypes={improverCredentialTypes}
-              credentialRequestsLoading={improverCredentialRequestsLoading}
-              onSetMerchantModePin={handleSetMerchantModePin}
-              onEnableMerchantMode={handleEnableMerchantMode}
-              accountDeletionBusy={accountDeletionBusy}
-              accountDeletionMessage={accountDeletionMessage}
-              onUpdateImproverRewardsWallet={async (address) => {
-                if (!backendClient) {
-                  throw new Error("Backend not configured.");
-                }
-                await backendClient.updateImproverPrimaryRewardsAccount(address.trim());
-                await loadAppProfile();
-              }}
-              volunteerPanelAvailable={canAccessVolunteerPanel}
-              volunteerReminderPreferences={volunteerReminderPreferences}
-              onUpdateVolunteerReminderPreferences={(next) => {
-                void handleUpdateVolunteerReminderPreferences(next);
-              }}
-              onOpenImprover={() => {
-                openImproverPanel("workflows");
-              }}
-              onOpenImproverCredentials={() => {
-                openImproverPanel("credentials");
-              }}
-              onDeleteAccount={handleDeleteAccount}
-              onUpdatePreferences={handleUpdatePreferences}
-            />
-          )}
-        </Animated.View>
-
-        {/* ── The profile gate ────────────────────────────────────────────
-            Required the first time Chats is opened, because a message from an
-            account with no name is worse for the person receiving it than a
-            form is for the person sending it. Cancelling returns them to the
-            tab they came from — see ProfileSetupModal's own note. */}
-        <ProfileSetupModal
-          visible={profileGateOpen}
-          client={backendClient ?? null}
-          mode={profileExists ? "edit" : "required"}
-          onCancel={() => {
-            setProfileGateOpen(false);
-            // Back where they were. Leaving them on a Chats tab they cannot use
-            // would be a dead end with no way to get the prompt back.
-            if (profileExists === false && (tab === "messages" || tab === "contacts")) {
-              setTab(tabBeforeChatRef.current === "messages" ? "wallet" : tabBeforeChatRef.current);
-            }
-          }}
-          onSaved={() => {
-            setProfileGateOpen(false);
-            setProfileExists(true);
-          }}
-        />
-
-        {/* Writing to SFLuv. Submitted through the authenticated client, which
-            is what attributes the request to this account — see the note on
-            ContactSupportModal. */}
-        <ContactSupportModal
-          visible={contactSupportOpen}
-          backendClient={backendClient ?? null}
-          defaultEmail={appUser?.contactEmail ?? undefined}
-          defaultName={appUser?.name ?? undefined}
-          onClose={() => setContactSupportOpen(false)}
-        />
-
-        {/* Sharing a merchant, event or transaction into a chat. */}
-        <ShareSheet
-          target={shareTarget}
-          backendClient={backendClient ?? null}
-          clientConfig={clientConfig}
-          chatEnabled={chatEnabled}
-          hapticsEnabled={preferences.hapticsEnabled}
-          onClose={() => setShareTarget(null)}
-          onShared={(conversationIds: number[]) => {
-            // One chat: go there, because that is almost certainly where the
-            // conversation continues. Several: stay put, since there is no one
-            // destination and jumping to an arbitrary one would be wrong.
-            if (conversationIds.length === 1) {
-              openChat(conversationIds[0], { autoFocus: false });
-            }
-          }}
-          onToast={showToast}
-        />
-
-        {/* A transaction opened from a chat card. Rendered by the shell rather
-            than by a tab, because a chat is reachable from any of them. */}
-        <TransactionDetailsModal
-          visible={Boolean(chatTransaction)}
-          details={chatTransaction}
-          tokenSymbol={clientConfig.tokenSymbol}
-          explorerURL={clientConfig.explorerURL}
-          onClose={() => setChatTransaction(null)}
-        />
-
       </View>
 
       <PaymentReceivedOverlay receipt={paymentReceipt} onDismiss={() => setPaymentReceipt(null)} />
 
 
-      {showStandardChrome && !merchantKiosk && !accountRoutingPending && !sendPaneActive ? (
-        <View pointerEvents="box-none" style={styles.bottomDockShell}>
+      {/* Mounted for the life of the account and HIDDEN, not removed, under a
+          chat or the send pane. Unmounting it reset everything it measures:
+          on the way back the slots were measured again and the selection
+          bubble popped in a frame late, and while it was gone it reported no
+          top edge, so everything lifted above it (the Messages button, the
+          toast) fell back to a guessed offset and jumped. */}
+      {!merchantKiosk && !accountRoutingPending ? (
+        <View
+          pointerEvents={dockVisible ? "box-none" : "none"}
+          style={[styles.bottomDockShell, !dockVisible ? styles.bottomDockHidden : undefined]}
+          accessibilityElementsHidden={!dockVisible}
+          importantForAccessibility={dockVisible ? "auto" : "no-hide-descendants"}
+        >
           <BlurView
             pointerEvents="none"
             intensity={Platform.OS === "android" ? 24 : 42}
@@ -7501,6 +7852,35 @@ function PrivyWalletApp({
   useEffect(() => {
     syncSentryUser(user?.id);
   }, [user?.id]);
+  // Scopes the chat cache to whoever is signed in. During render rather than
+  // in an effect, because the shell below reads the cache in its own first
+  // render, and children render before a parent's effects run — so an effect
+  // here would leave the first read unscoped and the inbox would spin anyway.
+  // Idempotent, and cheap: a comparison when nothing changed.
+  setChatCacheUser(user?.id ?? null);
+  setProfileCacheUser(user?.id ?? null);
+  // Whenever the signed-in person changes — signing out by any route, or a
+  // different account signing in — everything cached for the last one goes.
+  // handleLogout clears too, but it is not the only way out: the policy and
+  // deleted-account returns, and a session simply ending, all bypass it.
+  const cachedForUser = useRef<string | null>(null);
+  useEffect(() => {
+    const next = user?.id ?? null;
+    const previous = cachedForUser.current;
+    cachedForUser.current = next;
+    if (previous && previous !== next) {
+      void clearChatCache(previous);
+      void clearProfileCache();
+      void clearLinkPreviews();
+      clearAttachmentCache();
+      void AsyncStorage.getAllKeys()
+        .then((keys) => AsyncStorage.multiRemove(keys.filter((key) => key.startsWith(TRANSACTION_CACHE_STORAGE_KEY_PREFIX))))
+        .catch(() => {});
+      // The clears reset the caches' owner; whoever is signed in now gets it back.
+      setChatCacheUser(next);
+      setProfileCacheUser(next);
+    }
+  }, [user?.id]);
   const { login, state: oauthState } = useLoginWithOAuth();
   const { link, state: linkOauthState } = useLinkWithOAuth();
   const { unlinkOAuth } = useUnlinkOAuth();
@@ -7531,6 +7911,12 @@ function PrivyWalletApp({
     defaultWalletAddress: undefined,
     hiddenWalletAddresses: [],
   });
+  // Read by syncWalletPreferences to skip a write that would change nothing.
+  const walletPreferencesRef = useRef(walletPreferences);
+  walletPreferencesRef.current = walletPreferences;
+  // The bootstrap is keyed on who is signed in, not on Privy's user OBJECT,
+  // which can be replaced when Privy refreshes its own state.
+  const privyUserId = user?.id ?? null;
   const [loginMode, setLoginMode] = useState<"choice" | "email">("choice");
   const [emailAddress, setEmailAddress] = useState("");
   const [emailCode, setEmailCode] = useState("");
@@ -7671,7 +8057,25 @@ function PrivyWalletApp({
       return;
     }
     const nextPreferences = deriveStoredWalletPreferences(nextUser, nextWallets);
-    setWalletPreferences(nextPreferences);
+    // ── Kept when unchanged, and this is what stops the bootstrap re-running ──
+    //
+    // The wallet bootstrap effect depends on `hiddenWalletAddresses`, an array,
+    // so it re-runs whenever that array's IDENTITY changes. This used to set a
+    // fresh object every call — and it is called by the bootstrap itself, by
+    // every profile load, every foreground and every send. Each one re-ran
+    // everything above the bootstrap's identity guard: the runtime flipped to
+    // loading, ensureUser and the Privy provider were fetched again, smart
+    // wallet discovery ran again, and a new runtime object re-fired every
+    // effect keyed on it. On every cold start that happened at least twice.
+    // Same values, same object: nothing re-runs.
+    const unchanged = (current: StoredWalletPreferences) =>
+      current.defaultWalletAddress === nextPreferences.defaultWalletAddress &&
+      current.hiddenWalletAddresses.length === nextPreferences.hiddenWalletAddresses.length &&
+      current.hiddenWalletAddresses.every((address, index) => address === nextPreferences.hiddenWalletAddresses[index]);
+    if (unchanged(walletPreferencesRef.current)) {
+      return;
+    }
+    setWalletPreferences((current) => (unchanged(current) ? current : nextPreferences));
     AsyncStorage.setItem(walletPreferencesStorageKey(storageUserID), JSON.stringify(nextPreferences)).catch((error) => {
       console.warn("Unable to persist wallet preferences", error);
     });
@@ -7679,6 +8083,13 @@ function PrivyWalletApp({
 
   const handleIncomingLink = (rawURL: string | null) => {
     if (!rawURL) {
+      return;
+    }
+    // The share extension opens the app with "sfluv://dataUrl=…" to hand over
+    // what was shared. That is expo-share-intent's to read, not a link to
+    // route; parsed as one it would at best do nothing and at worst match a
+    // path by accident.
+    if (/^[a-z][a-z0-9+.-]*:\/\/dataUrl=/i.test(rawURL)) {
       return;
     }
     const parsedLink = parseSfluvUniversalLink(rawURL, clientConfig);
@@ -7974,7 +8385,7 @@ function PrivyWalletApp({
   useEffect(() => {
     if (
       !isReady ||
-      !user ||
+      !privyUserId ||
       !embeddedWallet ||
       !walletPreferencesReady ||
       deletedAccountStatus ||
@@ -8050,7 +8461,7 @@ function PrivyWalletApp({
             "load your selected smart wallet",
           ));
         }
-        const bootstrapKey = `${user.id}:${discovery.ownerAddress.toLowerCase()}`;
+        const bootstrapKey = `${privyUserId}:${discovery.ownerAddress.toLowerCase()}`;
 
         if (bootstrappedIdentityRef.current !== bootstrapKey) {
           if (!cancelled) {
@@ -8158,7 +8569,7 @@ function PrivyWalletApp({
     isReady,
     policyStatus,
     preferredCandidateKey,
-    user,
+    privyUserId,
     walletPreferences.defaultWalletAddress,
     walletPreferences.hiddenWalletAddresses,
     walletPreferencesReady,
@@ -9337,7 +9748,12 @@ function App() {
       // Both local reads together, before the signed-in shell mounts, so the
       // dock can be built from the cached answer on its very first render
       // rather than reflowing once a fetch lands.
-      const [cached] = await Promise.all([loadBootCache(), primeBetaCache()]);
+      const [cached] = await Promise.all([
+        loadBootCache(),
+        primeBetaCache(),
+        primeChatCache(),
+        primeProfileCache(),
+      ]);
       if (cancelled) {
         return;
       }
@@ -9502,10 +9918,15 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     fontSize: 10,
     fontWeight: "800",
   },
+  // Above everything in the shell, the chat stack included — see the note
+  // where it is rendered. Zero height, so it takes no room in the layout.
+  bannerAnchor: {
+    height: 0,
+    zIndex: 90,
+    elevation: 90,
+  },
   topBar: {
-    // Lifts the bar — and with it the in-app banner, which is a child of it —
-    // above the tab content that follows it in the tree. Without this the
-    // banner's lower half was painted over by the screen below.
+    // Above the tab content that follows it in the tree.
     zIndex: 30,
     paddingHorizontal: spacing.lg,
     paddingTop: 6,
@@ -9569,18 +9990,18 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     borderTopRightRadius: radii.xl,
     overflow: "hidden",
   },
-  // Above the tab content, and deliberately TRANSPARENT.
+  // Above the top bar and the tab content, and deliberately TRANSPARENT.
   //
   // The opacity belongs to the sliding screen, not to this container: each
   // screen in the stack paints its own background. Giving the container one
   // would cover the inbox the moment the chat mounted, which is the thing this
   // overlay exists to avoid — the slide would still happen, over a blank panel.
   chatStackOverlay: {
-    zIndex: 20,
+    // Over the top bar's 30, which it now covers rather than replaces.
+    zIndex: 40,
   },
-  contentShellFullscreen: {
-    borderTopLeftRadius: 0,
-    borderTopRightRadius: 0,
+  chromeStack: {
+    flex: 1,
   },
   content: {
     flex: 1,
@@ -9721,6 +10142,9 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     fontSize: 14,
     marginTop: 14,
     textDecorationLine: "underline",
+  },
+  bottomDockHidden: {
+    opacity: 0,
   },
   bottomDockShell: {
     position: "absolute",

@@ -7,8 +7,10 @@ import {
   FlatList,
   Image,
   Keyboard,
+  Linking,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -19,17 +21,24 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
+import { File, Paths } from "expo-file-system";
 
 import { AppBackendClient } from "../services/appBackend";
 import { useStuckWatch } from "../services/observability";
 import { SwipeBack, type SwipeBackHandle } from "../components/SwipeBack";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
-import { Avatar, BadgeLine } from "../components/BulletinParts";
+import { BadgeLine } from "../components/BulletinParts";
 import {
   MessageAttachmentCard,
   attachmentKindLabel,
   type AttachmentHandlers,
 } from "../components/MessageAttachmentCard";
+import { ChatAvatar } from "../components/ChatAvatar";
+import type { PastedContent } from "../components/PasteControl";
+import { seedAttachment } from "../services/attachmentCache";
+import { cachedThread, cachedThreadNow, saveThread } from "../services/chatCache";
+import { DerivedLinkCard, LinkifiedText } from "../components/MessageLinks";
+import { firstLink, isSameLink } from "../utils/links";
 import type { ChatTransactionRef } from "../utils/transactions";
 import {
   buildUniversalEventLink,
@@ -97,13 +106,23 @@ import {
  * READ — so that case is passed `autoFocus: false` by the shell.
  */
 
-/**
- * How far the thread slides to reveal timestamps, and how wide the column is.
- *
- * One constant for both, because they are the same measurement: the reveal is
- * complete exactly when the column is fully on screen.
- */
+/** How wide the revealed timestamp column is. */
 const STAMP_COLUMN_WIDTH = 56;
+
+/**
+ * How far the thread slides to reveal that column.
+ *
+ * The column plus the list's own horizontal padding, and the padding is the
+ * part that was missing. A row sits inside `listContent`'s `paddingHorizontal`,
+ * so the row's right edge is `spacing.md` short of the screen's. Parking the
+ * stamp at `right: -STAMP_COLUMN_WIDTH` therefore parks it against the row's
+ * edge, not the screen's, leaving `spacing.md` of the column permanently on
+ * screen — enough for the leading digit of a right-aligned "11:23 AM" to show
+ * without anybody swiping. Offsetting by the padding as well puts the column
+ * genuinely off-screen at rest, and makes the reveal land it with the same
+ * gutter every other row has.
+ */
+const STAMP_REVEAL_TRAVEL = STAMP_COLUMN_WIDTH + spacing.md;
 
 /** Sideways travel before the timestamp swipe takes the touch at all. */
 const STAMP_SWIPE_SLOP = 16;
@@ -194,9 +213,20 @@ export function ChatScreen({
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
 
-  const [conversation, setConversation] = useState<Conversation | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [hasMore, setHasMore] = useState(false);
+  // Seeded from the chat cache, so a thread read before opens on its last
+  // known state on the first frame — no spinner — and the network replaces it.
+  const [conversation, setConversation] = useState<Conversation | null>(
+    () => cachedThreadNow(conversationId)?.conversation ?? null,
+  );
+  const [messages, setMessages] = useState<ChatMessage[]>(() => cachedThreadNow(conversationId)?.messages ?? []);
+  const [hasMore, setHasMore] = useState(() => cachedThreadNow(conversationId)?.hasMore ?? false);
+  /**
+   * Which thread the state above belongs to. Saving keys on this rather than
+   * on `conversationId`, because for one render after a switch the prop is the
+   * new thread and the state is still the old one — keyed on the prop, that
+   * render would file one thread's messages under another's id.
+   */
+  const stateThread = useRef(conversationId);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -207,6 +237,16 @@ export function ChatScreen({
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [actionTarget, setActionTarget] = useState<ChatMessage | null>(null);
   const [reactionPickerFor, setReactionPickerFor] = useState<ChatMessage | null>(null);
+  /**
+   * The picker waiting for the action sheet to finish closing.
+   *
+   * Both are fade Modals. Opening the picker in the same tap that closes the
+   * sheet presents one iOS modal into a window still dismissing the other —
+   * the stacking that once froze the whole app from the share sheet. On iOS
+   * the picker is therefore opened from the sheet's onDismiss; Android has no
+   * such problem and opens it straight away.
+   */
+  const pickerAfterSheet = useRef<ChatMessage | null>(null);
   /**
    * The attachment open in the full-screen preview.
    *
@@ -290,7 +330,7 @@ export function ChatScreen({
           // so a sideways brush while scrolling barely moves it. Past the
           // column there is nothing more to reveal.
           const pulled = Math.max(0, -gesture.dx - STAMP_SWIPE_SLOP);
-          const eased = STAMP_COLUMN_WIDTH * (1 - Math.exp(-pulled / (STAMP_COLUMN_WIDTH * 2.2)));
+          const eased = STAMP_REVEAL_TRAVEL * (1 - Math.exp(-pulled / (STAMP_REVEAL_TRAVEL * 2.2)));
           stampReveal.setValue(-eased);
         },
         onPanResponderRelease: () => {
@@ -308,6 +348,8 @@ export function ChatScreen({
     [stampReveal],
   );
   const firstPageLoaded = useRef(false);
+  /** Monotonic id for thread reads, so an older one cannot overwrite a newer. */
+  const refreshSeq = useRef(0);
 
   /**
    * The parent's callbacks, held in refs.
@@ -347,42 +389,6 @@ export function ChatScreen({
     onLayout: measureKeyboardGap,
     lift,
   } = useKeyboardLift();
-
-  /**
-   * A link found in what the person is typing, and its scraped card.
-   *
-   * ── Why this replaced a tray option ──────────────────────────────────────
-   *
-   * "Link" used to be a button in the attachment tray that read the clipboard
-   * and asked for confirmation. That is backwards: nobody decides to attach a
-   * link, they paste one into the message they are already writing. So the
-   * draft is watched instead, and the card appears above the composer the way
-   * every other chat app does it — which also means the sender sees what the
-   * recipient will see before sending, which the tray version never offered.
-   *
-   * `dismissed` is kept per URL so that closing a card does not just make it
-   * reappear on the next keystroke.
-   */
-  const [linkPreview, setLinkPreview] = useState<{
-    /**
-     * The URL exactly as `firstURL` produced it from the draft.
-     *
-     * Kept alongside the server's normalized `url` because the two can differ
-     * — the server may add a trailing slash, drop a default port, or follow a
-     * redirect — and everything that compares a preview against the current
-     * draft has to compare like with like. Keying on the server's version
-     * instead caused two bugs: dismissing a card did not stick, and the
-     * "already previewed this" guard never matched, so the effect refetched
-     * every 600ms for as long as the link sat in the draft.
-     */
-    detectedUrl: string;
-    url: string;
-    title: string;
-    description: string;
-    imageUrl: string;
-    siteName: string;
-  } | null>(null);
-  const [dismissedLinks, setDismissedLinks] = useState<string[]>([]);
 
   const typing = useTypingIndicators(conversationId, subscribe);
   const reportTyping = useTypingReporter(conversationId, sendTyping);
@@ -426,33 +432,6 @@ export function ChatScreen({
   const isGroup = conversation?.kind === "group";
 
   /**
-   * Headers that let <Image> fetch an authenticated avatar.
-   *
-   * Resolved once per thread rather than per bubble: a busy group draws a lot
-   * of avatars, and the token behind them is the same one every time.
-   */
-  const [imageAuthHeaders, setImageAuthHeaders] = useState<Record<string, string> | null>(null);
-  useEffect(() => {
-    if (!backendClient || !isGroup) {
-      return;
-    }
-    let cancelled = false;
-    void backendClient
-      .getImageAuthHeaders()
-      .then((headers) => {
-        if (!cancelled) {
-          setImageAuthHeaders(headers);
-        }
-      })
-      .catch(() => {
-        // Initials are a complete fallback, so this needs no handling beyond
-        // leaving the headers null.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [backendClient, isGroup]);
-  /**
    * The id of your own newest message, which is the only one that shows a
    * delivery state.
    */
@@ -472,27 +451,52 @@ export function ChatScreen({
       if (!backendClient || !conversationId) {
         return;
       }
+      // Same ordering guard as the inbox, and the thread needs it more: the
+      // merge below keeps anything older than the page it was handed, so a
+      // stale page does not just show less, it filters the newest messages out
+      // of state entirely.
+      const seq = ++refreshSeq.current;
       try {
         const [conv, page] = await Promise.all([
           backendClient.getConversation(conversationId),
           backendClient.getConversationMessages(conversationId),
         ]);
+        if (seq !== refreshSeq.current) {
+          return;
+        }
         setConversation(conv);
+        // The first page of this visit is authoritative for everything up to
+        // it. What came before it was the cache — possibly hundreds of
+        // messages behind, possibly edited or deleted since — and keeping it
+        // under the page left a permanent hole: cached 1–100, page 251–300,
+        // and loadOlder paginating backwards from 1, so 101–250 were never
+        // fetched and the gap was saved back to disk. Later polls keep older
+        // pages, which are history somebody scrolled to and loaded THIS visit.
+        const firstPage = !firstPageLoaded.current;
         setMessages((current) => {
-          // The newest page replaces its own range; older pages already loaded
-          // are kept, so a poll does not discard history somebody scrolled to.
-          const newest = new Set(page.messages.map((m) => m.id));
+          const inPage = new Set(page.messages.map((m) => m.id));
           const oldestInPage = page.messages[0]?.id ?? Number.POSITIVE_INFINITY;
-          const older = current.filter((m) => !newest.has(m.id) && m.id < oldestInPage);
-          return [...older, ...page.messages];
+          const newestInPage = page.messages[page.messages.length - 1]?.id ?? Number.NEGATIVE_INFINITY;
+          const older = firstPage ? [] : current.filter((m) => !inPage.has(m.id) && m.id < oldestInPage);
+          // Newer than the page: sent, or delivered by the socket, while this
+          // read was in flight. The page predates them, so it cannot speak for
+          // them; dropping them made a message vanish until the next poll.
+          const newer = current.filter((m) => !inPage.has(m.id) && m.id > newestInPage);
+          return [...older, ...page.messages, ...newer];
         });
-        if (!firstPageLoaded.current) {
+        if (firstPage) {
           firstPageLoaded.current = true;
           setHasMore(page.has_more);
         }
         void backendClient.markConversationRead(conversationId).catch(() => {});
         onReadRef.current?.(conversationId);
       } catch (e) {
+        // Superseded — by a newer read, or by switching threads, which bumps
+        // the sequence. A 404 for the thread just left must not close the one
+        // just opened.
+        if (seq !== refreshSeq.current) {
+          return;
+        }
         if (e instanceof BulletinRequestError && e.status === 404) {
           onToastRef.current(e.message, "error");
           onBackRef.current();
@@ -518,13 +522,45 @@ export function ChatScreen({
   // re-fetched in cases where it must not be reset.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    setConversation(null);
-    setMessages([]);
+    // From the cache when there is one — memory first, then disk — rather
+    // than blank. The disk read is applied only if the network has not
+    // already answered for this same thread, which would be newer.
+    const seeded = cachedThreadNow(conversationId);
+    setConversation(seeded?.conversation ?? null);
+    setMessages(seeded?.messages ?? []);
+    setHasMore(seeded?.hasMore ?? false);
+    stateThread.current = conversationId;
+    // Any read still in flight belongs to the thread just left.
+    refreshSeq.current += 1;
     setDraft("");
     setReplyingTo(null);
     setMode("text");
     firstPageLoaded.current = false;
+    if (seeded) {
+      return;
+    }
+    let cancelled = false;
+    void cachedThread(conversationId).then((stored) => {
+      if (cancelled || !stored || firstPageLoaded.current || stateThread.current !== conversationId) {
+        return;
+      }
+      setConversation((current) => current ?? stored.conversation);
+      setMessages((current) => (current.length > 0 ? current : stored.messages));
+      setHasMore(stored.hasMore);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [conversationId]);
+
+  // Written back whenever the thread changes — debounced in the cache, so a
+  // burst of messages is one write. Only once there is a conversation to file
+  // it under, which is the server's answer or the cache's own.
+  useEffect(() => {
+    if (conversation) {
+      saveThread(stateThread.current, { conversation, messages, hasMore });
+    }
+  }, [conversation, hasMore, messages]);
 
   // ── Why the fetch is keyed on `refresh` and not on the thread ─────────────
   //
@@ -582,9 +618,7 @@ export function ChatScreen({
         if (!incoming?.id) {
           return;
         }
-        setMessages((current) =>
-          current.some((m) => m.id === incoming.id) ? current : [...current, incoming],
-        );
+        setMessages((current) => mergeMessage(current, incoming));
         // Reading it is implied by having it on screen, so the unread state is
         // cleared here rather than waiting for the next poll.
         void backendClient?.markConversationRead(conversationId).catch(() => {});
@@ -650,84 +684,22 @@ export function ChatScreen({
     return () => clearTimeout(timer);
   }, [autoFocus, conversationId]);
 
-  /**
-   * Watches the draft for a URL and fetches its card.
-   *
-   * Debounced, because this runs per keystroke and each fetch makes the server
-   * reach out to somebody else's site. Only the FIRST url in the draft is
-   * previewed: a message with three links is a message, not three cards, and
-   * picking the first is both predictable and what the recipient's own card
-   * will show.
-   */
-  useEffect(() => {
-    const found = firstURL(draft);
-    if (!found) {
-      setLinkPreview(null);
-      return;
-    }
-    if (dismissedLinks.includes(found)) {
-      setLinkPreview(null);
-      return;
-    }
-    if (linkPreview?.detectedUrl === found) {
-      return;
-    }
-    if (!backendClient) {
-      return;
-    }
-
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      void backendClient
-        .previewLink(found)
-        .then((meta) => {
-          if (cancelled) {
-            return;
-          }
-          setLinkPreview({
-            detectedUrl: found,
-            // The server's normalized url is what gets stored on the message,
-            // so that is what gets SENT; `found` is only for comparing against
-            // the draft.
-            url: meta.url || found,
-            title: meta.title,
-            description: meta.description,
-            imageUrl: meta.image_url,
-            siteName: meta.site_name,
-          });
-        })
-        .catch(() => {
-          if (cancelled) {
-            return;
-          }
-          // A link we cannot read is still a link worth sending. The card shows
-          // the bare URL rather than vanishing, so the sender can see it was
-          // recognised.
-          setLinkPreview({
-            detectedUrl: found,
-            url: found,
-            title: "",
-            description: "",
-            imageUrl: "",
-            siteName: "",
-          });
-        });
-    }, 600);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [backendClient, dismissedLinks, draft, linkPreview?.detectedUrl]);
-
   const loadOlder = async () => {
     if (!backendClient || !hasMore || loadingOlder || messages.length === 0) {
       return;
     }
     setLoadingOlder(true);
+    const forThread = conversationId;
     try {
       const page = await backendClient.getConversationMessages(conversationId, messages[0].id);
-      setMessages((current) => [...page.messages, ...current]);
+      // Switched threads while it loaded: this page belongs to the other one.
+      if (stateThread.current !== forThread) {
+        return;
+      }
+      setMessages((current) => {
+        const known = new Set(current.map((m) => m.id));
+        return [...page.messages.filter((m) => !known.has(m.id)), ...current];
+      });
       setHasMore(page.has_more);
     } catch {
       // Older messages are a nicety; the thread works without them.
@@ -746,45 +718,15 @@ export function ChatScreen({
     setSending(true);
     const replyTo = replyingTo?.id ?? null;
     try {
-      // A detected link is sent as a link attachment with the message as its
-      // caption, so the recipient gets the card rather than a bare URL. The
-      // server re-scrapes and stores the metadata itself — what is sent here is
-      // the url, not the preview, so a card cannot be forged by the sender.
-      //
-      // Read from the draft at send time rather than from the preview card,
-      // which only appears 600ms after typing stops: sent before then, a link
-      // used to go out as plain text. The card's normalized url is used when
-      // it is in hand for this same link.
-      const detected = firstURL(body);
-      const linkUrl =
-        detected && !dismissedLinks.includes(detected)
-          ? linkPreview?.detectedUrl === detected
-            ? linkPreview.url
-            : detected
-          : null;
-      const sendPlain = () => backendClient.sendConversationMessage(conversationId, body, replyTo);
-      const message = linkUrl
-        ? await backendClient
-            .attachConversationReference(conversationId, {
-              kind: "link",
-              link_url: linkUrl,
-              body,
-              reply_to_id: replyTo,
-            })
-            // Something that only looked like a link ("notes.md") is refused
-            // as one; it is still a message.
-            .catch((e: unknown) => {
-              if (e instanceof BulletinRequestError && e.code === "bad_link") {
-                return sendPlain();
-              }
-              throw e;
-            })
-        : await sendPlain();
-      setMessages((current) => [...current, message]);
+      // Always plain text. A link is rendered from the text by every client
+      // — inline as a tappable link, with a card under the bubble — rather than
+      // being turned into a link attachment here. What was typed is what is
+      // stored, what a notification shows, and what an edit edits; and nobody
+      // is asked whether they meant to send a link.
+      const message = await backendClient.sendConversationMessage(conversationId, body, replyTo);
+      setMessages((current) => mergeMessage(current, message));
       setDraft("");
       setReplyingTo(null);
-      setLinkPreview(null);
-      setDismissedLinks([]);
       reportTyping(false);
     } catch (e) {
       onToast(e instanceof BulletinRequestError ? e.message : "Couldn't send. Try again.", "error");
@@ -800,6 +742,13 @@ export function ChatScreen({
     if (files.length === 0) {
       return;
     }
+    // Every route in — tray, paste, a share from another app — comes through
+    // here, so this is where a staged payment is protected. Rebuilding `staged`
+    // below without it is exactly how one used to vanish.
+    if (staged?.payment) {
+      onToast("Send or remove the payment first.", "error");
+      return;
+    }
     setMode("text");
     setStaged((current) => ({
       files: [...(current?.files ?? []), ...files].slice(0, 10),
@@ -808,6 +757,41 @@ export function ChatScreen({
       // second photo should not move where the text splits.
       splitAt: current?.splitAt ?? caretRef.current,
     }));
+    setTimeout(() => inputRef.current?.focus(), 120);
+  };
+
+  /**
+   * Something pasted through the composer's Paste tile or clipboard chip.
+   *
+   * A photo is written to the cache and staged like one picked from the
+   * library — same chip, same caption split, same send. Text, which includes a
+   * link, goes into the draft at the caret, so pasting into the middle of a
+   * sentence works the way it does in the field itself.
+   */
+  const pasteContent = (content: PastedContent) => {
+    if (content.kind === "image") {
+      try {
+        const png = content.dataUri.startsWith("data:image/png");
+        const extension = png ? "png" : "jpg";
+        const file = new File(Paths.cache, `pasted-${Date.now()}.${extension}`);
+        file.create();
+        file.write(content.dataUri.slice(content.dataUri.indexOf(",") + 1), { encoding: "base64" });
+        stageAttachments([
+          {
+            uri: file.uri,
+            mimeType: png ? "image/png" : "image/jpeg",
+            fileName: `Pasted image.${extension}`,
+            isImage: true,
+          },
+        ]);
+      } catch {
+        onToast("Couldn't paste that image.", "error");
+      }
+      return;
+    }
+    const at = Math.min(caretRef.current ?? draft.length, draft.length);
+    setDraft(draft.slice(0, at) + content.text + draft.slice(at));
+    setMode("text");
     setTimeout(() => inputRef.current?.focus(), 120);
   };
 
@@ -883,7 +867,7 @@ export function ChatScreen({
           before,
           replyingTo?.id ?? null,
         );
-        setMessages((current) => [...current, leading]);
+        setMessages((current) => mergeMessage(current, leading));
       }
 
       if (staged.files.length > 0) {
@@ -895,7 +879,18 @@ export function ChatScreen({
           // replies.
           { replyToId: before ? null : replyingTo?.id ?? null },
         );
-        setMessages((current) => [...current, message]);
+        // Your own files are already on this device: copied into the
+        // attachment cache under the ids they just became, so your photo shows
+        // from disk at once rather than being downloaded back from the server
+        // it was uploaded to. Matched by position, which the server keeps.
+        const sentAttachments = [...(message.attachments ?? [])].sort((a, b) => a.position - b.position);
+        staged.files.forEach((file, index) => {
+          const attachment = sentAttachments[index];
+          if (attachment) {
+            seedAttachment(conversationId, attachment, file.uri);
+          }
+        });
+        setMessages((current) => mergeMessage(current, message));
       } else if (staged.reference) {
         const message = await backendClient.attachConversationReference(conversationId, {
           kind: staged.reference.kind,
@@ -904,12 +899,12 @@ export function ChatScreen({
           event_id: staged.reference.eventId,
           reply_to_id: before ? null : staged.reference ? replyingTo?.id ?? null : null,
         });
-        setMessages((current) => [...current, message]);
+        setMessages((current) => mergeMessage(current, message));
       }
 
       if (after) {
         const trailing = await backendClient.sendConversationMessage(conversationId, after, null);
-        setMessages((current) => [...current, trailing]);
+        setMessages((current) => mergeMessage(current, trailing));
       }
 
       setStaged(null);
@@ -1018,6 +1013,15 @@ export function ChatScreen({
         },
       },
     ];
+
+    // The mirror of the pay option's rule below. A staged payment is the whole
+    // next message, so a photo added to it would have to be thrown away on
+    // send — and was: staging one used to drop the payment silently.
+    if (staged?.payment) {
+      for (const option of options) {
+        option.disabledReason = "Send or remove the payment first.";
+      }
+    }
 
     // Direct threads only — there is no single recipient in a group. The server
     // refuses it there as well rather than trusting this.
@@ -1311,6 +1315,7 @@ export function ChatScreen({
     onOpenEvent: (eventId) =>
       handleMessageTap(message, () => attachmentHandlers.onOpenEvent?.(eventId)),
     onOpenSupport: () => handleMessageTap(message),
+    onOpenLink: (url) => handleMessageTap(message, () => void Linking.openURL(url).catch(() => {})),
   });
 
   const renderRow = ({ item: row }: { item: ChatRow }) => {
@@ -1368,12 +1373,14 @@ export function ChatScreen({
         ]}
       >
         {avatarRole === "show" ? (
-          <SenderAvatar
-            userId={item.sender_id}
-            name={item.sender_name || ""}
-            client={backendClient}
-            headers={imageAuthHeaders}
-          />
+          <View style={styles.senderAvatarSlot}>
+            <ChatAvatar
+              client={backendClient}
+              name={item.sender_name || ""}
+              size={AVATAR_SIZE}
+              userId={item.sender_id}
+            />
+          </View>
         ) : avatarRole === "spacer" ? (
           <View style={styles.senderAvatarSpacer} />
         ) : null}
@@ -1538,11 +1545,27 @@ export function ChatScreen({
                   // Compared loosely: the server stores its normalized form
                   // ("https://sfluv.org/"), so "Sfluv.org" as typed never matched
                   // exactly and the message showed as a bubble AND a card.
+                  //
+                  // Two sources of a link card. Older messages carry one as a
+                  // stored attachment, frozen when sent. Newer ones carry only
+                  // their text, and the card is derived from it here — so the
+                  // derived one is skipped whenever a stored one exists, or an
+                  // old message would show two cards for the same link.
+                  const storedLink = attachments.find((attachment) => attachment.kind === "link");
+                  const derivedLink = storedLink || item.deleted ? null : firstLink(body);
                   const soleLink =
-                    attachments.length === 1 &&
-                    attachments[0].kind === "link" &&
-                    Boolean(attachments[0].link_url) &&
-                    isSameLink(body, attachments[0].link_url ?? "");
+                    (attachments.length === 1 &&
+                      storedLink !== undefined &&
+                      Boolean(storedLink.link_url) &&
+                      isSameLink(body, storedLink.link_url ?? "")) ||
+                    (attachments.length === 0 && derivedLink !== null && isSameLink(body, derivedLink));
+                  const menuMessage = () => {
+                    if (item.deleted) {
+                      return;
+                    }
+                    triggerClickHaptic(hapticsEnabled);
+                    setActionTarget(item);
+                  };
 
                   return (
                     <View style={styles.messageStack}>
@@ -1558,9 +1581,15 @@ export function ChatScreen({
                               item.is_mine ? styles.bubbleMine : styles.bubbleTheirs,
                             ]}
                           >
-                            <Text style={item.is_mine ? styles.bubbleTextMine : styles.bubbleText}>
-                              {item.body}
-                            </Text>
+                            <LinkifiedText
+                              text={item.body}
+                              style={item.is_mine ? styles.bubbleTextMine : styles.bubbleText}
+                              linkStyle={item.is_mine ? styles.bubbleLinkMine : styles.bubbleLink}
+                              onLongPress={menuMessage}
+                              onPressLink={(href) =>
+                                handleMessageTap(item, () => void Linking.openURL(href).catch(() => {}))
+                              }
+                            />
                           </View>
                         )
                       ) : null}
@@ -1578,15 +1607,22 @@ export function ChatScreen({
                           // of opening the thing twice, and a long press menus it
                           // instead of navigating away from the thread.
                           handlers={cardHandlersFor(item)}
-                          onLongPress={() => {
-                            if (item.deleted) {
-                              return;
-                            }
-                            triggerClickHaptic(hapticsEnabled);
-                            setActionTarget(item);
-                          }}
+                          onLongPress={menuMessage}
                         />
                       ))}
+
+                      {derivedLink ? (
+                        <DerivedLinkCard
+                          url={derivedLink}
+                          messageId={item.id}
+                          conversationId={conversationId}
+                          client={backendClient}
+                          tokenSymbol={tokenSymbol}
+                          mine={item.is_mine}
+                          handlers={cardHandlersFor(item)}
+                          onLongPress={menuMessage}
+                        />
+                      ) : null}
                     </View>
                   );
                 })()
@@ -1673,7 +1709,16 @@ export function ChatScreen({
           accessibilityRole="button"
           accessibilityLabel={isGroup ? "Group info" : "Contact info"}
         >
-          <Avatar name={headerTitle || "?"} size={32} />
+          {/* The person's picture, or the group's — the same face the inbox
+              row and the in-app banner show, over the same initials. */}
+          <ChatAvatar
+            client={backendClient}
+            name={headerTitle || "?"}
+            size={32}
+            userId={isGroup ? null : conversation?.other_user.user_id}
+            conversationId={isGroup ? conversationId : null}
+            iconAttachmentId={isGroup ? conversation?.icon_attachment_id : null}
+          />
           <View style={styles.headerText}>
             <Text style={styles.headerTitle} numberOfLines={1}>
               {headerTitle}
@@ -1897,19 +1942,12 @@ export function ChatScreen({
             onCaretChange={(position) => {
               caretRef.current = position;
             }}
-            linkPreview={linkPreview}
-            onDismissLinkPreview={() => {
-              // Remembered per URL, so dismissing does not just make the card
-              // come back on the next keystroke.
-              if (linkPreview) {
-                // The DETECTED url, which is what the effect compares against.
-                setDismissedLinks((current) => [...current, linkPreview.detectedUrl]);
-              }
-              setLinkPreview(null);
-            }}
             hapticsEnabled={hapticsEnabled}
             inputRef={inputRef}
             placeholder={editing ? "Edit your message" : "Message"}
+            // Not while editing: an edit changes words, it cannot gain a photo.
+            onPaste={editing ? undefined : pasteContent}
+            pasteDisabledReason={staged?.payment ? "Send or remove the payment first." : undefined}
           />
           </>
         )}
@@ -1921,6 +1959,13 @@ export function ChatScreen({
         transparent
         animationType="fade"
         onRequestClose={() => setActionTarget(null)}
+        onDismiss={() => {
+          const next = pickerAfterSheet.current;
+          pickerAfterSheet.current = null;
+          if (next) {
+            setReactionPickerFor(next);
+          }
+        }}
       >
         <Pressable style={styles.sheetBackdrop} onPress={() => setActionTarget(null)}>
           <Pressable style={styles.actionCard} onPress={() => {}}>
@@ -1939,7 +1984,11 @@ export function ChatScreen({
               <Pressable
                 style={styles.quickReaction}
                 onPress={() => {
-                  setReactionPickerFor(actionTarget);
+                  if (Platform.OS === "ios") {
+                    pickerAfterSheet.current = actionTarget;
+                  } else {
+                    setReactionPickerFor(actionTarget);
+                  }
                   setActionTarget(null);
                 }}
                 accessibilityRole="button"
@@ -2251,74 +2300,8 @@ function SendingBar({ active }: { active: boolean }) {
   );
 }
 
-/**
- * A group member's picture beside their message.
- *
- * Falls back to their initials, which is also what happens for somebody who has
- * not set a picture: the avatar route answers 404 for them, so the image simply
- * errors and the initials take over. Asking the server first who has a picture
- * would be a request per member to avoid a 404 per member.
- */
-function SenderAvatar({
-  userId,
-  name,
-  client,
-  headers,
-}: {
-  userId: string;
-  name: string;
-  client: AppBackendClient | null;
-  headers: Record<string, string> | null;
-}) {
-  const { palette } = useAppTheme();
-  const [failed, setFailed] = useState(false);
-
-  // Built as one object so the headers' presence and the URL cannot disagree.
-  const source =
-    client && headers && !failed ? { uri: client.userAvatarURL(userId), headers } : null;
-
-  return (
-    <View style={{ width: AVATAR_SIZE, marginRight: 6, justifyContent: "flex-end" }}>
-      {source ? (
-        <Image
-          source={source}
-          style={{ width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: AVATAR_SIZE / 2 }}
-          onError={() => setFailed(true)}
-        />
-      ) : (
-        <View
-          style={{
-            width: AVATAR_SIZE,
-            height: AVATAR_SIZE,
-            borderRadius: AVATAR_SIZE / 2,
-            backgroundColor: palette.primaryMuted,
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <Text style={{ color: palette.primaryStrong, fontWeight: "700", fontSize: 11 }}>
-            {senderInitials(name)}
-          </Text>
-        </View>
-      )}
-    </View>
-  );
-}
-
 /** The width of a sender avatar, and of the gap left for one. */
 const AVATAR_SIZE = 26;
-
-/** Up to two initials from a display name, for somebody with no picture. */
-function senderInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) {
-    return "?";
-  }
-  return parts
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("");
-}
 
 /** Three dots that fade in sequence, which is what "typing" looks like. */
 function TypingDots() {
@@ -2437,48 +2420,40 @@ function isEmojiOnly(body: string): boolean {
 }
 
 /** The per-message time revealed by swiping the thread left. */
+/**
+ * Puts a message into the thread in id order, or leaves the thread alone if it
+ * is already there.
+ *
+ * Every arrival used to append. A socket frame and a send response race, so a
+ * message stored after yours could land first and yours would render below it
+ * — out of order for you, and in a different order from everybody else's copy
+ * of the same thread. Ids are the server's insert order, so ordering by id is
+ * what makes every client agree. The common case, newest at the end, costs one
+ * comparison.
+ *
+ * An id already present keeps the copy in hand: the server never echoes a
+ * message to its sender's own socket, so a duplicate can only be a poll that
+ * beat the send response, and that copy is already hydrated for this reader.
+ */
+function mergeMessage(current: ChatMessage[], incoming: ChatMessage): ChatMessage[] {
+  const last = current[current.length - 1];
+  if (!last || last.id < incoming.id) {
+    return [...current, incoming];
+  }
+  if (current.some((m) => m.id === incoming.id)) {
+    return current;
+  }
+  let index = current.length;
+  while (index > 0 && current[index - 1].id > incoming.id) {
+    index -= 1;
+  }
+  return [...current.slice(0, index), incoming, ...current.slice(index)];
+}
+
 function formatMessageStamp(at: string): string {
   return new Date(at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
-/**
- * The first URL in a draft, or null.
- *
- * Deliberately conservative. It matches an explicit http(s):// prefix, or a
- * bare `host.tld/...` with a recognisable dot — not every string containing a
- * dot, because "see you at 3.30" and "that costs 1.50" are not links and a card
- * appearing under them would be absurd. A sender whose link is not detected can
- * still send it as text; a false positive makes us fetch a URL that somebody
- * did not share, which is the worse error.
- */
-/**
- * Whether a message's text is nothing but this link, as a person would judge
- * it: case, scheme, "www." and a trailing slash do not count.
- */
-function isSameLink(text: string, url: string): boolean {
-  const bare = (value: string) =>
-    value
-      .trim()
-      .toLowerCase()
-      .replace(/^https?:\/\//, "")
-      .replace(/^www\./, "")
-      .replace(/\/+$/, "");
-  return bare(text) !== "" && bare(text) === bare(url);
-}
-
-function firstURL(text: string): string | null {
-  const match = text.match(
-    /(?:https?:\/\/[^\s<>"']+)|(?:\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?:\/[^\s<>"']*)?)/i,
-  );
-  if (!match) {
-    return null;
-  }
-  const candidate = match[0].replace(/[.,;:!?)\]]+$/, "");
-  if (!candidate) {
-    return null;
-  }
-  return /^https?:\/\//i.test(candidate) ? candidate : `https://${candidate}`;
-}
 
 export function formatSfluvAmount(base?: string | null): string {
   if (!base) return "";
@@ -2511,6 +2486,7 @@ function createStyles(palette: Palette) {
     messageRow: { flexDirection: "row", marginVertical: 2, alignItems: "flex-end" },
     // Holds the bubbles of a run in line with the one that has the picture.
     senderAvatarSpacer: { width: AVATAR_SIZE, marginRight: 6 },
+    senderAvatarSlot: { width: AVATAR_SIZE, marginRight: 6, justifyContent: "flex-end" },
     messageRowMine: { justifyContent: "flex-end" },
     messageColumn: { maxWidth: "84%" },
     messageColumnWithAvatar: { maxWidth: "76%" },
@@ -2540,6 +2516,10 @@ function createStyles(palette: Palette) {
     emojiOnly: { fontSize: 44, lineHeight: 52, paddingHorizontal: 4 },
     bubbleText: { fontSize: 15, color: palette.text, lineHeight: 20 },
     bubbleTextMine: { fontSize: 15, color: palette.white, lineHeight: 20 },
+    // Underlined rather than recoloured: on your own bubble the fill is the
+    // accent, so an accent-coloured link would vanish into it.
+    bubbleLink: { color: palette.primaryStrong, textDecorationLine: "underline" },
+    bubbleLinkMine: { color: palette.white, textDecorationLine: "underline" },
     caption: { marginTop: 6, color: palette.text },
     attachments: { gap: 6 },
 
@@ -2645,10 +2625,10 @@ function createStyles(palette: Palette) {
       width: STAMP_COLUMN_WIDTH,
       textAlign: "right",
       fontVariant: ["tabular-nums"],
-      // Parked off the right edge so it costs no width at rest; the row's
-      // translateX is what brings it into view.
+      // Parked off the SCREEN's right edge so it costs no width at rest and
+      // shows nothing until swiped; the row's translateX is what brings it in.
       position: "absolute",
-      right: -STAMP_COLUMN_WIDTH,
+      right: -STAMP_REVEAL_TRAVEL,
     },
     selectedRow: {
       backgroundColor: palette.primaryMuted,

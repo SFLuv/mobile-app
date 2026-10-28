@@ -4,6 +4,7 @@ import {
   Easing,
   FlatList,
   Modal,
+  Platform,
   Pressable,
   Share,
   StyleSheet,
@@ -63,10 +64,18 @@ import { BulletinRequestError, Conversation } from "../types/bulletin";
  * sheet says which ones did not make it.
  */
 
+/** A file handed to SFLuv by another app's share sheet. */
+export type SharedFile = { uri: string; mimeType?: string | null; fileName?: string | null; isImage: boolean };
+
 export type ShareTarget =
   | { kind: "merchant"; locationId: number; label: string }
   | { kind: "event"; eventId: string; label: string }
-  | { kind: "transaction"; txHash: string; label: string };
+  | { kind: "transaction"; txHash: string; label: string }
+  // Shared INTO SFLuv from another app: a photo or file, or text and links.
+  // Only the chat row applies — there is no SFLuv link for a photo that came
+  // from somewhere else, so copy-link and the OS share row are not shown.
+  | { kind: "files"; files: SharedFile[]; label: string }
+  | { kind: "text"; text: string; label: string };
 
 /**
  * Whether a target has somewhere public to land.
@@ -118,6 +127,16 @@ export function ShareSheet({
   const [selected, setSelected] = useState<number[]>([]);
   const [note, setNote] = useState("");
   const [sending, setSending] = useState(false);
+  /** Something to present once this Modal has finished going — see shareExternally. */
+  const afterDismiss = useRef<(() => void) | null>(null);
+  // Not while sending. A file shared in from another app is deleted when this
+  // closes, and closing between one chat's upload and the next pulled it out
+  // from under the uploads still to go.
+  const dismiss = () => {
+    if (!sending) {
+      onClose();
+    }
+  };
   // Drives both the dimming and the card's rise, so they read as one motion
   // rather than a fade and a slide that happen to overlap.
   const backdropFade = useRef(new Animated.Value(0)).current;
@@ -175,6 +194,9 @@ export function ShareSheet({
           return buildUniversalMerchantLink({ locationId: target.locationId }, clientConfig);
         case "transaction":
           return buildUniversalTransactionLink({ txHash: target.txHash }, clientConfig);
+        case "files":
+        case "text":
+          return "";
       }
     } catch {
       // A malformed id. Better to hide the link actions than hand out a URL
@@ -205,9 +227,10 @@ export function ShareSheet({
     triggerClickHaptic(hapticsEnabled);
     // Closed first: the OS share sheet is itself a presented view, and opening
     // it from under our own Modal is the same stacking problem that froze the
-    // app when this sheet was opened from the merchant modal.
-    onClose();
-    requestAnimationFrame(() => {
+    // app when this sheet was opened from the merchant modal. On iOS it waits
+    // for this Modal's onDismiss — a frame was a guess, and the fade outlasts
+    // it. Android has no such stacking and goes on the next frame.
+    const open = () => {
       void Share.share({
         message: `${target.label} — ${shareLink}`,
         // iOS shows `url` separately and some targets prefer it; Android
@@ -216,7 +239,13 @@ export function ShareSheet({
       }).catch(() => {
         // Dismissed, or no share targets. Nothing to recover.
       });
-    });
+    };
+    if (Platform.OS === "ios") {
+      afterDismiss.current = open;
+    } else {
+      requestAnimationFrame(open);
+    }
+    onClose();
   };
 
   const toggle = (id: number) => {
@@ -236,13 +265,26 @@ export function ShareSheet({
 
     for (const conversationId of selected) {
       try {
-        await backendClient.attachConversationReference(conversationId, {
-          kind: target.kind,
-          body: note.trim() || undefined,
-          location_id: target.kind === "merchant" ? target.locationId : undefined,
-          event_id: target.kind === "event" ? target.eventId : undefined,
-          tx_hash: target.kind === "transaction" ? target.txHash : undefined,
-        });
+        if (target.kind === "files") {
+          // Uploaded to each chat in turn — the same request the composer
+          // makes, with the note as the caption.
+          await backendClient.uploadConversationAttachments(conversationId, target.files, {
+            body: note.trim() || undefined,
+          });
+        } else if (target.kind === "text") {
+          // Plain text, links included: every client renders a link's card
+          // from the text itself.
+          const message = note.trim() ? `${note.trim()}\n${target.text}` : target.text;
+          await backendClient.sendConversationMessage(conversationId, message, null);
+        } else {
+          await backendClient.attachConversationReference(conversationId, {
+            kind: target.kind,
+            body: note.trim() || undefined,
+            location_id: target.kind === "merchant" ? target.locationId : undefined,
+            event_id: target.kind === "event" ? target.eventId : undefined,
+            tx_hash: target.kind === "transaction" ? target.txHash : undefined,
+          });
+        }
         sent.push(conversationId);
       } catch (e) {
         failed.push(conversationId);
@@ -286,10 +328,15 @@ export function ShareSheet({
       // looked wrong. Fading dims the screen in place, and the card does its own
       // short rise on top of that.
       animationType="fade"
-      onRequestClose={onClose}
+      onRequestClose={dismiss}
+      onDismiss={() => {
+        const next = afterDismiss.current;
+        afterDismiss.current = null;
+        next?.();
+      }}
     >
       <Animated.View style={[styles.backdrop, { opacity: backdropFade }]}>
-        <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityLabel="Close" />
+        <Pressable style={{ flex: 1 }} onPress={dismiss} accessibilityLabel="Close" />
         <Animated.View
           style={[
             styles.card,
@@ -411,7 +458,7 @@ export function ShareSheet({
             </View>
           ) : null}
 
-          {target && !hasPublicLanding(target) ? (
+          {target?.kind === "transaction" && !hasPublicLanding(target) ? (
             <Text style={styles.linkNote}>
               This link opens in SFLuv. People without the app will be asked to install it.
             </Text>

@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useMemo, useState } from "react";
+import { ActivityIndicator, Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 import { AppBackendClient } from "../services/appBackend";
+import { AUTO_DOWNLOAD_MAX_BYTES, forgetAttachment, useAttachmentFile } from "../services/attachmentCache";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import type { ChatTransactionRef } from "../utils/transactions";
 import type { AttachmentKind, MessageAttachment } from "../types/bulletin";
@@ -36,6 +37,12 @@ export type AttachmentHandlers = {
   onOpenMerchant?: (locationId: number) => void;
   onOpenEvent?: (eventId: string) => void;
   onOpenSupport?: (requestId: number) => void;
+  /**
+   * Opens a link card's URL. Routed through the thread's tap dispatcher like
+   * every other card, so a double tap likes the message instead of opening the
+   * browser on the first tap. Without it the card opens the URL itself.
+   */
+  onOpenLink?: (url: string) => void;
 };
 
 const FILE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -137,27 +144,14 @@ export function MessageAttachmentCard({
 
     case "file":
       return (
-        <Pressable
-          style={[styles.card, mine ? styles.cardMine : undefined]}
-          onPress={() => handlers.onOpenFile?.(attachment)}
+        <AttachmentFileCard
+          attachment={attachment}
+          conversationId={conversationId}
+          client={client}
+          mine={mine}
+          onOpen={handlers.onOpenFile}
           onLongPress={onLongPress}
-          delayLongPress={280}
-          accessibilityRole="button"
-          accessibilityLabel={`File: ${displayFileName(attachment.file_name) || "attachment"}`}
-        >
-          <View style={styles.iconWrap}>
-            <Ionicons name={fileIcon(attachment.content_type)} size={20} color={palette.primaryStrong} />
-          </View>
-          <View style={styles.cardBody}>
-            <Text style={styles.cardTitle} numberOfLines={2}>
-              {displayFileName(attachment.file_name) || "Attachment"}
-            </Text>
-            {formatFileSize(attachment.size_bytes) ? (
-              <Text style={styles.cardMeta}>{formatFileSize(attachment.size_bytes)}</Text>
-            ) : null}
-          </View>
-          <Ionicons name="download-outline" size={18} color={palette.textMuted} />
-        </Pressable>
+        />
       );
 
     case "link":
@@ -165,7 +159,12 @@ export function MessageAttachmentCard({
         <Pressable
           style={[styles.linkCard, mine ? styles.cardMine : undefined]}
           onPress={() => {
-            if (attachment.link_url) {
+            if (!attachment.link_url) {
+              return;
+            }
+            if (handlers.onOpenLink) {
+              handlers.onOpenLink(attachment.link_url);
+            } else {
               void Linking.openURL(attachment.link_url).catch(() => {});
             }
           }}
@@ -379,12 +378,80 @@ export function MessageAttachmentCard({
 }
 
 /**
+ * A document in a thread: its name, its size, and whether it is on this device.
+ *
+ * Files never download by themselves. Most are opened once, if at all, and the
+ * card says plainly which ones are already here — "On this device" with a tick —
+ * so somebody on a train knows which ones will open.
+ */
+function AttachmentFileCard({
+  attachment,
+  conversationId,
+  client,
+  mine,
+  onOpen,
+  onLongPress,
+}: {
+  attachment: MessageAttachment;
+  conversationId: number;
+  client: AppBackendClient | null;
+  mine: boolean;
+  onOpen?: (attachment: MessageAttachment) => void;
+  onLongPress?: () => void;
+}) {
+  const { palette } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette), [palette]);
+  const { state } = useAttachmentFile(client, conversationId, attachment, false);
+  const size = formatFileSize(attachment.size_bytes);
+  const onDevice = state.status === "cached";
+  const meta =
+    state.status === "downloading"
+      ? "Downloading…"
+      : [size, onDevice ? "On this device" : null].filter(Boolean).join(" · ");
+
+  return (
+    <Pressable
+      style={[styles.card, mine ? styles.cardMine : undefined]}
+      onPress={() => onOpen?.(attachment)}
+      onLongPress={onLongPress}
+      delayLongPress={280}
+      accessibilityRole="button"
+      accessibilityLabel={`File: ${displayFileName(attachment.file_name) || "attachment"}${size ? `, ${size}` : ""}${
+        onDevice ? ", on this device" : ", not downloaded"
+      }`}
+    >
+      <View style={styles.iconWrap}>
+        <Ionicons name={fileIcon(attachment.content_type)} size={20} color={palette.primaryStrong} />
+      </View>
+      <View style={styles.cardBody}>
+        <Text style={styles.cardTitle} numberOfLines={2}>
+          {displayFileName(attachment.file_name) || "Attachment"}
+        </Text>
+        {meta ? <Text style={styles.cardMeta}>{meta}</Text> : null}
+      </View>
+      {state.status === "downloading" ? (
+        <ActivityIndicator size="small" color={palette.textMuted} />
+      ) : (
+        <Ionicons
+          name={onDevice ? "checkmark-circle-outline" : "arrow-down-circle-outline"}
+          size={20}
+          color={onDevice ? palette.success : palette.textMuted}
+        />
+      )}
+    </Pressable>
+  );
+}
+
+/**
  * A photo in a thread.
  *
- * Fetched through the session rather than used as an <Image> URL, because the
- * route is authenticated: an Image with a bare uri sends no token and renders
- * nothing. The placeholder is sized from the stored dimensions so the thread
- * does not reflow under the reader when the bytes land.
+ * Shown from the attachment cache once it is on the device, so a thread that
+ * has been read before opens with its photos, offline included. Not yet on the
+ * device, a photo small enough fetches itself; a large one — or one that could
+ * not be fetched — shows a "not downloaded" card with its size and a tap to
+ * get it, rather than a spinner that may never resolve. The placeholder is
+ * sized from the stored dimensions in every state, so the thread never
+ * reflows under the reader when the bytes land.
  */
 function AttachmentImage({
   attachment,
@@ -401,38 +468,11 @@ function AttachmentImage({
 }) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
-  const [source, setSource] = useState<{ uri: string; headers: Record<string, string> } | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  // Only the authenticated URL and its headers are resolved here — the bytes
-  // are the native image loader's job. This used to pull the whole image
-  // through fetch and base64 it on the JS thread; see the note on
-  // getConversationAttachmentSource for what that cost.
-  useEffect(() => {
-    if (!client) {
-      return;
-    }
-    let cancelled = false;
-    void client
-      .getConversationAttachmentSource(conversationId, attachment.id)
-      .then((value) => {
-        if (!cancelled) {
-          if (value) {
-            setSource(value);
-          } else {
-            setFailed(true);
-          }
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setFailed(true);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [attachment.id, client, conversationId]);
+  const auto = (attachment.size_bytes ?? 0) <= AUTO_DOWNLOAD_MAX_BYTES;
+  const { state, download } = useAttachmentFile(client, conversationId, attachment, auto);
+  // A cached copy the image decoder rejects — truncated by a crash mid-write,
+  // or reclaimed half-way by the OS. Dropped so the next tap fetches it fresh.
+  const [corrupt, setCorrupt] = useState(false);
 
   // Capped so a tall photo cannot take the whole thread, and squared off when
   // the server did not record dimensions.
@@ -443,36 +483,70 @@ function AttachmentImage({
   const width = 232;
   const height = Math.max(120, Math.min(320, width / Math.max(0.5, Math.min(2.2, ratio))));
 
-  if (!source || failed) {
+  if (state.status === "cached" && !corrupt) {
     return (
-      <View style={[styles.imagePlaceholder, { width, height }]}>
-        <Ionicons
-          name={failed ? "image-outline" : "cloud-download-outline"}
-          size={22}
-          color={palette.textMuted}
+      <Pressable
+        onPress={() => onOpen?.(attachment, state.uri)}
+        onLongPress={onLongPress}
+        delayLongPress={280}
+        accessibilityRole="imagebutton"
+        accessibilityLabel={displayFileName(attachment.file_name) || "Photo"}
+      >
+        {/* The placeholder stays underneath rather than being swapped out, so
+            the bubble is the right size from the first frame and the photo
+            fades onto it instead of the thread reflowing when it arrives. */}
+        <View style={[styles.imagePlaceholder, { width, height, position: "absolute" }]} />
+        <Image
+          source={{ uri: state.uri }}
+          style={[styles.image, { width, height }]}
+          resizeMode="cover"
+          onError={() => {
+            forgetAttachment(conversationId, attachment);
+            setCorrupt(true);
+          }}
         />
-      </View>
+      </Pressable>
     );
   }
 
+  const downloading = state.status === "downloading";
+  const size = formatFileSize(attachment.size_bytes);
+  const label = downloading
+    ? "Downloading…"
+    : state.status === "failed" || corrupt
+      ? "Couldn't load · Tap to retry"
+      : size
+        ? `Photo · ${size}`
+        : "Tap to download";
+
   return (
     <Pressable
-      onPress={() => onOpen?.(attachment, source.uri)}
+      style={[styles.imagePlaceholder, { width, height }]}
+      onPress={
+        downloading
+          ? undefined
+          : () => {
+              setCorrupt(false);
+              download();
+            }
+      }
       onLongPress={onLongPress}
       delayLongPress={280}
-      accessibilityRole="imagebutton"
-      accessibilityLabel={displayFileName(attachment.file_name) || "Photo"}
+      accessibilityRole="button"
+      accessibilityLabel={downloading ? "Downloading photo" : `Download photo${size ? `, ${size}` : ""}`}
     >
-      {/* The placeholder stays underneath rather than being swapped out, so the
-          bubble is the right size from the first frame and the photo fades onto
-          it instead of the thread reflowing when it arrives. */}
-      <View style={[styles.imagePlaceholder, { width, height, position: "absolute" }]} />
-      <Image
-        source={source}
-        style={[styles.image, { width, height }]}
-        resizeMode="cover"
-        onError={() => setFailed(true)}
-      />
+      <View style={styles.downloadPill}>
+        {downloading ? (
+          <ActivityIndicator size="small" color={palette.white} />
+        ) : (
+          <Ionicons
+            name={state.status === "failed" || corrupt ? "refresh" : "arrow-down"}
+            size={15}
+            color={palette.white}
+          />
+        )}
+        <Text style={styles.downloadPillText}>{label}</Text>
+      </View>
     </Pressable>
   );
 }
@@ -595,5 +669,17 @@ function createStyles(palette: Palette) {
       alignItems: "center",
       justifyContent: "center",
     },
+    // A dark translucent pill, legible on the placeholder in either theme —
+    // the same treatment a photo app gives "tap to download".
+    downloadPill: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      borderRadius: radii.pill,
+      backgroundColor: "rgba(0,0,0,0.55)",
+    },
+    downloadPillText: { fontSize: 12, fontWeight: "600", color: palette.white },
   });
 }

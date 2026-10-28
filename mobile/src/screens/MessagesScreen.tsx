@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AppState,
   FlatList,
@@ -16,7 +16,11 @@ import { AppBackendClient } from "../services/appBackend";
 import { useStuckWatch } from "../services/observability";
 import { SegmentedTabs } from "../components/SegmentedTabs";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
-import { Avatar, BadgeLine, CATEGORY_ICONS, formatAgo } from "../components/BulletinParts";
+import { BadgeLine, CATEGORY_ICONS, formatAgo } from "../components/BulletinParts";
+import { ChatAvatar } from "../components/ChatAvatar";
+import { cachedInbox, forgetThread, saveInbox } from "../services/chatCache";
+import { peekLinkPreview } from "../services/linkPreviews";
+import { firstLink, hostOf, isSameLink } from "../utils/links";
 import { attachmentKindLabel } from "../components/MessageAttachmentCard";
 import { SwipeableRow } from "../components/SwipeableRow";
 import { useDockLift } from "../hooks/useDockLift";
@@ -98,7 +102,22 @@ export function MessagesScreen({
   const { ref: screenRef, onLayout, lift } = useDockLift();
 
   const [segment, setSegment] = useState<Segment>(requestedSegment ?? "chats");
-  const [conversations, setConversations] = useState<Conversation[] | null>(null);
+  // Drawn from the chat cache on the first frame, so the tab opens on the
+  // inbox it showed last time rather than a spinner — on a cold start and on
+  // every return to the tab, since tabs remount. The network replaces it.
+  const [conversations, setConversations] = useState<Conversation[] | null>(() => cachedInbox());
+  /**
+   * Whether `conversations` is something worth writing back: a server answer,
+   * the cache itself, or a local patch to either. Not the empty list a failed
+   * first load falls back to — saving that would open the next launch on an
+   * empty inbox that was never true.
+   */
+  const inboxTrusted = useRef(conversations !== null);
+  useEffect(() => {
+    if (conversations && inboxTrusted.current) {
+      saveInbox(conversations);
+    }
+  }, [conversations]);
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PublicUser[] | null>(null);
@@ -134,12 +153,34 @@ export function MessagesScreen({
     }
   }, [onChatsOpened, segment]);
 
+  /**
+   * Guards against an older inbox read landing after a newer one.
+   *
+   * Two things call `loadInbox`: a 15-second poll and every `message.new`,
+   * `conversation.read` or `conversation.updated` frame off the socket. In a
+   * busy thread those overlap constantly, responses are not ordered, and
+   * `setConversations` took whichever finished last. A read issued before the
+   * newest message therefore overwrote one issued after it, and the row sat on
+   * a preview one or two messages behind the thread until something happened to
+   * trigger another read — which is exactly what it looked like from outside.
+   *
+   * A counter rather than an AbortController: the stale response is already
+   * paid for by the time it is recognised, and all that matters is that it is
+   * not allowed to win.
+   */
+  const inboxSeq = useRef(0);
+
   const loadInbox = useCallback(async () => {
     if (!backendClient) {
       return;
     }
+    const seq = ++inboxSeq.current;
     try {
       const inbox = await backendClient.getConversations();
+      if (seq !== inboxSeq.current) {
+        return;
+      }
+      inboxTrusted.current = true;
       setConversations(inbox);
       // Conversations with something unread, not messages: two unread messages
       // in one thread are one thing to go and read, and that is what the
@@ -165,6 +206,29 @@ export function MessagesScreen({
 
   // A message, a read receipt or a membership change anywhere re-reads the
   // inbox. Cheap, and it means the list is never behind the thread.
+  //
+  // One read at a time, with at most one more queued behind it. Issued per
+  // frame, a busy group's frames arrived faster than a round trip, every
+  // response was superseded by the next request before it landed, and the
+  // list did not move until the stream paused. Queued, every read completes
+  // and the last one always starts after the latest frame.
+  const inboxReading = useRef(false);
+  const inboxReadAgain = useRef(false);
+  const requestInboxRef = useRef<() => void>(() => {});
+  requestInboxRef.current = () => {
+    if (inboxReading.current) {
+      inboxReadAgain.current = true;
+      return;
+    }
+    inboxReading.current = true;
+    void loadInbox().finally(() => {
+      inboxReading.current = false;
+      if (inboxReadAgain.current) {
+        inboxReadAgain.current = false;
+        requestInboxRef.current();
+      }
+    });
+  };
   useEffect(() => {
     return subscribe((event) => {
       if (
@@ -172,10 +236,10 @@ export function MessagesScreen({
         event.kind === "conversation.updated" ||
         event.kind === "conversation.read"
       ) {
-        void loadInbox();
+        requestInboxRef.current();
       }
     });
-  }, [loadInbox, subscribe]);
+  }, [subscribe]);
 
   useEffect(() => {
     const text = query.trim();
@@ -255,6 +319,7 @@ export function MessagesScreen({
         await backendClient.leaveGroup(conversation.id, mode === "leave-and-clear");
       }
       setConversations((current) => (current ?? []).filter((entry) => entry.id !== conversation.id));
+      forgetThread(conversation.id);
       setRowAction(null);
       void loadInbox();
     } catch (e) {
@@ -316,7 +381,7 @@ export function MessagesScreen({
       return who + (caption ? `${label} · ${caption}` : label);
     }
 
-    return who + (last.body?.trim() ?? "");
+    return who + textPreview(last.body?.trim() ?? "");
   };
 
   const renderConversation = ({ item }: { item: Conversation }) => {
@@ -367,8 +432,16 @@ export function MessagesScreen({
       >
         {/* 48 rather than the default 36: an inbox row is the one place the
             picture does identification work, and iMessage's is about this
-            size relative to its two lines of text. */}
-        <Avatar name={title} size={48} />
+            size relative to its two lines of text. The person's own picture,
+            or the group's, over their initials. */}
+        <ChatAvatar
+          client={backendClient}
+          name={title}
+          size={48}
+          userId={isGroup ? null : item.other_user.user_id}
+          conversationId={isGroup ? item.id : null}
+          iconAttachmentId={isGroup ? item.icon_attachment_id : null}
+        />
         <View style={[styles.rowBody, item.other_user_inactive ? styles.rowInactive : undefined]}>
           <View style={styles.rowTop}>
             <View style={styles.rowTitleWrap}>
@@ -595,7 +668,7 @@ export function MessagesScreen({
               }
               renderItem={({ item }) => (
                 <Pressable style={styles.row} onPress={() => onStartConversation(item.userId)}>
-                  <Avatar name={item.title} />
+                  <ChatAvatar client={backendClient} name={item.title} userId={item.userId} />
                   <View style={styles.rowBody}>
                     <Text style={styles.rowName}>{item.title}</Text>
                     {item.user?.saved_contact ? (
@@ -693,11 +766,11 @@ function attachmentPreviewLabel(attachment: MessageAttachment, count: number): s
     case "link":
       return `🔗 ${attachment.link_title || attachment.link_site_name || "Link"}`;
     case "transaction":
-      return "Shared a transaction";
+      return "🧾 Shared a transaction";
     case "merchant":
-      return `Shared ${attachment.location_name || "a merchant"}`;
+      return `📍 Shared ${attachment.location_name || "a merchant"}`;
     case "event":
-      return `Shared ${attachment.event_title || "an event"}`;
+      return `📅 Shared ${attachment.event_title || "an event"}`;
     case "support":
       return "About your message to SFLuv";
     default:
@@ -705,6 +778,23 @@ function attachmentPreviewLabel(attachment: MessageAttachment, count: number): s
       // than blank, so the row is still worth tapping.
       return attachmentKindLabel(attachment.kind);
   }
+}
+
+/**
+ * A text message's one-line preview.
+ *
+ * Links are sent as plain text now and rendered as cards in the thread, so a
+ * message that is nothing but a link would otherwise preview as a raw
+ * "https://…". It reads as the link instead — the page's title if this device
+ * has already fetched the card, its host if not — matching what the push for
+ * the same message said. A link inside a sentence leaves the sentence alone.
+ */
+function textPreview(body: string): string {
+  const link = firstLink(body);
+  if (!link || !isSameLink(body, link)) {
+    return body;
+  }
+  return `🔗 ${peekLinkPreview(link)?.title || hostOf(link)}`;
 }
 
 export function formatSfluvAmount(base?: string | null): string {

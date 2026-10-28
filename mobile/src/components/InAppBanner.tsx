@@ -2,8 +2,10 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
+import type { AppBackendClient } from "../services/appBackend";
 import { getShadows, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
+import { ChatAvatar } from "./ChatAvatar";
 
 /**
  * Notifications while the app is open, drawn over the top bar.
@@ -34,8 +36,27 @@ export type BannerNotification = {
   id: string;
   title: string;
   body: string;
-  /** Left-hand glyph. Defaults to a chat bubble. */
+  /** Left-hand glyph. Defaults to a chat bubble. Ignored when there is an avatar. */
   icon?: keyof typeof Ionicons.glyphMap;
+  /**
+   * Whose face goes on the left, for a message: the sender in a direct thread,
+   * the group's picture in a group. Initials when they have no picture, never
+   * the app's mark — the banner is about a person, not about the app.
+   */
+  avatar?: {
+    name: string;
+    userId?: string;
+    conversationId?: number;
+    iconAttachmentId?: number;
+  };
+  /**
+   * What a screen reader says instead of "title. body" — "Maria said: hello".
+   * Read as one sentence, because "Garden crew. Maria colon camera Photo" is
+   * what the visual text pronounces as.
+   */
+  spoken?: string;
+  /** Read after the label: where it is from, and what tapping does. */
+  hint?: string;
   /** Run when the banner is tapped. The banner closes either way. */
   onPress?: () => void;
 };
@@ -49,11 +70,14 @@ export function InAppBanner({
   notification,
   onDismiss,
   hapticsEnabled,
+  client,
 }: {
   /** The banner to show, or null for none. */
   notification: BannerNotification | null;
   onDismiss: (id: string) => void;
   hapticsEnabled: boolean;
+  /** For the avatar's picture. Without it the avatar is initials. */
+  client: AppBackendClient | null;
 }) {
   const { palette, shadows } = useAppTheme();
   const styles = React.useMemo(() => createStyles(palette, shadows), [palette, shadows]);
@@ -164,16 +188,28 @@ export function InAppBanner({
       <Pressable
         style={styles.card}
         accessibilityRole="button"
-        accessibilityLabel={`${visible.title}. ${visible.body}`}
+        accessibilityLabel={visible.spoken || `${visible.title}. ${visible.body}`}
+        accessibilityHint={visible.hint}
         onPress={() => {
           triggerClickHaptic(hapticsEnabled);
           visible.onPress?.();
           close(visible.id);
         }}
       >
-        <View style={styles.iconWrap}>
-          <Ionicons name={visible.icon ?? "chatbubble"} size={16} color={palette.primaryStrong} />
-        </View>
+        {visible.avatar ? (
+          <ChatAvatar
+            client={client}
+            name={visible.avatar.name}
+            size={36}
+            userId={visible.avatar.userId}
+            conversationId={visible.avatar.conversationId}
+            iconAttachmentId={visible.avatar.iconAttachmentId}
+          />
+        ) : (
+          <View style={styles.iconWrap}>
+            <Ionicons name={visible.icon ?? "chatbubble"} size={16} color={palette.primaryStrong} />
+          </View>
+        )}
         <View style={styles.text}>
           <Text style={styles.title} numberOfLines={1}>
             {visible.title}

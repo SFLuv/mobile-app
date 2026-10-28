@@ -5,6 +5,7 @@ import { Paths } from "expo-file-system";
 import { WebView } from "react-native-webview";
 
 import { AppBackendClient } from "../services/appBackend";
+import { downloadAttachment, localAttachmentUri } from "../services/attachmentCache";
 import { ThemedActivityIndicator } from "./ThemedActivityIndicator";
 import { formatFileSize } from "./MessageAttachmentCard";
 import { cacheAttachment, displayFileName, fileTypeIcon, saveAttachment } from "../utils/attachmentFiles";
@@ -80,10 +81,13 @@ export function AttachmentPreview({
 
     const load = async () => {
       if (kind === "image") {
-        const value = await client.getConversationAttachmentSource(conversationId, attachment.id);
+        // From the attachment cache, which the thread has usually filled
+        // already — opening a photo you can see costs nothing — and which this
+        // fills for the thread when it has not.
+        const uri = localAttachmentUri(conversationId, attachment) ??
+          (await downloadAttachment(client, conversationId, attachment));
         if (!cancelled) {
-          if (value) setSource(value);
-          else setFailed(true);
+          setSource({ uri, headers: {} });
         }
         return;
       }

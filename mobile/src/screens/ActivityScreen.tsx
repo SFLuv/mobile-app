@@ -197,8 +197,12 @@ export function ActivityScreen({
     [faucetAddress, palette, styles, tokenSymbol, visibleTransactions.length],
   );
 
+  // No entrance of its own: this is shown as a tab, and the shell already
+  // slides and fades every tab change. With SwipeBack's full-width entrance as
+  // well, the screen arrived twice over — a push from the right on top of the
+  // tab's own slide. The swipe-back gesture is kept.
   return (
-    <SwipeBack onBack={onBack} style={styles.screen}>
+    <SwipeBack onBack={onBack} style={styles.screen} animateIn={false}>
       {/* Back arrow and search, in the row the wallet pill used to hold. The
           pill named the wallet these transactions belong to, which the wallet
           screen one tap back already says; what this list actually needed was a

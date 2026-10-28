@@ -1,5 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Dimensions, Keyboard, Platform, type KeyboardEvent, type View } from "react-native";
+import { Dimensions, Keyboard, LayoutAnimation, Platform, type KeyboardEvent, type View } from "react-native";
+
+/**
+ * Animates the next layout change on the keyboard's own curve and duration.
+ *
+ * Setting the padding in the same frame the keyboard starts moving was half the
+ * fix: the padding still changed in ONE step, so the composer jumped to its end
+ * position while the keyboard was still sliding up to meet it. This is how
+ * React Native's KeyboardAvoidingView makes its content travel with the
+ * keyboard — iOS's keyboard curve, the event's duration, applied to the layout
+ * update the padding change causes.
+ */
+function followKeyboard(event?: KeyboardEvent) {
+  const duration = event?.duration ?? 0;
+  if (duration <= 0) {
+    return;
+  }
+  LayoutAnimation.configureNext({
+    duration,
+    update: { duration, type: LayoutAnimation.Types.keyboard },
+  });
+}
 
 /**
  * How much bottom padding a screen needs so its own bottom edge sits on top of
@@ -42,6 +63,8 @@ import { Dimensions, Keyboard, Platform, type KeyboardEvent, type View } from "r
  */
 export function useKeyboardLift() {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  // The height last applied, so a repeat event with the same height is ignored.
+  const heightRef = useRef(0);
   /**
    * How far this view's bottom edge sits above the bottom of the display.
    *
@@ -71,17 +94,29 @@ export function useKeyboardLift() {
     // "Will" rather than "Did": the padding changes in the same frame the
     // keyboard starts moving, so the composer travels with it instead of
     // jumping once it has arrived.
+    // Only when the height really changes. Show and change-frame both fire for
+    // one keyboard; a layout animation configured for a change that commits
+    // nothing stays pending and animates whatever lays out next — a message
+    // arriving, say — which is LayoutAnimation's best-known trap.
+    const apply = (next: number, event?: KeyboardEvent) => {
+      if (next === heightRef.current) {
+        return;
+      }
+      heightRef.current = next;
+      followKeyboard(event);
+      setKeyboardHeight(next);
+    };
     const show = Keyboard.addListener("keyboardWillShow", (event: KeyboardEvent) => {
-      setKeyboardHeight(event.endCoordinates.height);
+      apply(event.endCoordinates.height, event);
     });
-    const hide = Keyboard.addListener("keyboardWillHide", () => setKeyboardHeight(0));
+    const hide = Keyboard.addListener("keyboardWillHide", (event: KeyboardEvent) => apply(0, event));
     // A hardware keyboard, or a language switch, changes the height without a
     // show/hide pair.
     const change = Keyboard.addListener("keyboardWillChangeFrame", (event: KeyboardEvent) => {
       const screenHeight = Dimensions.get("window").height;
       // A frame that starts at or below the bottom of the screen is the
       // keyboard leaving, not a resize.
-      setKeyboardHeight(event.endCoordinates.screenY >= screenHeight ? 0 : event.endCoordinates.height);
+      apply(event.endCoordinates.screenY >= screenHeight ? 0 : event.endCoordinates.height, event);
     });
     return () => {
       show.remove();

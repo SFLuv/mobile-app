@@ -1,21 +1,17 @@
-import { File, Paths } from "expo-file-system";
+import { Directory, File, Paths } from "expo-file-system";
 import * as MediaLibrary from "expo-media-library";
 import * as Sharing from "expo-sharing";
 
+import { downloadAttachment } from "../services/attachmentCache";
 import type { AppBackendClient } from "../services/appBackend";
 import type { MessageAttachment } from "../types/bulletin";
 
 /**
  * Getting an attachment off the server and onto the device.
  *
- * ── Why the bytes come down as base64 and not a direct download ─────────────
- *
- * The attachment route is authenticated, and `FileSystem.downloadAsync` cannot
- * carry our session the way `authFetch` does — it would need the token in a
- * header it does not let us set reliably. So the client fetches the bytes
- * through the same path everything else uses and writes them to the cache
- * itself. The cost is holding one file in memory; the cap on an attachment is
- * 25 MB, which is the ceiling on that.
+ * The bytes come down through the attachment cache (services/attachmentCache),
+ * a native download with our auth headers, so nothing the size of a file ever
+ * passes through the JS thread — this used to base64 the whole file there.
  *
  * Two destinations, because they are genuinely different things to a person:
  * a photo belongs in their camera roll, and a document belongs wherever the
@@ -55,29 +51,31 @@ function safeName(attachment: MessageAttachment): string {
   return raw.replace(/[^\w.\- ]+/g, "_").slice(0, 120);
 }
 
-/** Writes an attachment into the app's cache and returns the local file URI. */
+/**
+ * An attachment on disk under the name its sender gave it, for the share sheet
+ * and the previewer.
+ *
+ * Downloaded once into the attachment cache, then copied out under its real
+ * name: the cache keys files by id, and a share sheet offering "12-345.pdf" is
+ * offering something nobody can identify.
+ */
 export async function cacheAttachment(
   client: AppBackendClient,
   conversationId: number,
   attachment: MessageAttachment,
 ): Promise<string> {
-  const dataUri = await client.getConversationAttachmentDataUri(conversationId, attachment.id);
-  if (!dataUri) {
-    throw new Error("That file could not be downloaded.");
+  const cached = await downloadAttachment(client, conversationId, attachment);
+  const named = new Directory(Paths.cache, "named");
+  if (!named.exists) {
+    named.create({ intermediates: true, idempotent: true });
   }
-  const base64 = dataUri.slice(dataUri.indexOf(",") + 1);
-  // expo-file-system 19's object API. The older
-  // `writeAsStringAsync(uri, ...)` helpers moved to `expo-file-system/legacy`
-  // in this major; using the current API rather than the compatibility entry
-  // keeps this off a deprecation path from the day it is written.
-  const file = new File(Paths.cache, safeName(attachment));
+  const file = new File(named, safeName(attachment));
   if (file.exists) {
-    // A second save of the same attachment should overwrite rather than fail,
-    // and rather than accumulate "1-name.pdf" copies in the cache.
+    // Another attachment of the same name, or this one again: replaced rather
+    // than accumulating "1-name.pdf" copies.
     file.delete();
   }
-  file.create();
-  file.write(base64, { encoding: "base64" });
+  new File(cached).copy(file);
   return file.uri;
 }
 

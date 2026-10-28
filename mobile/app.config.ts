@@ -8,6 +8,7 @@ const DEFAULT_EXPO_OWNER = "sfluv";
 const DEFAULT_EXPO_SLUG = "sfluv";
 const DEFAULT_IOS_BUNDLE_IDENTIFIER = "org.sfluv.wallet";
 const DEFAULT_ANDROID_PACKAGE = "org.sfluv.wallet";
+const DEFAULT_APPLE_TEAM_ID = "ARLC5L6F5P";
 const DEFAULT_SENTRY_ORG = "sfluv";
 const DEFAULT_SENTRY_PROJECT = "sfluv-mobile";
 
@@ -67,7 +68,12 @@ const baseConfig = (config: ConfigContext["config"]): ExpoConfig => ({
   //
   // Leaving this at 2.1.0 for a release that adds native code is therefore not
   // an untidy version number; it is a way to brick the installed base.
-  version: "2.2.0",
+  //
+  // 2.3.0 for the same reason: it adds a share extension (expo-share-intent,
+  // whose JS calls a native module 2.2 does not have) and a Notification
+  // Service Extension. JS that imports the share module, delivered over the
+  // air to a 2.2 binary, would fail at import.
+  version: "2.3.0",
   description:
     "This app is a nonprofit-run community hub for managing and spending your SFLUV, redeeming perks, and coordinating verified improvers. Improvers can sign up to complete real-world tasks in San Francisco and be rewarded with SFLUV.",
   scheme: "sfluv",
@@ -106,7 +112,16 @@ const baseConfig = (config: ConfigContext["config"]): ExpoConfig => ({
   ios: {
     supportsTablet: false,
     bundleIdentifier: process.env.IOS_BUNDLE_IDENTIFIER?.trim() || DEFAULT_IOS_BUNDLE_IDENTIFIER,
+    // Required by @bacons/apple-targets to sign the extension targets. The
+    // same team the universal-link association file names.
+    appleTeamId: process.env.APPLE_TEAM_ID?.trim() || DEFAULT_APPLE_TEAM_ID,
     usesAppleSignIn: true,
+    entitlements: {
+      // Lets the Notification Service Extension present chat pushes as
+      // communication notifications: the sender's picture, the app's icon in
+      // the corner. See targets/notification-service.
+      "com.apple.developer.usernotifications.communication": true,
+    },
     config: {
       googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() || "",
     },
@@ -114,6 +129,9 @@ const baseConfig = (config: ConfigContext["config"]): ExpoConfig => ({
     infoPlist: {
       CFBundleDisplayName: "SFLuv",
       ITSAppUsesNonExemptEncryption: false,
+      // Declares that the app donates messaging intents, which iOS requires
+      // before it will draw a communication notification.
+      NSUserActivityTypes: ["INSendMessageIntent"],
     },
   },
   android: {
@@ -171,6 +189,32 @@ const baseConfig = (config: ConfigContext["config"]): ExpoConfig => ({
     "expo-secure-store",
     "expo-updates",
     "expo-web-browser",
+    // Builds targets/* into the iOS project — the Notification Service
+    // Extension. Listed before expo-share-intent: both register EAS app
+    // extensions, and expo-share-intent mishandles its own entry when it lands
+    // at index 0 of that list.
+    "@bacons/apple-targets",
+    [
+      "expo-share-intent",
+      {
+        // "SFLuv" in the share sheet. The target name is set separately — a
+        // patched option, see patches/expo-share-intent+5.1.1.patch — because
+        // by default the label is also the Xcode target name, and "SFLuv"
+        // collides with the app's own target and the extension is skipped.
+        iosShareExtensionName: "SFLuv",
+        iosShareExtensionTargetName: "ShareExtension",
+        // One item at a time: with several, the extension hands off to the
+        // app when the LAST one finishes loading and can drop the rest.
+        iosActivationRules: {
+          NSExtensionActivationSupportsText: true,
+          NSExtensionActivationSupportsWebURLWithMaxCount: 1,
+          NSExtensionActivationSupportsWebPageWithMaxCount: 1,
+          NSExtensionActivationSupportsImageWithMaxCount: 1,
+          NSExtensionActivationSupportsFileWithMaxCount: 1,
+        },
+        androidIntentFilters: ["text/*", "image/*", "*/*"],
+      },
+    ],
   ],
   extra: buildExtra(config),
 });

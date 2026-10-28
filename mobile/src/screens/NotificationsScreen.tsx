@@ -441,8 +441,12 @@ export function NotificationsScreen({
     [busyAction, loadingMore, onOpen, palette, runAction, styles],
   );
 
+  // No entrance of its own: this is shown as a tab, and the shell already
+  // slides and fades every tab change. With SwipeBack's full-width entrance as
+  // well, the screen arrived twice over — a push from the right on top of the
+  // tab's own slide. The swipe-back gesture is kept.
   return (
-    <SwipeBack onBack={onClose} style={styles.screen}>
+    <SwipeBack onBack={onClose} style={styles.screen} animateIn={false}>
       {/* No title here. The app header above already says "Notifications",
           and printing it twice was the screen telling you where you are in a
           place you can already see. The tabs take that space instead, inline

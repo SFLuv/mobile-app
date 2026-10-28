@@ -51,11 +51,37 @@ export type RealtimeEventKind =
   | "notification"
   | "beta.changed";
 
+/**
+ * How the server says a new message should be announced — the same title and
+ * line its push carries, so the in-app banner and the phone's own notification
+ * cannot word one message two ways. Telegram's shape: a group is titled with
+ * the group and the line names who spoke ("Maria: 📷 Photo"); a direct thread
+ * is titled with the person.
+ */
+export type ChatNotice = {
+  title: string;
+  body: string;
+  /** For a screen reader: "Maria said: hello". */
+  spoken: string;
+  sender_id: string;
+  sender_name: string;
+  is_group: boolean;
+  icon_attachment_id?: number;
+  /**
+   * This reader muted the thread, or is not in the chat beta: the message still
+   * arrives and still counts as unread, but nothing should interrupt them —
+   * the same people the push path declines to buzz.
+   */
+  silent?: boolean;
+};
+
 export type RealtimeEvent = {
   kind: RealtimeEventKind | string;
   conversation_id?: number;
   data?: unknown;
   sent_at?: string;
+  /** Set on message.new by servers new enough to send one. */
+  notice?: ChatNotice;
 };
 
 export type RealtimeStatus = "idle" | "connecting" | "open" | "offline";

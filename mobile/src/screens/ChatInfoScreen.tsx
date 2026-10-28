@@ -17,7 +17,8 @@ import { AppBackendClient } from "../services/appBackend";
 import { SwipeBack } from "../components/SwipeBack";
 import { SegmentedTabs } from "../components/SegmentedTabs";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
-import { Avatar, BadgeLine } from "../components/BulletinParts";
+import { BadgeLine } from "../components/BulletinParts";
+import { ChatAvatar } from "../components/ChatAvatar";
 import { formatFileSize } from "../components/MessageAttachmentCard";
 import { AttachmentPreview } from "../components/AttachmentPreview";
 import { displayFileName, fileTypeIcon } from "../utils/attachmentFiles";
@@ -249,9 +250,11 @@ export function ChatInfoScreen({
               {iconUri ? (
                 <Image source={{ uri: iconUri }} style={styles.icon} />
               ) : (
-                <Avatar
+                <ChatAvatar
+                  client={backendClient}
                   name={isGroup ? conversation.title || "Group" : conversation.other_user.public_name}
                   size={76}
+                  userId={isGroup ? null : conversation.other_user.user_id}
                 />
               )}
               {isGroup && canAdminister ? (
@@ -325,6 +328,7 @@ export function ChatInfoScreen({
                   member={member}
                   myRole={myRole}
                   myUserId={myUserId}
+                  client={backendClient}
                   onOpen={() => onOpenMember(member.user.user_id)}
                   onRemove={() =>
                     void run(
@@ -424,6 +428,7 @@ function MemberRow({
   member,
   myRole,
   myUserId,
+  client,
   onOpen,
   onRemove,
   onSetRole,
@@ -431,6 +436,8 @@ function MemberRow({
   member: ConversationMember;
   myRole: ConversationRole;
   myUserId: string;
+  /** For the member's picture; initials without it. */
+  client: AppBackendClient | null;
   onOpen: () => void;
   onRemove: () => void;
   onSetRole: (role: ConversationRole) => void;
@@ -487,7 +494,7 @@ function MemberRow({
 
   return (
     <Pressable style={styles.memberRow} onPress={openMenu}>
-      <Avatar name={member.user.public_name} size={38} />
+      <ChatAvatar client={client} name={member.user.public_name} size={38} userId={member.user.user_id} />
       <View style={styles.memberBody}>
         <Text style={[styles.memberName, member.left && styles.memberLeft]} numberOfLines={1}>
           {member.user.public_name}

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  AppState,
   Easing,
   Image,
   Platform,
@@ -15,6 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
 import { displayFileName, fileTypeIconFor } from "../utils/attachmentFiles";
+import { clipboardHasImage, PasteButton, PastedContent } from "./PasteControl";
 
 /** SFLuv's own mark, so a staged payment names the currency it is in. */
 const SFLUV_MARK = require("../../assets/qr-logo.png");
@@ -75,14 +77,14 @@ export function ChatComposer({
   availableBalance,
   replyingTo,
   onCancelReply,
-  linkPreview,
-  onDismissLinkPreview,
   stagedAttachments,
   onRemoveStaged,
   onCaretChange,
   hapticsEnabled,
   inputRef,
   placeholder = "Message",
+  onPaste,
+  pasteDisabledReason,
 }: {
   mode: ComposerMode;
   onModeChange: (mode: ComposerMode) => void;
@@ -108,21 +110,6 @@ export function ChatComposer({
   replyingTo?: { id: number; senderName: string; body: string } | null;
   onCancelReply?: () => void;
   /**
-   * A link found in the draft, with whatever metadata was scraped.
-   *
-   * Shown above the input, so the sender sees the card the recipient will get
-   * before sending it. Replaces a "Link" button in the attachment tray — see
-   * the note on linkPreview in ChatScreen for why detecting beats asking.
-   */
-  linkPreview?: {
-    url: string;
-    title: string;
-    description: string;
-    imageUrl: string;
-    siteName: string;
-  } | null;
-  onDismissLinkPreview?: () => void;
-  /**
    * Attachments picked but not yet sent, shown as thumbnails above the input.
    *
    * Picking used to send immediately, which left no moment to say anything
@@ -147,9 +134,38 @@ export function ChatComposer({
   hapticsEnabled: boolean;
   inputRef?: React.RefObject<TextInput | null>;
   placeholder?: string;
+  /**
+   * A photo, link or text pasted through the Paste tile or the clipboard chip.
+   * See PasteControl for why the text field's own paste cannot take a photo.
+   */
+  onPaste?: (content: PastedContent) => void;
+  /** Why pasting is unavailable right now — a payment is staged, say. */
+  pasteDisabledReason?: string;
 }) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
+
+  /**
+   * Whether the clipboard is holding a photo, checked when the field gains
+   * focus and whenever the app comes back to the front — the moment somebody
+   * has just copied one somewhere else. Detection only: nothing is read, which
+   * on iOS is what keeps this from asking "Allow paste?".
+   */
+  const [clipboardImage, setClipboardImage] = useState(false);
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!onPaste) {
+      return;
+    }
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active" && focused.current) {
+        void clipboardHasImage().then(setClipboardImage);
+      }
+    });
+    return () => subscription.remove();
+  }, [onPaste]);
+  const showPasteChip =
+    Boolean(onPaste) && !pasteDisabledReason && clipboardImage && mode === "text" && !stagedAttachments?.length;
 
   /**
    * The tray's entrance.
@@ -276,35 +292,33 @@ export function ChatComposer({
         </View>
       ) : null}
 
-      {/* The detected link's card. Above the reply bar so the stack reads
-          bottom-up as: what I am sending, what I am replying to, the input. */}
-      {linkPreview && mode === "text" ? (
-        <View style={styles.linkCard}>
-          {linkPreview.imageUrl ? (
-            <Image source={{ uri: linkPreview.imageUrl }} style={styles.linkImage} resizeMode="cover" />
-          ) : (
-            <View style={[styles.linkImage, styles.linkImageFallback]}>
-              <Ionicons name="link-outline" size={18} color={palette.textMuted} />
-            </View>
-          )}
-          <View style={styles.linkText}>
-            <Text style={styles.linkTitle} numberOfLines={1}>
-              {/* A link whose page we could not read still shows, as the bare
-                  host — so "recognised but not previewable" is visibly
-                  different from "not recognised". */}
-              {linkPreview.title || hostOf(linkPreview.url)}
-            </Text>
-            <Text style={styles.linkMeta} numberOfLines={2}>
-              {linkPreview.description || linkPreview.siteName || linkPreview.url}
-            </Text>
-          </View>
+      {/* A photo on the clipboard, offered where somebody about to paste is
+          already looking. One tap, and on iOS the system's own paste button,
+          so no permission prompt. */}
+      {showPasteChip && onPaste ? (
+        <View style={styles.pasteChip}>
+          <Ionicons name="image-outline" size={15} color={palette.textMuted} />
+          <Text style={styles.pasteChipText} numberOfLines={1}>
+            Photo on your clipboard
+          </Text>
+          <PasteButton
+            withLabel
+            size={{ width: 96, height: 30 }}
+            background={palette.primaryStrong}
+            foreground={palette.white}
+            onPaste={(content) => {
+              setClipboardImage(false);
+              onPaste(content);
+            }}
+            onEmpty={() => setClipboardImage(false)}
+          />
           <Pressable
-            onPress={onDismissLinkPreview}
             hitSlop={10}
+            onPress={() => setClipboardImage(false)}
             accessibilityRole="button"
-            accessibilityLabel="Don't send a link preview"
+            accessibilityLabel="Don't paste"
           >
-            <Ionicons name="close" size={16} color={palette.textMuted} />
+            <Ionicons name="close" size={15} color={palette.textMuted} />
           </Pressable>
         </View>
       ) : null}
@@ -362,6 +376,27 @@ export function ChatComposer({
                 </Text>
               </Pressable>
             ))}
+            {onPaste ? (
+              <View
+                style={[styles.trayOption, pasteDisabledReason ? styles.trayOptionDisabled : undefined]}
+                pointerEvents={pasteDisabledReason ? "none" : "auto"}
+                accessibilityHint={pasteDisabledReason}
+              >
+                <PasteButton
+                  size={{ width: 48, height: 48 }}
+                  style={{ marginBottom: 6 }}
+                  background={palette.primaryMuted}
+                  foreground={palette.primaryStrong}
+                  onPaste={(content) => {
+                    triggerClickHaptic(hapticsEnabled);
+                    onPaste(content);
+                  }}
+                />
+                <Text style={styles.trayLabel} numberOfLines={2}>
+                  Paste
+                </Text>
+              </View>
+            ) : null}
           </View>
           <Pressable
             style={styles.trayClose}
@@ -391,6 +426,15 @@ export function ChatComposer({
             value={draft}
             onChangeText={onDraftChange}
             onSelectionChange={(event) => onCaretChange?.(event.nativeEvent.selection.start)}
+            onFocus={() => {
+              focused.current = true;
+              if (onPaste) {
+                void clipboardHasImage().then(setClipboardImage);
+              }
+            }}
+            onBlur={() => {
+              focused.current = false;
+            }}
             placeholder={placeholder}
             placeholderTextColor={palette.textMuted}
             multiline
@@ -560,15 +604,6 @@ function AmountPad({
   );
 }
 
-/** The host of a URL, for a card with no scraped title. */
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
-}
-
 function createStyles(palette: Palette) {
   return StyleSheet.create({
     wrap: {
@@ -687,23 +722,6 @@ function createStyles(palette: Palette) {
       alignItems: "center",
       justifyContent: "center",
     },
-    linkCard: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: spacing.sm,
-      marginHorizontal: spacing.md,
-      marginTop: spacing.sm,
-      padding: spacing.xs,
-      borderRadius: radii.md,
-      backgroundColor: palette.surface,
-      borderWidth: 1,
-      borderColor: palette.border,
-    },
-    linkImage: { width: 44, height: 44, borderRadius: radii.sm, backgroundColor: palette.surfaceStrong },
-    linkImageFallback: { alignItems: "center", justifyContent: "center" },
-    linkText: { flex: 1 },
-    linkTitle: { fontSize: 13, fontWeight: "600", color: palette.text },
-    linkMeta: { fontSize: 12, color: palette.textMuted, marginTop: 1 },
     replyBar: {
       flexDirection: "row",
       alignItems: "center",
@@ -737,6 +755,21 @@ function createStyles(palette: Palette) {
       marginBottom: 6,
     },
     trayLabel: { fontSize: 11, color: palette.textMuted, textAlign: "center" },
+    pasteChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      marginHorizontal: spacing.md,
+      marginTop: spacing.sm,
+      paddingLeft: spacing.sm,
+      paddingRight: spacing.sm,
+      paddingVertical: 5,
+      borderRadius: radii.md,
+      backgroundColor: palette.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: palette.border,
+    },
+    pasteChipText: { flex: 1, fontSize: 13, color: palette.text },
     trayClose: { alignItems: "center", paddingVertical: spacing.sm },
     trayCloseText: { fontSize: 14, color: palette.textMuted, fontWeight: "600" },
 

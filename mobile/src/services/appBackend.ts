@@ -4309,10 +4309,12 @@ export class AppBackendClient {
     if (!headers) {
       return null;
     }
-    return {
-      uri: endpoint(`/conversations/${conversationId}/attachments/${attachmentId}`),
-      headers,
-    };
+    return { uri: this.conversationAttachmentURL(conversationId, attachmentId), headers };
+  }
+
+  /** Where an attachment's bytes live. Pair with getImageAuthHeaders. */
+  conversationAttachmentURL(conversationId: number, attachmentId: number): string {
+    return endpoint(`/conversations/${conversationId}/attachments/${attachmentId}`);
   }
 
   /**
@@ -4380,9 +4382,10 @@ export class AppBackendClient {
   /**
    * A URL's metadata, without posting anything.
    *
-   * Used by the composer to show the card before the message is sent. Returns
-   * empty strings rather than failing when the page is unreachable, so a link
-   * that cannot be previewed is still sendable as a plain link.
+   * What a link card in the thread is drawn from: links are sent as plain
+   * text and every client renders their cards itself, through the cache in
+   * services/linkPreviews.ts. Returns empty strings rather than failing when
+   * the page is unreachable, and the card then shows the bare URL.
    */
   previewLink(url: string): Promise<{
     url: string;

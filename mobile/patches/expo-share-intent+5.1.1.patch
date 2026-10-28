@@ -1,0 +1,63 @@
+diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
+index 0153c89..0cabe9d 100644
+--- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
++++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
+@@ -66,13 +66,20 @@ class ExpoShareIntentModule : Module() {
+                     "filePath" to instance?.getAbsolutePath(uri),
+                 )
+             }
+-            val queryResult: Cursor = resolver.query(uri, null, null, null, null)!!
+-            queryResult.moveToFirst()
+-            val fileName = queryResult.getString(queryResult.getColumnIndex(OpenableColumns.DISPLAY_NAME))
+-            val fileSize = queryResult.getString(queryResult.getColumnIndex(OpenableColumns.SIZE))
+-            queryResult.close()
++            // SFLuv patch: a provider may return no cursor, an empty one, or one
++            // without these columns. Each of those crashed the app here.
++            var fileName: String? = null
++            var fileSize: String? = null
++            resolver.query(uri, null, null, null, null)?.use { queryResult ->
++                if (queryResult.moveToFirst()) {
++                    val nameIndex = queryResult.getColumnIndex(OpenableColumns.DISPLAY_NAME)
++                    val sizeIndex = queryResult.getColumnIndex(OpenableColumns.SIZE)
++                    if (nameIndex >= 0) fileName = queryResult.getString(nameIndex)
++                    if (sizeIndex >= 0) fileSize = queryResult.getString(sizeIndex)
++                }
++            }
+ 
+-            val mimeType = resolver.getType(uri)!!
++            val mimeType = resolver.getType(uri) ?: "application/octet-stream"
+ 
+             var mediaWidth: String? = null;
+             var mediaHeight: String? = null;
+@@ -301,7 +308,14 @@ class ExpoShareIntentModule : Module() {
+                     val columnIndex = cursor.getColumnIndexOrThrow(column)
+                     val fileName = cursor.getString(columnIndex)
+                     Log.i("FileDirectory", "File name: $fileName")
+-                    targetFile = File(context.cacheDir, fileName)
++                    // SFLuv patch: the display name is chosen by the sharing app.
++                    // Only its last path segment may name a file here, or a name
++                    // like "../shared_prefs/x.xml" writes outside the cache.
++                    val safeName = fileName?.let { File(it).name }
++                        ?.takeIf { it.isNotBlank() && it != "." && it != ".." }
++                    if (safeName != null) {
++                        targetFile = File(context.cacheDir, safeName)
++                    }
+                 }
+             } finally {
+                 cursor?.close()
+diff --git a/node_modules/expo-share-intent/plugin/build/ios/constants.js b/node_modules/expo-share-intent/plugin/build/ios/constants.js
+index b147600..e2721b8 100644
+--- a/node_modules/expo-share-intent/plugin/build/ios/constants.js
++++ b/node_modules/expo-share-intent/plugin/build/ios/constants.js
+@@ -8,6 +8,11 @@ exports.shareExtensionStoryBoardFileName = "MainInterface.storyboard";
+ exports.shareExtensionViewControllerFileName = "ShareViewController.swift";
+ exports.shareExtensionPreprocessorFileName = "ShareExtensionPreprocessor.js";
+ const getShareExtensionName = (parameters) => {
++    // SFLuv patch: a target name separate from the share-sheet label. Without
++    // it the label must also be the target name, and an extension labelled
++    // with the app's own name collides with the app's target and is skipped.
++    if (parameters?.iosShareExtensionTargetName)
++        return parameters.iosShareExtensionTargetName.replace(/[^a-zA-Z0-9]/g, "");
+     if (!parameters?.iosShareExtensionName)
+         return shareExtensionName;
+     return parameters.iosShareExtensionName.replace(/[^a-zA-Z0-9]/g, "");

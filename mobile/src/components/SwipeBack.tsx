@@ -99,9 +99,17 @@ export const SwipeBack = forwardRef<
         useNativeDriver: true,
       }).start(() => {
         onBackRef.current();
-        // For a future mount: the next time this screen appears it should start
-        // from its entrance position, not mid-exit.
-        translateX.setValue(animateIn ? screenWidth : 0);
+        if (animateIn) {
+          // For a future mount: the next time this screen appears it should
+          // start from its entrance position, not mid-exit.
+          translateX.setValue(screenWidth);
+        } else {
+          // No entrance to replay, so if this screen stays mounted it has to
+          // come back to rest by itself. Not in this frame: the parent's
+          // unmount lands a frame or two after onBack, and resetting at once
+          // drew the dismissed screen back in the middle for that frame.
+          setTimeout(() => translateX.setValue(0), 300);
+        }
         dismissing.current = false;
       });
     },
