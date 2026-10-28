@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from "react-native";
 import { SwipeBack } from "../components/SwipeBack";
@@ -36,6 +36,12 @@ type Props = {
   canLoadMore: boolean;
   onRefresh: () => Promise<void>;
   onLoadMore: () => Promise<void>;
+  /**
+   * A transaction to open as soon as it is in the list: the one a payment
+   * notification was about. Cleared through onFocusHandled once shown.
+   */
+  focusTxHash?: string | null;
+  onFocusHandled?: () => void;
 };
 
 function formatDate(timestamp: number): string {
@@ -66,6 +72,8 @@ export function ActivityScreen({
   onRefresh,
   onLoadMore,
   onShareTransaction,
+  focusTxHash,
+  onFocusHandled,
 }: Props) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
@@ -118,6 +126,21 @@ export function ActivityScreen({
     if (!term) return decoratedTransactions;
     return decoratedTransactions.filter((details) => haystackFor(details).includes(term));
   }, [decoratedTransactions, haystackFor, query]);
+
+  // Opened from a payment notification: show that payment, once it has
+  // loaded. A push can arrive before the indexer has the transfer, so this
+  // waits on the list rather than giving up on the first render.
+  useEffect(() => {
+    if (!focusTxHash) {
+      return;
+    }
+    const wanted = focusTxHash.toLowerCase();
+    const match = decoratedTransactions.find((details) => details.transaction.hash?.toLowerCase() === wanted);
+    if (match) {
+      setSelectedTransaction(match);
+      onFocusHandled?.();
+    }
+  }, [decoratedTransactions, focusTxHash, onFocusHandled]);
 
   // onEndReached fires repeatedly on a fast scroll, and will fire again before
   // an in-flight page resolves. The ref is what stops three identical requests

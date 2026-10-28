@@ -19,7 +19,8 @@ export type NotificationTarget =
   // volunteer and an improver can all owe a W-9. It opens the wallet, which
   // every signed-in user can reach.
   | { kind: "tax" }
-  | { kind: "activity" }
+  // A payment push carries its transaction, which Activity then opens.
+  | { kind: "activity"; txHash?: string }
   // A direct message, opened at its thread.
   | { kind: "conversation"; conversationId: number }
   // Something about the person's own Bulletin activity (e.g. moderation).
@@ -89,7 +90,8 @@ export function targetFromData(data: Record<string, unknown> | undefined): Notif
     return { kind: "tax" };
   }
   if (type === "transaction" || type === "wallet_activity" || type === "reward") {
-    return { kind: "activity" };
+    const txHash = asString(data?.hash);
+    return txHash ? { kind: "activity", txHash } : { kind: "activity" };
   }
   if (type === "bulletin_message") {
     const conversationId = Number(asString(data?.conversation_id));

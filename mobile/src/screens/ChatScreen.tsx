@@ -1529,11 +1529,15 @@ export function ChatScreen({
                 // a sentence, the sentence has to survive — so the text renders
                 // as a normal bubble and the card goes under it, rather than the
                 // text becoming a caption clamped under an image.
+                //
+                // Compared loosely: the server stores its normalized form
+                // ("https://sfluv.org/"), so "Sfluv.org" as typed never matched
+                // exactly and the message showed as a bubble AND a card.
                 const soleLink =
                   attachments.length === 1 &&
                   attachments[0].kind === "link" &&
                   Boolean(attachments[0].link_url) &&
-                  body.replace(attachments[0].link_url ?? "", "").trim() === "";
+                  isSameLink(body, attachments[0].link_url ?? "");
 
                 return (
                   <View style={styles.messageStack}>
@@ -2441,6 +2445,21 @@ function formatMessageStamp(at: string): string {
  * still send it as text; a false positive makes us fetch a URL that somebody
  * did not share, which is the worse error.
  */
+/**
+ * Whether a message's text is nothing but this link, as a person would judge
+ * it: case, scheme, "www." and a trailing slash do not count.
+ */
+function isSameLink(text: string, url: string): boolean {
+  const bare = (value: string) =>
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .replace(/\/+$/, "");
+  return bare(text) !== "" && bare(text) === bare(url);
+}
+
 function firstURL(text: string): string | null {
   const match = text.match(
     /(?:https?:\/\/[^\s<>"']+)|(?:\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?:\/[^\s<>"']*)?)/i,

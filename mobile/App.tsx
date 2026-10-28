@@ -1766,6 +1766,16 @@ function WalletAppShellContent({
   const [activityTransactions, setActivityTransactions] = useState<AppTransaction[]>([]);
   const [walletTransactionsLoaded, setWalletTransactionsLoaded] = useState(false);
   const [activityTransactionsLoaded, setActivityTransactionsLoaded] = useState(false);
+  // The payment a tapped notification was about, for Activity to open.
+  const [activityFocusHash, setActivityFocusHash] = useState<string | null>(null);
+  const clearActivityFocus = useCallback(() => setActivityFocusHash(null), []);
+  // Leaving Activity drops it, so a payment that never showed up (say, on the
+  // other wallet) does not pop open on some later visit.
+  useEffect(() => {
+    if (tab !== "activity") {
+      setActivityFocusHash(null);
+    }
+  }, [tab]);
   const [contacts, setContacts] = useState<AppContact[]>([]);
   const [locations, setLocations] = useState<AppLocation[]>([]);
   const [ownedLocations, setOwnedLocations] = useState<AppOwnedLocation[]>([]);
@@ -3616,6 +3626,7 @@ function WalletAppShellContent({
           return;
         case "activity":
           setTab("activity");
+          setActivityFocusHash(target.txHash ?? null);
           return;
         case "conversation":
           // Same shape as the role panels above: a push can outlive the switch
@@ -6617,6 +6628,8 @@ function WalletAppShellContent({
               merchantLabels={merchantLabelsByAddress}
               activeAddress={smartAddress}
               selectedWalletLabel={selectedWalletLabel}
+              focusTxHash={activityFocusHash}
+              onFocusHandled={clearActivityFocus}
               onBack={() => {
                 setTab("wallet");
                 setWalletPane("home");

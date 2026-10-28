@@ -534,7 +534,10 @@ function createStyles(palette: Palette) {
       alignItems: "center",
       justifyContent: "center",
     },
-    cardBody: { flex: 1 },
+    // Sized by its text, then free to grow and to wrap. It was `flex: 1`,
+    // which in a card with no width of its own resolves to zero: the file
+    // card showed its icon and download button with no name between them.
+    cardBody: { flexGrow: 1, flexShrink: 1 },
     cardTitle: { fontSize: 14, fontWeight: "600", color: palette.text },
     cardMeta: { fontSize: 12, color: palette.textMuted, marginTop: 2 },
     // The reference-card shape: a kicker banner saying WHAT this is, then the
