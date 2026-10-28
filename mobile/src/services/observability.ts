@@ -182,6 +182,13 @@ export function initSentry(): void {
     sendDefaultPii: false,
     tracesSampleRate: 0,
     maxBreadcrumbs: 60,
+    /*
+     * The native iOS SDK records its own copy of every request, after
+     * beforeBreadcrumb has run, so the filter below cannot drop the Celo
+     * balance poll from it. Off; the JavaScript side still records failures.
+     * The option is read natively and is not in the React Native types.
+     */
+    ...({ enableNetworkBreadcrumbs: false } as object),
     beforeSend: (event) => (isExpected(event) ? null : scrubEvent(event)),
     beforeBreadcrumb: (breadcrumb) => {
       if (isRoutineAutoRequest(breadcrumb)) {
@@ -460,15 +467,4 @@ export function reportHandledError(where: string, error: unknown, context?: Reco
       Sentry.captureMessage(`${where}: ${message}`);
     }
   });
-}
-
-/**
- * Settings → About, long-press the version: proves the pipeline end to end.
- * The issue should show this function, in this file, at this line.
- */
-export function sendTestError(): void {
-  if (!enabled()) {
-    return;
-  }
-  Sentry.captureException(new Error(`Sentry test error (${mobileConfig.sentryEnvironment})`));
 }

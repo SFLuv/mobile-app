@@ -33,10 +33,12 @@ trail bottom-up.
 | Request failure | A backend answer the app treats as an error (`throwRequestError`), or a failed `pm_sponsorUserOperation` / `eth_sendUserOperation` | Method, route, status |
 | Still waiting | A watched wait passes 15s (payments: 150s) | What was being waited on |
 | Handled error | Errors the app catches and shows as a message, where wired with `reportHandledError` | Where + message |
-| Test error | Settings → long-press the version line at the bottom | — |
 
 Every event carries the trail: tab changes, notification taps, each request
 (method, route, status, duration, request id) and each watched wait.
+Successful network calls the SDK sees on its own (mostly the Celo balance poll,
+every two seconds) are left out so they do not push the useful steps off the
+end; failed ones stay.
 
 Watched waits: notifications feed, activity list, opening a chat, sending a
 chat message, the chat list, starting a conversation, and payments. Add one
@@ -101,13 +103,15 @@ ignored).
 
 ## Checking it works
 
-On a fresh preview build:
+There is no in-app test button any more (the long-press on the Settings version
+line was removed after the first check in October 2026). On a fresh build, make
+something fail on purpose, for example message someone outside the chat beta,
+then:
 
-1. Settings → long-press the version line → "Test error sent".
-2. `sentry_issues` shows "Sentry test error (preview)" within a minute.
-3. `sentry_issue` on it shows `observability.ts` with a real line number, the
-   right release and build, and the Privy DID as the user, nothing else.
-4. Airplane mode, then use the app: no new issues.
+1. `sentry_issues` for the environment and version shows it within a minute.
+2. `sentry_issue` on it shows real file names and line numbers, the right
+   release and build, and the Privy DID as the user, nothing else.
+3. Airplane mode, then use the app: no new issues.
 
 ## Two build traps (from the first attempt, September 2026)
 
