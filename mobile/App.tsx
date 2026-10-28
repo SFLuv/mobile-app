@@ -3524,7 +3524,11 @@ function WalletAppShellContent({
           setProfileGateOpen(true);
           return;
         }
-        reportHandledError("messages: start conversation", error);
+        // An answer, not a fault: the other person does not have chat yet,
+        // and the message says what to do about it.
+        if (!(error instanceof BulletinRequestError && error.code === "chat_not_enabled")) {
+          reportHandledError("messages: start conversation", error);
+        }
         showToast(
           error instanceof BulletinRequestError ? error.message : "Couldn't start a conversation.",
           "error",
