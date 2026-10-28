@@ -184,6 +184,9 @@ export function initSentry(): void {
     maxBreadcrumbs: 60,
     beforeSend: (event) => (isExpected(event) ? null : scrubEvent(event)),
     beforeBreadcrumb: (breadcrumb) => {
+      if (isRoutineAutoRequest(breadcrumb)) {
+        return null;
+      }
       if (breadcrumb.message) {
         breadcrumb.message = redact(breadcrumb.message);
       }
@@ -278,6 +281,24 @@ export type RequestRecord = {
   /** Set when the request never got a response. */
   failure?: string;
 };
+
+/**
+ * The SDK records every fetch and XHR on its own. Successful ones are mostly
+ * the balance poll to the Celo node every two seconds, which pushed everything
+ * useful out of the trail; backend calls already get a richer step from
+ * recordRequest. Failed ones are kept.
+ */
+function isRoutineAutoRequest(breadcrumb: Sentry.Breadcrumb): boolean {
+  if (breadcrumb.category !== "http" && breadcrumb.category !== "xhr" && breadcrumb.category !== "fetch") {
+    return false;
+  }
+  const data = breadcrumb.data;
+  if (!data || typeof data.url !== "string" || "request_id" in data) {
+    return false;
+  }
+  const status = typeof data.status_code === "number" ? data.status_code : 0;
+  return status >= 200 && status < 400;
+}
 
 /**
  * One step in the trail an issue carries. Method, target, status, timing and
