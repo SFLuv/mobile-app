@@ -3620,19 +3620,28 @@ function WalletAppShellContent({
   useEffect(() => {
     tabVisitsRef.current = [...tabVisitsRef.current.slice(-9), { tab, at: Date.now() }];
   }, [tab]);
+  // Recent dock taps. Leaving a tab by tapping the dock is the person moving
+  // on, not a bounce, so that visit counts as landed however short it was:
+  // tapping Activity then Messages within 400 ms was reported as a dead tap.
+  const dockTapsRef = useRef<number[]>([]);
   const landedOn = useCallback((expected: string, since: number) => {
     const visits = tabVisitsRef.current;
     return visits.some((visit, index) => {
       if (visit.tab !== expected || visit.at < since - 50) {
         return false;
       }
-      const leftAt = visits[index + 1]?.at ?? Date.now();
-      return leftAt - visit.at >= TAB_SETTLED_MS;
+      const next = visits[index + 1];
+      const leftAt = next?.at ?? Date.now();
+      if (leftAt - visit.at >= TAB_SETTLED_MS) {
+        return true;
+      }
+      return next !== undefined && dockTapsRef.current.some((at) => at >= visit.at && at <= leftAt);
     });
   }, []);
 
   const handleDockSelect = useCallback(
     (key: DockTabKey) => {
+      dockTapsRef.current = [...dockTapsRef.current.slice(-9), Date.now()];
       const expected = key === "participate" ? (participateTargets.length === 1 ? participateTargets[0] : null) : key;
       if (expected && expected !== tab) {
         const tappedAt = Date.now();
