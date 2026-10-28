@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { ethers } from "ethers";
-import { Animated, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { Alert, Animated, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import {
   AppCredentialRequest,
   AppGlobalCredentialType,
@@ -14,6 +14,8 @@ import {
   AppWallet,
 } from "../types/app";
 import { SegmentedTabs } from "../components/SegmentedTabs";
+import { getClientMetadata } from "../services/clientMetadata";
+import { sendTestError } from "../services/observability";
 import {
   DEFAULT_VOLUNTEER_REMINDER_HOURS,
   VOLUNTEER_REMINDER_HOUR_OPTIONS,
@@ -1439,6 +1441,23 @@ export function SettingsScreen({
           ) : null}
         </>
       ) : null}
+        {/*
+          Which build this is, for support. Long-pressing it sends a test error
+          to Sentry, the end-to-end check in docs/SENTRY.md; nobody finds it by
+          accident and it does nothing a user would notice.
+        */}
+        <Pressable
+          onLongPress={() => {
+            sendTestError();
+            Alert.alert("Test error sent", "Check Sentry for \"Sentry test error\".");
+          }}
+          delayLongPress={1500}
+          accessibilityRole="text"
+        >
+          <Text style={styles.versionFooter}>
+            Version {getClientMetadata().version} (build {getClientMetadata().buildLabel})
+          </Text>
+        </Pressable>
       </ScrollView>
       <Modal
         visible={deleteConfirmVisible}
@@ -2182,6 +2201,12 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       color: palette.danger,
       fontWeight: "800",
       fontSize: 15,
+    },
+    versionFooter: {
+      color: palette.textMuted,
+      fontSize: 12,
+      textAlign: "center",
+      paddingVertical: spacing.md,
     },
     dangerZoneHeader: {
       flexDirection: "row",

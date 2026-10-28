@@ -1,4 +1,12 @@
+import { REQUEST_ID_HEADER, newRequestId, recordRequest, reportRequestFailure } from "../services/observability";
+
 export type UserOp = Record<string, unknown>;
+
+/**
+ * Receipt polling asks dozens of times per payment and expects "not yet", so
+ * only these methods report failures; the rest leave steps in the trail.
+ */
+const REPORTED_RPC_METHODS = new Set(["pm_sponsorUserOperation", "eth_sendUserOperation"]);
 
 const CW_ENGINE_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -43,14 +51,31 @@ export class BackendClient {
     if (accessToken) {
       headers["Access-Token"] = accessToken;
     }
-    const res = await fetchWithTimeout(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-    }, CW_ENGINE_REQUEST_TIMEOUT_MS);
+    const requestId = newRequestId();
+    headers[REQUEST_ID_HEADER] = requestId;
+    const startedAt = Date.now();
+    const base = { kind: "rpc" as const, method: "POST", target: method, requestId };
+
+    let res: Response;
+    try {
+      res = await fetchWithTimeout(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      }, CW_ENGINE_REQUEST_TIMEOUT_MS);
+    } catch (error) {
+      const failure = (error as Error)?.name === "AbortError" ? "timed out" : "no response";
+      recordRequest({ ...base, durationMs: Date.now() - startedAt, failure });
+      throw error;
+    }
 
     const body = await res.json();
+    const record = { ...base, status: res.status, durationMs: Date.now() - startedAt };
+    recordRequest(body.error ? { ...record, failure: "rpc error" } : record);
     if (body.error) {
+      if (REPORTED_RPC_METHODS.has(method)) {
+        reportRequestFailure({ ...record, failure: "rpc error", detail: body.error.message });
+      }
       throw new Error(body.error.message || "RPC error");
     }
 

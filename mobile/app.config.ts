@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { withSentry } from "@sentry/react-native/expo";
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
 const DEFAULT_EAS_PROJECT_ID = "457c71a1-29cd-4e60-9be8-04a6e0a6194a";
@@ -7,6 +8,8 @@ const DEFAULT_EXPO_OWNER = "sfluv";
 const DEFAULT_EXPO_SLUG = "sfluv";
 const DEFAULT_IOS_BUNDLE_IDENTIFIER = "org.sfluv.wallet";
 const DEFAULT_ANDROID_PACKAGE = "org.sfluv.wallet";
+const DEFAULT_SENTRY_ORG = "sfluv";
+const DEFAULT_SENTRY_PROJECT = "sfluv-mobile";
 
 function buildExtra(config: ConfigContext["config"]): ExpoConfig["extra"] {
   const baseExtra =
@@ -47,7 +50,7 @@ const googleServicesFile = resolveGoogleServicesFile();
 const expoOwner = process.env.EXPO_OWNER?.trim() || DEFAULT_EXPO_OWNER;
 const expoSlug = process.env.EXPO_SLUG?.trim() || DEFAULT_EXPO_SLUG;
 
-export default ({ config }: ConfigContext): ExpoConfig => ({
+const baseConfig = (config: ConfigContext["config"]): ExpoConfig => ({
   ...config,
   name: "SFLuv",
   slug: expoSlug,
@@ -171,3 +174,21 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   extra: buildExtra(config),
 });
+
+/*
+ * withSentry is a config plugin, not a config wrapper: it attaches the native
+ * mods that write `sentry.properties` and the source-map upload step into the
+ * generated iOS and Android projects. It does not appear in `plugins` above;
+ * `expo config --type prebuild` lists it under _internal.pluginHistory.
+ *
+ * The upload reads SENTRY_AUTH_TOKEN from the environment: `mobile/.env`
+ * locally, an EAS secret in the cloud. It is deliberately never inlined here,
+ * because the plugin writes its options into the shipped app. Without it the
+ * build still succeeds and stack traces stay minified.
+ */
+export default ({ config }: ConfigContext): ExpoConfig =>
+  withSentry(baseConfig(config), {
+    url: "https://sentry.io/",
+    organization: process.env.SENTRY_ORG?.trim() || DEFAULT_SENTRY_ORG,
+    project: process.env.SENTRY_PROJECT?.trim() || DEFAULT_SENTRY_PROJECT,
+  });

@@ -70,6 +70,15 @@ import { W9CompleteModal } from "./src/components/W9CompleteModal";
 import { W9TierModal } from "./src/components/W9TierModal";
 import { mobileConfig } from "./src/config";
 import {
+  initSentry,
+  recordStep,
+  reportHandledError,
+  syncSentryUser,
+  useStuckWatch,
+  watchForStuck,
+  wrapRoot,
+} from "./src/services/observability";
+import {
   clearCachedRouteDiscovery,
   createSmartWalletServiceFromSigner,
   RouteCandidate,
@@ -149,6 +158,12 @@ import {
   useAppTheme,
   chromeLabel,
 } from "./src/theme";
+
+/*
+ * At module scope, before anything renders, so a crash during startup is still
+ * reported. Without a DSN it does nothing; see src/services/observability.ts.
+ */
+initSentry();
 
 type RuntimeState = {
   loading: boolean;
@@ -1720,6 +1735,10 @@ function WalletAppShellContent({
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const [tab, setTab] = useState<Tab>("wallet");
+  // Every screen change goes into the trail a Sentry issue carries.
+  useEffect(() => {
+    recordStep("navigation", `tab: ${tab}`);
+  }, [tab]);
   const [walletPane, setWalletPane] = useState<WalletPane>("home");
   const walletPaneSlideDistance = Dimensions.get("window").width;
   const walletPaneTranslateX = useRef(new Animated.Value(walletPaneSlideDistance)).current;
@@ -3468,6 +3487,7 @@ function WalletAppShellContent({
       if (!backendClient) {
         return;
       }
+      const finished = watchForStuck("messages: start conversation");
       try {
         const conversation = await backendClient.startConversation(userId, null);
         setNewMessageRoute(null);
@@ -3479,10 +3499,13 @@ function WalletAppShellContent({
           setProfileGateOpen(true);
           return;
         }
+        reportHandledError("messages: start conversation", error);
         showToast(
           error instanceof BulletinRequestError ? error.message : "Couldn't start a conversation.",
           "error",
         );
+      } finally {
+        finished();
       }
     },
     [backendClient, openChat],
@@ -3696,6 +3719,11 @@ function WalletAppShellContent({
       unseenCount: notificationFeed.unseenCount + derived.length,
     };
   }, [improverNotifications, notificationFeed]);
+
+  // Spinners that should never spin for long: a feed or a history that never
+  // arrives is reported rather than left as a screen that "loads forever".
+  useStuckWatch("notifications: load feed", tab === "notifications" && notificationsLoading && !screenNotificationFeed);
+  useStuckWatch("activity: load transactions", tab === "activity" && !activityTransactionsLoaded);
 
   /**
    * What the bell's badge counts.
@@ -5455,12 +5483,29 @@ function WalletAppShellContent({
     }
   };
 
+  /**
+   * A transfer, timed and reported. Confirmation polls for up to two minutes,
+   * so "stuck" here means well past that; a failure the user sees as an error
+   * is reported with the trail of UserOperation steps that led to it.
+   */
+  const sendWatched = async <T,>(label: string, send: () => Promise<T>): Promise<T> => {
+    const finished = watchForStuck(label, undefined, 150_000);
+    try {
+      return await send();
+    } catch (error) {
+      reportHandledError(label, error);
+      throw error;
+    } finally {
+      finished();
+    }
+  };
+
   const handleSend = async (recipient: string, amount: string, unit: "wei" | "token", memo: string) => {
     if (!runtime.service) {
       throw new Error("Wallet signer is not ready.");
     }
 
-    const result = await runtime.service.sendSFLUV(recipient, amount, unit);
+    const result = await sendWatched("payment: send", () => runtime.service!.sendSFLUV(recipient, amount, unit));
     const chatPayment = pendingChatPaymentRef.current;
     if (
       chatPayment &&
@@ -5526,7 +5571,7 @@ function WalletAppShellContent({
     pendingChatPaymentRef.current = null;
     chatPaymentSentRef.current = true;
 
-    const result = await runtime.service.sendSFLUV(payAddress, amount, "token");
+    const result = await sendWatched("payment: send in chat", () => runtime.service!.sendSFLUV(payAddress, amount, "token"));
     if (!result.txHash) {
       throw new Error("The transfer didn't go through. Nothing was sent.");
     }
@@ -6667,6 +6712,7 @@ function WalletAppShellContent({
                 // so a history row lands in the same place tapping the real
                 // push would have.
                 const target = targetFromData(item.data);
+                recordStep("notification", "opened from the list", { target: target.kind });
                 navigateToNotificationTarget(target);
                 resolveNotificationTarget(target);
               }}
@@ -7358,6 +7404,11 @@ function PrivyWalletApp({
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const { user, isReady, logout, getAccessToken } = usePrivy();
+  // Ties Sentry events to the signed-in Privy DID, and unties them when Privy
+  // clears the user: logout, session expiry and account deletion alike.
+  useEffect(() => {
+    syncSentryUser(user?.id);
+  }, [user?.id]);
   const { login, state: oauthState } = useLoginWithOAuth();
   const { link, state: linkOauthState } = useLinkWithOAuth();
   const { unlinkOAuth } = useUnlinkOAuth();
@@ -9086,7 +9137,7 @@ function blockedCompatibilityState(
   return null;
 }
 
-export default function App() {
+function App() {
   const [preferences, setPreferences, preferencesLoaded] = useStoredPreferences();
   const [compatibility, setCompatibility] = useState<CompatibilityState>({ status: "loading" });
   const compatibilityClientRef = useRef<AppBackendClient | null>(null);
@@ -9290,6 +9341,13 @@ export default function App() {
     </AppThemeProvider>
   );
 }
+
+/*
+ * Sentry's error boundary over the root: React Native has none, so a render
+ * error would otherwise blank the app with nothing reported. Keep it as the
+ * default export.
+ */
+export default wrapRoot(App);
 
 const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, isDark: boolean) =>
   StyleSheet.create({

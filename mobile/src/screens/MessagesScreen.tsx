@@ -13,6 +13,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 
 import { AppBackendClient } from "../services/appBackend";
+import { useStuckWatch } from "../services/observability";
 import { SegmentedTabs } from "../components/SegmentedTabs";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { Avatar, BadgeLine, CATEGORY_ICONS, formatAgo } from "../components/BulletinParts";
@@ -100,6 +101,7 @@ export function MessagesScreen({
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PublicUser[] | null>(null);
+  useStuckWatch("messages: load conversations", segment === "chats" && conversations === null);
   const [merchantResults, setMerchantResults] = useState<
     Array<{ location_id: number; name: string; owner_user_id: string }>
   >([]);

@@ -12,7 +12,8 @@
     "config:check": "./scripts/with-local-env.sh expo config --type public",
     "build:ios:dev": "./scripts/with-local-env.sh npx eas-cli build --platform ios --profile development",
     "build:android:dev": "./scripts/with-local-env.sh npx eas-cli build --platform android --profile development",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sentry:upload-update": "./scripts/with-local-env.sh npx sentry-expo-upload-sourcemaps dist"
   },
   "dependencies": {
     "@ethersproject/shims": "^5.8.0",
@@ -20,6 +21,7 @@
     "@privy-io/expo": "^0.63.6",
     "@privy-io/expo-native-extensions": "^0.0.7",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@sentry/react-native": "~7.2.0",
     "buffer": "^6.0.3",
     "ethers": "^5.7.2",
     "expo": "^54.0.0",
@@ -47,6 +49,7 @@
     "expo-updates": "~29.0.20",
     "expo-web-browser": "~15.0.10",
     "fast-text-encoding": "^1.0.6",
+    "promise": "8.3.0",
     "react": "19.1.0",
     "react-native": "0.81.5",
     "react-native-get-random-values": "~1.11.0",

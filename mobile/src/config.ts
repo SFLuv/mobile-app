@@ -24,4 +24,13 @@ export const mobileConfig = {
   // Privy
   privyAppId: process.env.EXPO_PUBLIC_PRIVY_APP_ID ?? "",
   privyClientId: process.env.EXPO_PUBLIC_PRIVY_CLIENT_ID ?? "",
+
+  /*
+   * Sentry. The DSN is public by design: it ships in the bundle and only allows
+   * submitting events, never reading them. An empty DSN disables Sentry, which
+   * is what local Expo Go runs should do. SENTRY_AUTH_TOKEN is the real
+   * credential, build-time only, and must never appear here.
+   */
+  sentryDsn: process.env.EXPO_PUBLIC_SENTRY_DSN ?? "",
+  sentryEnvironment: process.env.EXPO_PUBLIC_SENTRY_ENVIRONMENT ?? "development",
 };

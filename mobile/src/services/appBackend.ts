@@ -3,6 +3,14 @@ import { ethers } from "ethers";
 import { mobileConfig } from "../config";
 import { clientMetadataHeaders, getClientMetadata } from "./clientMetadata";
 import {
+  REQUEST_ID_HEADER,
+  newRequestId,
+  recordRequest,
+  reportRequestFailure,
+  routeTemplate,
+  type RequestRecord,
+} from "./observability";
+import {
   AppAccountDeletionPreview,
   AppAccountDeletionStatusResponse,
   AppBetaAccess,
@@ -763,6 +771,17 @@ function endpoint(path: string): string {
   return `${mobileConfig.appBackendURL.replace(/\/+$/, "")}${path}`;
 }
 
+/**
+ * What was sent for each response, so throwRequestError can report a failure
+ * with its route and request id without every call site passing them along.
+ */
+const requestRecords = new WeakMap<Response, RequestRecord>();
+
+/**
+ * Every request to the app backend goes through here. Each one carries a fresh
+ * X-Request-Id, which the backend prints in its logs, and leaves a step in the
+ * Sentry trail; see services/observability.ts.
+ */
 async function fetchWithTimeout(
   url: string,
   options: RequestInit,
@@ -770,11 +789,37 @@ async function fetchWithTimeout(
 ): Promise<Response> {
   const controller = new AbortController();
   const timeoutID = setTimeout(() => controller.abort(), timeoutMs);
+  const requestId = newRequestId();
+  const method = (options.method ?? "GET").toUpperCase();
+  const target = routeTemplate(url);
+  const startedAt = Date.now();
   try {
-    return await fetch(url, {
+    const response = await fetch(url, {
       ...options,
+      headers: { ...(options.headers as Record<string, string> | undefined), [REQUEST_ID_HEADER]: requestId },
       signal: options.signal ?? controller.signal,
     });
+    const record: RequestRecord = {
+      kind: "backend",
+      method,
+      target,
+      status: response.status,
+      durationMs: Date.now() - startedAt,
+      requestId,
+    };
+    requestRecords.set(response, record);
+    recordRequest(record);
+    return response;
+  } catch (error) {
+    recordRequest({
+      kind: "backend",
+      method,
+      target,
+      durationMs: Date.now() - startedAt,
+      requestId,
+      failure: (error as Error)?.name === "AbortError" ? "timed out" : "no response",
+    });
+    throw error;
   } finally {
     clearTimeout(timeoutID);
   }
@@ -791,6 +836,12 @@ async function readResponseDetail(response: Response): Promise<string> {
 
 async function throwRequestError(response: Response, fallbackMessage: string): Promise<never> {
   const detail = await readResponseDetail(response);
+  // Reaching here means the caller treats this answer as a failure, which is
+  // exactly the set worth reporting: deliberate 404s are handled before this.
+  const record = requestRecords.get(response);
+  if (record) {
+    reportRequestFailure({ ...record, detail });
+  }
   const message = detail ? `${fallbackMessage} (${response.status}): ${detail}` : `${fallbackMessage} (${response.status}).`;
   throw new AppBackendRequestError(message, response.status, detail || undefined);
 }

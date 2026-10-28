@@ -21,6 +21,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 
 import { AppBackendClient } from "../services/appBackend";
+import { useStuckWatch } from "../services/observability";
 import { SwipeBack, type SwipeBackHandle } from "../components/SwipeBack";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { Avatar, BadgeLine } from "../components/BulletinParts";
@@ -196,6 +197,9 @@ export function ChatScreen({
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  // A thread that never loads, and a message that never finishes sending.
+  useStuckWatch("chat: open conversation", conversation === null, { conversation_id: conversationId });
+  useStuckWatch("chat: send message", sending, { conversation_id: conversationId });
   const [mode, setMode] = useState<ComposerMode>("text");
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [actionTarget, setActionTarget] = useState<ChatMessage | null>(null);
