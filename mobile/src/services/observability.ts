@@ -415,7 +415,7 @@ export function watchForStuck(
       scope.setFingerprint(["stuck", label]);
       scope.setTag("stuck", label);
       scope.setContext("wait", { label, waited_ms: Date.now() - startedAt, ...context });
-      Sentry.captureMessage(`Still waiting: ${label} after ${Math.round(timeoutMs / 1000)}s`);
+      Sentry.captureException(namedError("Still waiting", `${label} after ${Math.round(timeoutMs / 1000)}s`));
     });
   }, timeoutMs);
   return () => {
@@ -442,6 +442,17 @@ export function useStuckWatch(
     // not a new wait.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [label, active]);
+}
+
+/**
+ * An error whose name and message become the issue's title ("Tap went
+ * nowhere: dock: map"). captureMessage with the stack attached was titled by
+ * the innermost function instead, "Sentry.withScope$argument_0".
+ */
+function namedError(name: string, message: string): Error {
+  const error = new Error(message);
+  error.name = name;
+  return error;
 }
 
 /**
@@ -472,7 +483,7 @@ export function expectArrival(
       scope.setFingerprint(["tap-went-nowhere", label]);
       scope.setTag("tap_went_nowhere", label);
       scope.setContext("tap", { label, waited_ms: timeoutMs, ...context });
-      Sentry.captureMessage(`Tap went nowhere: ${label}`);
+      Sentry.captureException(namedError("Tap went nowhere", label));
     });
   }, timeoutMs);
 }

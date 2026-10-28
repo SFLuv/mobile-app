@@ -77,7 +77,9 @@ type Props = {
 };
 
 type Row =
-  | { kind: "item"; key: string; item: AppNotificationItem }
+  // `fresh`: listed under New, so still a way to get where it points even
+  // after opening the screen has marked it seen.
+  | { kind: "item"; key: string; item: AppNotificationItem; fresh: boolean }
   | { kind: "empty"; key: string; message: string }
   | { kind: "footer"; key: string };
 
@@ -259,7 +261,7 @@ export function NotificationsScreen({
         out.push({ kind: "empty", key: "empty:active", message: "You are all caught up." });
       }
       for (const item of active) {
-        out.push({ kind: "item", key: `active:${item.id}`, item });
+        out.push({ kind: "item", key: `active:${item.id}`, item, fresh: true });
       }
       return out;
     }
@@ -272,7 +274,7 @@ export function NotificationsScreen({
       });
     }
     for (const item of history) {
-      out.push({ kind: "item", key: `history:${item.id}`, item });
+      out.push({ kind: "item", key: `history:${item.id}`, item, fresh: false });
     }
     if (feed?.nextCursor) {
       out.push({ kind: "footer", key: "footer:more" });
@@ -307,9 +309,12 @@ export function NotificationsScreen({
       const { item } = row;
       const internal = item.internal;
       const resolved = internal?.resolved ?? false;
-      const settled = resolved || (internal === null && item.seen);
+      const settled = resolved || (internal === null && item.seen && !row.fresh);
       const support = supportRequestDetails(item);
-      const routable = internal === null && !item.seen;
+      // Held under New for this visit, a notification stays tappable after
+      // the screen has marked it seen; otherwise it reappeared as a dead copy
+      // of itself after coming back from where it led.
+      const routable = internal === null && (!item.seen || row.fresh);
       // A support request opens its own sheet: the card is a summary, and the
       // reply needs the full message, the address and the ticket number.
       const opensDetail = Boolean(support);

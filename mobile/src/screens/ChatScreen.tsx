@@ -1427,165 +1427,171 @@ export function ChatScreen({
                 ) : null}
               </View>
             ) : null}
-            {/* A deleted message keeps its place.
-                Removing the row would turn any reply to it into a
-                non-sequitur, and would quietly change what the conversation
-                looks like it was. The body is already blanked by the server —
-                there is nothing here to hide. */}
-            {item.deleted ? (
-              <View style={styles.deletedBubble}>
-                <Text style={styles.deletedText}>Message was deleted</Text>
-              </View>
-            ) : null}
-
-            {!item.deleted && item.reply_to ? (
-              <View style={[styles.quote, item.is_mine ? styles.quoteMine : undefined]}>
-                <View style={styles.quoteStripe} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.quoteName} numberOfLines={1}>
-                    {item.reply_to.sender_name || "Message"}
-                  </Text>
-                  <Text
-                    style={[styles.quoteBody, item.reply_to.deleted && styles.quoteBodyDeleted]}
-                    numberOfLines={2}
-                  >
-                    {item.reply_to.deleted
-                      ? "Message was deleted"
-                      : item.reply_to.body?.trim() ||
-                        attachmentKindLabel(item.reply_to.attachment_kind)}
-                  </Text>
+            {/* In select mode a tap anywhere on a message picks it. The cards
+                inside (links, files, payments) are buttons of their own and
+                took the tap first, so a link could be opened but never
+                selected for deletion. */}
+            <View pointerEvents={selectedIds !== null ? "none" : "auto"}>
+              {/* A deleted message keeps its place.
+                  Removing the row would turn any reply to it into a
+                  non-sequitur, and would quietly change what the conversation
+                  looks like it was. The body is already blanked by the server —
+                  there is nothing here to hide. */}
+              {item.deleted ? (
+                <View style={styles.deletedBubble}>
+                  <Text style={styles.deletedText}>Message was deleted</Text>
                 </View>
-              </View>
-            ) : null}
+              ) : null}
 
-            {item.deleted ? null : isPayment ? (
-              // ── A PAYMENT, not a record ────────────────────────────────────
-              //
-              // Money moving inside this conversation. Deliberately shaped
-              // nothing like the transaction-record card in
-              // MessageAttachmentCard: a dollar sign rather than a receipt, and
-              // the amount is the whole content rather than a subtitle under a
-              // title. "I just paid you 5 SFLUV" and "here is a transfer from
-              // March" are different claims and should not have to be told
-              // apart by reading carefully.
-              //
-              // Both open the same transaction sheet, so the detail is one tap
-              // away from either.
-              <Pressable
-                style={styles.paymentBubble}
-                onPress={() =>
-                  handleMessageTap(item, () => {
-                    if (!item.tx_hash) {
-                      return;
-                    }
-                    // A payment bubble carries no addresses — only the amount
-                    // and who posted it — so `mine` is what tells the sheet
-                    // which way the money went.
-                    onOpenTransaction?.({
-                      txHash: item.tx_hash,
-                      amountSfluvBase: item.amount_sfluv_base,
-                      at: Math.floor(new Date(item.created_at).getTime() / 1000),
-                      mine: item.is_mine,
-                    });
-                  })
-                }
-                accessibilityRole="button"
-                accessibilityLabel={`Payment, ${formatSfluvAmount(item.amount_sfluv_base)} ${tokenSymbol}`}
-              >
-                {/* SFLuv's mark, not a dollar sign. This is not dollars: a
-                    green $ on a payment of a local currency names the wrong
-                    unit, and it is the same mark the QR code and the volunteer
-                    screens already use, so a payment in the chat looks like
-                    the currency it is. */}
-                <View style={styles.paymentIcon}>
-                  <Image source={SFLUV_MARK} style={styles.paymentMark} resizeMode="contain" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.paymentAmount}>
-                    {formatSfluvAmount(item.amount_sfluv_base) || "—"} {tokenSymbol}
-                  </Text>
-                  {/* The sender's note, when they wrote one. Kept because the
-                      amount pad offers the field — not a "detail" we added, but
-                      something they chose to say. */}
-                  {item.body ? <Text style={styles.paymentNote}>{item.body}</Text> : null}
-                  {/* A state, not a detail: an unconfirmed amount must not read
-                      as a settled one. */}
-                  {!item.payment_verified ? (
-                    <Text style={styles.paymentPending}>Confirming…</Text>
-                  ) : null}
-                </View>
-                <Ionicons name="chevron-forward" size={15} color={palette.textMuted} />
-              </Pressable>
-            ) : (
-              (() => {
-                const attachments = item.attachments ?? [];
-                const body = item.body?.trim() ?? "";
-                const emojiOnly = attachments.length === 0 && isEmojiOnly(body);
-
-                // ── A link that IS the message ────────────────────────────
-                //
-                // When the whole message is one link, the card says everything
-                // and the URL beneath it is noise. When the link is one part of
-                // a sentence, the sentence has to survive — so the text renders
-                // as a normal bubble and the card goes under it, rather than the
-                // text becoming a caption clamped under an image.
-                //
-                // Compared loosely: the server stores its normalized form
-                // ("https://sfluv.org/"), so "Sfluv.org" as typed never matched
-                // exactly and the message showed as a bubble AND a card.
-                const soleLink =
-                  attachments.length === 1 &&
-                  attachments[0].kind === "link" &&
-                  Boolean(attachments[0].link_url) &&
-                  isSameLink(body, attachments[0].link_url ?? "");
-
-                return (
-                  <View style={styles.messageStack}>
-                    {/* The text, in a normal bubble, whenever there is text
-                        worth showing. */}
-                    {body && !soleLink ? (
-                      emojiOnly ? (
-                        <Text style={styles.emojiOnly}>{item.body}</Text>
-                      ) : (
-                        <View
-                          style={[
-                            styles.bubble,
-                            item.is_mine ? styles.bubbleMine : styles.bubbleTheirs,
-                          ]}
-                        >
-                          <Text style={item.is_mine ? styles.bubbleTextMine : styles.bubbleText}>
-                            {item.body}
-                          </Text>
-                        </View>
-                      )
-                    ) : null}
-
-                    {attachments.map((attachment: MessageAttachment) => (
-                      <MessageAttachmentCard
-                        key={attachment.id}
-                        attachment={attachment}
-                        conversationId={conversationId}
-                        client={backendClient}
-                        tokenSymbol={tokenSymbol}
-                        mine={item.is_mine}
-                        // The card's own open action is routed through the tap
-                        // dispatcher, so a double tap hearts the message instead
-                        // of opening the thing twice, and a long press menus it
-                        // instead of navigating away from the thread.
-                        handlers={cardHandlersFor(item)}
-                        onLongPress={() => {
-                          if (item.deleted) {
-                            return;
-                          }
-                          triggerClickHaptic(hapticsEnabled);
-                          setActionTarget(item);
-                        }}
-                      />
-                    ))}
+              {!item.deleted && item.reply_to ? (
+                <View style={[styles.quote, item.is_mine ? styles.quoteMine : undefined]}>
+                  <View style={styles.quoteStripe} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.quoteName} numberOfLines={1}>
+                      {item.reply_to.sender_name || "Message"}
+                    </Text>
+                    <Text
+                      style={[styles.quoteBody, item.reply_to.deleted && styles.quoteBodyDeleted]}
+                      numberOfLines={2}
+                    >
+                      {item.reply_to.deleted
+                        ? "Message was deleted"
+                        : item.reply_to.body?.trim() ||
+                          attachmentKindLabel(item.reply_to.attachment_kind)}
+                    </Text>
                   </View>
-                );
-              })()
-            )}
+                </View>
+              ) : null}
+
+              {item.deleted ? null : isPayment ? (
+                // ── A PAYMENT, not a record ────────────────────────────────────
+                //
+                // Money moving inside this conversation. Deliberately shaped
+                // nothing like the transaction-record card in
+                // MessageAttachmentCard: a dollar sign rather than a receipt, and
+                // the amount is the whole content rather than a subtitle under a
+                // title. "I just paid you 5 SFLUV" and "here is a transfer from
+                // March" are different claims and should not have to be told
+                // apart by reading carefully.
+                //
+                // Both open the same transaction sheet, so the detail is one tap
+                // away from either.
+                <Pressable
+                  style={styles.paymentBubble}
+                  onPress={() =>
+                    handleMessageTap(item, () => {
+                      if (!item.tx_hash) {
+                        return;
+                      }
+                      // A payment bubble carries no addresses — only the amount
+                      // and who posted it — so `mine` is what tells the sheet
+                      // which way the money went.
+                      onOpenTransaction?.({
+                        txHash: item.tx_hash,
+                        amountSfluvBase: item.amount_sfluv_base,
+                        at: Math.floor(new Date(item.created_at).getTime() / 1000),
+                        mine: item.is_mine,
+                      });
+                    })
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel={`Payment, ${formatSfluvAmount(item.amount_sfluv_base)} ${tokenSymbol}`}
+                >
+                  {/* SFLuv's mark, not a dollar sign. This is not dollars: a
+                      green $ on a payment of a local currency names the wrong
+                      unit, and it is the same mark the QR code and the volunteer
+                      screens already use, so a payment in the chat looks like
+                      the currency it is. */}
+                  <View style={styles.paymentIcon}>
+                    <Image source={SFLUV_MARK} style={styles.paymentMark} resizeMode="contain" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.paymentAmount}>
+                      {formatSfluvAmount(item.amount_sfluv_base) || "—"} {tokenSymbol}
+                    </Text>
+                    {/* The sender's note, when they wrote one. Kept because the
+                        amount pad offers the field — not a "detail" we added, but
+                        something they chose to say. */}
+                    {item.body ? <Text style={styles.paymentNote}>{item.body}</Text> : null}
+                    {/* A state, not a detail: an unconfirmed amount must not read
+                        as a settled one. */}
+                    {!item.payment_verified ? (
+                      <Text style={styles.paymentPending}>Confirming…</Text>
+                    ) : null}
+                  </View>
+                  <Ionicons name="chevron-forward" size={15} color={palette.textMuted} />
+                </Pressable>
+              ) : (
+                (() => {
+                  const attachments = item.attachments ?? [];
+                  const body = item.body?.trim() ?? "";
+                  const emojiOnly = attachments.length === 0 && isEmojiOnly(body);
+
+                  // ── A link that IS the message ────────────────────────────
+                  //
+                  // When the whole message is one link, the card says everything
+                  // and the URL beneath it is noise. When the link is one part of
+                  // a sentence, the sentence has to survive — so the text renders
+                  // as a normal bubble and the card goes under it, rather than the
+                  // text becoming a caption clamped under an image.
+                  //
+                  // Compared loosely: the server stores its normalized form
+                  // ("https://sfluv.org/"), so "Sfluv.org" as typed never matched
+                  // exactly and the message showed as a bubble AND a card.
+                  const soleLink =
+                    attachments.length === 1 &&
+                    attachments[0].kind === "link" &&
+                    Boolean(attachments[0].link_url) &&
+                    isSameLink(body, attachments[0].link_url ?? "");
+
+                  return (
+                    <View style={styles.messageStack}>
+                      {/* The text, in a normal bubble, whenever there is text
+                          worth showing. */}
+                      {body && !soleLink ? (
+                        emojiOnly ? (
+                          <Text style={styles.emojiOnly}>{item.body}</Text>
+                        ) : (
+                          <View
+                            style={[
+                              styles.bubble,
+                              item.is_mine ? styles.bubbleMine : styles.bubbleTheirs,
+                            ]}
+                          >
+                            <Text style={item.is_mine ? styles.bubbleTextMine : styles.bubbleText}>
+                              {item.body}
+                            </Text>
+                          </View>
+                        )
+                      ) : null}
+
+                      {attachments.map((attachment: MessageAttachment) => (
+                        <MessageAttachmentCard
+                          key={attachment.id}
+                          attachment={attachment}
+                          conversationId={conversationId}
+                          client={backendClient}
+                          tokenSymbol={tokenSymbol}
+                          mine={item.is_mine}
+                          // The card's own open action is routed through the tap
+                          // dispatcher, so a double tap hearts the message instead
+                          // of opening the thing twice, and a long press menus it
+                          // instead of navigating away from the thread.
+                          handlers={cardHandlersFor(item)}
+                          onLongPress={() => {
+                            if (item.deleted) {
+                              return;
+                            }
+                            triggerClickHaptic(hapticsEnabled);
+                            setActionTarget(item);
+                          }}
+                        />
+                      ))}
+                    </View>
+                  );
+                })()
+              )}
+            </View>
           </Pressable>
 
           {/* Delivery state, on your own most recent message only.

@@ -266,6 +266,9 @@ type Tab =
 // rather than adding one — Bulletin takes Activity's, Messages takes Contacts' —
 // so every one of these keys can be the occupant depending on access, and the
 // count never changes.
+/** How long a tab has to stay current for a tap on it to count as landed. */
+const TAB_SETTLED_MS = 400;
+
 type DockTabKey = "participate" | "map" | "wallet" | "bulletin" | "activity" | "messages" | "contacts";
 
 /**
@@ -3402,12 +3405,31 @@ function WalletAppShellContent({
   // The tab as of now, for checks that run after a render or two.
   const currentTabRef = useRef(tab);
   currentTabRef.current = tab;
+  // Recent tab changes, for "did that tap land?". Judged on whether the tab
+  // was reached and stayed, not on where the person is when the check runs:
+  // checking the current tab reported every quick Wallet → Map → Participate
+  // as a dead tap. A bounce straight back (the push bug) never stays.
+  const tabVisitsRef = useRef<Array<{ tab: string; at: number }>>([]);
+  useEffect(() => {
+    tabVisitsRef.current = [...tabVisitsRef.current.slice(-9), { tab, at: Date.now() }];
+  }, [tab]);
+  const landedOn = useCallback((expected: string, since: number) => {
+    const visits = tabVisitsRef.current;
+    return visits.some((visit, index) => {
+      if (visit.tab !== expected || visit.at < since - 50) {
+        return false;
+      }
+      const leftAt = visits[index + 1]?.at ?? Date.now();
+      return leftAt - visit.at >= TAB_SETTLED_MS;
+    });
+  }, []);
 
   const handleDockSelect = useCallback(
     (key: DockTabKey) => {
-      if (key !== "participate" || participateTargets.length === 1) {
-        const expected = key === "participate" ? participateTargets[0] : key;
-        expectArrival(`dock: ${key}`, () => currentTabRef.current === expected, { from: tab });
+      const expected = key === "participate" ? (participateTargets.length === 1 ? participateTargets[0] : null) : key;
+      if (expected && expected !== tab) {
+        const tappedAt = Date.now();
+        expectArrival(`dock: ${key}`, () => landedOn(expected, tappedAt), { from: tab });
       }
       if (key === "participate") {
         // One destination goes straight there; two offers the choice, in the
@@ -3435,7 +3457,7 @@ function WalletAppShellContent({
       }
       setTab(key);
     },
-    [participateTargets, tab],
+    [landedOn, participateTargets, tab],
   );
 
   // Tab content slides in from the side the new screen sits on, so a tab change
@@ -3815,10 +3837,11 @@ function WalletAppShellContent({
   const expectNotificationArrival = useCallback((target: NotificationTarget, from: "push" | "list") => {
     const expected =
       target.kind === "activity" ? "activity" : target.kind === "tax" ? "wallet" : target.kind === "bulletin" ? "bulletin" : null;
-    if (expected) {
-      expectArrival(`notification: ${target.kind}`, () => currentTabRef.current === expected, { from });
+    if (expected && expected !== currentTabRef.current) {
+      const tappedAt = Date.now();
+      expectArrival(`notification: ${target.kind}`, () => landedOn(expected, tappedAt), { from });
     }
-  }, []);
+  }, [landedOn]);
   const routedNotificationResponsesRef = useRef(new Set<string>());
   useEffect(() => {
     const routeFromResponse = (response: Notifications.NotificationResponse | null) => {
