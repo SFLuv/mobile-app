@@ -132,11 +132,34 @@ export function fileTypeIcon(attachment: MessageAttachment): {
   icon: string;
   label: string;
 } {
-  const type = attachment.content_type ?? "";
-  const name = (attachment.file_name ?? "").toLowerCase();
+  return fileTypeIconFor({
+    contentType: attachment.content_type,
+    fileName: attachment.file_name,
+    isImage: attachment.kind === "image",
+  });
+}
+
+/**
+ * The same choice, for a file that is not an attachment yet.
+ *
+ * The composer stages local files before they are sent and wants the same icon
+ * the thread will show once they are — so this takes the three fields the
+ * decision actually needs rather than a server-shaped attachment.
+ */
+export function fileTypeIconFor({
+  contentType,
+  fileName,
+  isImage,
+}: {
+  contentType?: string | null;
+  fileName?: string | null;
+  isImage?: boolean;
+}): { icon: string; label: string } {
+  const type = contentType ?? "";
+  const name = (fileName ?? "").toLowerCase();
   const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : "";
 
-  if (attachment.kind === "image" || type.startsWith("image/")) {
+  if (isImage || type.startsWith("image/")) {
     return { icon: "image", label: "Photo" };
   }
   if (type === "application/pdf" || ext === "pdf") {

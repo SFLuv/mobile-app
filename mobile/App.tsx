@@ -136,6 +136,7 @@ import {
 import { TransactionDetailsModal } from "./src/components/TransactionDetailsModal";
 import {
   buildAddressNameMaps,
+  buildChatTransactionPayload,
   buildTransactionDetailPayload,
   type TransactionDetailPayload,
 } from "./src/utils/transactions";
@@ -419,11 +420,46 @@ async function withTimeout<T>(
   }
 }
 
+/**
+ * Whether this device is holding a live chat socket.
+ *
+ * Module-level because the notification handler below is registered once at
+ * module scope, outside React, and has to be able to read it. The shell keeps
+ * it in step with the socket's status.
+ */
+let socketLive = false;
+
+export function setSocketLive(live: boolean) {
+  socketLive = live;
+}
+
+/**
+ * How a push is drawn while the app is in the FOREGROUND — this handler is not
+ * consulted for one that arrives in the background, which the OS always draws.
+ *
+ * ── Why the banner is suppressed while the socket is live ───────────────────
+ *
+ * A notification reaching this device has two routes: down the chat socket,
+ * which the app draws itself as an in-app banner over the title bar, and as a
+ * push, which the OS draws. They are meant to be mutually exclusive — the
+ * server skips the push for any device it can see holding a socket — but that
+ * check is a snapshot taken before the send, so a device that connects in the
+ * gap gets both, and the person sees the same notification twice: once from us
+ * and once from Apple, a second or so apart.
+ *
+ * So while the socket is up, the in-app banner is the one that draws and the
+ * system banner is suppressed. While it is down, nothing in the app would draw
+ * it, so the system banner stays — which is also the pre-socket behaviour, and
+ * means a notification is never silently dropped.
+ *
+ * The tray row is kept either way: suppressing the banner is about not showing
+ * the same thing twice at the moment it arrives, not about hiding it.
+ */
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowBanner: true,
+    shouldShowBanner: !socketLive,
     shouldShowList: true,
-    shouldPlaySound: true,
+    shouldPlaySound: !socketLive,
     shouldSetBadge: false,
   }),
 });
@@ -1757,8 +1793,43 @@ function WalletAppShellContent({
    */
   const [supportReplyDraft, setSupportReplyDraft] = useState<string | null>(null);
   const [contactSupportOpen, setContactSupportOpen] = useState(false);
-  // The in-app banner currently showing, if any.
+  // ── In-app banner state ───────────────────────────────────────────────────
+  //
+  // This lives here, in the shell, and not on any screen: a banner is about the
+  // app, not about the tab you happen to be on. Tabs are state in this
+  // component rather than mounted/unmounted routes, so a banner that is still
+  // on its way out survives a tab change instead of being re-mounted and
+  // replayed by the new tab.
   const [banner, setBanner] = useState<BannerNotification | null>(null);
+  /**
+   * Ids that have already had their banner.
+   *
+   * The second half of the retrigger fix. The first was identity churn in the
+   * component (see InAppBanner), but an event can also genuinely arrive twice:
+   * the socket reconnects and the server re-sends, or a push lands at the same
+   * moment as the socket frame for the same message. Showing the same message
+   * twice is wrong either way, so the id is the gate and the banner is drawn at
+   * most once per distinct notification.
+   *
+   * Capped because this is a set that only ever grows, and a long session on a
+   * busy account would otherwise hold every id it had ever seen.
+   */
+  const bannerSeenRef = useRef<string[]>([]);
+  const showBanner = useCallback((next: BannerNotification) => {
+    if (bannerSeenRef.current.includes(next.id)) {
+      return;
+    }
+    bannerSeenRef.current = [...bannerSeenRef.current.slice(-199), next.id];
+    setBanner(next);
+  }, []);
+  /**
+   * Stable, so the banner's own effect does not re-run on every shell render.
+   * An inline arrow here was the direct cause of banners replaying their entry
+   * animation several times for one notification.
+   */
+  const dismissBanner = useCallback((id: string) => {
+    setBanner((current) => (current?.id === id ? null : current));
+  }, []);
   /**
    * A transaction opened from a chat card.
    *
@@ -2193,11 +2264,19 @@ function WalletAppShellContent({
   // gated on chatEnabled: one of the things it carries is "your beta access
   // changed", and a socket that required the beta could never deliver the event
   // saying you now have it. See the backend's ServeRealtime.
-  const { subscribe: subscribeRealtime, sendTyping } = useRealtime({
+  const { subscribe: subscribeRealtime, sendTyping, connected: socketConnected } = useRealtime({
     baseURL: mobileConfig.appBackendURL,
     getToken: getAccessToken,
     enabled: Boolean(appUser) && Boolean(backendClient),
   });
+
+  // Keeps the module-level flag the notification handler reads in step with the
+  // socket, so a push arriving while we are connected does not draw a system
+  // banner on top of the in-app one. See setNotificationHandler above.
+  useEffect(() => {
+    setSocketLive(socketConnected);
+    return () => setSocketLive(false);
+  }, [socketConnected]);
 
   const showVolunteerNav = canAccessVolunteerPanel && preferences.showVolunteerPanel;
   // Participate is one slot leading to one or two panels. With both available
@@ -3842,8 +3921,22 @@ function WalletAppShellContent({
   //
   // A tap routes through the same navigateToNotificationTarget a real push
   // does, so there is one destination table and both paths use it.
-  useEffect(() => {
-    return subscribeRealtime((event) => {
+  // ── Why the handler is a ref and the subscription has one dependency ───────
+  //
+  // Written the obvious way, this effect depended on the open conversation, on
+  // openConversation (which depends on the current tab) and on half a dozen
+  // other callbacks — so it tore down and re-subscribed on every tab change and
+  // every chat open. Nothing was replayed by that, since subscribe() does not
+  // buffer, but it put the one piece of notification state that has to outlive
+  // a tab change on the same lifecycle as the tab.
+  //
+  // Holding the body in a ref that is refreshed on every render instead gives
+  // both halves: the handler always reads current values, and the socket is
+  // subscribed once for the life of the connection.
+  const bannerHandlerRef = useRef<(event: { kind: string; conversation_id?: number; data?: unknown }) => void>(
+    () => {},
+  );
+  bannerHandlerRef.current = (event) => {
       if (event.kind === "message.new") {
         const message = event.data as ChatMessage | undefined;
         const conversationId = event.conversation_id;
@@ -3864,7 +3957,9 @@ function WalletAppShellContent({
           message.kind === "payment"
             ? "Sent you SFLUV"
             : message.body?.trim() || "Sent an attachment";
-        setBanner({
+        // Keyed on the message row, which is the same key the push path uses,
+        // so a message that arrives down both is banner'd once.
+        showBanner({
           id: `message:${message.id}`,
           title: message.sender_name?.trim() || "New message",
           body: preview,
@@ -3882,8 +3977,15 @@ function WalletAppShellContent({
           return;
         }
         const target = targetFromData(payload?.data);
-        setBanner({
-          id: `notification:${Date.now()}`,
+        // Not Date.now(). An id minted from the clock is unique by
+        // construction, which defeats the dedupe below it — the same
+        // notification arriving twice looked like two notifications. These
+        // events carry no server id, so the id is the content, bucketed by the
+        // minute: a re-send lands in the same bucket and is dropped, while the
+        // same text genuinely sent again later still gets its banner.
+        const bucket = Math.floor(Date.now() / 60_000);
+        showBanner({
+          id: `notification:${bucket}:${payload?.title ?? ""}:${payload?.body ?? ""}`,
           title: payload?.title || "SFLuv",
           body: payload?.body || "",
           icon: "notifications",
@@ -3911,17 +4013,11 @@ function WalletAppShellContent({
           }
         })();
       }
-    });
-  }, [
-    backendClient,
-    betaUserId,
-    chatRoute?.conversationId,
-    navigateToNotificationTarget,
-    openConversation,
-    refreshMessagesUnread,
-    resolveNotificationTarget,
-    subscribeRealtime,
-  ]);
+  };
+
+  useEffect(() => {
+    return subscribeRealtime((event) => bannerHandlerRef.current(event));
+  }, [subscribeRealtime]);
 
 
   const handleMarkImproverNotificationsSeen = useCallback(async () => {
@@ -5952,20 +6048,28 @@ function WalletAppShellContent({
         ) : null}
       </View>
 
-      {/* Notifications while the app is open, drawn OVER the top bar rather
-          than pushing it down — displacing the layout would move whatever the
-          person was about to tap. Hidden during the chat stack, which has its
-          own header and no top bar to sit on. */}
-      {showStandardChrome ? (
-        <InAppBanner
-          notification={banner}
-          onDismiss={(id) => setBanner((current) => (current?.id === id ? null : current))}
-          hapticsEnabled={preferences.hapticsEnabled}
-        />
-      ) : null}
-
       {showStandardChrome ? (
         <View style={styles.topBar}>
+          {/* Notifications while the app is open, drawn OVER the top bar rather
+              than pushing it down — displacing the layout would move whatever
+              the person was about to tap. Hidden during the chat stack, which
+              has its own header and no top bar to sit on.
+
+              It lives INSIDE the top bar, which is what puts it in the right
+              place: it is absolutely positioned at top: 0 of this view, so it
+              comes down exactly where the title bar is on every device. As an
+              absolute child of the root it sat behind the Dynamic Island —
+              InAppBanner's wrap style carries the full explanation. Being
+              absolute it is out of flow, so it does not disturb this row. */}
+          {/* Always mounted, never conditional: the card holds its own copy of
+              the notification so it can finish sliding out after the shell has
+              cleared it, and unmounting it here would cut that short. It
+              renders nothing when there is nothing to show. */}
+          <InAppBanner
+            notification={banner}
+            onDismiss={dismissBanner}
+            hapticsEnabled={preferences.hapticsEnabled}
+          />
           <View style={styles.topTitleWrap}>
             <Text style={styles.brandKicker}>SFLuv</Text>
             <Text style={styles.brand}>{activeTitle}</Text>
@@ -6091,27 +6195,43 @@ function WalletAppShellContent({
                 onBack={closeChatRoute}
                 onOpenInfo={setChatInfoRoute}
                 onSendPayment={handleSendInChat}
-                onOpenTransaction={(txHash) => {
+                onOpenTransaction={(ref) => {
                   // The wallet and Activity already have this sheet; the shell
                   // finds the row and shows the same one rather than building a
                   // third copy of it.
                   const match = [...walletTransactions, ...activityTransactions].find(
-                    (transaction) => transaction.hash?.toLowerCase() === txHash.toLowerCase(),
+                    (transaction) => transaction.hash?.toLowerCase() === ref.txHash.toLowerCase(),
                   );
-                  if (!match) {
-                    // Only the signed-in person's own transfers are in their
-                    // history, so somebody else's shared transaction has no row
-                    // here. The card still shows the amount and the parties,
-                    // which came from the chain index.
-                    showToast("That transaction isn't in your history.", "info");
+                  if (match) {
+                    setChatTransaction(
+                      buildTransactionDetailPayload(
+                        match,
+                        smartAddress,
+                        contactNameByAddress,
+                        merchantNameByAddress,
+                        clientConfig.faucetAddress,
+                      ),
+                    );
                     return;
                   }
+                  // No history row, which is the normal case rather than an
+                  // error: those lists hold only this person's own transfers, so
+                  // anything shared out of somebody else's history is missing
+                  // from them by definition — and so is your own payment for the
+                  // minute before the indexer catches up. This used to refuse
+                  // with "that transaction isn't in your history", which meant
+                  // a shared record could be opened by the person who shared it
+                  // and nobody else.
+                  //
+                  // The thread carries the chain facts, so the sheet is built
+                  // from those instead.
                   setChatTransaction(
-                    buildTransactionDetailPayload(
-                      match,
+                    buildChatTransactionPayload(
+                      ref,
                       smartAddress,
                       contactNameByAddress,
                       merchantNameByAddress,
+                      clientConfig.tokenDecimals,
                       clientConfig.faucetAddress,
                     ),
                   );
@@ -9233,6 +9353,10 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>, 
     fontWeight: "800",
   },
   topBar: {
+    // Lifts the bar — and with it the in-app banner, which is a child of it —
+    // above the tab content that follows it in the tree. Without this the
+    // banner's lower half was painted over by the screen below.
+    zIndex: 30,
     paddingHorizontal: spacing.lg,
     paddingTop: 6,
     // ── Why this is 12 and not 6 ─────────────────────────────────────────────

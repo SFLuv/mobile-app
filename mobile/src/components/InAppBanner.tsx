@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 import { getShadows, radii, spacing, useAppTheme } from "../theme";
@@ -64,6 +64,23 @@ export function InAppBanner({
   const [visible, setVisible] = useState<BannerNotification | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Why onDismiss is held in a ref ─────────────────────────────────────────
+  //
+  // The shell passes this as an inline arrow, so it is a new function on every
+  // render of the whole app — and the shell re-renders on a tab change, a
+  // balance refresh, a socket frame, anything. If `close` depended on it
+  // directly, `close` churned too, and the effect below (which has to depend on
+  // `close` to be able to call it) re-ran on every one of those renders: the
+  // entry animation replayed from the top and the auto-dismiss timer was reset.
+  //
+  // That is the "banner retriggers several times for one notification" bug. The
+  // banner was not being re-sent — one banner was re-animating, and because the
+  // timer kept being cleared a few milliseconds before it fired, it also never
+  // left on its own. Holding the callback in a ref makes `close` permanently
+  // stable, so the effect keys on the notification id and nothing else.
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+
   const close = useCallback(
     (id: string) => {
       if (timer.current) {
@@ -77,21 +94,27 @@ export function InAppBanner({
         useNativeDriver: true,
       }).start(() => {
         setVisible(null);
-        onDismiss(id);
+        onDismissRef.current(id);
       });
     },
-    [onDismiss, slide],
+    [slide],
   );
 
+  const notificationRef = useRef(notification);
+  notificationRef.current = notification;
+
+  const notificationId = notification?.id ?? null;
+
   useEffect(() => {
-    if (!notification) {
+    const incoming = notificationRef.current;
+    if (!notificationId || !incoming) {
       return;
     }
     // A second banner arriving while one is up replaces it rather than queueing.
     // A queue would mean somebody who gets five messages at once watches
     // twenty-one seconds of banners, and the last one is the only one still
     // worth reading by then.
-    setVisible(notification);
+    setVisible(incoming);
     slide.setValue(0);
     Animated.timing(slide, {
       toValue: 1,
@@ -103,7 +126,7 @@ export function InAppBanner({
     if (timer.current) {
       clearTimeout(timer.current);
     }
-    timer.current = setTimeout(() => close(notification.id), VISIBLE_MS);
+    timer.current = setTimeout(() => close(notificationId), VISIBLE_MS);
 
     return () => {
       if (timer.current) {
@@ -111,7 +134,10 @@ export function InAppBanner({
         timer.current = null;
       }
     };
-  }, [close, notification, slide]);
+    // Deliberately keyed on the id alone. `close` is stable by construction
+    // (see above) and the notification object is read through a ref, so this
+    // runs once per distinct banner — which is once per notification.
+  }, [close, notificationId, slide]);
 
   if (!visible) {
     return null;
@@ -173,8 +199,26 @@ function createStyles(palette: ReturnType<typeof useAppTheme>["palette"], shadow
   return StyleSheet.create({
     wrap: {
       position: "absolute",
-      // Sits over the top bar rather than above it, so nothing on screen moves.
-      top: Platform.OS === "ios" ? spacing.xs : spacing.sm,
+      // ── Why top is 0 and not a safe-area offset ────────────────────────────
+      //
+      // The banner is positioned against its wrapper in the shell, which is an
+      // ordinary flow sibling of the top bar — so top: 0 is exactly where the
+      // title bar begins, which is where the person expects a notification to
+      // come down, and it is correct on every device without this file knowing
+      // anything about insets.
+      //
+      // It used to be an absolute child of the root SafeAreaView with a small
+      // top offset, which put it behind the Dynamic Island on a newer iPhone.
+      // The reason is a React Native layout quirk worth writing down: RN runs
+      // Yoga with the legacy absolute-positioning errata, under which an
+      // absolutely positioned child is placed against its parent's BORDER box
+      // and the parent's padding is ignored. Core SafeAreaView applies the
+      // safe-area inset as padding — so the inset the root was carrying did
+      // nothing at all for this child, and top: 6 meant six points from the
+      // physical top of the screen. On a notched phone the cutout is narrow
+      // and the card's own side margins hid the problem; on a pill, which is
+      // centred and wide, the card landed squarely behind it.
+      top: 0,
       left: spacing.md,
       right: spacing.md,
       zIndex: 90,

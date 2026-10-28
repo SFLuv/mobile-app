@@ -726,6 +726,23 @@ const POLICY_REQUIRED_REASON = "privacy-policy-required";
 const APP_BACKEND_REQUEST_TIMEOUT_MS = 25_000;
 
 /**
+ * The ceiling for a multipart attachment upload.
+ *
+ * Ten files of 25 MB over a phone uplink is minutes of work, so this is sized
+ * for the worst allowed case rather than the common one. It is still a ceiling:
+ * a stalled connection fails here rather than hanging forever.
+ */
+const ATTACHMENT_UPLOAD_TIMEOUT_MS = 240_000;
+
+/**
+ * A request init that may override the shared timeout.
+ *
+ * Kept as our own type rather than widening RequestInit, so the override is
+ * visible at the call sites that use it and absent everywhere else.
+ */
+type AppRequestInit = RequestInit & { timeoutMs?: number };
+
+/**
  * An unrecognised tier is treated as no tier rather than rendered blindly: a
  * backend that grows a fifth rung must not make an older app draw a modal it
  * has no copy for.
@@ -2196,7 +2213,7 @@ export class AppBackendClient {
     private readonly clientConfig?: AppClientConfig,
   ) {}
 
-  private async rawAuthFetch(path: string, options: RequestInit = {}): Promise<Response> {
+  private async rawAuthFetch(path: string, options: AppRequestInit = {}): Promise<Response> {
     const accessToken = await this.getAccessToken();
     if (!accessToken) {
       throw new AppBackendAuthError("Privy could not provide a backend access token. Please sign out and sign in again.");
@@ -2207,12 +2224,13 @@ export class AppBackendClient {
       ...extraHeaders,
       "Access-Token": accessToken,
     };
+    const { timeoutMs, ...init } = options;
     let response: Response;
     try {
       response = await fetchWithTimeout(
         endpoint(path),
-        { ...options, headers },
-        APP_BACKEND_REQUEST_TIMEOUT_MS,
+        { ...init, headers },
+        timeoutMs ?? APP_BACKEND_REQUEST_TIMEOUT_MS,
       );
     } catch (error) {
       throw new AppBackendRequestError(
@@ -2253,7 +2271,7 @@ export class AppBackendClient {
     return mapClientVersion((await response.json()) as ClientVersionResponse);
   }
 
-  private async authFetch(path: string, options: RequestInit = {}): Promise<Response> {
+  private async authFetch(path: string, options: AppRequestInit = {}): Promise<Response> {
     const response = await this.rawAuthFetch(path, options);
     if (response.status === 401 || response.status === 403) {
       if (
@@ -3929,7 +3947,7 @@ export class AppBackendClient {
    * can show the sentence and branch on the code (profile_required,
    * suspended, rate_limited...).
    */
-  private async bulletinRequest<T>(path: string, init: RequestInit = {}, fallback = "Something went wrong"): Promise<T> {
+  private async bulletinRequest<T>(path: string, init: AppRequestInit = {}, fallback = "Something went wrong"): Promise<T> {
     const response = await this.authFetch(path, init);
     if (!response.ok) {
       const detail = await readResponseDetail(response);
@@ -4159,6 +4177,15 @@ export class AppBackendClient {
     files: Array<{ uri: string; mimeType?: string | null; fileName?: string | null }>,
     options?: { body?: string; replyToId?: number | null },
   ): Promise<ChatMessage> {
+    // ── Why this one request gets its own timeout ───────────────────────────
+    //
+    // Everything else here is a small JSON round trip and the shared 25-second
+    // timeout is generous for it. This sends up to ten files of up to 25 MB.
+    // On a phone's uplink that is minutes, not seconds, so the shared timeout
+    // aborted the upload mid-stream — and because the abort happens on the
+    // client the server often had the file already: the send "failed", the
+    // toast said so, and the message turned up anyway. That is the attachments
+    // "not sending correctly".
     const form = new FormData();
     files.forEach((file, index) => {
       form.append("files", {
@@ -4175,7 +4202,7 @@ export class AppBackendClient {
     }
     return this.bulletinRequest(
       `/conversations/${conversationId}/attachments`,
-      { method: "POST", body: form },
+      { method: "POST", body: form, timeoutMs: ATTACHMENT_UPLOAD_TIMEOUT_MS },
       "Unable to send that attachment",
     );
   }
@@ -4202,6 +4229,84 @@ export class AppBackendClient {
       this.jsonInit("POST", input),
       "Unable to share that",
     );
+  }
+
+  /**
+   * An authenticated source for <Image>, so the native image loader fetches the
+   * bytes itself.
+   *
+   * ── Why this exists alongside the data-URI reader ──────────────────────────
+   *
+   * The data URI below pulls the bytes through fetch and base64-encodes them on
+   * the JS thread. For a photo that is several megabytes of binary turned into a
+   * third again as much string, synchronously, per image — which blocks the
+   * thread hard enough that every other attachment in the thread sits on its
+   * loading placeholder waiting for a turn, and the thread stutters while you
+   * scroll. That is the "other items get stuck loading".
+   *
+   * React Native's Image accepts headers on its source, so the fetch, the
+   * decode and the caching all happen natively and none of it touches the JS
+   * thread. That is what a thumbnail should use. The data URI is still the right
+   * tool when the BYTES are what is wanted — writing a file to disk to save or
+   * share it — which is what cacheAttachment does with it.
+   */
+  async getConversationAttachmentSource(
+    conversationId: number,
+    attachmentId: number,
+  ): Promise<{ uri: string; headers: Record<string, string> } | null> {
+    const headers = await this.getImageAuthHeaders();
+    if (!headers) {
+      return null;
+    }
+    return {
+      uri: endpoint(`/conversations/${conversationId}/attachments/${attachmentId}`),
+      headers,
+    };
+  }
+
+  /**
+   * Headers that let the native image loader fetch an authenticated image.
+   *
+   * Resolved once and reused across many <Image> sources, which is the point:
+   * a group thread draws one avatar per sender per run and asking Privy for a
+   * token per image would be dozens of calls for one answer.
+   */
+  async getImageAuthHeaders(): Promise<Record<string, string> | null> {
+    const accessToken = await this.getAccessToken();
+    if (!accessToken) {
+      return null;
+    }
+    return { ...clientMetadataHeaders(), "Access-Token": accessToken };
+  }
+
+  /**
+   * Where a person's profile picture lives.
+   *
+   * Pair it with getImageAuthHeaders for an <Image> source. The route answers
+   * 404 for somebody who has not set one, so the caller falls back to initials
+   * on the image's error rather than asking first.
+   */
+  userAvatarURL(userId: string): string {
+    return endpoint(`/users/${encodeURIComponent(userId)}/avatar`);
+  }
+
+  /**
+   * An attachment's bytes as text, for previewing the formats that ARE text.
+   *
+   * A CSV or a .txt can be shown as what it is; capped because the point is a
+   * preview and nobody reads a megabyte of CSV in a modal.
+   */
+  async getConversationAttachmentText(
+    conversationId: number,
+    attachmentId: number,
+    maxChars = 200_000,
+  ): Promise<string | null> {
+    const response = await this.authFetch(`/conversations/${conversationId}/attachments/${attachmentId}`);
+    if (!response.ok) {
+      return null;
+    }
+    const text = await response.text();
+    return text.length > maxChars ? `${text.slice(0, maxChars)}\n\n…truncated` : text;
   }
 
   /**

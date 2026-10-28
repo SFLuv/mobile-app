@@ -14,6 +14,10 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
+import { fileTypeIconFor } from "../utils/attachmentFiles";
+
+/** SFLuv's own mark, so a staged payment names the currency it is in. */
+const SFLUV_MARK = require("../../assets/qr-logo.png");
 
 /**
  * The bottom of a chat: a text field, an attachment tray, and an amount pad.
@@ -64,7 +68,9 @@ export function ChatComposer({
   sending,
   attachmentOptions,
   /** Omitted in groups, which removes the amount mode entirely. */
-  onSendAmount,
+  onStageAmount,
+  stagedPayment,
+  onRemoveStagedPayment,
   tokenSymbol,
   availableBalance,
   replyingTo,
@@ -85,7 +91,18 @@ export function ChatComposer({
   onSend: () => void;
   sending: boolean;
   attachmentOptions: AttachmentOption[];
-  onSendAmount?: (amount: string, note: string) => Promise<void>;
+  /**
+   * Hands a composed amount back to be staged — it does NOT pay.
+   *
+   * The pad used to send straight from its own button, which made a transfer
+   * the one thing in this composer with no review step. Now it stages, the
+   * chip shows what will be sent, and the composer's send button is what
+   * actually spends.
+   */
+  onStageAmount?: (amount: string, note: string) => void;
+  /** A payment composed and waiting on the send button. */
+  stagedPayment?: { amount: string; note: string } | null;
+  onRemoveStagedPayment?: () => void;
   tokenSymbol: string;
   availableBalance?: string;
   replyingTo?: { id: number; senderName: string; body: string } | null;
@@ -112,7 +129,12 @@ export function ChatComposer({
    * about the thing being sent. These sit here until the send button is
    * pressed, alongside whatever is typed.
    */
-  stagedAttachments?: Array<{ uri: string; fileName?: string | null; isImage: boolean }>;
+  stagedAttachments?: Array<{
+    uri: string;
+    fileName?: string | null;
+    mimeType?: string | null;
+    isImage: boolean;
+  }>;
   onRemoveStaged?: (index: number) => void;
   /**
    * The caret position, reported on every selection change.
@@ -167,6 +189,35 @@ export function ChatComposer({
 
   return (
     <View style={styles.wrap}>
+      {/* A composed payment, waiting on send. Deliberately the loudest chip in
+          the composer: it is the only staged thing that spends money, and the
+          amount should be unmissable before the send button is pressed. */}
+      {stagedPayment ? (
+        <View style={styles.stagedRow}>
+          <View style={styles.paymentChip}>
+            <View style={styles.paymentChipIcon}>
+              <Image source={SFLUV_MARK} style={styles.paymentChipMark} resizeMode="contain" />
+            </View>
+            <View style={styles.paymentChipText}>
+              <Text style={styles.paymentChipAmount} numberOfLines={1}>
+                {stagedPayment.amount} {tokenSymbol}
+              </Text>
+              <Text style={styles.paymentChipMeta} numberOfLines={1}>
+                {stagedPayment.note || "Sends when you hit send"}
+              </Text>
+            </View>
+            <Pressable
+              onPress={onRemoveStagedPayment}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Remove payment"
+            >
+              <Ionicons name="close" size={16} color={palette.textMuted} />
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+
       {/* Staged attachments, as thumbnails. Topmost in the stack because they
           are the thing being sent; everything below is about it. */}
       {stagedAttachments?.length ? (
@@ -176,11 +227,39 @@ export function ChatComposer({
               {item.isImage ? (
                 <Image source={{ uri: item.uri }} style={styles.stagedThumb} resizeMode="cover" />
               ) : (
-                <View style={[styles.stagedThumb, styles.stagedFile]}>
-                  <Ionicons name="document-outline" size={18} color={palette.textMuted} />
-                  <Text style={styles.stagedFileName} numberOfLines={1}>
-                    {item.fileName || "File"}
-                  </Text>
+                // ── Why a file chip is not a square thumbnail ────────────────
+                //
+                // It was: a 60pt box with the name at 8pt on one line, which
+                // for "Richmond-DPW-invoice-2026-03.pdf" rendered as an
+                // ellipsis. A file has no thumbnail to show, so the name IS
+                // the preview and it has to be readable — hence a wider chip
+                // with the type icon beside two lines of name.
+                <View style={styles.stagedFile}>
+                  <View style={styles.stagedFileIcon}>
+                    <Ionicons
+                      name={
+                        fileTypeIconFor({
+                          contentType: item.mimeType,
+                          fileName: item.fileName,
+                        }).icon as keyof typeof Ionicons.glyphMap
+                      }
+                      size={18}
+                      color={palette.primaryStrong}
+                    />
+                  </View>
+                  <View style={styles.stagedFileText}>
+                    <Text style={styles.stagedFileName} numberOfLines={2}>
+                      {item.fileName || "File"}
+                    </Text>
+                    <Text style={styles.stagedFileKind} numberOfLines={1}>
+                      {
+                        fileTypeIconFor({
+                          contentType: item.mimeType,
+                          fileName: item.fileName,
+                        }).label
+                      }
+                    </Text>
+                  </View>
                 </View>
               )}
               <Pressable
@@ -247,14 +326,14 @@ export function ChatComposer({
         </View>
       ) : null}
 
-      {mode === "amount" && onSendAmount ? (
+      {mode === "amount" && onStageAmount ? (
         <Animated.View style={trayStyle}>
         <AmountPad
           tokenSymbol={tokenSymbol}
           availableBalance={availableBalance}
           hapticsEnabled={hapticsEnabled}
           onCancel={() => onModeChange("text")}
-          onSend={onSendAmount}
+          onStage={onStageAmount}
         />
         </Animated.View>
       ) : mode === "attach" ? (
@@ -322,10 +401,12 @@ export function ChatComposer({
             // is a message.
             style={[
               styles.sendButton,
-              (!draft.trim() && !stagedAttachments?.length) || sending ? styles.sendButtonIdle : undefined,
+              (!draft.trim() && !stagedAttachments?.length && !stagedPayment) || sending
+                ? styles.sendButtonIdle
+                : undefined,
             ]}
             onPress={() => void onSend()}
-            disabled={(!draft.trim() && !stagedAttachments?.length) || sending}
+            disabled={(!draft.trim() && !stagedAttachments?.length && !stagedPayment) || sending}
             accessibilityRole="button"
             accessibilityLabel="Send message"
           >
@@ -351,19 +432,18 @@ function AmountPad({
   availableBalance,
   hapticsEnabled,
   onCancel,
-  onSend,
+  onStage,
 }: {
   tokenSymbol: string;
   availableBalance?: string;
   hapticsEnabled: boolean;
   onCancel: () => void;
-  onSend: (amount: string, note: string) => Promise<void>;
+  onStage: (amount: string, note: string) => void;
 }) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
-  const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const press = (key: string) => {
@@ -397,21 +477,14 @@ function AmountPad({
   const numeric = Number(amount);
   const balance = availableBalance ? Number(availableBalance) : undefined;
   const overBalance = balance !== undefined && Number.isFinite(balance) && numeric > balance;
-  const ready = Number.isFinite(numeric) && numeric > 0 && !overBalance && !sending;
+  const ready = Number.isFinite(numeric) && numeric > 0 && !overBalance;
 
-  const send = async () => {
+  const stage = () => {
     if (!ready) {
       return;
     }
-    setSending(true);
     setError(null);
-    try {
-      await onSend(amount, note.trim());
-    } catch (e) {
-      setError((e as Error)?.message || "Couldn't send that. Try again.");
-    } finally {
-      setSending(false);
-    }
+    onStage(amount, note.trim());
   };
 
   return (
@@ -471,16 +544,17 @@ function AmountPad({
 
       {error ? <Text style={styles.padError}>{error}</Text> : null}
 
+      {/* "Attach", not "Send": nothing is spent by this button. It is the same
+          word the rest of the composer uses for staging something, and the
+          send button below is the one that moves money. */}
       <Pressable
         style={[styles.padSend, !ready && styles.padSendDisabled]}
-        onPress={() => void send()}
+        onPress={stage}
         disabled={!ready}
         accessibilityRole="button"
-        accessibilityLabel={`Send ${amount || "0"} ${tokenSymbol}`}
+        accessibilityLabel={`Attach a payment of ${amount || "0"} ${tokenSymbol}`}
       >
-        <Text style={styles.padSendText}>
-          {sending ? "Sending…" : `Send ${amount || "0"} ${tokenSymbol}`}
-        </Text>
+        <Text style={styles.padSendText}>{`Attach ${amount || "0"} ${tokenSymbol}`}</Text>
       </Pressable>
     </View>
   );
@@ -540,6 +614,31 @@ function createStyles(palette: Palette) {
     },
     sendButtonIdle: { opacity: 0.4 },
 
+    paymentChip: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingVertical: spacing.xs,
+      paddingHorizontal: spacing.sm,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: palette.primarySoft,
+      backgroundColor: palette.primaryMuted,
+    },
+    paymentChipIcon: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: palette.surface,
+    },
+    paymentChipMark: { width: 20, height: 20 },
+    paymentChipText: { flex: 1 },
+    paymentChipAmount: { fontSize: 15, fontWeight: "800", color: palette.text },
+    paymentChipMeta: { fontSize: 11, color: palette.textMuted, marginTop: 1 },
+
     stagedRow: {
       flexDirection: "row",
       flexWrap: "wrap",
@@ -554,8 +653,29 @@ function createStyles(palette: Palette) {
       borderRadius: radii.sm,
       backgroundColor: palette.surfaceStrong,
     },
-    stagedFile: { alignItems: "center", justifyContent: "center", padding: 4, gap: 2 },
-    stagedFileName: { fontSize: 8, color: palette.textMuted, textAlign: "center" },
+    stagedFile: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+      // Wide enough for a real filename on two lines, and the same height as
+      // an image thumbnail so a mixed batch sits on one baseline.
+      width: 176,
+      height: 60,
+      paddingHorizontal: spacing.xs,
+      borderRadius: radii.sm,
+      backgroundColor: palette.surfaceStrong,
+    },
+    stagedFileIcon: {
+      width: 32,
+      height: 32,
+      borderRadius: radii.sm,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: palette.primaryMuted,
+    },
+    stagedFileText: { flex: 1 },
+    stagedFileName: { fontSize: 11, fontWeight: "600", color: palette.text },
+    stagedFileKind: { fontSize: 10, color: palette.textMuted, marginTop: 1 },
     stagedRemove: {
       position: "absolute",
       top: -5,

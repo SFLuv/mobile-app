@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { AppBackendClient } from "../services/appBackend";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
+import type { ChatTransactionRef } from "../utils/transactions";
 import type { AttachmentKind, MessageAttachment } from "../types/bulletin";
 
 /**
@@ -23,7 +24,14 @@ import type { AttachmentKind, MessageAttachment } from "../types/bulletin";
 export type AttachmentHandlers = {
   onOpenImage?: (attachment: MessageAttachment, uri: string) => void;
   onOpenFile?: (attachment: MessageAttachment) => void;
-  onOpenTransaction?: (txHash: string) => void;
+  /**
+   * Opens the transaction sheet.
+   *
+   * Takes the whole attachment rather than just the hash: the attachment is the
+   * only place the chain facts live for a transfer the viewer has no history
+   * row for, which is every record shared by somebody else.
+   */
+  onOpenTransaction?: (ref: ChatTransactionRef) => void;
   onOpenMerchant?: (locationId: number) => void;
   onOpenEvent?: (eventId: string) => void;
   onOpenSupport?: (requestId: number) => void;
@@ -202,7 +210,16 @@ export function MessageAttachmentCard({
       return (
         <Pressable
           style={[styles.referenceCard, mine ? styles.cardMine : undefined]}
-          onPress={() => attachment.tx_hash && handlers.onOpenTransaction?.(attachment.tx_hash)}
+          onPress={() =>
+            attachment.tx_hash &&
+            handlers.onOpenTransaction?.({
+              txHash: attachment.tx_hash,
+              amountSfluvBase: attachment.tx_amount_sfluv_base,
+              from: attachment.tx_from,
+              to: attachment.tx_to,
+              at: attachment.tx_at,
+            })
+          }
           onLongPress={onLongPress}
           delayLongPress={280}
           accessibilityRole="button"
@@ -383,20 +400,24 @@ function AttachmentImage({
 }) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
-  const [uri, setUri] = useState<string | null>(null);
+  const [source, setSource] = useState<{ uri: string; headers: Record<string, string> } | null>(null);
   const [failed, setFailed] = useState(false);
 
+  // Only the authenticated URL and its headers are resolved here — the bytes
+  // are the native image loader's job. This used to pull the whole image
+  // through fetch and base64 it on the JS thread; see the note on
+  // getConversationAttachmentSource for what that cost.
   useEffect(() => {
     if (!client) {
       return;
     }
     let cancelled = false;
     void client
-      .getConversationAttachmentDataUri(conversationId, attachment.id)
+      .getConversationAttachmentSource(conversationId, attachment.id)
       .then((value) => {
         if (!cancelled) {
           if (value) {
-            setUri(value);
+            setSource(value);
           } else {
             setFailed(true);
           }
@@ -421,7 +442,7 @@ function AttachmentImage({
   const width = 232;
   const height = Math.max(120, Math.min(320, width / Math.max(0.5, Math.min(2.2, ratio))));
 
-  if (!uri) {
+  if (!source || failed) {
     return (
       <View style={[styles.imagePlaceholder, { width, height }]}>
         <Ionicons
@@ -435,13 +456,22 @@ function AttachmentImage({
 
   return (
     <Pressable
-      onPress={() => onOpen?.(attachment, uri)}
+      onPress={() => onOpen?.(attachment, source.uri)}
       onLongPress={onLongPress}
       delayLongPress={280}
       accessibilityRole="imagebutton"
       accessibilityLabel={attachment.file_name || "Photo"}
     >
-      <Image source={{ uri }} style={[styles.image, { width, height }]} resizeMode="cover" />
+      {/* The placeholder stays underneath rather than being swapped out, so the
+          bubble is the right size from the first frame and the photo fades onto
+          it instead of the thread reflowing when it arrives. */}
+      <View style={[styles.imagePlaceholder, { width, height, position: "absolute" }]} />
+      <Image
+        source={source}
+        style={[styles.image, { width, height }]}
+        resizeMode="cover"
+        onError={() => setFailed(true)}
+      />
     </Pressable>
   );
 }

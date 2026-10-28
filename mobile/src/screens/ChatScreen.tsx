@@ -5,6 +5,8 @@ import {
   Easing,
   AppState,
   FlatList,
+  Image,
+  Keyboard,
   Modal,
   PanResponder,
   Pressable,
@@ -27,6 +29,12 @@ import {
   attachmentKindLabel,
   type AttachmentHandlers,
 } from "../components/MessageAttachmentCard";
+import type { ChatTransactionRef } from "../utils/transactions";
+import {
+  buildUniversalEventLink,
+  buildUniversalMerchantLink,
+  buildUniversalTransactionLink,
+} from "../utils/universalLinks";
 import { ChatComposer, type AttachmentOption, type ComposerMode } from "../components/ChatComposer";
 import { AttachmentPreview } from "../components/AttachmentPreview";
 import { saveAttachment } from "../utils/attachmentFiles";
@@ -35,6 +43,14 @@ import { triggerClickHaptic } from "../utils/haptics";
 import type { RealtimeEvent } from "../services/realtime";
 import { useTypingIndicators, useTypingReporter } from "../hooks/useRealtime";
 import { useKeyboardLift } from "../hooks/useKeyboardLift";
+
+/**
+ * SFLuv's own mark, bundled rather than fetched.
+ *
+ * The same asset the QR code centres on and the volunteer screens use, so the
+ * currency looks the same everywhere it appears.
+ */
+const SFLUV_MARK = require("../../assets/qr-logo.png");
 import {
   BulletinRequestError,
   ChatMessage,
@@ -90,7 +106,13 @@ const STAMP_COLUMN_WIDTH = 56;
 
 /** One row of the thread: a message, or a date between sessions. */
 type ChatRow =
-  | { kind: "message"; message: ChatMessage; previousInTime?: ChatMessage }
+  | {
+      kind: "message";
+      message: ChatMessage;
+      previousInTime?: ChatMessage;
+      /** The chronologically NEWER neighbour, for deciding where a run ends. */
+      nextInTime?: ChatMessage;
+    }
   | { kind: "separator"; label: string; key: string };
 
 /** iMessage's six, which cover almost every reaction anybody actually sends. */
@@ -135,7 +157,7 @@ type Props = {
     amount: string;
     note: string;
   }) => Promise<void>;
-  onOpenTransaction?: (txHash: string) => void;
+  onOpenTransaction?: (ref: ChatTransactionRef) => void;
   onOpenMerchant?: (locationId: number) => void;
   onOpenEvent?: (eventId: string) => void;
   subscribe: (listener: (event: RealtimeEvent) => void) => () => void;
@@ -220,6 +242,16 @@ export function ChatScreen({
       locationId?: number;
       eventId?: string;
     };
+    /**
+     * A payment composed on the amount pad but not yet made.
+     *
+     * Staged rather than sent from the pad, because the money moving is the one
+     * thing in this composer that cannot be taken back. Everything else here is
+     * reviewed before it is sent and a transfer should not be the exception —
+     * so the pad composes it, the chip shows what is about to happen, and the
+     * send button is what spends.
+     */
+    payment?: { amount: string; note: string };
     splitAt: number;
   } | null>(null);
   const caretRef = useRef(0);
@@ -366,7 +398,12 @@ export function ChatScreen({
     const ordered = [...messages].reverse();
     const out: ChatRow[] = [];
     ordered.forEach((message, index) => {
-      out.push({ kind: "message", message, previousInTime: ordered[index + 1] });
+      out.push({
+        kind: "message",
+        message,
+        previousInTime: ordered[index + 1],
+        nextInTime: index > 0 ? ordered[index - 1] : undefined,
+      });
       const separator = sessionSeparator(ordered[index + 1], message);
       if (separator) {
         out.push({ kind: "separator", label: separator, key: `sep:${message.id}` });
@@ -376,6 +413,34 @@ export function ChatScreen({
   }, [messages]);
 
   const isGroup = conversation?.kind === "group";
+
+  /**
+   * Headers that let <Image> fetch an authenticated avatar.
+   *
+   * Resolved once per thread rather than per bubble: a busy group draws a lot
+   * of avatars, and the token behind them is the same one every time.
+   */
+  const [imageAuthHeaders, setImageAuthHeaders] = useState<Record<string, string> | null>(null);
+  useEffect(() => {
+    if (!backendClient || !isGroup) {
+      return;
+    }
+    let cancelled = false;
+    void backendClient
+      .getImageAuthHeaders()
+      .then((headers) => {
+        if (!cancelled) {
+          setImageAuthHeaders(headers);
+        }
+      })
+      .catch(() => {
+        // Initials are a complete fallback, so this needs no handling beyond
+        // leaving the headers null.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [backendClient, isGroup]);
   /**
    * The id of your own newest message, which is the only one that shows a
    * delivery state.
@@ -438,6 +503,8 @@ export function ChatScreen({
   // Resets only when the THREAD changes. `refresh` is deliberately not a
   // dependency: it is stable now, but listing it here is what made a parent
   // re-render wipe the composer, and nothing should be able to do that again.
+  // The fetch is the effect below rather than this one, so that a thread is
+  // re-fetched in cases where it must not be reset.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     setConversation(null);
@@ -446,8 +513,27 @@ export function ChatScreen({
     setReplyingTo(null);
     setMode("text");
     firstPageLoaded.current = false;
-    void refresh({ silent: true });
   }, [conversationId]);
+
+  // ── Why the fetch is keyed on `refresh` and not on the thread ─────────────
+  //
+  // `refresh` changes identity on exactly two things: the thread, and the
+  // backend client appearing. The second is what this is for.
+  //
+  // Opening a chat from a notification — especially a cold start, where the
+  // tapped notification is what launched the app — mounts this screen before
+  // sign-in has finished, so backendClient is still null and refresh returns
+  // without fetching. Keyed on the thread alone, nothing re-ran when the client
+  // did arrive: the screen sat on its spinner, which is the chat that "loads
+  // forever when opened from a notification". (The fifteen-second poll did
+  // eventually rescue it, which is why it looked intermittent rather than
+  // broken.)
+  //
+  // Safe for the flicker this file is otherwise careful about, because it only
+  // fetches: nothing here clears the composer or the message list.
+  useEffect(() => {
+    void refresh({ silent: true });
+  }, [refresh]);
 
   // Applied after the reset above rather than with it, so switching threads
   // cannot wipe a draft that was handed in for the thread being opened. Cleared
@@ -693,6 +779,24 @@ export function ChatScreen({
   };
 
   /**
+   * Stages a composed payment for the next send, rather than paying now.
+   *
+   * Deliberately the only thing staged: the tray refuses to open the pad while
+   * a file or a reference is waiting, so there is nothing here to preserve, and
+   * writing it this way means a payment can never arrive carrying a photo it
+   * would have to throw away.
+   */
+  const stagePayment = (amount: string, note: string) => {
+    setMode("text");
+    setStaged({
+      files: [],
+      payment: { amount, note },
+      splitAt: caretRef.current,
+    });
+    setTimeout(() => inputRef.current?.focus(), 120);
+  };
+
+  /**
    * Sends the staged attachments and the draft around them.
    *
    * Up to three messages, in the order they read: the text before the
@@ -710,6 +814,36 @@ export function ChatScreen({
 
     setSending(true);
     try {
+      // The payment first and on its own path: it is a chain transfer, not a
+      // POST, and onSendPayment both moves the money and posts the bubble. It
+      // throws if the transfer failed, which leaves everything else unsent —
+      // correct, because a note that reads "here you go" under a payment that
+      // did not happen is worse than nothing.
+      if (staged.payment) {
+        if (!conversation?.pay_address || !onSendPayment) {
+          // Refused out loud. Falling through would send the text and quietly
+          // drop the payment, which is the one failure here nobody would
+          // notice until they were asked where the money was.
+          onToast("This conversation can't take a payment.", "error");
+          return;
+        }
+        await onSendPayment({
+          conversationId,
+          payAddress: conversation.pay_address,
+          amount: staged.payment.amount,
+          // Whatever was typed alongside it becomes the note, since a payment
+          // is one message and cannot have text either side of it the way an
+          // attachment can.
+          note: staged.payment.note || draft.trim(),
+        });
+        setStaged(null);
+        setDraft("");
+        setReplyingTo(null);
+        reportTyping(false);
+        await refresh({ silent: true });
+        return;
+      }
+
       if (before) {
         const leading = await backendClient.sendConversationMessage(
           conversationId,
@@ -859,6 +993,13 @@ export function ChatScreen({
         id: "pay",
         label: `Send ${tokenSymbol}`,
         icon: "cash-outline",
+        // Refused while something else is staged rather than allowed and then
+        // silently dropped: a payment is one message and cannot carry a photo,
+        // so sending both would have to discard one of them.
+        disabledReason:
+          staged && (staged.files.length > 0 || staged.reference)
+            ? "Send what's attached first."
+            : undefined,
         onPress: () => setMode("amount"),
       });
     }
@@ -869,6 +1010,7 @@ export function ChatScreen({
     isGroup,
     onSendPayment,
     onToast,
+    staged,
     stageAttachments,
     tokenSymbol,
   ]);
@@ -1038,21 +1180,50 @@ export function ChatScreen({
    * What "Copy" puts on the clipboard.
    *
    * For a plain message, its text. For a message whose content is a card, the
-   * thing the card points AT — the link's URL, the transaction's hash — because
-   * that is what somebody copying a preview wants to paste somewhere. Copying
-   * the card's scraped title instead would hand them our words about the link
-   * rather than the link.
+   * thing the card points AT — because that is what somebody copying a preview
+   * wants to paste somewhere, and copying the card's scraped title instead
+   * would hand them our words about the link rather than the link.
+   *
+   * ── Why an internal reference copies as a universal link ───────────────────
+   *
+   * A merchant, an event or a transaction copied out of a chat used to give a
+   * bare database id, or — for a transaction — a bare hash, which pasted into a
+   * message means nothing to whoever receives it. These are the same things the
+   * share sheet hands out, so they copy as the same universal links: they open
+   * the item in the app for somebody who has it, and land on a page describing
+   * it for somebody who does not.
+   *
+   * The builders are shared with the share sheet rather than reimplemented, so
+   * there is one URL shape per kind and no second place for it to drift.
    */
   const copyMessage = async (message: ChatMessage) => {
     setActionTarget(null);
 
     const attachment = message.attachments?.[0];
-    const fromAttachment =
-      attachment?.kind === "link"
-        ? attachment.link_url
-        : attachment?.kind === "transaction"
-          ? attachment.tx_hash
-          : "";
+    const referenceLink = (): string => {
+      try {
+        if (attachment?.kind === "merchant" && attachment.location_id !== undefined) {
+          return buildUniversalMerchantLink({ locationId: attachment.location_id });
+        }
+        if (attachment?.kind === "event" && attachment.event_id) {
+          return buildUniversalEventLink({ eventId: attachment.event_id });
+        }
+        if (attachment?.kind === "transaction" && attachment.tx_hash) {
+          return buildUniversalTransactionLink({ txHash: attachment.tx_hash });
+        }
+        // A payment made in the chat is not an attachment, but it points at a
+        // transaction just the same.
+        if (message.kind === "payment" && message.tx_hash) {
+          return buildUniversalTransactionLink({ txHash: message.tx_hash });
+        }
+      } catch {
+        // A malformed id. Falls through to the body rather than copying a URL
+        // that goes nowhere.
+      }
+      return "";
+    };
+
+    const fromAttachment = attachment?.kind === "link" ? attachment.link_url : referenceLink();
 
     // The body wins when there is one AND it is not just the bare link the
     // card already represents — a sentence containing a link copies as the
@@ -1100,8 +1271,8 @@ export function ChatScreen({
     onOpenImage: (attachment) =>
       handleMessageTap(message, () => setPreviewAttachment(attachment)),
     onOpenFile: (attachment) => handleMessageTap(message, () => setPreviewAttachment(attachment)),
-    onOpenTransaction: (txHash) =>
-      handleMessageTap(message, () => attachmentHandlers.onOpenTransaction?.(txHash)),
+    onOpenTransaction: (ref) =>
+      handleMessageTap(message, () => attachmentHandlers.onOpenTransaction?.(ref)),
     onOpenMerchant: (locationId) =>
       handleMessageTap(message, () => attachmentHandlers.onOpenMerchant?.(locationId)),
     onOpenEvent: (eventId) =>
@@ -1120,6 +1291,7 @@ export function ChatScreen({
 
     const item = row.message;
     const olderNeighbour = row.previousInTime;
+    const newerNeighbour = row.nextInTime;
 
     if (item.kind === "system") {
       return (
@@ -1138,6 +1310,22 @@ export function ChatScreen({
 
     const isPayment = item.kind === "payment";
 
+    // ── Who said it, in a group ──────────────────────────────────────────────
+    //
+    // Telegram's arrangement: a small picture beside the bubble, on the LAST
+    // message of a run from one person, bottom-aligned, with the others in the
+    // run indented to match. The name already appears once at the top of the
+    // run; the picture is what makes a busy group scannable without reading
+    // any names at all.
+    //
+    // Shown for other people only. Your own messages are on the other side of
+    // the screen, which already says they are yours.
+    const avatarRole = !isGroup || item.is_mine
+      ? "none"
+      : !newerNeighbour || newerNeighbour.sender_id !== item.sender_id || newerNeighbour.kind === "system"
+        ? "show"
+        : "spacer";
+
     return (
       <Animated.View
         style={[
@@ -1146,7 +1334,26 @@ export function ChatScreen({
           { transform: [{ translateX: stampReveal }] },
         ]}
       >
-        <View style={styles.messageColumn}>
+        {avatarRole === "show" ? (
+          <SenderAvatar
+            userId={item.sender_id}
+            name={item.sender_name || ""}
+            client={backendClient}
+            headers={imageAuthHeaders}
+          />
+        ) : avatarRole === "spacer" ? (
+          <View style={styles.senderAvatarSpacer} />
+        ) : null}
+
+        <View
+          style={[
+            styles.messageColumn,
+            // The avatar column costs the bubble its width, so the cap comes
+            // down by that much — otherwise a long message in a group pushes
+            // past the edge of the screen.
+            avatarRole !== "none" ? styles.messageColumnWithAvatar : undefined,
+          ]}
+        >
           {showSender ? <Text style={styles.senderName}>{item.sender_name}</Text> : null}
 
           <Pressable
@@ -1211,13 +1418,31 @@ export function ChatScreen({
               <Pressable
                 style={styles.paymentBubble}
                 onPress={() =>
-                  handleMessageTap(item, () => item.tx_hash && onOpenTransaction?.(item.tx_hash))
+                  handleMessageTap(item, () => {
+                    if (!item.tx_hash) {
+                      return;
+                    }
+                    // A payment bubble carries no addresses — only the amount
+                    // and who posted it — so `mine` is what tells the sheet
+                    // which way the money went.
+                    onOpenTransaction?.({
+                      txHash: item.tx_hash,
+                      amountSfluvBase: item.amount_sfluv_base,
+                      at: Math.floor(new Date(item.created_at).getTime() / 1000),
+                      mine: item.is_mine,
+                    });
+                  })
                 }
                 accessibilityRole="button"
                 accessibilityLabel={`Payment, ${formatSfluvAmount(item.amount_sfluv_base)} ${tokenSymbol}`}
               >
+                {/* SFLuv's mark, not a dollar sign. This is not dollars: a
+                    green $ on a payment of a local currency names the wrong
+                    unit, and it is the same mark the QR code and the volunteer
+                    screens already use, so a payment in the chat looks like
+                    the currency it is. */}
                 <View style={styles.paymentIcon}>
-                  <Ionicons name="logo-usd" size={17} color={palette.white} />
+                  <Image source={SFLUV_MARK} style={styles.paymentMark} resizeMode="contain" />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.paymentAmount}>
@@ -1397,7 +1622,16 @@ export function ChatScreen({
           </View>
         </Pressable>
         <Pressable
-          onPress={() => conversation && onOpenInfo(conversation)}
+          onPress={() => {
+            // The keyboard goes with it. Info is a screen, not a sheet over
+            // this one, so a keyboard left standing there belongs to a text
+            // field that is no longer on screen — it covers half the info
+            // screen and the only way to get rid of it is to come back here.
+            Keyboard.dismiss();
+            if (conversation) {
+              onOpenInfo(conversation);
+            }
+          }}
           hitSlop={10}
           accessibilityRole="button"
           // Replaces the "..." this had: a menu glyph promises a list of
@@ -1407,6 +1641,18 @@ export function ChatScreen({
         >
           <Ionicons name="information-circle-outline" size={24} color={palette.text} />
         </Pressable>
+
+        {/* The sending indicator, on the header's bottom edge.
+            It used to sit on top of the composer, which put it in the one place
+            a progress bar should not be: under your thumbs, moving, while you
+            are typing the next message. Here it reads as the screen's own
+            loading state — the same place a browser puts one — and it is clear
+            of the keyboard entirely.
+            Absolutely positioned, so a send does not nudge the whole thread
+            down by two points as the bar appears. Rendered unconditionally
+            because it owns its own mounting: `active` going false is what
+            starts the run-out. */}
+        <SendingBar active={sending} />
       </View>
 
       {/* The measured keyboard lift, not a KeyboardAvoidingView.
@@ -1451,33 +1697,33 @@ export function ChatScreen({
               </View>
             )
           }
-          // The typing bubble lives in the header of an inverted list, which is
-          // its visual bottom — directly above the composer, where it belongs.
-          ListHeaderComponent={
-            typing.length > 0 ? (
-              <View style={styles.typingRow}>
-                <View style={styles.typingBubble}>
-                  <TypingDots />
-                </View>
-                {isGroup ? (
-                  <Text style={styles.typingWho} numberOfLines={1}>
-                    {typing.length === 1
-                      ? `${typing[0].userName} is typing`
-                      : `${typing.length} people are typing`}
-                  </Text>
-                ) : null}
-              </View>
-            ) : null
-          }
         />
 
-        {/* The sending indicator.
-            A hairline above the composer rather than a spinner over the
-            thread: sending is usually instant and occasionally is not, and the
-            case worth showing is an attachment upload — which should not stop
-            somebody reading while it finishes. Indeterminate because the
-            upload reports no progress; it says "working", not "40%". */}
-        {sending ? <SendingBar /> : null}
+        {/* ── Why the typing bubble is not in the list ─────────────────────────
+            It was the inverted list's ListHeaderComponent, which is that
+            list's visual bottom and looks like the right place for it. The
+            problem is what happens when a message arrives while it is up: a
+            new cell is inserted at index 0, which in an inverted list is the
+            same edge the header occupies, and for the frame between the cell
+            mounting and its height being measured the two are laid out over
+            each other. That is the reported overlap.
+            As a sibling of the list it cannot overlap list content at all, and
+            it pushes the thread up by its own height when it appears, which is
+            what iMessage and Telegram both do. */}
+        {typing.length > 0 ? (
+          <View style={styles.typingRow}>
+            <View style={styles.typingBubble}>
+              <TypingDots />
+            </View>
+            {isGroup ? (
+              <Text style={styles.typingWho} numberOfLines={1}>
+                {typing.length === 1
+                  ? `${typing[0].userName} is typing`
+                  : `${typing.length} people are typing`}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
 
         {/* Selection mode replaces the composer: you are deleting, not
             writing, and leaving a text field up invites typing into a mode
@@ -1540,19 +1786,21 @@ export function ChatScreen({
             onSend={() => void (editing ? submitEdit() : staged ? sendStaged() : send())}
             sending={sending}
             attachmentOptions={attachmentOptions}
-            onSendAmount={
-              !isGroup && conversation?.pay_address && onSendPayment
-                ? async (amount, note) => {
-                    await onSendPayment({
-                      conversationId,
-                      payAddress: conversation.pay_address!,
-                      amount,
-                      note,
-                    });
-                    setMode("text");
-                    await refresh({ silent: true });
-                  }
-                : undefined
+            onStageAmount={
+              !isGroup && conversation?.pay_address && onSendPayment ? stagePayment : undefined
+            }
+            stagedPayment={staged?.payment ?? null}
+            onRemoveStagedPayment={() =>
+              setStaged((current) => {
+                if (!current) {
+                  return null;
+                }
+                // Dropping the payment with nothing else staged clears the
+                // whole staging state, so the composer goes back to plain text
+                // rather than holding an empty tray.
+                const rest = { ...current, payment: undefined };
+                return rest.files.length === 0 && !rest.reference ? null : rest;
+              })
             }
             tokenSymbol={tokenSymbol}
             availableBalance={availableBalance}
@@ -1837,48 +2085,165 @@ function ActionRow({
 }
 
 /**
- * A hairline that sweeps while a message is in flight.
+ * A hairline under the conversation's name showing a message in flight.
  *
- * Indeterminate on purpose: the upload gives no progress events, and a bar
- * that pretends to measure something it cannot is worse than one that only
- * says "still going".
+ * ── Why it fills rather than sweeps, and why it finishes ────────────────────
+ *
+ * This was an indeterminate sweep that was simply unmounted the moment the
+ * send resolved, so the common case — a send that takes a fraction of a
+ * second — was a bar that appeared mid-stride and vanished mid-stride. It read
+ * as something being interrupted rather than something completing.
+ *
+ * Now it has an end. The fill creeps toward nine tenths while the send is in
+ * flight, slowing as it goes, and never arrives on its own: arriving means
+ * delivered, and only the server can say that. When the send resolves it runs
+ * the last tenth quickly and fades, so every send — however short — is seen to
+ * finish. The creep is still not a measurement, and is honest about that by
+ * decelerating instead of advancing steadily.
  */
-function SendingBar() {
+function SendingBar({ active }: { active: boolean }) {
   const { palette } = useAppTheme();
-  const slide = useRef(new Animated.Value(0)).current;
+  const progress = useRef(new Animated.Value(0)).current;
+  const fade = useRef(new Animated.Value(0)).current;
+  // Whether a run is in progress, as a ref rather than state so the effect
+  // below depends on `active` alone and is not re-entered by its own
+  // setMounted.
+  const running = useRef(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const loop = Animated.loop(
-      Animated.timing(slide, {
+    if (active) {
+      running.current = true;
+      setMounted(true);
+      progress.setValue(0);
+      fade.setValue(1);
+      Animated.timing(progress, {
+        toValue: 0.9,
+        duration: 2400,
+        // Decelerating: fast off the mark, then slower and slower short of the
+        // end. A linear creep to 90% looks like a measurement of something.
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: false,
+      }).start();
+      return;
+    }
+
+    if (!running.current) {
+      return;
+    }
+    running.current = false;
+    Animated.sequence([
+      Animated.timing(progress, {
         toValue: 1,
-        duration: 900,
-        easing: Easing.inOut(Easing.quad),
-        useNativeDriver: true,
+        duration: 200,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
       }),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [slide]);
+      Animated.timing(fade, { toValue: 0, duration: 220, useNativeDriver: false }),
+    ]).start(({ finished }) => {
+      if (finished) {
+        setMounted(false);
+      }
+    });
+  }, [active, fade, progress]);
+
+  if (!mounted) {
+    // Nothing at all, not a zero-height box: a 2pt track sitting under the
+    // header at all times is a line the design does not have.
+    return null;
+  }
 
   return (
-    <View style={{ height: 2, overflow: "hidden", backgroundColor: palette.surfaceStrong }}>
+    <Animated.View
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        height: 2,
+        overflow: "hidden",
+        backgroundColor: palette.surfaceStrong,
+        opacity: fade,
+      }}
+    >
       <Animated.View
         style={{
           height: 2,
-          width: "40%",
           backgroundColor: palette.primary,
-          transform: [
-            {
-              translateX: slide.interpolate({
-                inputRange: [0, 1],
-                outputRange: [-120, 420],
-              }),
-            },
-          ],
+          width: progress.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] }),
         }}
       />
+    </Animated.View>
+  );
+}
+
+/**
+ * A group member's picture beside their message.
+ *
+ * Falls back to their initials, which is also what happens for somebody who has
+ * not set a picture: the avatar route answers 404 for them, so the image simply
+ * errors and the initials take over. Asking the server first who has a picture
+ * would be a request per member to avoid a 404 per member.
+ */
+function SenderAvatar({
+  userId,
+  name,
+  client,
+  headers,
+}: {
+  userId: string;
+  name: string;
+  client: AppBackendClient | null;
+  headers: Record<string, string> | null;
+}) {
+  const { palette } = useAppTheme();
+  const [failed, setFailed] = useState(false);
+
+  // Built as one object so the headers' presence and the URL cannot disagree.
+  const source =
+    client && headers && !failed ? { uri: client.userAvatarURL(userId), headers } : null;
+
+  return (
+    <View style={{ width: AVATAR_SIZE, marginRight: 6, justifyContent: "flex-end" }}>
+      {source ? (
+        <Image
+          source={source}
+          style={{ width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: AVATAR_SIZE / 2 }}
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <View
+          style={{
+            width: AVATAR_SIZE,
+            height: AVATAR_SIZE,
+            borderRadius: AVATAR_SIZE / 2,
+            backgroundColor: palette.primaryMuted,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Text style={{ color: palette.primaryStrong, fontWeight: "700", fontSize: 11 }}>
+            {senderInitials(name)}
+          </Text>
+        </View>
+      )}
     </View>
   );
+}
+
+/** The width of a sender avatar, and of the gap left for one. */
+const AVATAR_SIZE = 26;
+
+/** Up to two initials from a display name, for somebody with no picture. */
+function senderInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) {
+    return "?";
+  }
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
 }
 
 /** Three dots that fade in sequence, which is what "typing" looks like. */
@@ -2054,9 +2419,12 @@ function createStyles(palette: Palette) {
     body: { flex: 1 },
     listContent: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: 3 },
 
-    messageRow: { flexDirection: "row", marginVertical: 2 },
+    messageRow: { flexDirection: "row", marginVertical: 2, alignItems: "flex-end" },
+    // Holds the bubbles of a run in line with the one that has the picture.
+    senderAvatarSpacer: { width: AVATAR_SIZE, marginRight: 6 },
     messageRowMine: { justifyContent: "flex-end" },
     messageColumn: { maxWidth: "84%" },
+    messageColumnWithAvatar: { maxWidth: "76%" },
     senderName: {
       fontSize: 11,
       fontWeight: "700",
@@ -2117,10 +2485,13 @@ function createStyles(palette: Palette) {
       width: 30,
       height: 30,
       borderRadius: 15,
-      backgroundColor: palette.success,
+      // The mark carries its own colour, so the disc behind it is the app's
+      // quiet icon ground rather than the green the dollar sign needed.
+      backgroundColor: palette.primaryMuted,
       alignItems: "center",
       justifyContent: "center",
     },
+    paymentMark: { width: 20, height: 20 },
     // Larger than a record card's title: on a payment the amount IS the
     // content, so it carries the weight a title would.
     paymentAmount: { fontSize: 19, fontWeight: "800", color: palette.text },
@@ -2223,7 +2594,15 @@ function createStyles(palette: Palette) {
     systemLine: { alignItems: "center", paddingVertical: spacing.sm },
     systemText: { fontSize: 12, color: palette.textMuted, textAlign: "center" },
 
-    typingRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 6 },
+    typingRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      // Matches listContent's horizontal padding: outside the list now, it has
+      // to line its bubble up with the message bubbles itself.
+      paddingHorizontal: spacing.md,
+      paddingVertical: 6,
+    },
     typingBubble: {
       backgroundColor: palette.surface,
       borderWidth: 1,
