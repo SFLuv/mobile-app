@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { Animated, PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -45,14 +45,37 @@ export function SwipeableRow({
   children: React.ReactNode;
   hapticsEnabled: boolean;
 }) {
-  const { palette } = useAppTheme();
+  const { palette, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
+
+  /**
+   * The colour on top of a danger action.
+   *
+   * `palette.danger` is a DARK red in light mode (#b00020) and a LIGHT one in
+   * dark mode (#ff8a80), so a fixed white foreground is correct in one theme
+   * and nearly invisible in the other. The neutral action had it worse:
+   * `palette.navy` inverts outright — #0b303b light, #d8e6ea dark — so white
+   * icons disappeared completely. The neutral action now uses surfaceStrong
+   * with the ordinary text colour, which tracks the theme on its own, and
+   * danger picks a foreground that contrasts with whichever red it got.
+   */
+  const dangerForeground = isDark ? palette.background : palette.white;
   const translateX = useRef(new Animated.Value(0)).current;
+  /**
+   * Open-ness twice over, deliberately.
+   *
+   * The ref is what the PanResponder reads: its callbacks are created once and
+   * would close over a stale value of state. The state is what the render
+   * reads, because changing a ref does not re-render — which is why the
+   * tap-to-close overlay never appeared.
+   */
   const openRef = useRef(false);
+  const [open, setOpen] = useState(false);
   const trayWidth = actions.length * ACTION_WIDTH;
 
   const settle = (toOpen: boolean) => {
     openRef.current = toOpen;
+    setOpen(toOpen);
     Animated.spring(translateX, {
       toValue: toOpen ? -trayWidth : 0,
       useNativeDriver: true,
@@ -112,17 +135,39 @@ export function SwipeableRow({
             accessibilityRole="button"
             accessibilityLabel={action.label}
           >
-            <Ionicons name={action.icon} size={20} color={palette.white} />
-            <Text style={styles.actionLabel}>{action.label}</Text>
+            <Ionicons
+              name={action.icon}
+              size={20}
+              color={action.tone === "danger" ? dangerForeground : palette.text}
+            />
+            <Text
+              style={[
+                styles.actionLabel,
+                { color: action.tone === "danger" ? dangerForeground : palette.text },
+              ]}
+            >
+              {action.label}
+            </Text>
           </Pressable>
         ))}
       </View>
 
-      <Animated.View style={{ transform: [{ translateX }] }} {...responder.panHandlers}>
+      {/* OPAQUE, and that is the whole fix for two reported faults.
+          The tray sits behind this view, so anything translucent lets it
+          through — which is why the mute and delete buttons were visible on
+          every row without swiping, and why the row's timestamp appeared to
+          overlap the mute button. The row's own styles set no background (it
+          inherits the screen's), so the background has to be set here. */}
+      <Animated.View
+        style={[styles.content, { transform: [{ translateX }] }]}
+        {...responder.panHandlers}
+      >
         {/* Tapping an open row closes it rather than opening the conversation,
             which is what every list with this gesture does — the first tap
-            after a swipe is almost always "put that back". */}
-        {openRef.current ? <Pressable style={StyleSheet.absoluteFill} onPress={close} /> : null}
+            after a swipe is almost always "put that back".
+            Driven by state, not the ref: a ref change does not re-render, so
+            this overlay never appeared when the row opened. */}
+        {open ? <Pressable style={StyleSheet.absoluteFill} onPress={close} /> : null}
         {children}
       </Animated.View>
     </View>
@@ -144,8 +189,19 @@ function createStyles(palette: Palette) {
       gap: 4,
     },
     actionDanger: { backgroundColor: palette.danger },
-    actionNeutral: { backgroundColor: palette.navy },
-    actionLabel: { color: palette.white, fontSize: 11, fontWeight: "700" },
+    // borderStrong, not navy and not surfaceStrong.
+    //
+    // navy inverts between themes (#0b303b light, #d8e6ea dark), so a fixed
+    // foreground on it is unreadable in one of them. surfaceStrong fixes that
+    // but is within a shade of the row's own background in light mode, so the
+    // button would read as a gap rather than a control. borderStrong is a
+    // mid-tone in both themes — #d3c5bd and #3f6472 — which keeps it distinct
+    // from the row AND readable under palette.text.
+    actionNeutral: { backgroundColor: palette.borderStrong },
+    // The colour is applied inline, per action, because it depends on the tone.
+    actionLabel: { fontSize: 11, fontWeight: "700" },
+    // The row's own surface, so the tray behind it stays hidden until swiped.
+    content: { backgroundColor: palette.background },
   });
 }
 
