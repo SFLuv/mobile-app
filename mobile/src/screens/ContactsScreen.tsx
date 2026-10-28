@@ -883,7 +883,12 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     fab: {
       position: "absolute",
       right: spacing.lg,
-      bottom: 108,
+      // The Messages tab's positioning: a gutter above the screen's bottom,
+      // plus the measured dock lift added where it is rendered. This was 108 —
+      // a guess at clearing the dock from before the lift was measured — and
+      // the lift was then added on top of it, so the button sat high on every
+      // phone and highest on a Home-button one.
+      bottom: spacing.lg,
       width: 66,
       height: 66,
       borderRadius: 33,

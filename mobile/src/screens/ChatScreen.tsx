@@ -36,7 +36,7 @@ import {
 import { ChatAvatar } from "../components/ChatAvatar";
 import type { PastedContent } from "../components/PasteControl";
 import { seedAttachment } from "../services/attachmentCache";
-import { cachedThread, cachedThreadNow, saveThread } from "../services/chatCache";
+import { cachedConversation, cachedThread, cachedThreadNow, saveThread } from "../services/chatCache";
 import { DerivedLinkCard, LinkifiedText } from "../components/MessageLinks";
 import { firstLink, isSameLink } from "../utils/links";
 import type { ChatTransactionRef } from "../utils/transactions";
@@ -159,6 +159,16 @@ type Props = {
   /** False when the chat was reached from a notification: they came to read. */
   autoFocus?: boolean;
   /**
+   * The message a tapped notification was about. When the cached thread does
+   * not have it, the cache is older than the reason the chat was opened, so it
+   * is not shown: the header paints and the thread catches up behind a
+   * spinner, rather than opening on a conversation that is missing the very
+   * message that was tapped.
+   */
+  expectMessageId?: number;
+  /** The notification's title, for the header before anything is loaded. */
+  placeholderTitle?: string;
+  /**
    * A line to prefill the composer with, applied once.
    *
    * Used by the support-reply flow: a staff member pressing "Message" on a
@@ -197,6 +207,8 @@ export function ChatScreen({
   hapticsEnabled,
   availableBalance,
   autoFocus = true,
+  expectMessageId,
+  placeholderTitle,
   initialDraft,
   onInitialDraftApplied,
   onBack,
@@ -215,11 +227,18 @@ export function ChatScreen({
 
   // Seeded from the chat cache, so a thread read before opens on its last
   // known state on the first frame — no spinner — and the network replaces it.
-  const [conversation, setConversation] = useState<Conversation | null>(
-    () => cachedThreadNow(conversationId)?.conversation ?? null,
-  );
-  const [messages, setMessages] = useState<ChatMessage[]>(() => cachedThreadNow(conversationId)?.messages ?? []);
-  const [hasMore, setHasMore] = useState(() => cachedThreadNow(conversationId)?.hasMore ?? false);
+  // See seedThread for when the cached messages are held back.
+  const [initialSeed] = useState(() => seedThread(conversationId, expectMessageId));
+  const [conversation, setConversation] = useState<Conversation | null>(initialSeed.conversation);
+  const [messages, setMessages] = useState<ChatMessage[]>(initialSeed.messages);
+  const [hasMore, setHasMore] = useState(initialSeed.hasMore);
+  /**
+   * Whether the server has answered for this thread on this visit. Until then
+   * an empty list means "not loaded", not "nobody has said anything" — so the
+   * empty state is a spinner, not "Say hello." — and nothing is written back to
+   * the cache, which would only be the cache's own copy, or less.
+   */
+  const [pageLoaded, setPageLoaded] = useState(false);
   /**
    * Which thread the state above belongs to. Saving keys on this rather than
    * on `conversationId`, because for one render after a switch the prop is the
@@ -350,6 +369,10 @@ export function ChatScreen({
   const firstPageLoaded = useRef(false);
   /** Monotonic id for thread reads, so an older one cannot overwrite a newer. */
   const refreshSeq = useRef(0);
+  const firstPageRetries = useRef(0);
+  const firstPageRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Read by the retry timer, which outlives the render that scheduled it.
+  const refreshRef = useRef<(options?: { silent?: boolean }) => Promise<void>>(async () => {});
 
   /**
    * The parent's callbacks, held in refs.
@@ -486,6 +509,7 @@ export function ChatScreen({
         });
         if (firstPage) {
           firstPageLoaded.current = true;
+          setPageLoaded(true);
           setHasMore(page.has_more);
         }
         void backendClient.markConversationRead(conversationId).catch(() => {});
@@ -502,6 +526,23 @@ export function ChatScreen({
           onBackRef.current();
           return;
         }
+        // The first read of a visit is retried within seconds rather than left
+        // to the fifteen-second poll. It is the one most likely to fail — the
+        // app has just woken, often from a tapped notification, with a token
+        // to refresh and a network still coming back — and it is the one the
+        // person is waiting on.
+        if (!firstPageLoaded.current && firstPageRetries.current < FIRST_PAGE_RETRY_MS.length) {
+          const delay = FIRST_PAGE_RETRY_MS[firstPageRetries.current];
+          firstPageRetries.current += 1;
+          if (firstPageRetryTimer.current) {
+            clearTimeout(firstPageRetryTimer.current);
+          }
+          firstPageRetryTimer.current = setTimeout(() => {
+            firstPageRetryTimer.current = null;
+            void refreshRef.current({ silent: true });
+          }, delay);
+          return;
+        }
         if (!options?.silent) {
           // A failed load leaves whatever was already on screen. An empty
           // thread and an unreachable one are different things, and showing
@@ -514,6 +555,7 @@ export function ChatScreen({
     // above precisely so they cannot land here — see the note on those refs.
     [backendClient, conversationId],
   );
+  refreshRef.current = refresh;
 
   // Resets only when the THREAD changes. `refresh` is deliberately not a
   // dependency: it is stable now, but listing it here is what made a parent
@@ -525,18 +567,24 @@ export function ChatScreen({
     // From the cache when there is one — memory first, then disk — rather
     // than blank. The disk read is applied only if the network has not
     // already answered for this same thread, which would be newer.
-    const seeded = cachedThreadNow(conversationId);
-    setConversation(seeded?.conversation ?? null);
-    setMessages(seeded?.messages ?? []);
-    setHasMore(seeded?.hasMore ?? false);
+    const seeded = seedThread(conversationId, expectMessageId);
+    setConversation(seeded.conversation);
+    setMessages(seeded.messages);
+    setHasMore(seeded.hasMore);
     stateThread.current = conversationId;
     // Any read still in flight belongs to the thread just left.
     refreshSeq.current += 1;
+    firstPageRetries.current = 0;
+    if (firstPageRetryTimer.current) {
+      clearTimeout(firstPageRetryTimer.current);
+      firstPageRetryTimer.current = null;
+    }
     setDraft("");
     setReplyingTo(null);
     setMode("text");
     firstPageLoaded.current = false;
-    if (seeded) {
+    setPageLoaded(false);
+    if (seeded.fromMemory) {
       return;
     }
     let cancelled = false;
@@ -545,6 +593,11 @@ export function ChatScreen({
         return;
       }
       setConversation((current) => current ?? stored.conversation);
+      // The disk copy is held back for the same reason as memory's: it cannot
+      // be current if it does not have the message the chat was opened for.
+      if (expectMessageId && !stored.messages.some((m) => m.id >= expectMessageId)) {
+        return;
+      }
       setMessages((current) => (current.length > 0 ? current : stored.messages));
       setHasMore(stored.hasMore);
     });
@@ -553,14 +606,23 @@ export function ChatScreen({
     };
   }, [conversationId]);
 
+  useEffect(
+    () => () => {
+      if (firstPageRetryTimer.current) {
+        clearTimeout(firstPageRetryTimer.current);
+      }
+    },
+    [],
+  );
+
   // Written back whenever the thread changes — debounced in the cache, so a
   // burst of messages is one write. Only once there is a conversation to file
   // it under, which is the server's answer or the cache's own.
   useEffect(() => {
-    if (conversation) {
+    if (conversation && pageLoaded) {
       saveThread(stateThread.current, { conversation, messages, hasMore });
     }
-  }, [conversation, hasMore, messages]);
+  }, [conversation, hasMore, messages, pageLoaded]);
 
   // ── Why the fetch is keyed on `refresh` and not on the thread ─────────────
   //
@@ -1674,9 +1736,11 @@ export function ChatScreen({
     );
   };
 
-  const headerTitle = isGroup
-    ? conversation?.title || "Group"
-    : conversation?.other_user.public_name || "";
+  const headerTitle = !conversation
+    ? placeholderTitle || ""
+    : isGroup
+      ? conversation.title || "Group"
+      : conversation.other_user.public_name || "";
   const headerSubtitle = isGroup
     ? `${conversation?.member_count ?? 0} ${conversation?.member_count === 1 ? "person" : "people"}`
     : null;
@@ -1797,7 +1861,7 @@ export function ChatScreen({
             ) : null
           }
           ListEmptyComponent={
-            conversation ? (
+            conversation && pageLoaded ? (
               <View style={styles.empty}>
                 <Ionicons name="chatbubbles-outline" size={30} color={palette.textMuted} />
                 <Text style={styles.emptyText}>Say hello.</Text>
@@ -1947,6 +2011,9 @@ export function ChatScreen({
             placeholder={editing ? "Edit your message" : "Message"}
             // Not while editing: an edit changes words, it cannot gain a photo.
             onPaste={editing ? undefined : pasteContent}
+            // Photos and files pasted into the field itself — staged like any
+            // picked from the library, through the same payment guard.
+            onPasteFiles={editing ? undefined : (files) => stageAttachments(files)}
             pasteDisabledReason={staged?.payment ? "Send or remove the payment first." : undefined}
           />
           </>
@@ -2448,6 +2515,30 @@ function mergeMessage(current: ChatMessage[], incoming: ChatMessage): ChatMessag
     index -= 1;
   }
   return [...current.slice(0, index), incoming, ...current.slice(index)];
+}
+
+/** Waits before retrying a failed first read of a thread. */
+const FIRST_PAGE_RETRY_MS = [1500, 3000, 6000];
+
+/**
+ * What a thread opens on, from the cache.
+ *
+ * The cached messages are held back when the chat was opened for a message —
+ * a tapped notification — that they do not include: that cache predates the
+ * reason the chat is open, and showing it would open on a conversation
+ * missing the very message tapped. The header still paints, from the thread's
+ * cached conversation or the inbox's, and the thread catches up behind a
+ * spinner. `fromMemory` says whether there is a disk copy still worth reading.
+ */
+function seedThread(conversationId: number, expectMessageId?: number) {
+  const thread = cachedThreadNow(conversationId);
+  const current = !expectMessageId || Boolean(thread?.messages.some((m) => m.id >= expectMessageId));
+  return {
+    conversation: thread?.conversation ?? cachedConversation(conversationId),
+    messages: current ? thread?.messages ?? [] : [],
+    hasMore: current ? thread?.hasMore ?? false : false,
+    fromMemory: Boolean(thread),
+  };
 }
 
 function formatMessageStamp(at: string): string {

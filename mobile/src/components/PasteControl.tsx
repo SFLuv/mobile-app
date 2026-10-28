@@ -8,11 +8,11 @@ import * as Clipboard from "expo-clipboard";
  *
  * ── Why this is a control and not the text field's own paste ────────────────
  *
- * React Native's TextInput can only paste text. Long-pressing it with a photo
- * on the clipboard offers nothing, and a link pasted there is just text — which
- * is fine for links, and is why text still pastes normally. Photos need their
- * own way in, so there is a Paste tile in the attachment tray and, when the
- * clipboard is holding an image, a chip above the composer.
+ * The message field's own Paste is the main way in: it is a native paste-aware
+ * input (see ChatComposer), so photos and files paste straight into it. This is
+ * the other way in — a Paste tile in the attachment tray — for anybody who looks
+ * for it there, and for a build without the native input, where React Native's
+ * TextInput can only paste text.
  *
  * ── Why the native button where there is one ───────────────────────────────
  *
@@ -53,18 +53,6 @@ export async function readClipboard(): Promise<PastedContent | null> {
     return text ? { kind: "text", text } : null;
   } catch {
     return null;
-  }
-}
-
-/**
- * Whether the clipboard holds an image, without reading it — which on iOS is
- * what keeps this from triggering the paste prompt.
- */
-export async function clipboardHasImage(): Promise<boolean> {
-  try {
-    return await Clipboard.hasImageAsync();
-  } catch {
-    return false;
   }
 }
 

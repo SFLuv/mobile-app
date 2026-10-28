@@ -135,7 +135,7 @@ import { ShareSheet, type ShareTarget } from "./src/components/ShareSheet";
 import { ContactSupportModal } from "./src/components/ContactSupportModal";
 import { loadBootCache, rememberSignedIn, saveBootCache } from "./src/services/bootCache";
 import { cachedBetaFor, emptyBetaAccess, primeBetaCache, saveBetaCache } from "./src/services/betaCache";
-import { clearChatCache, primeChatCache, setChatCacheUser } from "./src/services/chatCache";
+import { clearChatCache, mergeIntoCachedThread, primeChatCache, setChatCacheUser } from "./src/services/chatCache";
 import { clearAttachmentCache } from "./src/services/attachmentCache";
 import { clearLinkPreviews } from "./src/services/linkPreviews";
 import {
@@ -1885,7 +1885,15 @@ function WalletAppShellContent({
      * to read is the wrong greeting.
      */
     autoFocus: boolean;
+    /** The message a tapped push was about — see ChatScreen's catching-up state. */
+    expectMessageId?: number;
+    /** The push's title, for the header before the thread has loaded. */
+    placeholderTitle?: string;
   } | null>(null);
+  /** A conversation push tapped before beta access was known; opened once it is. */
+  const pendingConversationRef = useRef<{ conversationId: number; messageId?: number; title?: string } | null>(
+    null,
+  );
   const [chatInfoRoute, setChatInfoRoute] = useState<Conversation | null>(null);
   const [newMessageRoute, setNewMessageRoute] = useState<{
     mode: "choose" | "group" | "add";
@@ -3705,11 +3713,19 @@ function WalletAppShellContent({
    * from the Bulletin, and from the inbox alike.
    */
   const openChat = useCallback(
-    (conversationId: number, options?: { autoFocus?: boolean }) => {
+    (
+      conversationId: number,
+      options?: { autoFocus?: boolean; expectMessageId?: number; placeholderTitle?: string },
+    ) => {
       if (!conversationId) {
         return;
       }
-      setChatRoute({ conversationId, autoFocus: options?.autoFocus ?? true });
+      setChatRoute({
+        conversationId,
+        autoFocus: options?.autoFocus ?? true,
+        expectMessageId: options?.expectMessageId,
+        placeholderTitle: options?.placeholderTitle,
+      });
       // Everything that draws above a chat. A banner can now be tapped while
       // any of these is open, and the chat it opens must land on top rather
       // than underneath them.
@@ -3721,7 +3737,7 @@ function WalletAppShellContent({
   );
 
   const openConversation = useCallback(
-    (conversationId: number | null) => {
+    (conversationId: number | null, hints?: { messageId?: number; title?: string }) => {
       if (!conversationId) {
         setMessagesRouteRequest((current) => ({ conversationId: null, nonce: current.nonce + 1 }));
         setTab("messages");
@@ -3730,10 +3746,27 @@ function WalletAppShellContent({
       // Reached from a push or a deep link: they came to READ it, so the
       // keyboard stays down. See ChatScreen's note on autoFocus.
       tabBeforeChatRef.current = tab === "messages" || tab === "contacts" ? "messages" : tab;
-      openChat(conversationId, { autoFocus: false });
+      openChat(conversationId, {
+        autoFocus: false,
+        expectMessageId: hints?.messageId,
+        placeholderTitle: hints?.title,
+      });
     },
     [openChat, tab],
   );
+
+  // A push tapped while beta access was still loading, released once it is
+  // known: opened if chat is on for this person, dropped if it is not.
+  useEffect(() => {
+    const pending = pendingConversationRef.current;
+    if (!pending || !betaKnown) {
+      return;
+    }
+    pendingConversationRef.current = null;
+    if (chatEnabled) {
+      openConversation(pending.conversationId, pending);
+    }
+  }, [betaKnown, chatEnabled, openConversation]);
 
   /** Backs out of the chat stack, one layer at a time. */
   const closeChatRoute = useCallback(() => {
@@ -3863,8 +3896,15 @@ function WalletAppShellContent({
           // Same shape as the role panels above: a push can outlive the switch
           // that showed its screen, so an arrival for a surface that is off is
           // dropped rather than sent to a tab the dock no longer has.
+          //
+          // But "not known yet" is not "off". On a cold start from the push,
+          // beta access can still be loading, and the tap — marked handled
+          // either way — was thrown away for good. It is held until the answer
+          // arrives, and then opened or dropped on that answer.
           if (chatEnabled) {
-            openConversation(target.conversationId);
+            openConversation(target.conversationId, target);
+          } else if (!betaKnown) {
+            pendingConversationRef.current = target;
           }
           return;
         case "bulletin":
@@ -3884,6 +3924,7 @@ function WalletAppShellContent({
     },
     [
       canAccessImproverPanel,
+      betaKnown,
       bulletinEnabled,
       canAccessImproverPanel,
       canAccessVolunteerPanel,
@@ -4063,7 +4104,12 @@ function WalletAppShellContent({
       }
       routedNotificationResponsesRef.current.add(key);
       const data = response.notification.request.content.data as Record<string, unknown> | undefined;
-      const target = targetFromData(data);
+      const parsed = targetFromData(data);
+      // The push's own title — the person, or the group — for the chat header
+      // while the thread is still loading.
+      const pushTitle = response.notification.request.content.title?.trim();
+      const target =
+        parsed.kind === "conversation" && pushTitle ? { ...parsed, title: pushTitle } : parsed;
       recordStep("notification", "opened from a push", { target: target.kind });
       expectNotificationArrival(target, "push");
       navigateToNotificationTarget(target);
@@ -4272,6 +4318,9 @@ function WalletAppShellContent({
         // without this line the count simply stops moving for anybody with the
         // app open, which is everybody this event reaches.
         void refreshMessagesUnread();
+        // Into the thread's cached copy, so opening it — from the banner below,
+        // or the inbox — shows this message at once.
+        mergeIntoCachedThread(conversationId, message);
 
         // A muted thread still counts — the badge above — but does not
         // interrupt. The server marks it, by the same rules its push follows.
@@ -4302,7 +4351,9 @@ function WalletAppShellContent({
                 name: notice?.sender_name || message.sender_name || title,
                 userId: notice?.sender_id || message.sender_id,
               },
-          onPress: () => openConversation(conversationId),
+          // The message it announced travels with the tap, so a thread whose
+          // cached copy lacks it catches up rather than opening without it.
+          onPress: () => openConversation(conversationId, { messageId: message.id, title }),
         });
         return;
       }
@@ -7071,6 +7122,8 @@ function WalletAppShellContent({
                     : formatDisplayBalance(smartBalance, clientConfig.tokenDecimals)
                 }
                 autoFocus={chatRoute.autoFocus}
+                expectMessageId={chatRoute.expectMessageId}
+                placeholderTitle={chatRoute.placeholderTitle}
                 initialDraft={supportReplyDraft}
                 onInitialDraftApplied={() => setSupportReplyDraft(null)}
                 onBack={closeChatRoute}
@@ -7970,6 +8023,41 @@ function PrivyWalletApp({
     [clientConfig],
   );
   const linkedAppleAccount = useMemo(() => getLinkedAppleAccount(user), [user]);
+
+  // ── A signed-out device says so ───────────────────────────────────────────
+  //
+  // Some people were getting notifications for accounts they had signed out
+  // of. Sign-out unregisters the device through the ordinary authenticated
+  // sync, but not every way out goes through it — a session that simply
+  // ended, the terms and deleted-account screens returning to login, an
+  // unregister lost to a bad connection — and each left that account's pushes
+  // arriving here. So whenever this app is ready with nobody signed in, it
+  // reports the device as signed out, once per signed-out spell. Nobody is
+  // signed out by this; it only stops pushes for accounts not signed in here.
+  const reportedSignedOutRef = useRef(false);
+  useEffect(() => {
+    if (!isReady || user?.id) {
+      reportedSignedOutRef.current = false;
+      return;
+    }
+    if (reportedSignedOutRef.current) {
+      return;
+    }
+    reportedSignedOutRef.current = true;
+    void (async () => {
+      try {
+        // Read without asking: a signed-out person is never prompted for
+        // notification permission by this.
+        const registration = await readCurrentPushRegistration();
+        if (!registration.token) {
+          return;
+        }
+        await backendClient.reportPushSignedOut(registration.token, await getOrCreateAppInstallationID());
+      } catch {
+        // Best effort, retried on the next signed-out launch.
+      }
+    })();
+  }, [backendClient, isReady, user?.id]);
   const linkedGoogleAccount = useMemo(() => getLinkedGoogleAccount(user), [user]);
   const linkedEmailAccount = useMemo(() => getLinkedEmailAccount(user), [user]);
   const appleLinked = Boolean(linkedAppleAccount?.subject || linkedAppleAccount?.email);

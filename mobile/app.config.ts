@@ -73,7 +73,13 @@ const baseConfig = (config: ConfigContext["config"]): ExpoConfig => ({
   // whose JS calls a native module 2.2 does not have) and a Notification
   // Service Extension. JS that imports the share module, delivered over the
   // air to a 2.2 binary, would fail at import.
-  version: "2.3.0",
+  //
+  // 2.4.0: the composer's text field is now a native component
+  // (@mattermost/react-native-paste-input, so its own Paste can take photos and
+  // files). JS rendering it on a 2.3 binary would draw an unimplemented view
+  // where the message field should be. No new extension or entitlement this
+  // time, so no Apple-portal work comes with it.
+  version: "2.4.0",
   description:
     "This app is a nonprofit-run community hub for managing and spending your SFLUV, redeeming perks, and coordinating verified improvers. Improvers can sign up to complete real-world tasks in San Francisco and be rewarded with SFLUV.",
   scheme: "sfluv",
@@ -193,6 +199,8 @@ const baseConfig = (config: ConfigContext["config"]): ExpoConfig => ({
     // Extension. Listed before expo-share-intent: both register EAS app
     // extensions, and expo-share-intent mishandles its own entry when it lands
     // at index 0 of that list.
+    // The composer's native paste — see plugins/withPasteInput.js.
+    "./plugins/withPasteInput",
     "@bacons/apple-targets",
     [
       "expo-share-intent",

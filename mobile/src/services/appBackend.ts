@@ -3477,6 +3477,25 @@ export class AppBackendClient {
     }
   }
 
+  /**
+   * Tells the server nobody is signed in on this device, so no account keeps
+   * sending it notifications. Unauthenticated, because a signed-out app has no
+   * session; the server requires this device's token AND installation id, and
+   * can only switch notifications off. Best effort: it fails silently, and the
+   * next launch signed out tries again.
+   */
+  async reportPushSignedOut(token: string, installationID: string): Promise<void> {
+    await fetchWithTimeout(
+      endpoint("/push/signed-out"),
+      {
+        method: "POST",
+        headers: { ...clientMetadataHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ token, installation_id: installationID }),
+      },
+      APP_BACKEND_REQUEST_TIMEOUT_MS,
+    ).catch(() => undefined);
+  }
+
   async getPublicLocations(): Promise<AppLocation[]> {
     const response = await fetchWithTimeout(
       endpoint("/locations"),

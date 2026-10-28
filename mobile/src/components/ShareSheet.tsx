@@ -6,6 +6,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  SafeAreaView,
   Share,
   StyleSheet,
   Text,
@@ -16,6 +17,8 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 
 import { AppBackendClient } from "../services/appBackend";
+import { seedAttachment } from "../services/attachmentCache";
+import { noteSentMessage } from "../services/chatCache";
 import type { AppClientConfig } from "../types/app";
 import {
   buildUniversalEventLink,
@@ -268,14 +271,28 @@ export function ShareSheet({
         if (target.kind === "files") {
           // Uploaded to each chat in turn — the same request the composer
           // makes, with the note as the caption.
-          await backendClient.uploadConversationAttachments(conversationId, target.files, {
+          const message = await backendClient.uploadConversationAttachments(conversationId, target.files, {
             body: note.trim() || undefined,
           });
+          // Shown at once when the chat opens, as a message the composer sent
+          // is: the files go into the attachment cache under the ids they
+          // became (before the sheet closes and deletes the shared copies), and
+          // the message into the thread, so it is on screen from the first
+          // frame instead of after a fetch and a download of your own photo.
+          const sentAttachments = [...(message.attachments ?? [])].sort((a, b) => a.position - b.position);
+          target.files.forEach((file, index) => {
+            const attachment = sentAttachments[index];
+            if (attachment) {
+              seedAttachment(conversationId, attachment, file.uri);
+            }
+          });
+          noteSentMessage(conversationId, message);
         } else if (target.kind === "text") {
           // Plain text, links included: every client renders a link's card
           // from the text itself.
-          const message = note.trim() ? `${note.trim()}\n${target.text}` : target.text;
-          await backendClient.sendConversationMessage(conversationId, message, null);
+          const body = note.trim() ? `${note.trim()}\n${target.text}` : target.text;
+          const message = await backendClient.sendConversationMessage(conversationId, body, null);
+          noteSentMessage(conversationId, message);
         } else {
           await backendClient.attachConversationReference(conversationId, {
             kind: target.kind,
@@ -463,6 +480,15 @@ export function ShareSheet({
               This link opens in SFLuv. People without the app will be asked to install it.
             </Text>
           ) : null}
+
+          {/* Clear of the home indicator. The card had no bottom padding, so
+              its last row — the send row, for anything shared in from another
+              app, which has no link actions beneath it — sat under the home
+              bar where it was hard to hit. A core SafeAreaView at the foot of
+              the screen pads by exactly the bottom inset: 34pt on a Face ID
+              phone, nothing on a Home-button one. */}
+          <View style={styles.footerGap} />
+          <SafeAreaView />
         </Animated.View>
       </Animated.View>
     </Modal>
@@ -513,6 +539,9 @@ function createStyles(palette: Palette) {
       paddingTop: spacing.md,
       maxHeight: "80%",
     },
+    // A gutter on every phone, plus Android's navigation bar, which the
+    // SafeAreaView below does not know about.
+    footerGap: { height: Platform.OS === "android" ? spacing.lg + spacing.sm : spacing.sm },
     header: {
       flexDirection: "row",
       alignItems: "flex-start",

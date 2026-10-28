@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
-  AppState,
   Easing,
   Image,
   Platform,
@@ -16,7 +15,40 @@ import { Ionicons } from "@expo/vector-icons";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
 import { displayFileName, fileTypeIconFor } from "../utils/attachmentFiles";
-import { clipboardHasImage, PasteButton, PastedContent } from "./PasteControl";
+import { PasteButton, PastedContent } from "./PasteControl";
+
+/**
+ * The message field, as a native paste-aware input where the build has one.
+ *
+ * React Native's TextInput can only paste text. @mattermost/react-native-paste-
+ * input is a drop-in replacement whose own Paste — the field's long-press menu,
+ * or ⌘V on a keyboard — also delivers photos and files, which the composer
+ * stages like anything picked from the library. That replaced a "photo on your
+ * clipboard" chip that guessed at the clipboard, popped up for things that were
+ * not photos, and sat in the way.
+ *
+ * Loaded defensively: its module looks itself up at import and throws on a
+ * binary built without it — a 2.3 build, or a dev client older than this
+ * code. Then the field is the plain TextInput and text still pastes.
+ */
+type PasteInputComponentType = typeof import("@mattermost/react-native-paste-input").default;
+// Type-only, so it is erased and cannot trigger the import-time lookup below.
+type PasteTextInputInstance = import("@mattermost/react-native-paste-input").PasteTextInputInstance;
+let NativePasteInput: PasteInputComponentType | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  NativePasteInput = require("@mattermost/react-native-paste-input").default as PasteInputComponentType;
+} catch {
+  NativePasteInput = null;
+}
+
+/** A photo or file pasted into the message field. */
+export type PastedFileForStaging = {
+  uri: string;
+  mimeType?: string | null;
+  fileName?: string | null;
+  isImage: boolean;
+};
 
 /** SFLuv's own mark, so a staged payment names the currency it is in. */
 const SFLUV_MARK = require("../../assets/qr-logo.png");
@@ -84,6 +116,7 @@ export function ChatComposer({
   inputRef,
   placeholder = "Message",
   onPaste,
+  onPasteFiles,
   pasteDisabledReason,
 }: {
   mode: ComposerMode;
@@ -139,33 +172,17 @@ export function ChatComposer({
    * See PasteControl for why the text field's own paste cannot take a photo.
    */
   onPaste?: (content: PastedContent) => void;
+  /**
+   * Photos and files pasted into the message field itself, through its native
+   * Paste. Text pastes into the field as text, as it always has.
+   */
+  onPasteFiles?: (files: PastedFileForStaging[]) => void;
   /** Why pasting is unavailable right now — a payment is staged, say. */
   pasteDisabledReason?: string;
 }) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
 
-  /**
-   * Whether the clipboard is holding a photo, checked when the field gains
-   * focus and whenever the app comes back to the front — the moment somebody
-   * has just copied one somewhere else. Detection only: nothing is read, which
-   * on iOS is what keeps this from asking "Allow paste?".
-   */
-  const [clipboardImage, setClipboardImage] = useState(false);
-  const focused = useRef(false);
-  useEffect(() => {
-    if (!onPaste) {
-      return;
-    }
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active" && focused.current) {
-        void clipboardHasImage().then(setClipboardImage);
-      }
-    });
-    return () => subscription.remove();
-  }, [onPaste]);
-  const showPasteChip =
-    Boolean(onPaste) && !pasteDisabledReason && clipboardImage && mode === "text" && !stagedAttachments?.length;
 
   /**
    * The tray's entrance.
@@ -292,37 +309,6 @@ export function ChatComposer({
         </View>
       ) : null}
 
-      {/* A photo on the clipboard, offered where somebody about to paste is
-          already looking. One tap, and on iOS the system's own paste button,
-          so no permission prompt. */}
-      {showPasteChip && onPaste ? (
-        <View style={styles.pasteChip}>
-          <Ionicons name="image-outline" size={15} color={palette.textMuted} />
-          <Text style={styles.pasteChipText} numberOfLines={1}>
-            Photo on your clipboard
-          </Text>
-          <PasteButton
-            withLabel
-            size={{ width: 96, height: 30 }}
-            background={palette.primaryStrong}
-            foreground={palette.white}
-            onPaste={(content) => {
-              setClipboardImage(false);
-              onPaste(content);
-            }}
-            onEmpty={() => setClipboardImage(false)}
-          />
-          <Pressable
-            hitSlop={10}
-            onPress={() => setClipboardImage(false)}
-            accessibilityRole="button"
-            accessibilityLabel="Don't paste"
-          >
-            <Ionicons name="close" size={15} color={palette.textMuted} />
-          </Pressable>
-        </View>
-      ) : null}
-
       {replyingTo ? (
         <View style={styles.replyBar}>
           <View style={styles.replyStripe} />
@@ -420,26 +406,46 @@ export function ChatComposer({
           >
             <Ionicons name="add" size={22} color={palette.primaryStrong} />
           </Pressable>
-          <TextInput
-            ref={inputRef}
-            style={styles.input}
-            value={draft}
-            onChangeText={onDraftChange}
-            onSelectionChange={(event) => onCaretChange?.(event.nativeEvent.selection.start)}
-            onFocus={() => {
-              focused.current = true;
-              if (onPaste) {
-                void clipboardHasImage().then(setClipboardImage);
-              }
-            }}
-            onBlur={() => {
-              focused.current = false;
-            }}
-            placeholder={placeholder}
-            placeholderTextColor={palette.textMuted}
-            multiline
-            maxLength={2000}
-          />
+          {NativePasteInput ? (
+            <NativePasteInput
+              // The paste input's instance has TextInput's focus and blur, which
+              // is all the screen uses the ref for.
+              ref={inputRef as unknown as React.Ref<PasteTextInputInstance>}
+              style={styles.input}
+              value={draft}
+              onChangeText={onDraftChange}
+              onSelectionChange={(event) => onCaretChange?.(event.nativeEvent.selection.start)}
+              placeholder={placeholder}
+              placeholderTextColor={palette.textMuted}
+              multiline
+              maxLength={2000}
+              onPaste={(error, files) => {
+                if (error || files.length === 0 || !onPasteFiles) {
+                  return;
+                }
+                onPasteFiles(
+                  files.map((file) => ({
+                    uri: file.uri,
+                    mimeType: file.type || null,
+                    fileName: file.fileName || null,
+                    isImage: Boolean(file.type?.startsWith("image/")),
+                  })),
+                );
+              }}
+            />
+          ) : (
+            <TextInput
+              ref={inputRef}
+              style={styles.input}
+              value={draft}
+              onChangeText={onDraftChange}
+              onSelectionChange={(event) => onCaretChange?.(event.nativeEvent.selection.start)}
+              placeholder={placeholder}
+              placeholderTextColor={palette.textMuted}
+              multiline
+              maxLength={2000}
+            />
+          )}
           <Pressable
             // Sendable with staged attachments and no text: a photo on its own
             // is a message.
@@ -755,21 +761,6 @@ function createStyles(palette: Palette) {
       marginBottom: 6,
     },
     trayLabel: { fontSize: 11, color: palette.textMuted, textAlign: "center" },
-    pasteChip: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: spacing.sm,
-      marginHorizontal: spacing.md,
-      marginTop: spacing.sm,
-      paddingLeft: spacing.sm,
-      paddingRight: spacing.sm,
-      paddingVertical: 5,
-      borderRadius: radii.md,
-      backgroundColor: palette.surface,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: palette.border,
-    },
-    pasteChipText: { flex: 1, fontSize: 13, color: palette.text },
     trayClose: { alignItems: "center", paddingVertical: spacing.sm },
     trayCloseText: { fontSize: 14, color: palette.textMuted, fontWeight: "600" },
 

@@ -21,8 +21,11 @@ export type NotificationTarget =
   | { kind: "tax" }
   // A payment push carries its transaction, which Activity then opens.
   | { kind: "activity"; txHash?: string }
-  // A direct message, opened at its thread.
-  | { kind: "conversation"; conversationId: number }
+  // A direct message, opened at its thread. `messageId` is the message the push
+  // was about, so the thread can tell whether what it has cached is current;
+  // `title` is the push's own title, painted in the header before the thread
+  // has loaded.
+  | { kind: "conversation"; conversationId: number; messageId?: number; title?: string }
   // Something about the person's own Bulletin activity (e.g. moderation).
   | { kind: "bulletin" }
   // An arbitrary link, chosen by the server. Nothing in the app can be built
@@ -95,8 +98,13 @@ export function targetFromData(data: Record<string, unknown> | undefined): Notif
   }
   if (type === "bulletin_message") {
     const conversationId = Number(asString(data?.conversation_id));
+    const messageId = Number(asString(data?.message_id));
     return Number.isFinite(conversationId) && conversationId > 0
-      ? { kind: "conversation", conversationId }
+      ? {
+          kind: "conversation",
+          conversationId,
+          ...(Number.isFinite(messageId) && messageId > 0 ? { messageId } : {}),
+        }
       : { kind: "bulletin" };
   }
   if (type.startsWith("bulletin_")) {

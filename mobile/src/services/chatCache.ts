@@ -209,6 +209,59 @@ export function saveThread(
   }
 }
 
+/**
+ * A message sent from outside the thread — the share sheet — put into the
+ * cached thread, so opening the chat shows it on the first frame. In memory
+ * only: the thread writes itself to disk once it has its own copy from the
+ * server, and the first page it fetches replaces this. Without a cached thread
+ * it starts one, with the inbox's copy of the conversation for the header.
+ */
+export function noteSentMessage(conversationId: number, message: ChatMessage) {
+  if (!userId) {
+    return;
+  }
+  const entry = cachedThreadNow(conversationId);
+  const messages = entry?.messages ?? [];
+  if (messages.some((existing) => existing.id === message.id)) {
+    return;
+  }
+  threads.set(conversationId, {
+    userId,
+    conversation: entry?.conversation ?? cachedConversation(conversationId),
+    messages: [...messages, message].sort((left, right) => left.id - right.id),
+    hasMore: entry?.hasMore ?? false,
+    savedAt: Date.now(),
+  });
+}
+
+/**
+ * A message that arrived for a thread not on screen, put into that thread's
+ * in-memory copy if there is one — so opening it from the in-app banner shows
+ * the message that was announced, on the first frame. A thread with no copy in
+ * memory is left alone: starting one with only this message would hide the
+ * older history on disk until the fetch, and the chat's catching-up state
+ * covers that case instead.
+ */
+export function mergeIntoCachedThread(conversationId: number, message: ChatMessage) {
+  const entry = cachedThreadNow(conversationId);
+  if (!entry || entry.messages.some((existing) => existing.id === message.id)) {
+    return;
+  }
+  threads.set(conversationId, {
+    ...entry,
+    messages: [...entry.messages, message].sort((left, right) => left.id - right.id),
+  });
+}
+
+/** A conversation's header data from the cache — its thread, or the inbox. */
+export function cachedConversation(conversationId: number): Conversation | null {
+  const fromThread = cachedThreadNow(conversationId)?.conversation;
+  if (fromThread) {
+    return fromThread;
+  }
+  return cachedInbox()?.find((conversation) => conversation.id === conversationId) ?? null;
+}
+
 /** Drops one thread — when it is deleted or left. */
 export function forgetThread(conversationId: number) {
   threads.delete(conversationId);
