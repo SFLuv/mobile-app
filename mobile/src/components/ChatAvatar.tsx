@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Image, Text, View } from "react-native";
 
 import type { AppBackendClient } from "../services/appBackend";
+import { useContactPictureFor, useContactPictureVersion } from "../services/contactPictures";
 import { useAppTheme } from "../theme";
 
 /**
@@ -106,29 +107,43 @@ export function ChatAvatar({
   userId,
   conversationId,
   iconAttachmentId,
+  contactId,
 }: {
   client: AppBackendClient | null;
   name: string;
   size?: number;
-  /** A person's picture. */
+  /** A person's picture. The one you gave them as a contact wins over theirs. */
   userId?: string | null;
   /** A group's picture: both are needed to address the attachment. */
   conversationId?: number | null;
   iconAttachmentId?: number | null;
+  /** A saved contact's picture, for a contact with no account to match by. */
+  contactId?: number | null;
 }) {
   const { palette } = useAppTheme();
   const headers = useImageAuthHeaders(client);
   const [failed, setFailed] = useState(false);
+  // Your picture for them failed: fall back to their own rather than initials.
+  const [contactFailed, setContactFailed] = useState(false);
+  const isGroup = Boolean(conversationId && iconAttachmentId);
+  const matchedContactId = useContactPictureFor(isGroup ? null : userId);
+  const pictureVersion = useContactPictureVersion();
+  const ownContactId = contactId ?? matchedContactId;
 
   // A different subject is a different picture; forget the last one's error.
   useEffect(() => {
     setFailed(false);
-  }, [userId, conversationId, iconAttachmentId]);
+    setContactFailed(false);
+  }, [userId, conversationId, iconAttachmentId, ownContactId, pictureVersion]);
 
   let uri: string | null = null;
+  let showingContact = false;
   if (client && headers && !failed) {
-    if (conversationId && iconAttachmentId) {
-      uri = client.conversationAttachmentURL(conversationId, iconAttachmentId);
+    if (isGroup) {
+      uri = client.conversationAttachmentURL(conversationId!, iconAttachmentId!);
+    } else if (ownContactId && !contactFailed) {
+      uri = client.contactAvatarURL(ownContactId, pictureVersion);
+      showingContact = true;
     } else if (userId && !avatarRecentlyFailed(userId)) {
       uri = client.userAvatarURL(userId);
     }
@@ -148,6 +163,10 @@ export function ChatAvatar({
           source={{ uri, headers }}
           style={[round, { position: "absolute", top: 0, left: 0 }]}
           onError={() => {
+            if (showingContact) {
+              setContactFailed(true);
+              return;
+            }
             if (userId && !iconAttachmentId) {
               failedUserAvatars.set(userId, Date.now());
             }

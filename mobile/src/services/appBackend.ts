@@ -4362,6 +4362,11 @@ export class AppBackendClient {
     return endpoint(`/users/${encodeURIComponent(userId)}/avatar`);
   }
 
+  /** `version` only defeats the image cache after a change; the server ignores it. */
+  contactAvatarURL(contactId: number, version: number): string {
+    return `${endpoint(`/contacts/${contactId}/avatar`)}?v=${version}`;
+  }
+
   /**
    * An attachment's bytes as text, for previewing the formats that ARE text.
    *

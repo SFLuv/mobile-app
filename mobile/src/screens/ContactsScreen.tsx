@@ -22,6 +22,8 @@ import { ScannerCornerGuide } from "../components/ScannerCornerGuide";
 import { SegmentedTabs } from "../components/SegmentedTabs";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { useDockLift } from "../hooks/useDockLift";
+import { ChatAvatar } from "../components/ChatAvatar";
+import type { AppBackendClient } from "../services/appBackend";
 import { AppClientConfig, AppContact } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { buildUniversalAddContactLink, parseSendTarget, parseSfluvUniversalLink } from "../utils/universalLinks";
@@ -51,6 +53,8 @@ type Props = {
    * detail route wired up.
    */
   onOpenContact?: (contact: AppContact) => void;
+  /** For the contacts' pictures. Without it the rows show initials. */
+  backendClient?: AppBackendClient | null;
 };
 
 /**
@@ -116,6 +120,7 @@ export function ContactsScreen({
   onDeleteContact,
   profileElement,
   onOpenContact,
+  backendClient,
 }: Props) {
   const { palette, shadows } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
@@ -475,7 +480,7 @@ export function ContactsScreen({
                   accessibilityLabel={contact.name}
                   accessibilityHint="Opens this contact's details"
                 >
-                  <ContactAvatar contact={contact} />
+                  <ContactAvatar contact={contact} client={backendClient ?? null} />
                   <View style={styles.contactRowBody}>
                     <Text style={styles.contactName} numberOfLines={1}>
                       {contact.name}
@@ -835,33 +840,18 @@ export function ContactsScreen({
  *
  * Only fetched when the contact actually has one, which is what `hasAvatar`
  * on the row is for: a list of fifty contacts would otherwise be fifty requests
- * that mostly 404.
+ * that mostly 404. Drawn by ChatAvatar, so the picture here is the same one the
+ * inbox and chats show for this person.
  */
-function ContactAvatar({ contact }: { contact: AppContact }) {
-  const { palette } = useAppTheme();
-  const initials =
-    contact.name
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0])
-      .join("")
-      .toUpperCase() || "?";
-
+function ContactAvatar({ contact, client }: { contact: AppContact; client: AppBackendClient | null }) {
   return (
-    <View
-      style={{
-        width: 42,
-        height: 42,
-        borderRadius: 21,
-        backgroundColor: palette.primaryMuted,
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <Text style={{ color: palette.primaryStrong, fontWeight: "700", fontSize: 15 }}>{initials}</Text>
-    </View>
+    <ChatAvatar
+      client={client}
+      name={contact.name}
+      size={42}
+      contactId={contact.hasAvatar ? contact.id : null}
+      userId={contact.userId}
+    />
   );
 }
 

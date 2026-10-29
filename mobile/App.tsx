@@ -145,6 +145,7 @@ import {
   saveProfileCache,
   setProfileCacheUser,
 } from "./src/services/profileCache";
+import { publishContactPictures } from "./src/services/contactPictures";
 import type { AppNotificationFeed } from "./src/types/notifications";
 import {
   InboxNotification,
@@ -1838,6 +1839,11 @@ function WalletAppShellContent({
   // of it when the live profile lands.
   const bootProfile = useRef(cachedProfile<AppProfileResponse>()).current;
   const [contacts, setContacts] = useState<AppContact[]>(() => bootProfile?.contacts ?? []);
+  // Every surface that draws a person uses the picture you gave them as a
+  // contact; see contactPictures.ts.
+  useEffect(() => {
+    publishContactPictures(contacts);
+  }, [contacts]);
   const [locations, setLocations] = useState<AppLocation[]>([]);
   const [ownedLocations, setOwnedLocations] = useState<AppOwnedLocation[]>(() => bootProfile?.locations ?? []);
   const [backendWallets, setBackendWallets] = useState<AppWallet[]>(() => bootProfile?.wallets ?? []);
@@ -6460,6 +6466,7 @@ function WalletAppShellContent({
 
   const contactsScreenElement = (
     <ContactsScreen
+      backendClient={backendClient ?? null}
       clientConfig={clientConfig}
       contacts={contacts}
       shareAddress={smartAddress}

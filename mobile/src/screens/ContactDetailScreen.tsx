@@ -23,6 +23,7 @@ import { AppClientConfig, AppContact } from "../types/app";
 import { buildUniversalAddContactLink } from "../utils/universalLinks";
 import { pickAvatarPhoto } from "../utils/avatarPicker";
 import { useCopyFeedback } from "../hooks/useCopyFeedback";
+import { contactPictureChanged } from "../services/contactPictures";
 
 /**
  * One person: what you saved about them, and what they published about
@@ -196,6 +197,7 @@ export function ContactDetailScreen({
       }
       await backendClient.uploadContactAvatar(contact.id, picked);
       setAvatarUri(picked.uri);
+      contactPictureChanged();
       onChanged();
     } catch {
       onToast("Couldn't save that picture.", "error");
@@ -212,6 +214,7 @@ export function ContactDetailScreen({
     try {
       await backendClient.deleteContactAvatar(contact.id);
       setAvatarUri(null);
+      contactPictureChanged();
       onChanged();
     } catch {
       onToast("Couldn't remove that picture.", "error");
