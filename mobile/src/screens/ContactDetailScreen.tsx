@@ -23,7 +23,7 @@ import { AppClientConfig, AppContact } from "../types/app";
 import { buildUniversalAddContactLink } from "../utils/universalLinks";
 import { pickAvatarPhoto } from "../utils/avatarPicker";
 import { useCopyFeedback } from "../hooks/useCopyFeedback";
-import { contactPictureChanged } from "../services/contactPictures";
+import { contactPictureChanged } from "../services/contactOverrides";
 
 /**
  * One person: what you saved about them, and what they published about

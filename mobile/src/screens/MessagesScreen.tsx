@@ -25,6 +25,7 @@ import { attachmentKindLabel } from "../components/MessageAttachmentCard";
 import { SwipeableRow } from "../components/SwipeableRow";
 import { useDockLift } from "../hooks/useDockLift";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
+import { useContactNames } from "../services/contactOverrides";
 import { triggerClickHaptic } from "../utils/haptics";
 import type { RealtimeEvent } from "../services/realtime";
 import { BulletinRequestError, Conversation, MessageAttachment, PublicUser } from "../types/bulletin";
@@ -98,6 +99,8 @@ export function MessagesScreen({
   subscribe,
 }: Props) {
   const { palette, shadows } = useAppTheme();
+  // What you saved people as in Contacts wins over their own name.
+  const nameFor = useContactNames();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
   const { ref: screenRef, onLayout, lift } = useDockLift();
 
@@ -369,7 +372,7 @@ export function MessagesScreen({
     const who = last.is_mine
       ? "You: "
       : conversation.kind === "group" && last.sender_name
-        ? `${last.sender_name}: `
+        ? `${nameFor(last.sender_id, last.sender_name)}: `
         : "";
 
     const attachment = last.attachments?.[0];
@@ -386,7 +389,7 @@ export function MessagesScreen({
 
   const renderConversation = ({ item }: { item: Conversation }) => {
     const isGroup = item.kind === "group";
-    const title = isGroup ? item.title || "Group" : item.other_user.public_name;
+    const title = isGroup ? item.title || "Group" : nameFor(item.other_user.user_id, item.other_user.public_name);
     const unread = item.unread_count > 0;
 
     return (
@@ -638,7 +641,7 @@ export function MessagesScreen({
                 ...(results ?? []).map((user) => ({
                   key: `u:${user.user_id}`,
                   userId: user.user_id,
-                  title: user.public_name,
+                  title: nameFor(user.user_id, user.public_name),
                   user: user as PublicUser | null,
                 })),
                 ...merchantResults.map((merchant) => ({
@@ -686,6 +689,7 @@ export function MessagesScreen({
           ) : (
             <FlatList
               data={conversations ?? []}
+              extraData={nameFor}
               keyExtractor={(item) => String(item.id)}
               renderItem={renderConversation}
               // Hairlines between rows, inset past the avatar so the line

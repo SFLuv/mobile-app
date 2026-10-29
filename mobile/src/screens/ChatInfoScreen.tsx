@@ -24,6 +24,7 @@ import { AttachmentPreview } from "../components/AttachmentPreview";
 import { displayFileName, fileTypeIcon } from "../utils/attachmentFiles";
 import { pickAvatarPhoto } from "../utils/avatarPicker";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
+import { useContactNames } from "../services/contactOverrides";
 import { triggerClickHaptic } from "../utils/haptics";
 import {
   BulletinRequestError,
@@ -101,6 +102,10 @@ export function ChatInfoScreen({
   onToast: (message: string, tone?: "info" | "success" | "error") => void;
 }) {
   const { palette } = useAppTheme();
+  const nameFor = useContactNames();
+  const otherName = conversation.other_user
+    ? nameFor(conversation.other_user.user_id, conversation.other_user.public_name)
+    : "";
   const styles = useMemo(() => createStyles(palette), [palette]);
   const [segment, setSegment] = useState<Segment>("about");
   const [renaming, setRenaming] = useState(false);
@@ -246,7 +251,7 @@ export function ChatInfoScreen({
               ) : (
                 <ChatAvatar
                   client={backendClient}
-                  name={isGroup ? conversation.title || "Group" : conversation.other_user.public_name}
+                  name={isGroup ? conversation.title || "Group" : otherName}
                   size={76}
                   userId={isGroup ? null : conversation.other_user.user_id}
                 />
@@ -285,7 +290,7 @@ export function ChatInfoScreen({
                 disabled={!isGroup || !canAdminister}
               >
                 <Text style={styles.name}>
-                  {isGroup ? conversation.title || "Group" : conversation.other_user.public_name}
+                  {isGroup ? conversation.title || "Group" : otherName}
                 </Text>
                 {isGroup && canAdminister ? (
                   <Ionicons name="pencil" size={14} color={palette.textMuted} />
@@ -387,8 +392,8 @@ export function ChatInfoScreen({
                   style={[styles.actionText, !conversation.blocked_by_me && { color: palette.danger }]}
                 >
                   {conversation.blocked_by_me
-                    ? `Unblock ${conversation.other_user.public_name}`
-                    : `Block ${conversation.other_user.public_name}`}
+                    ? `Unblock ${otherName}`
+                    : `Block ${otherName}`}
                 </Text>
               </Pressable>
 
@@ -442,6 +447,8 @@ function MemberRow({
   onSetRole: (role: ConversationRole) => void;
 }) {
   const { palette } = useAppTheme();
+  const nameFor = useContactNames();
+  const memberName = nameFor(member.user.user_id, member.user.public_name);
   const styles = useMemo(() => createStyles(palette), [palette]);
 
   // Mirrors the server's rules so nothing is offered that would be refused.
@@ -472,7 +479,7 @@ function MemberRow({
         onPress: () =>
           Alert.alert(
             "Hand the group over?",
-            `${member.user.public_name} will own this group and you'll become an admin. This can't be undone by you.`,
+            `${memberName} will own this group and you'll become an admin. This can't be undone by you.`,
             [
               { text: "Cancel", style: "cancel" },
               { text: "Hand over", style: "destructive", onPress: () => onSetRole("owner") },
@@ -482,21 +489,21 @@ function MemberRow({
     }
     if (canRemove) {
       options.push({
-        text: `Remove ${member.user.public_name}`,
+        text: `Remove ${memberName}`,
         style: "destructive",
         onPress: onRemove,
       });
     }
     options.push({ text: "Cancel", style: "cancel" });
-    Alert.alert(member.user.public_name, undefined, options);
+    Alert.alert(memberName, undefined, options);
   };
 
   return (
     <Pressable style={styles.memberRow} onPress={openMenu}>
-      <ChatAvatar client={client} name={member.user.public_name} size={38} userId={member.user.user_id} />
+      <ChatAvatar client={client} name={memberName} size={38} userId={member.user.user_id} />
       <View style={styles.memberBody}>
         <Text style={[styles.memberName, member.left && styles.memberLeft]} numberOfLines={1}>
-          {member.user.public_name}
+          {memberName}
         </Text>
         <Text style={styles.memberMeta} numberOfLines={1}>
           {member.left

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Image, Text, View } from "react-native";
 
 import type { AppBackendClient } from "../services/appBackend";
-import { useContactPictureFor, useContactPictureVersion } from "../services/contactPictures";
+import { useContactPictureFor, useContactPictureVersion } from "../services/contactOverrides";
 import { useAppTheme } from "../theme";
 
 /**

@@ -47,6 +47,7 @@ import { ChatComposer, type AttachmentOption, type ComposerMode } from "../compo
 import { AttachmentPreview } from "../components/AttachmentPreview";
 import { displayFileName, saveAttachment } from "../utils/attachmentFiles";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
+import { useContactNames } from "../services/contactOverrides";
 import { triggerClickHaptic } from "../utils/haptics";
 import type { RealtimeEvent } from "../services/realtime";
 import { useTypingIndicators, useTypingReporter } from "../hooks/useRealtime";
@@ -221,6 +222,9 @@ export function ChatScreen({
   onRead,
 }: Props) {
   const { palette } = useAppTheme();
+  // What you saved people as in Contacts wins over their own name, here and in
+  // an open thread: renaming a contact re-renders this screen.
+  const nameFor = useContactNames();
   const styles = useMemo(() => createStyles(palette), [palette]);
 
   // Seeded from the chat cache, so a thread read before opens on its last
@@ -1401,7 +1405,7 @@ export function ChatScreen({
           <View style={styles.senderAvatarSlot}>
             <ChatAvatar
               client={backendClient}
-              name={item.sender_name || ""}
+              name={nameFor(item.sender_id, item.sender_name || "")}
               size={AVATAR_SIZE}
               userId={item.sender_id}
             />
@@ -1419,7 +1423,7 @@ export function ChatScreen({
             avatarRole !== "none" ? styles.messageColumnWithAvatar : undefined,
           ]}
         >
-          {showSender ? <Text style={styles.senderName}>{item.sender_name}</Text> : null}
+          {showSender ? <Text style={styles.senderName}>{nameFor(item.sender_id, item.sender_name || "")}</Text> : null}
 
           <Pressable
             onLongPress={() => {
@@ -1480,7 +1484,7 @@ export function ChatScreen({
                   <View style={styles.quoteStripe} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.quoteName} numberOfLines={1}>
-                      {item.reply_to.sender_name || "Message"}
+                      {nameFor(item.reply_to.sender_id, item.reply_to.sender_name || "Message")}
                     </Text>
                     <Text
                       style={[styles.quoteBody, item.reply_to.deleted && styles.quoteBodyDeleted]}
@@ -1699,19 +1703,22 @@ export function ChatScreen({
     );
   };
 
+  const otherName = conversation?.other_user
+    ? nameFor(conversation.other_user.user_id, conversation.other_user.public_name || "")
+    : "";
   const headerTitle = !conversation
     ? placeholderTitle || ""
     : isGroup
       ? conversation.title || "Group"
-      : conversation.other_user.public_name || "";
+      : otherName;
   const headerSubtitle = isGroup
     ? `${conversation?.member_count ?? 0} ${conversation?.member_count === 1 ? "person" : "people"}`
     : null;
 
   const composerDisabledReason = conversation?.blocked_by_me
-    ? `You blocked ${conversation.other_user.public_name}.`
+    ? `You blocked ${otherName}.`
     : conversation?.other_user_inactive
-      ? `${conversation.other_user.public_name} can't receive messages right now.`
+      ? `${otherName} can't receive messages right now.`
       : null;
 
   return (
@@ -1809,6 +1816,7 @@ export function ChatScreen({
           data={rows}
           keyExtractor={(row) => (row.kind === "separator" ? row.key : String(row.message.id))}
           renderItem={renderRow}
+          extraData={nameFor}
           contentContainerStyle={styles.listContent}
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
@@ -1948,7 +1956,7 @@ export function ChatScreen({
                     id: replyingTo.id,
                     senderName: replyingTo.is_mine
                       ? "You"
-                      : replyingTo.sender_name || conversation?.other_user.public_name || "Message",
+                      : nameFor(replyingTo.sender_id, replyingTo.sender_name || otherName || "Message"),
                     body: replyingTo.body?.trim() || attachmentKindLabel(replyingTo.attachments?.[0]?.kind),
                   }
                 : null
