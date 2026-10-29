@@ -26,9 +26,10 @@ import { SwipeableRow } from "../components/SwipeableRow";
 import { useDockLift } from "../hooks/useDockLift";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { useContactNames } from "../services/contactOverrides";
+import { applyPendingReads, reconcileWithInbox, usePendingReadsVersion } from "../services/pendingReads";
 import { triggerClickHaptic } from "../utils/haptics";
 import type { RealtimeEvent } from "../services/realtime";
-import { BulletinRequestError, Conversation, MessageAttachment, PublicUser } from "../types/bulletin";
+import { BulletinRequestError, Conversation, MessageAttachment, PublicUser, type UnreadItem } from "../types/bulletin";
 import { displayFileName } from "../utils/attachmentFiles";
 
 /**
@@ -74,8 +75,11 @@ type Props = {
    * does is report that it was opened.
    */
   onChatsOpened?: () => void;
-  /** How many conversations have something unread. Drives the dock badge. */
-  onUnreadChange?: (count: number) => void;
+  /**
+   * The conversations with something unread, as the server last said. Drives
+   * the dock badge, which takes reads made here off it (pendingReads.ts).
+   */
+  onUnreadChange?: (items: UnreadItem[]) => void;
   onOpenConversation: (conversationId: number) => void;
   onStartConversation: (userId: string) => void;
   onNewMessage: () => void;
@@ -121,6 +125,15 @@ export function MessagesScreen({
       saveInbox(conversations);
     }
   }, [conversations]);
+  // As drawn: a chat read here shows read straight away, whatever the server
+  // last said about it. `conversations` stays the server's answer, so a read
+  // the server never takes cannot be saved into the cache as if it had.
+  const pendingReadsVersion = usePendingReadsVersion();
+  const shownConversations = useMemo(
+    () => (conversations ? applyPendingReads(conversations) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [conversations, pendingReadsVersion],
+  );
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PublicUser[] | null>(null);
@@ -185,11 +198,16 @@ export function MessagesScreen({
       }
       inboxTrusted.current = true;
       setConversations(inbox);
+      reconcileWithInbox(inbox);
       // Conversations with something unread, not messages: two unread messages
       // in one thread are one thing to go and read, and that is what the
       // server's own summary counts — so the number does not jump when the
       // shell takes the count back over.
-      onUnreadChange?.(inbox.filter((conversation) => conversation.unread_count > 0).length);
+      onUnreadChange?.(
+        inbox
+          .filter((conversation) => conversation.unread_count > 0)
+          .map((conversation) => ({ conversation_id: conversation.id, last_message_id: conversation.last_message?.id ?? 0 })),
+      );
     } catch {
       // Left as it was. A dropped request is not an empty inbox, and it is not
       // a cleared badge either.
@@ -380,7 +398,7 @@ export function MessagesScreen({
       const caption = last.body?.trim();
       // A caption is what the sender chose to say, so it wins over our label —
       // with the kind kept as a prefix so the row still shows what came with it.
-      const label = attachmentPreviewLabel(attachment, last.attachments?.length ?? 1);
+      const label = attachmentPreviewLabel(last.attachments ?? [attachment]);
       return who + (caption ? `${label} · ${caption}` : label);
     }
 
@@ -688,7 +706,7 @@ export function MessagesScreen({
             />
           ) : (
             <FlatList
-              data={conversations ?? []}
+              data={shownConversations ?? []}
               extraData={nameFor}
               keyExtractor={(item) => String(item.id)}
               renderItem={renderConversation}
@@ -761,12 +779,35 @@ export function MessagesScreen({
  * wants "Shared a merchant", not "attachment". The count is used only for
  * photos and files, where sending several at once is normal.
  */
-function attachmentPreviewLabel(attachment: MessageAttachment, count: number): string {
+/**
+ * What a message's attachments are, in the words its push used — see
+ * attachmentsAnnouncement in the backend's chat_announce.go. Photos, videos and
+ * files are counted together, so two photos and a PDF are "3 attachments"
+ * rather than whatever the first one happened to be.
+ */
+function attachmentPreviewLabel(attachments: MessageAttachment[]): string {
+  const attachment = attachments[0];
+  const media = attachments.filter((a) => a.kind === "image" || a.kind === "file");
+  if (media.length === attachments.length) {
+    const isVideo = (a: MessageAttachment) => a.kind === "file" && (a.content_type ?? "").toLowerCase().startsWith("video/");
+    const images = media.filter((a) => a.kind === "image").length;
+    const videos = media.filter(isVideo).length;
+    const files = media.length - images - videos;
+    if (files === 0 && videos === 0) {
+      return images > 1 ? `📷 ${images} photos` : "📷 Photo";
+    }
+    if (files === 0 && images === 0) {
+      return videos > 1 ? `🎥 ${videos} videos` : "🎥 Video";
+    }
+    if (files === 0) {
+      return `📷 ${images + videos} photos and videos`;
+    }
+    if (images + videos === 0) {
+      return files > 1 ? `📎 ${files} files` : `📎 ${displayFileName(attachment.file_name) || "File"}`;
+    }
+    return `📎 ${media.length} attachments`;
+  }
   switch (attachment.kind) {
-    case "image":
-      return count > 1 ? `📷 ${count} photos` : "📷 Photo";
-    case "file":
-      return count > 1 ? `📎 ${count} files` : `📎 ${displayFileName(attachment.file_name) || "File"}`;
     case "link":
       return `🔗 ${attachment.link_title || attachment.link_site_name || "Link"}`;
     case "transaction":

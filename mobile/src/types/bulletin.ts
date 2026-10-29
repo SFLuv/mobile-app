@@ -311,6 +311,12 @@ export interface Conversation {
   blocked_by_me: boolean;
 }
 
+/** One unread conversation in the messaging summary, by its newest message from somebody else. */
+export interface UnreadItem {
+  conversation_id: number;
+  last_message_id: number;
+}
+
 export interface MessagesPage {
   messages: ChatMessage[];
   has_more: boolean;

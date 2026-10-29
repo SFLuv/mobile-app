@@ -61,7 +61,7 @@ import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { ContactsScreen } from "./src/screens/ContactsScreen";
 import { BulletinScreen } from "./src/screens/BulletinScreen";
 import { MessagesScreen } from "./src/screens/MessagesScreen";
-import { BulletinPost, BulletinRequestError, ChatMessage, Conversation } from "./src/types/bulletin";
+import { BulletinPost, BulletinRequestError, ChatMessage, Conversation, type UnreadItem } from "./src/types/bulletin";
 import { ImproverScreen } from "./src/screens/ImproverScreen";
 import { NotificationsScreen } from "./src/screens/NotificationsScreen";
 import { VolunteerScreen } from "./src/screens/VolunteerScreen";
@@ -136,6 +136,16 @@ import { ContactSupportModal } from "./src/components/ContactSupportModal";
 import { loadBootCache, rememberSignedIn, saveBootCache } from "./src/services/bootCache";
 import { cachedBetaFor, emptyBetaAccess, primeBetaCache, saveBetaCache } from "./src/services/betaCache";
 import { clearChatCache, mergeIntoCachedThread, primeChatCache, setChatCacheUser } from "./src/services/chatCache";
+import {
+  bindReadSender,
+  clearPendingReads,
+  countUnread,
+  onReadConfirmed,
+  primePendingReads,
+  reconcileWithSummary,
+  setPendingReadsUser,
+  usePendingReadsVersion,
+} from "./src/services/pendingReads";
 import { clearAttachmentCache } from "./src/services/attachmentCache";
 import { clearLinkPreviews } from "./src/services/linkPreviews";
 import {
@@ -145,7 +155,7 @@ import {
   saveProfileCache,
   setProfileCacheUser,
 } from "./src/services/profileCache";
-import { publishContactOverrides } from "./src/services/contactOverrides";
+import { contactNameFor, publishContactOverrides } from "./src/services/contactOverrides";
 import type { AppNotificationFeed } from "./src/types/notifications";
 import {
   InboxNotification,
@@ -3531,8 +3541,28 @@ function WalletAppShellContent({
    * the Messages screen reports its own count from the inbox it already polls,
    * an arriving push bumps it immediately, and a slow poll covers the case
    * where no push can arrive at all.
+   *
+   * Each of those reports which conversations are unread, not just how many,
+   * so a chat read here comes off the count the moment it is opened, before
+   * the server has heard (pendingReads.ts). `items` is null from a server too
+   * old to list them, and then the count is shown as it came.
    */
-  const [messagesUnread, setMessagesUnread] = useState(0);
+  const [messagesUnreadSource, setMessagesUnreadSource] = useState<{ count: number; items: UnreadItem[] | null }>({
+    count: 0,
+    items: [],
+  });
+  // Stable: the Messages screen's inbox load depends on it, and a new identity
+  // on every shell render would re-run that load just as often.
+  const handleInboxUnread = useCallback(
+    (items: UnreadItem[]) => setMessagesUnreadSource({ count: items.length, items }),
+    [],
+  );
+  const pendingReadsVersion = usePendingReadsVersion();
+  const messagesUnread = useMemo(
+    () => (messagesUnreadSource.items ? countUnread(messagesUnreadSource.items) : messagesUnreadSource.count),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [messagesUnreadSource, pendingReadsVersion],
+  );
   // Read by the poll without becoming one of its dependencies: a ref, so
   // changing tabs does not tear down and restart the interval.
   const messagesScreenOpenRef = useRef(false);
@@ -4225,17 +4255,27 @@ function WalletAppShellContent({
     return () => clearInterval(interval);
   }, [appUser, backendClient, refreshImproverNotifications]);
 
+  const messagesUnreadSeq = useRef(0);
   const refreshMessagesUnread = useCallback(async () => {
     // Nothing shows this count when the tab is gone, so asking for it is a
     // request made for nobody. Gated here rather than at the call sites so the
     // one-shot and the interval cannot disagree.
     if (!backendClient || !appUser || !chatEnabled) {
-      setMessagesUnread(0);
+      setMessagesUnreadSource({ count: 0, items: [] });
       return;
     }
+    // The newest request wins. A read's confirmation asks again, and the answer
+    // to a request sent before it must not land last and put the read back.
+    const seq = ++messagesUnreadSeq.current;
     try {
       const summary = await backendClient.getMessagingSummary();
-      setMessagesUnread(summary.unread_conversations);
+      if (seq !== messagesUnreadSeq.current) {
+        return;
+      }
+      if (summary.unread) {
+        reconcileWithSummary(summary.unread);
+      }
+      setMessagesUnreadSource({ count: summary.unread_conversations, items: summary.unread ?? null });
     } catch {
       // Left at its last value. A failed request is not evidence that nothing
       // is waiting, and clearing the badge on a dropped connection is the one
@@ -4246,6 +4286,29 @@ function WalletAppShellContent({
   useEffect(() => {
     void refreshMessagesUnread();
   }, [refreshMessagesUnread]);
+
+  // Reads go to the server from pendingReads.ts, through whoever is signed in.
+  useEffect(() => {
+    if (!backendClient || !appUser) {
+      bindReadSender(null);
+      return;
+    }
+    bindReadSender((conversationId, upTo) => backendClient.markConversationRead(conversationId, upTo));
+    return () => bindReadSender(null);
+  }, [appUser, backendClient]);
+
+  // Once the server has a read, its count agrees, so it is asked again. Not
+  // while the Messages screen is up: the server tells this device about its
+  // own read over the socket, and that screen re-reads the inbox on it.
+  useEffect(
+    () =>
+      onReadConfirmed(() => {
+        if (!messagesScreenOpenRef.current) {
+          void refreshMessagesUnread();
+        }
+      }),
+    [refreshMessagesUnread],
+  );
 
   useEffect(() => {
     if (!backendClient || !appUser || !chatEnabled) {
@@ -4350,21 +4413,42 @@ function WalletAppShellContent({
         const notice = event.notice;
         const fallbackLine =
           message.kind === "payment" ? "Sent you SFLUV" : message.body?.trim() || "Sent an attachment";
-        const title = notice?.title || message.sender_name?.trim() || "New message";
+        let title = notice?.title || message.sender_name?.trim() || "New message";
+        let body = notice?.body || fallbackLine;
+        let spoken = notice?.spoken;
+        // What you saved the sender as, if you did — as their push now says
+        // too (noticeAsCalled, on the server). The notice is one wording for
+        // every member of the thread, so it carries their profile name; only
+        // the name is swapped, where the server put it.
+        const senderId = notice?.sender_id || message.sender_id;
+        const profileName = notice?.sender_name || message.sender_name?.trim() || "";
+        const calledName = contactNameFor(senderId, profileName);
+        if (profileName && calledName !== profileName) {
+          if (notice?.is_group) {
+            if (body.startsWith(`${profileName}: `)) {
+              body = `${calledName}: ${body.slice(profileName.length + 2)}`;
+            }
+          } else if (title === profileName) {
+            title = calledName;
+          }
+          if (spoken?.startsWith(`${profileName} `)) {
+            spoken = `${calledName}${spoken.slice(profileName.length)}`;
+          }
+        }
         // Keyed on the message row, which is the same key the push path uses,
         // so a message that arrives down both is banner'd once.
         showBanner({
           id: `message:${message.id}`,
           title,
-          body: notice?.body || fallbackLine,
-          spoken: notice?.spoken,
+          body,
+          spoken,
           hint: notice?.is_group ? `In ${title}. Opens the conversation.` : "Opens the conversation.",
           // The group's picture for a group, the person's for a direct thread.
           avatar: notice?.is_group
             ? { name: title, conversationId, iconAttachmentId: notice.icon_attachment_id }
             : {
-                name: notice?.sender_name || message.sender_name || title,
-                userId: notice?.sender_id || message.sender_id,
+                name: calledName || title,
+                userId: senderId,
               },
           // The message it announced travels with the tap, so a thread whose
           // cached copy lacks it catches up rather than opening without it.
@@ -5585,6 +5669,7 @@ function WalletAppShellContent({
       clearAttachmentCache();
       void clearProfileCache();
       void clearLinkPreviews();
+      void clearPendingReads();
       // This person's transaction history, under whichever addresses it was
       // cached for.
       void AsyncStorage.getAllKeys()
@@ -6954,7 +7039,7 @@ function WalletAppShellContent({
                 hapticsEnabled={preferences.hapticsEnabled}
                 requestedSegment={tab === "contacts" ? "contacts" : undefined}
                 requestedSegmentNonce={tab === "contacts" ? messagesRouteRequest.nonce : undefined}
-                onUnreadChange={setMessagesUnread}
+                onUnreadChange={handleInboxUnread}
                 onChatsOpened={handleChatsOpened}
                 onOpenConversation={(conversationId) => openChat(conversationId, { autoFocus: true })}
                 onStartConversation={(userId) => void startConversationWith(userId)}
@@ -7206,12 +7291,11 @@ function WalletAppShellContent({
                 sendTyping={sendTyping}
                 onToast={showToast}
                 onRead={(conversationId) => {
-                  // Two things, both of which "reading it" should do: move the
-                  // badge, and clear the OS notification for that thread — the
-                  // same way tapping the push would have. A notification for a
-                  // message already on screen is the thing this whole path is
-                  // for getting rid of.
-                  void refreshMessagesUnread();
+                  // The badge has already moved: the read is in pendingReads,
+                  // which it counts through. What is left is the OS
+                  // notification for that thread, cleared the same way tapping
+                  // the push would have. A notification for a message already
+                  // on screen is the thing this whole path is for getting rid of.
                   handleConversationOpened(conversationId);
                 }}
               />
@@ -7321,8 +7405,11 @@ function WalletAppShellContent({
                         const fresh = updated.find(
                           (contact) => contact.id === contactDetailRoute.id,
                         );
+                        // Only onto the card if it is still the one open: a
+                        // save that lands after leaving it (see `leave` in
+                        // ContactDetailScreen) must not open it again.
                         if (fresh) {
-                          setContactDetailRoute(fresh);
+                          setContactDetailRoute((current) => (current && current.id === fresh.id ? fresh : current));
                         }
                       } catch {
                         // The card keeps what it has.
@@ -7928,6 +8015,7 @@ function PrivyWalletApp({
   // Idempotent, and cheap: a comparison when nothing changed.
   setChatCacheUser(user?.id ?? null);
   setProfileCacheUser(user?.id ?? null);
+  setPendingReadsUser(user?.id ?? null);
   // Whenever the signed-in person changes — signing out by any route, or a
   // different account signing in — everything cached for the last one goes.
   // handleLogout clears too, but it is not the only way out: the policy and
@@ -7941,6 +8029,7 @@ function PrivyWalletApp({
       void clearChatCache(previous);
       void clearProfileCache();
       void clearLinkPreviews();
+      void clearPendingReads();
       clearAttachmentCache();
       void AsyncStorage.getAllKeys()
         .then((keys) => AsyncStorage.multiRemove(keys.filter((key) => key.startsWith(TRANSACTION_CACHE_STORAGE_KEY_PREFIX))))
@@ -7948,6 +8037,7 @@ function PrivyWalletApp({
       // The clears reset the caches' owner; whoever is signed in now gets it back.
       setChatCacheUser(next);
       setProfileCacheUser(next);
+      setPendingReadsUser(next);
     }
   }, [user?.id]);
   const { login, state: oauthState } = useLoginWithOAuth();
@@ -9857,6 +9947,7 @@ function App() {
         primeBetaCache(),
         primeChatCache(),
         primeProfileCache(),
+        primePendingReads(),
       ]);
       if (cancelled) {
         return;

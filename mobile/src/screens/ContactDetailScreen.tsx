@@ -232,12 +232,31 @@ export function ContactDetailScreen({
 
   const dirty = name.trim() !== contact.name || (notes ?? "") !== (contact.notes ?? "");
 
+  // Leaving with an edit still in a field saves it. The fields save on blur,
+  // but a back tap or swipe while one is focused unmounts the screen first, and
+  // the blur that would have saved it never arrives: the rename was simply
+  // lost, and the chat with them kept their old name.
+  const leave = () => {
+    const nextName = name.trim();
+    const patch: { name?: string; notes?: string } = {};
+    if (nextName && nextName !== contact.name) {
+      patch.name = nextName;
+    }
+    if ((notes ?? "") !== (contact.notes ?? "")) {
+      patch.notes = notes;
+    }
+    if (patch.name !== undefined || patch.notes !== undefined) {
+      void persist(patch);
+    }
+    onBack();
+  };
+
   const shareLink = buildUniversalAddContactLink({ address: contact.address }, clientConfig);
 
   return (
-    <SwipeBack onBack={onBack} style={styles.screen}>
+    <SwipeBack onBack={leave} style={styles.screen}>
       <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
+        <Pressable onPress={leave} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
           <Ionicons name="chevron-back" size={26} color={palette.text} />
         </Pressable>
         <Text style={styles.headerTitle}>Contact</Text>

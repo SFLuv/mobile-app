@@ -80,6 +80,11 @@ export function useContactPictureVersion(): number {
   return useSyncExternalStore(subscribe, () => version);
 }
 
+/** The same as `nameFor`, read once, for code that is not a component's render. */
+export function contactNameFor(userId: string | null | undefined, fallback: string): string {
+  return (userId ? byUserId.get(userId)?.name : undefined) || fallback;
+}
+
 /**
  * `nameFor(userId, theirName)`: what you saved them as, or their own name.
  * The component re-renders whenever a contact is renamed.

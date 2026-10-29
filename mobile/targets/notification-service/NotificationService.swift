@@ -2,6 +2,7 @@ import ImageIO
 import Intents
 import UIKit
 import UserNotifications
+import os
 
 /// Chat pushes, drawn the way Messages and Telegram draw theirs.
 ///
@@ -21,6 +22,11 @@ import UserNotifications
 /// the app logo, which is what "even with the default picture" asks for. Any
 /// other problem delivers the push exactly as it arrived.
 class NotificationService: UNNotificationServiceExtension {
+  /// Every fallback says why, so a push that arrives with the app's icon can be
+  /// told apart from one that arrived with initials. On a Mac, Console.app with
+  /// the phone selected, filtered to the subsystem "SFLuv.NotificationService".
+  private static let log = Logger(subsystem: "SFLuv.NotificationService", category: "push")
+
   private var contentHandler: ((UNNotificationContent) -> Void)?
   private var bestAttempt: UNMutableNotificationContent?
   /// The work finishes on Swift's cooperative pool and the deadline arrives on
@@ -46,6 +52,7 @@ class NotificationService: UNNotificationServiceExtension {
     else {
       // Not a chat message — a payout, a W-9 notice, being added to a group.
       // Shown as it is.
+      Self.log.info("not a chat message, shown as sent")
       deliver(content)
       return
     }
@@ -57,6 +64,10 @@ class NotificationService: UNNotificationServiceExtension {
     let groupName: String? = isGroup ? content.title : nil
     let senderAvatarURL = data["sender_avatar_url"] as? String
     let groupAvatarURL = data["group_avatar_url"] as? String
+
+    if senderAvatarURL == nil {
+      Self.log.notice("no sender picture URL in the push; the server has no public URL, or nobody to picture")
+    }
 
     Task {
       let senderData = await Self.download(senderAvatarURL)
@@ -125,8 +136,13 @@ class NotificationService: UNNotificationServiceExtension {
 
       do {
         let updated = try content.updating(from: intent)
+        Self.log.info("communication notification, sender picture: \(senderData != nil ? "downloaded" : "initials", privacy: .public)")
         self.deliver(updated)
       } catch {
+        // The plain push, with the app's icon. iOS refuses this when the app
+        // lacks the Communication Notifications entitlement or does not list
+        // INSendMessageIntent in NSUserActivityTypes.
+        Self.log.error("updating(from:) refused: \(String(describing: error), privacy: .public)")
         self.deliver(content)
       }
     }
@@ -181,13 +197,20 @@ class NotificationService: UNNotificationServiceExtension {
     var request = URLRequest(url: url)
     request.timeoutInterval = 8
     guard let result = try? await URLSession.shared.data(for: request) else {
+      log.error("picture download failed: no response from \(url.host ?? "?", privacy: .public)")
       return nil
     }
     let (data, response) = result
     guard let http = response as? HTTPURLResponse, http.statusCode == 200, data.count <= maxImageBytes else {
+      // 404 is also "no picture": the route answers every refusal the same.
+      log.notice("picture download refused: status \((response as? HTTPURLResponse)?.statusCode ?? 0, privacy: .public), \(data.count, privacy: .public) bytes")
       return nil
     }
-    return thumbnail(of: data)
+    guard let small = thumbnail(of: data) else {
+      log.error("picture did not decode: \(data.count, privacy: .public) bytes")
+      return nil
+    }
+    return small
   }
 
   /// At most `maxPixels` on its longest side, as PNG, or nil if it does not

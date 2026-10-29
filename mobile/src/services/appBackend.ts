@@ -81,6 +81,7 @@ import {
   PublicUser,
   MessagesPage,
   ReportReason,
+  UnreadItem,
   UserProfile,
   UserSearchResult,
 } from "../types/bulletin";
@@ -4138,7 +4139,12 @@ export class AppBackendClient {
     return this.bulletinRequest("/me/conversations", {}, "Unable to load messages");
   }
 
-  getMessagingSummary(): Promise<{ unread_conversations: number }> {
+  /**
+   * `unread` lists each unread conversation with its newest message, so reads
+   * not yet confirmed can be taken off the count exactly (pendingReads.ts).
+   * Absent from a server older than that.
+   */
+  getMessagingSummary(): Promise<{ unread_conversations: number; unread?: UnreadItem[] }> {
     return this.bulletinRequest("/me/messaging-summary", {}, "Unable to load messages");
   }
 
@@ -4629,8 +4635,17 @@ export class AppBackendClient {
     );
   }
 
-  markConversationRead(conversationId: number): Promise<void> {
-    return this.bulletinRequest(`/conversations/${conversationId}/read`, { method: "POST" }, "Unable to update messages");
+  /**
+   * Marks a thread read up to `upTo`, the newest message that was on screen —
+   * not whatever has reached the server since. A server older than that marks
+   * it read to its newest, as it always did.
+   */
+  markConversationRead(conversationId: number, upTo?: number): Promise<void> {
+    return this.bulletinRequest(
+      `/conversations/${conversationId}/read`,
+      upTo ? this.jsonInit("POST", { up_to: upTo }) : { method: "POST" },
+      "Unable to update messages",
+    );
   }
 
   /**

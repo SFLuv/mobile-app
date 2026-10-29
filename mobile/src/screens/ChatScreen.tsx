@@ -48,6 +48,7 @@ import { AttachmentPreview } from "../components/AttachmentPreview";
 import { displayFileName, saveAttachment } from "../utils/attachmentFiles";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { useContactNames } from "../services/contactOverrides";
+import { noteRead } from "../services/pendingReads";
 import { triggerClickHaptic } from "../utils/haptics";
 import type { RealtimeEvent } from "../services/realtime";
 import { useTypingIndicators, useTypingReporter } from "../hooks/useRealtime";
@@ -195,7 +196,12 @@ type Props = {
   subscribe: (listener: (event: RealtimeEvent) => void) => () => void;
   sendTyping: (conversationId: number, typing: boolean) => void;
   onToast: (message: string, tone?: "info" | "success" | "error") => void;
-  /** Reported so the inbox and the dock badge can clear without a round trip. */
+  /**
+   * Reported whenever the thread is read further, as it happens. The read
+   * itself is already recorded in pendingReads.ts, which is what the inbox and
+   * the badge draw from; this is for the shell's own part, clearing the OS
+   * notifications for the thread.
+   */
   onRead?: (conversationId: number) => void;
 };
 
@@ -514,8 +520,6 @@ export function ChatScreen({
           setPageLoaded(true);
           setHasMore(page.has_more);
         }
-        void backendClient.markConversationRead(conversationId).catch(() => {});
-        onReadRef.current?.(conversationId);
       } catch (e) {
         // Superseded — by a newer read, or by switching threads, which bumps
         // the sequence. A 404 for the thread just left must not close the one
@@ -646,6 +650,34 @@ export function ChatScreen({
     void refresh({ silent: true });
   }, [refresh]);
 
+  // ── Reading ───────────────────────────────────────────────────────────────
+  //
+  // The thread is read as soon as it is on screen — from the cache, on the
+  // first frame — up to the newest message in it, and again whenever a newer
+  // one arrives. pendingReads.ts shows it read everywhere at once and gets the
+  // server to agree behind. It used to wait for this screen's own fetch, then
+  // send the read and re-count the badge in the same instant, so the badge
+  // usually counted before the read had landed and stayed up until a poll.
+  const newestMessageId = useMemo(() => {
+    let newest = 0;
+    for (const message of messages) {
+      // For one render after a switch, `messages` is still the last thread's.
+      // Ids are global, so without this the thread just opened would be marked
+      // read up to a message in another one.
+      if (message.conversation_id === conversationId && message.id > newest) {
+        newest = message.id;
+      }
+    }
+    return newest;
+  }, [conversationId, messages]);
+  useEffect(() => {
+    if (!newestMessageId) {
+      return;
+    }
+    noteRead(conversationId, newestMessageId);
+    onReadRef.current?.(conversationId);
+  }, [conversationId, newestMessageId]);
+
   // Applied after the reset above rather than with it, so switching threads
   // cannot wipe a draft that was handed in for the thread being opened. Cleared
   // immediately so it is used once: it is an opening line, not a saved draft,
@@ -682,11 +714,8 @@ export function ChatScreen({
         if (!incoming?.id) {
           return;
         }
+        // Read by being on screen: the read effect below sees the newer id.
         setMessages((current) => mergeMessage(current, incoming));
-        // Reading it is implied by having it on screen, so the unread state is
-        // cleared here rather than waiting for the next poll.
-        void backendClient?.markConversationRead(conversationId).catch(() => {});
-        onReadRef.current?.(conversationId);
         return;
       }
       if (event.kind === "message.updated") {
@@ -735,7 +764,6 @@ export function ChatScreen({
         void refresh({ silent: true });
       }
     });
-    // onRead is read through its ref, for the reason given on those refs.
   }, [backendClient, conversationId, refresh, subscribe]);
 
   // Chats open ready to type. See the header note on why this is the default
