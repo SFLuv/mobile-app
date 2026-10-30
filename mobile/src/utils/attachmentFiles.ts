@@ -107,7 +107,9 @@ export async function saveAttachment(
   }
 
   if (attachment.kind === "image") {
-    const permission = await MediaLibrary.requestPermissionsAsync();
+    // Add-only: saving a photo needs no access to the rest of the library,
+    // and Android no longer declares library-read permissions (app.config.ts).
+    const permission = await MediaLibrary.requestPermissionsAsync(true);
     if (!permission.granted) {
       // Refused rather than silently falling back to the share sheet: they
       // asked to save it to their photos, and a share sheet is a different

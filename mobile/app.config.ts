@@ -142,6 +142,17 @@ const baseConfig = (config: ConfigContext["config"]): ExpoConfig => ({
   },
   android: {
     package: process.env.ANDROID_PACKAGE?.trim() || DEFAULT_ANDROID_PACKAGE,
+    // Google Play only lets gallery-type apps hold broad photo, video and
+    // audio library access, and rejected 2.4.0 for declaring it. Nothing here
+    // needs it: picking photos uses the system photo picker, and saving a chat
+    // image asks for add-only access (attachmentFiles.ts). expo-media-library
+    // adds these by default, so they are stripped from the final manifest.
+    blockedPermissions: [
+      "android.permission.READ_MEDIA_IMAGES",
+      "android.permission.READ_MEDIA_VIDEO",
+      "android.permission.READ_MEDIA_AUDIO",
+      "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+    ],
     ...(googleServicesFile ? { googleServicesFile } : {}),
     config: {
       googleMaps: {
