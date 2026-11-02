@@ -64,6 +64,7 @@ function presentationFor(
   taxYear?: number,
   correctionNeeded = false,
   supportNeeded = false,
+  pastLimit = false,
 ): Presentation {
   // Failed the IRS TIN match more than once. The backend no longer hands out a
   // form on its own, so this beats every tier, including the two that say a
@@ -114,6 +115,17 @@ function presentationFor(
         dismiss: "Later",
       };
     case "warning_500":
+      // While enforcement is off, the warning is also what somebody already
+      // past the line is shown, and "close to the limit" would be wrong.
+      if (pastLimit) {
+        return {
+          icon: "alert-circle",
+          tone: "warning",
+          title: "We need a W-9 from you",
+          body: `You're past ${threshold} ${symbol} for the year, so we need a W-9 on file. It takes a couple of minutes.`,
+          dismiss: "Later",
+        };
+      }
       return {
         icon: "alert-circle",
         tone: "warning",
@@ -141,6 +153,16 @@ function presentationFor(
         emphasis: "Your QR code is still good — scan it again once the form is in.",
         dismiss: "Not now",
       };
+  }
+}
+
+/** Compared in base units as integers, so 599.999999 is never read as 600. */
+function isPastLimit(earnedBase: string, thresholdBase: string): boolean {
+  try {
+    const threshold = BigInt(thresholdBase || "0");
+    return threshold > 0n && BigInt(earnedBase || "0") >= threshold;
+  } catch {
+    return false;
   }
 }
 
@@ -180,9 +202,18 @@ export function W9TierModal({
   const presentation = useMemo(
     () =>
       tier
-        ? presentationFor(tier, thresholdSfluv, tokenSymbol, adminRequested, taxYear, correctionNeeded, supportNeeded)
+        ? presentationFor(
+            tier,
+            thresholdSfluv,
+            tokenSymbol,
+            adminRequested,
+            taxYear,
+            correctionNeeded,
+            supportNeeded,
+            isPastLimit(earnedBase, thresholdBase),
+          )
         : null,
-    [adminRequested, correctionNeeded, supportNeeded, taxYear, thresholdSfluv, tier, tokenSymbol],
+    [adminRequested, correctionNeeded, earnedBase, supportNeeded, taxYear, thresholdBase, thresholdSfluv, tier, tokenSymbol],
   );
 
   if (!presentation) {
