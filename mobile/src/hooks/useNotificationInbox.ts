@@ -82,6 +82,11 @@ export function useNotificationInbox({ onNavigate }: Options) {
   // Delivered while the app is open.
   useEffect(() => {
     const subscription = Notifications.addNotificationReceivedListener((notification) => {
+      // A badge update says nothing and is never shown; it is not a notification
+      // anybody needs to clear.
+      if ((notification.request.content.data as Record<string, unknown> | undefined)?.type === "badge") {
+        return;
+      }
       ingest([itemFromNotification(notification)]);
     });
     return () => subscription.remove();

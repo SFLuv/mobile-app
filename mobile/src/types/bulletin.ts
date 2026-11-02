@@ -315,6 +315,8 @@ export interface Conversation {
 export interface UnreadItem {
   conversation_id: number;
   last_message_id: number;
+  /** Unread messages in it. Absent from a server older than the count. */
+  unread_count?: number;
 }
 
 export interface MessagesPage {

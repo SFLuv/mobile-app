@@ -143,6 +143,33 @@ function contentToItem(
   };
 }
 
+/**
+ * Clears every notification the OS is holding about one conversation, whether
+ * or not this list has heard of it.
+ *
+ * Opening a chat used to clear only the entries in this list. Pushes that
+ * arrived while the app was in the background join it when the tray is re-read
+ * on the return to the foreground, and that read usually finished after the
+ * chat it was opened from had already cleared — so one or two of a chat's
+ * notifications went and the rest stayed on the lock screen. This asks the OS
+ * directly, so there is no race to lose.
+ */
+export async function dismissConversationFromTray(conversationId: number): Promise<void> {
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    await Promise.all(
+      presented
+        .filter((notification) => {
+          const target = targetFromData((notification.request.content.data ?? {}) as Record<string, unknown>);
+          return target.kind === "conversation" && target.conversationId === conversationId;
+        })
+        .map((notification) => Notifications.dismissNotificationAsync(notification.request.identifier).catch(() => {})),
+    );
+  } catch {
+    // The tray could not be read; the list's own copy is cleared regardless.
+  }
+}
+
 export function itemFromNotification(notification: Notifications.Notification): InboxNotification {
   const identifier = notification.request.identifier;
   const receivedAt = notification.date ? Number(notification.date) : Date.now();

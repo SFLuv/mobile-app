@@ -156,11 +156,13 @@ import {
   setProfileCacheUser,
 } from "./src/services/profileCache";
 import { contactNameFor, publishContactOverrides } from "./src/services/contactOverrides";
+import { isNotificationReply, registerChatNotificationActions, sendNotificationReply } from "./src/services/notificationReplies";
 import type { AppNotificationFeed } from "./src/types/notifications";
 import {
   InboxNotification,
   NotificationTarget,
   targetFromData,
+  dismissConversationFromTray,
 } from "./src/services/notificationInbox";
 import { AppPreferences, defaultAppPreferences } from "./src/types/preferences";
 import {
@@ -477,6 +479,20 @@ export function setSocketLive(live: boolean) {
   socketLive = live;
 }
 
+/** The chat on screen, if any. Module-level for the same reason. */
+let openConversationId: number | null = null;
+
+export function setOpenConversation(conversationId: number | null) {
+  openConversationId = conversationId;
+}
+
+const SHOW_NOTHING: Notifications.NotificationBehavior = {
+  shouldShowBanner: false,
+  shouldShowList: false,
+  shouldPlaySound: false,
+  shouldSetBadge: false,
+};
+
 /**
  * How a push is drawn while the app is in the FOREGROUND — this handler is not
  * consulted for one that arrives in the background, which the OS always draws.
@@ -498,15 +514,32 @@ export function setSocketLive(live: boolean) {
  *
  * The tray row is kept either way: suppressing the banner is about not showing
  * the same thing twice at the moment it arrives, not about hiding it.
+ *
+ * Two pushes show nothing at all. A message for the chat already on screen is
+ * in front of the person, so a tray row for it would only be one more thing
+ * to clear. And a badge update (push_badge.go in the backend) has nothing to
+ * show; the shell sets the icon's number itself while it is open.
  */
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: !socketLive,
-    shouldShowList: true,
-    shouldPlaySound: !socketLive,
-    shouldSetBadge: false,
-  }),
+  handleNotification: async (notification) => {
+    const data = (notification.request.content.data ?? {}) as Record<string, unknown>;
+    if (data.type === "badge") {
+      return SHOW_NOTHING;
+    }
+    if (openConversationId !== null && Number(data.conversation_id) === openConversationId) {
+      return SHOW_NOTHING;
+    }
+    return {
+      shouldShowBanner: !socketLive,
+      shouldShowList: true,
+      shouldPlaySound: !socketLive,
+      shouldSetBadge: false,
+    };
+  },
 });
+
+// The Reply action on chat pushes — see notificationReplies.ts.
+void registerChatNotificationActions();
 
 function blankRuntime(loading = false): RuntimeState {
   return { loading, service: null, discovery: null, error: null, loadingMessage: null };
@@ -3546,17 +3579,23 @@ function WalletAppShellContent({
    * so a chat read here comes off the count the moment it is opened, before
    * the server has heard (pendingReads.ts). `items` is null from a server too
    * old to list them, and then the count is shown as it came.
+   *
+   * It counts messages, as each inbox row's bubble does. It used to count
+   * conversations, so ten messages from one person showed 1 here and 10 on
+   * the row, and the badge looked stuck.
    */
   const [messagesUnreadSource, setMessagesUnreadSource] = useState<{ count: number; items: UnreadItem[] | null }>({
     count: 0,
     items: [],
   });
+  /** Whether the count above has been heard from a server yet — see iconBadge. */
+  const messagesUnreadKnown = useRef(false);
   // Stable: the Messages screen's inbox load depends on it, and a new identity
   // on every shell render would re-run that load just as often.
-  const handleInboxUnread = useCallback(
-    (items: UnreadItem[]) => setMessagesUnreadSource({ count: items.length, items }),
-    [],
-  );
+  const handleInboxUnread = useCallback((items: UnreadItem[]) => {
+    messagesUnreadKnown.current = true;
+    setMessagesUnreadSource({ count: items.length, items });
+  }, []);
   const pendingReadsVersion = usePendingReadsVersion();
   const messagesUnread = useMemo(
     () => (messagesUnreadSource.items ? countUnread(messagesUnreadSource.items) : messagesUnreadSource.count),
@@ -3997,9 +4036,18 @@ function WalletAppShellContent({
   const handleConversationOpened = useCallback(
     (conversationId: number) => {
       resolveNotificationTarget({ kind: "conversation", conversationId });
+      // The OS tray itself, too: see dismissConversationFromTray for why the
+      // list above is not enough.
+      void dismissConversationFromTray(conversationId);
     },
     [resolveNotificationTarget],
   );
+
+  const openChatId = chatRoute?.conversationId ?? null;
+  useEffect(() => {
+    setOpenConversation(openChatId);
+    return () => setOpenConversation(null);
+  }, [openChatId]);
 
   /**
    * The server-side notification ledger behind the Notifications screen.
@@ -4100,6 +4148,33 @@ function WalletAppShellContent({
    */
   const panelNotificationCount = screenNotificationFeed?.unseenCount ?? serverUnseenCount;
 
+  /**
+   * The number on the app's icon: everything waiting — unread messages, as
+   * the dock's Messages badge counts them, and what the bell counts.
+   *
+   * iOS draws no count on an icon unless something sets one, and nothing did,
+   * so the icon stayed bare however much was waiting. Pushes now carry the
+   * number while the app is closed (push_badge.go in the backend). This keeps
+   * it right while the app runs and the counts move with no push to say so: a
+   * chat read, a notification looked at.
+   *
+   * Only once both counts have been heard from the server. Before that they
+   * read 0, and an app woken in the background — to send a reply typed into a
+   * notification, say — would clear a correct number and could be suspended
+   * before putting it back.
+   */
+  const iconBadge = (chatEnabled ? messagesUnread : 0) + panelNotificationCount;
+  const iconBadgeKnown =
+    Boolean(appUser) &&
+    (notificationFeed !== null || screenNotificationFeed != null) &&
+    (!chatEnabled || messagesUnreadKnown.current);
+  useEffect(() => {
+    if (!iconBadgeKnown) {
+      return;
+    }
+    void Notifications.setBadgeCountAsync(iconBadge).catch(() => {});
+  }, [iconBadge, iconBadgeKnown]);
+
   // Reaching a screen under your own steam handles the notification for it just
   // as tapping it would, so it clears from our list and the OS tray together.
   useEffect(() => {
@@ -4138,6 +4213,10 @@ function WalletAppShellContent({
     }
   }, [landedOn]);
   const routedNotificationResponsesRef = useRef(new Set<string>());
+  // Read when a reply arrives rather than listed below: the listener should not
+  // be torn down and re-added every time the client is rebuilt.
+  const replyClientRef = useRef(backendClient);
+  replyClientRef.current = backendClient;
   useEffect(() => {
     const routeFromResponse = (response: Notifications.NotificationResponse | null) => {
       if (!response) {
@@ -4148,6 +4227,17 @@ function WalletAppShellContent({
         return;
       }
       routedNotificationResponsesRef.current.add(key);
+      // A reply typed into the push is sent, not opened: the point of
+      // answering from the banner is not having to come into the app.
+      if (isNotificationReply(response)) {
+        recordStep("notification", "replied from a push");
+        const client = replyClientRef.current;
+        void sendNotificationReply(
+          response,
+          client ? (conversationId, body) => client.sendConversationMessage(conversationId, body, null) : null,
+        );
+        return;
+      }
       const data = response.notification.request.content.data as Record<string, unknown> | undefined;
       const parsed = targetFromData(data);
       // The push's own title — the person, or the group — for the chat header
@@ -4275,6 +4365,7 @@ function WalletAppShellContent({
       if (summary.unread) {
         reconcileWithSummary(summary.unread);
       }
+      messagesUnreadKnown.current = true;
       setMessagesUnreadSource({ count: summary.unread_conversations, items: summary.unread ?? null });
     } catch {
       // Left at its last value. A failed request is not evidence that nothing
@@ -5670,6 +5761,8 @@ function WalletAppShellContent({
       void clearProfileCache();
       void clearLinkPreviews();
       void clearPendingReads();
+      // The icon's count was theirs too.
+      void Notifications.setBadgeCountAsync(0).catch(() => {});
       // This person's transaction history, under whichever addresses it was
       // cached for.
       void AsyncStorage.getAllKeys()
@@ -8030,6 +8123,7 @@ function PrivyWalletApp({
       void clearProfileCache();
       void clearLinkPreviews();
       void clearPendingReads();
+      void Notifications.setBadgeCountAsync(0).catch(() => {});
       clearAttachmentCache();
       void AsyncStorage.getAllKeys()
         .then((keys) => AsyncStorage.multiRemove(keys.filter((key) => key.startsWith(TRANSACTION_CACHE_STORAGE_KEY_PREFIX))))

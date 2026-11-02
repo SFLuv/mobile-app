@@ -1,26 +1,34 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Dimensions, Keyboard, LayoutAnimation, Platform, type KeyboardEvent, type View } from "react-native";
+import { Animated, Dimensions, Easing, Keyboard, Platform, type KeyboardEvent, type View } from "react-native";
 
 /**
- * Animates the next layout change on the keyboard's own curve and duration.
+ * The iOS keyboard's own curve, as near as a cubic Bézier gets to it: off the
+ * mark fast, then a long gentle settle.
  *
- * Setting the padding in the same frame the keyboard starts moving was half the
- * fix: the padding still changed in ONE step, so the composer jumped to its end
- * position while the keyboard was still sliding up to meet it. This is how
- * React Native's KeyboardAvoidingView makes its content travel with the
- * keyboard — iOS's keyboard curve, the event's duration, applied to the layout
- * update the padding change causes.
+ * ── Why the composer trailed the keyboard ───────────────────────────────────
+ *
+ * This used to configure a LayoutAnimation of type "keyboard" with the event's
+ * duration, which is what KeyboardAvoidingView does and what reads as exact on
+ * the old architecture: UIKit animates the layout change on the keyboard's
+ * private curve. The New Architecture's LayoutAnimation has no such curve. It
+ * implements linear, the eases and spring, and anything else — "keyboard"
+ * included — falls through to LINEAR (calculateAnimationProgress, in React
+ * Native's renderer/animations). A linear move starts slowly while the keyboard
+ * leaps away, so the composer visibly trailed it on the way up and on the way
+ * down, though both took the same quarter of a second.
+ *
+ * It also waited on React: the padding was state, so every keyboard event
+ * re-rendered the whole chat screen before the move could start.
+ *
+ * Now the padding is an Animated value driven on this curve and the event's
+ * duration, started inside the keyboard event itself, with no render between
+ * the keyboard moving and the composer moving.
+ *
+ * Exact coupling, frame for frame, including an interactive swipe-down that
+ * drags the keyboard under the finger, needs the keyboard's frames from native
+ * code. That is react-native-keyboard-controller, on the 2.5 branch.
  */
-function followKeyboard(event?: KeyboardEvent) {
-  const duration = event?.duration ?? 0;
-  if (duration <= 0) {
-    return;
-  }
-  LayoutAnimation.configureNext({
-    duration,
-    update: { duration, type: LayoutAnimation.Types.keyboard },
-  });
-}
+const KEYBOARD_EASING = Easing.bezier(0.38, 0.7, 0.125, 1);
 
 /**
  * How much bottom padding a screen needs so its own bottom edge sits on top of
@@ -52,19 +60,21 @@ function followKeyboard(event?: KeyboardEvent) {
  * ── Usage ───────────────────────────────────────────────────────────────────
  *
  *   const { ref, onLayout, lift } = useKeyboardLift();
- *   <View ref={ref} onLayout={onLayout} style={{ flex: 1, paddingBottom: lift }}>
+ *   <Animated.View ref={ref} onLayout={onLayout} style={{ flex: 1, paddingBottom: lift }}>
  *     <FlatList inverted ... />
  *     <Composer />
- *   </View>
+ *   </Animated.View>
  *
  * With an inverted list above the composer, that is the whole Telegram
  * behaviour: the content stays anchored to the bottom of the shrinking box, so
  * the newest message rides up with the composer and scrolling still works.
  */
 export function useKeyboardLift() {
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-  // The height last applied, so a repeat event with the same height is ignored.
+  // The keyboard's height, read by the animation without being state: setting
+  // it must not re-render the screen. See KEYBOARD_EASING.
   const heightRef = useRef(0);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const lift = useRef(new Animated.Value(0)).current;
   /**
    * How far this view's bottom edge sits above the bottom of the display.
    *
@@ -75,17 +85,43 @@ export function useKeyboardLift() {
    * landed, and under-lifting hides the text field behind the keyboard — the
    * exact failure being fixed.
    */
-  const [bottomGap, setBottomGap] = useState(0);
+  const bottomGapRef = useRef(0);
   const ref = useRef<View>(null);
+
+  /** Moves the padding to where the keyboard is going, over `duration`. */
+  const follow = useCallback(
+    (duration: number) => {
+      // Never negative: a keyboard shorter than the inset the view already has
+      // needs no lift at all, and a negative padding would pull the composer
+      // off the bottom of the screen.
+      const target = Math.max(0, heightRef.current - bottomGapRef.current);
+      lift.stopAnimation();
+      if (duration <= 0) {
+        lift.setValue(target);
+        return;
+      }
+      // Not the native driver: padding is layout, which only the JS driver can
+      // animate. It does so without React, by writing the prop directly.
+      Animated.timing(lift, { toValue: target, duration, easing: KEYBOARD_EASING, useNativeDriver: false }).start();
+    },
+    [lift],
+  );
 
   const onLayout = useCallback(() => {
     ref.current?.measureInWindow((_x, y, _width, height) => {
       if (!height) {
         return;
       }
-      setBottomGap(Math.max(0, Dimensions.get("window").height - (y + height)));
+      const gap = Math.max(0, Dimensions.get("window").height - (y + height));
+      if (gap !== bottomGapRef.current) {
+        bottomGapRef.current = gap;
+        // A measurement, not a keyboard move: corrected in place.
+        if (Platform.OS === "ios" && heightRef.current > 0) {
+          follow(0);
+        }
+      }
     });
-  }, []);
+  }, [follow]);
 
   useEffect(() => {
     if (Platform.OS !== "ios") {
@@ -94,17 +130,16 @@ export function useKeyboardLift() {
     // "Will" rather than "Did": the padding changes in the same frame the
     // keyboard starts moving, so the composer travels with it instead of
     // jumping once it has arrived.
-    // Only when the height really changes. Show and change-frame both fire for
-    // one keyboard; a layout animation configured for a change that commits
-    // nothing stays pending and animates whatever lays out next — a message
-    // arriving, say — which is LayoutAnimation's best-known trap.
+    // Only when the height really changes: show and change-frame both fire for
+    // one keyboard, and a second animation to the same place would restart
+    // the curve from wherever the first had got to.
     const apply = (next: number, event?: KeyboardEvent) => {
       if (next === heightRef.current) {
         return;
       }
       heightRef.current = next;
-      followKeyboard(event);
-      setKeyboardHeight(next);
+      follow(event?.duration ?? 0);
+      setKeyboardVisible(next > 0);
     };
     const show = Keyboard.addListener("keyboardWillShow", (event: KeyboardEvent) => {
       apply(event.endCoordinates.height, event);
@@ -123,12 +158,9 @@ export function useKeyboardLift() {
       hide.remove();
       change.remove();
     };
-  }, []);
+  }, [follow]);
 
-  // Never negative: a keyboard shorter than the inset the view already has
-  // needs no lift at all, and a negative padding would pull the composer off
-  // the bottom of the screen.
-  const lift = Platform.OS === "ios" ? Math.max(0, keyboardHeight - bottomGap) : 0;
-
-  return { ref, onLayout, lift, keyboardVisible: keyboardHeight > 0 };
+  // `lift` is an Animated value: give it to an Animated.View's paddingBottom.
+  // It stays 0 on Android, where the window itself resizes (see above).
+  return { ref, onLayout, lift, keyboardVisible };
 }
