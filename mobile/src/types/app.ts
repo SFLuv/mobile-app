@@ -1032,6 +1032,16 @@ export interface AppW9Status {
    * only changes what it says. False from a backend that predates the flag.
    */
   adminRequested: boolean;
+  /**
+   * Their W-9 failed the IRS TIN match once. They can send a corrected one: the
+   * start button gets a fresh form. False from a backend without the flag.
+   */
+  correctionNeeded: boolean;
+  /**
+   * It failed more than once, so the backend refuses another form and they are
+   * asked to email support instead.
+   */
+  supportNeeded: boolean;
   /** A payout was actually refused — not merely held. */
   blocked: boolean;
   /**

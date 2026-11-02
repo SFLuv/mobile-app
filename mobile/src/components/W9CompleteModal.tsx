@@ -33,7 +33,9 @@ type Props = {
  *
  * So this says three things, in order of what people actually want to know:
  * the form is in, the money that was held is on its way, and rewards work
- * normally again. The middle one is omitted rather than reworded when nothing
+ * normally again. "Received", not "on file": this shows on the signature,
+ * hours before the IRS TIN match answers, and a form that then fails the match
+ * would otherwise have been called done. The middle one is omitted rather than reworded when nothing
  * was held, because "0 SFLUV has been released" invites the question of where
  * it went.
  */
@@ -56,7 +58,7 @@ export function W9CompleteModal({ visible, releasedSfluv, tokenSymbol, onDismiss
             <Ionicons name="checkmark-circle" size={44} color={palette.success} />
           </View>
 
-          <Text style={styles.title}>Your W-9 is on file</Text>
+          <Text style={styles.title}>We've received your W-9</Text>
 
           {hadEscrow ? (
             <>
@@ -71,8 +73,8 @@ export function W9CompleteModal({ visible, releasedSfluv, tokenSymbol, onDismiss
 
           <Text style={styles.body}>
             {hadEscrow
-              ? "Nothing is being held any more, and future rewards will arrive as normal."
-              : "Nothing is being held, and your rewards will arrive as normal."}
+              ? "Nothing is being held any more, and future rewards will arrive as normal. We'll let you know if the IRS check finds anything to fix."
+              : "Nothing is being held, and your rewards will arrive as normal. We'll let you know if the IRS check finds anything to fix."}
           </Text>
 
           <Pressable

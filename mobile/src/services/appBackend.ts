@@ -3965,6 +3965,8 @@ export class AppBackendClient {
       tier: normalizeW9Tier(asString(body.tier)),
       tierAcknowledged: body.tier_acknowledged === true,
       adminRequested: body.admin_requested === true,
+      correctionNeeded: body.correction_needed === true,
+      supportNeeded: body.support_needed === true,
       blocked: body.blocked === true,
       earnedBase: asString(body.earned_base) || "0",
       thresholdBase: asString(body.threshold_base) || "0",

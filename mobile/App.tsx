@@ -8051,6 +8051,8 @@ function WalletAppShellContent({
         tokenSymbol={clientConfig.tokenSymbol}
         adminRequested={w9Status?.adminRequested ?? false}
         taxYear={w9Status?.taxYear}
+        correctionNeeded={w9Status?.correctionNeeded ?? false}
+        supportNeeded={w9Status?.supportNeeded ?? false}
         busy={w9Busy}
         onStartForm={() => {
           void handleStartW9();

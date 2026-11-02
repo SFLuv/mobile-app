@@ -19,6 +19,10 @@ type Props = {
   adminRequested?: boolean;
   /** The year the form is for, named in the admin-request wording. */
   taxYear?: number;
+  /** Their last W-9 failed the IRS check once; see AppW9Status.correctionNeeded. */
+  correctionNeeded?: boolean;
+  /** It failed again and support has to help; see AppW9Status.supportNeeded. */
+  supportNeeded?: boolean;
   busy?: boolean;
   onStartForm: () => void;
   onDismiss: () => void;
@@ -39,6 +43,8 @@ type Presentation = {
   emphasis?: string;
   dismiss: string;
   tone: "notice" | "warning" | "stopped";
+  /** False when there is no form to open: the backend refuses one and says why. */
+  startable?: boolean;
 };
 
 /**
@@ -56,7 +62,36 @@ function presentationFor(
   symbol: string,
   adminRequested: boolean,
   taxYear?: number,
+  correctionNeeded = false,
+  supportNeeded = false,
+  pastLimit = false,
 ): Presentation {
+  // Failed the IRS TIN match more than once. The backend no longer hands out a
+  // form on its own, so this beats every tier, including the two that say a
+  // form will fix things.
+  if (supportNeeded) {
+    return {
+      icon: "mail",
+      tone: "warning",
+      title: "We couldn't verify your W-9",
+      body: "The name and taxpayer number on your W-9 still didn't match IRS records. Please email techsupport@sfluv.org and we'll help sort it out.",
+      dismiss: "OK",
+      startable: false,
+    };
+  }
+  // Failed it once. That is nearly always a typo, so say what to check before
+  // they open the fresh form. Escrow and blocked keep their own wording, as for
+  // admin requests below.
+  if (correctionNeeded && (tier === "notice_400" || tier === "warning_500")) {
+    return {
+      icon: "create",
+      tone: "warning",
+      title: "We need a corrected W-9",
+      body: "The name or taxpayer number on your W-9 didn't match IRS records. Check your number digit by digit, and use your name exactly as it appears on your Social Security card.",
+      emphasis: "You'll get a fresh, blank form.",
+      dismiss: "Later",
+    };
+  }
   // Asked for by an admin. The backend delivers the request as the notice or
   // warning tier, because those are the prompts older builds can draw; this
   // build says what actually happened. The escrow and blocked tiers keep their
@@ -80,6 +115,17 @@ function presentationFor(
         dismiss: "Later",
       };
     case "warning_500":
+      // While enforcement is off, the warning is also what somebody already
+      // past the line is shown, and "close to the limit" would be wrong.
+      if (pastLimit) {
+        return {
+          icon: "alert-circle",
+          tone: "warning",
+          title: "We need a W-9 from you",
+          body: `You're past ${threshold} ${symbol} for the year, so we need a W-9 on file. It takes a couple of minutes.`,
+          dismiss: "Later",
+        };
+      }
       return {
         icon: "alert-circle",
         tone: "warning",
@@ -110,6 +156,16 @@ function presentationFor(
   }
 }
 
+/** Compared in base units as integers, so 599.999999 is never read as 600. */
+function isPastLimit(earnedBase: string, thresholdBase: string): boolean {
+  try {
+    const threshold = BigInt(thresholdBase || "0");
+    return threshold > 0n && BigInt(earnedBase || "0") >= threshold;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The meter is always drawn against the limit, never against the tier that
  * triggered the modal. The limit is the number that actually costs somebody
@@ -134,6 +190,8 @@ export function W9TierModal({
   tokenSymbol,
   adminRequested = false,
   taxYear,
+  correctionNeeded = false,
+  supportNeeded = false,
   busy = false,
   onStartForm,
   onDismiss,
@@ -142,8 +200,20 @@ export function W9TierModal({
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
   const presentation = useMemo(
-    () => (tier ? presentationFor(tier, thresholdSfluv, tokenSymbol, adminRequested, taxYear) : null),
-    [adminRequested, taxYear, thresholdSfluv, tier, tokenSymbol],
+    () =>
+      tier
+        ? presentationFor(
+            tier,
+            thresholdSfluv,
+            tokenSymbol,
+            adminRequested,
+            taxYear,
+            correctionNeeded,
+            supportNeeded,
+            isPastLimit(earnedBase, thresholdBase),
+          )
+        : null,
+    [adminRequested, correctionNeeded, earnedBase, supportNeeded, taxYear, thresholdBase, thresholdSfluv, tier, tokenSymbol],
   );
 
   if (!presentation) {
@@ -188,27 +258,31 @@ export function W9TierModal({
             <Text style={[styles.emphasis, { color: accent }]}>{presentation.emphasis}</Text>
           ) : null}
 
-          <Pressable
-            style={[styles.primaryButton, { backgroundColor: accent }, busy ? styles.primaryButtonBusy : null]}
-            onPress={onStartForm}
-            disabled={busy}
-            accessibilityRole="button"
-            // Role alone is not enough: the button wraps an unlabelled icon and
-            // the text, and iOS builds the name by concatenating them, so this
-            // announces as ", Fill out my W-9" — leading comma — without an
-            // explicit label.
-            accessibilityLabel={busy ? "Opening your form" : "Fill out my W-9"}
-          >
-            <Ionicons name="open-outline" size={16} color={palette.white} />
-            <Text style={styles.primaryButtonText}>{busy ? "Opening your form…" : "Fill out my W-9"}</Text>
-          </Pressable>
+          {presentation.startable === false ? null : (
+            <>
+              <Pressable
+                style={[styles.primaryButton, { backgroundColor: accent }, busy ? styles.primaryButtonBusy : null]}
+                onPress={onStartForm}
+                disabled={busy}
+                accessibilityRole="button"
+                // Role alone is not enough: the button wraps an unlabelled icon and
+                // the text, and iOS builds the name by concatenating them, so this
+                // announces as ", Fill out my W-9" — leading comma — without an
+                // explicit label.
+                accessibilityLabel={busy ? "Opening your form" : "Fill out my W-9"}
+              >
+                <Ionicons name="open-outline" size={16} color={palette.white} />
+                <Text style={styles.primaryButtonText}>{busy ? "Opening your form…" : "Fill out my W-9"}</Text>
+              </Pressable>
 
-          {/*
-            The form opens in the system browser, which leaves the app. Said out
-            loud so that is expected rather than alarming — the address bar is
-            the point.
-          */}
-          <Text style={styles.footnote}>Opens the secure tax form outside the app.</Text>
+              {/*
+                The form opens in the system browser, which leaves the app. Said out
+                loud so that is expected rather than alarming — the address bar is
+                the point.
+              */}
+              <Text style={styles.footnote}>Opens the secure tax form outside the app.</Text>
+            </>
+          )}
 
           <Pressable
             style={styles.secondaryButton}
