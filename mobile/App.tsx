@@ -30,6 +30,7 @@ import * as Crypto from "expo-crypto";
 import * as Device from "expo-device";
 import * as Linking from "expo-linking";
 import * as Notifications from "expo-notifications";
+import { KeyboardProvider } from "react-native-keyboard-controller";
 import * as SecureStore from "expo-secure-store";
 import { ethers } from "ethers";
 import {
@@ -10091,6 +10092,10 @@ function App() {
   } as any : null;
 
   return (
+    // Disabled until a screen asks for it: on Android, enabled means the window
+    // stops resizing for the keyboard, which every other form relies on. The
+    // chat turns it on while it is open — see useKeyboardLift.
+    <KeyboardProvider enabled={false}>
     <AppThemeProvider preference={preferences.themePreference}>
       {!mobileConfig.privyAppId.trim().length ? (
         <MissingPrivyConfigScreen />
@@ -10136,6 +10141,7 @@ function App() {
         </View>
       ) : null}
     </AppThemeProvider>
+    </KeyboardProvider>
   );
 }
 
