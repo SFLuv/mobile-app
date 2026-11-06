@@ -344,7 +344,7 @@ const WALLET_PREFERENCES_STORAGE_KEY_PREFIX = "sfluv-wallet:wallet-preferences";
 const BALANCE_CACHE_STORAGE_KEY_PREFIX = "sfluv-wallet:balance-cache";
 const REACTIVATED_ACCOUNT_RECOVERY_NOTICE_STORAGE_KEY =
   "sfluv-wallet:reactivated-account-recovery-notice";
-const ACCOUNT_RECOVERY_SUPPORT_EMAIL = "techsupport@sfluv.org";
+const ACCOUNT_RECOVERY_CONTACT = "Contact SFLuv in Settings";
 const PRIVACY_POLICY_PATH = "/privacy-policy";
 const EMAIL_OPT_IN_POLICY_PATH = "/email-opt-in-policy";
 const TRANSFER_REFRESH_DEBOUNCE_MS = 350;
@@ -5941,7 +5941,7 @@ function WalletAppShellContent({
       const preview = await backendClient.getDeleteAccountPreview();
       Alert.alert(
         "Delete account",
-        `${buildDeleteAccountPreviewMessage(preview)} Before the delete request is sent, any ${clientConfig.tokenSymbol} in your accessible wallets will be transferred out of your account. If you later reactivate during the grace period, contact ${ACCOUNT_RECOVERY_SUPPORT_EMAIL} to recover those funds.`,
+        `${buildDeleteAccountPreviewMessage(preview)} Before the delete request is sent, any ${clientConfig.tokenSymbol} in your accessible wallets will be transferred out of your account. If you later reactivate during the grace period, use ${ACCOUNT_RECOVERY_CONTACT} to recover those funds.`,
         [
           {
             text: "Keep account",
@@ -5965,7 +5965,7 @@ function WalletAppShellContent({
                     discovery: runtime.discovery,
                   });
                   setAccountDeletionMessage(
-                    `Submitting your deletion request. If you later stop the scheduled deletion, contact ${ACCOUNT_RECOVERY_SUPPORT_EMAIL} to recover your transferred funds.`,
+                    `Submitting your deletion request. If you later stop the scheduled deletion, use ${ACCOUNT_RECOVERY_CONTACT} to recover your transferred funds.`,
                   );
                   const status = await backendClient.deleteAccount();
                   const deleteDateLabel =
@@ -5973,7 +5973,7 @@ function WalletAppShellContent({
                     getDeletionFallbackDateLabel();
                   Alert.alert(
                     "Account scheduled for deletion",
-                    `This account is inactive and scheduled for deletion on ${deleteDateLabel}. Sign in again during that window if you want to reactivate it. If you reactivate later, contact ${ACCOUNT_RECOVERY_SUPPORT_EMAIL} to recover any ${clientConfig.tokenSymbol} transferred out during the deletion request.`,
+                    `This account is inactive and scheduled for deletion on ${deleteDateLabel}. Sign in again during that window if you want to reactivate it. If you reactivate later, use ${ACCOUNT_RECOVERY_CONTACT} to recover any ${clientConfig.tokenSymbol} transferred out during the deletion request.`,
                     [
                       {
                         text: "OK",
@@ -7934,7 +7934,7 @@ function WalletAppShellContent({
               request will not return automatically.
             </Text>
             <Text style={styles.sendingText}>
-              Contact {ACCOUNT_RECOVERY_SUPPORT_EMAIL} to recover your funds.
+              Use {ACCOUNT_RECOVERY_CONTACT} to recover your funds.
             </Text>
             <Pressable style={styles.dismissButton} onPress={onDismissRecoveryFundsNotice}>
               <Text style={styles.dismissButtonText}>Understood</Text>
