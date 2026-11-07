@@ -18,7 +18,7 @@ import { SegmentedTabs } from "../components/SegmentedTabs";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { BadgeLine, CATEGORY_ICONS, formatAgo } from "../components/BulletinParts";
 import { ChatAvatar } from "../components/ChatAvatar";
-import { cachedInbox, forgetThread, saveInbox } from "../services/chatCache";
+import { cachedInbox, forgetThread, saveInbox, reconcileThreadNewest, useThreadNewestVersion, withThreadNewest } from "../services/chatCache";
 import { peekLinkPreview } from "../services/linkPreviews";
 import { firstLink, hostOf, isSameLink } from "../utils/links";
 import { attachmentKindLabel } from "../components/MessageAttachmentCard";
@@ -126,13 +126,16 @@ export function MessagesScreen({
     }
   }, [conversations]);
   // As drawn: a chat read here shows read straight away, whatever the server
-  // last said about it. `conversations` stays the server's answer, so a read
-  // the server never takes cannot be saved into the cache as if it had.
+  // last said about it, and a message you just sent is the row's last line
+  // straight away, though the server never tells the sender's inbox about it
+  // (chatCache.ts, noteThreadNewest). `conversations` stays the server's
+  // answer, so neither can be saved into the cache as if the server had said it.
   const pendingReadsVersion = usePendingReadsVersion();
+  const threadNewestVersion = useThreadNewestVersion();
   const shownConversations = useMemo(
-    () => (conversations ? applyPendingReads(conversations) : null),
+    () => (conversations ? applyPendingReads(withThreadNewest(conversations)) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [conversations, pendingReadsVersion],
+    [conversations, pendingReadsVersion, threadNewestVersion],
   );
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
@@ -199,14 +202,18 @@ export function MessagesScreen({
       inboxTrusted.current = true;
       setConversations(inbox);
       reconcileWithInbox(inbox);
-      // Conversations with something unread, not messages: two unread messages
-      // in one thread are one thing to go and read, and that is what the
-      // server's own summary counts — so the number does not jump when the
-      // shell takes the count back over.
+      reconcileThreadNewest(inbox);
+      // Each conversation with something unread, and how many messages: the
+      // Messages badge counts messages, as the row's own bubble does, so ten
+      // from one person read 10 rather than 1.
       onUnreadChange?.(
         inbox
           .filter((conversation) => conversation.unread_count > 0)
-          .map((conversation) => ({ conversation_id: conversation.id, last_message_id: conversation.last_message?.id ?? 0 })),
+          .map((conversation) => ({
+            conversation_id: conversation.id,
+            last_message_id: conversation.last_message?.id ?? 0,
+            unread_count: conversation.unread_count,
+          })),
       );
     } catch {
       // Left as it was. A dropped request is not an empty inbox, and it is not

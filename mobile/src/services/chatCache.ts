@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useSyncExternalStore } from "react";
 
 import type { ChatMessage, Conversation } from "../types/bulletin";
 
@@ -57,6 +58,10 @@ type ThreadIndex = { userId: string; ids: number[] };
 
 let userId: string | null = null;
 let inbox: StoredInbox | null = null;
+/** See noteThreadNewest. */
+let threadNewest = new Map<number, ChatMessage>();
+let threadNewestVersion = 0;
+const threadNewestListeners = new Set<() => void>();
 const threads = new Map<number, CachedThread>();
 let index: ThreadIndex | null = null;
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -103,6 +108,7 @@ export function setChatCacheUser(next: string | null) {
   }
   userId = next;
   threads.clear();
+  threadNewest = new Map();
 }
 
 /** Deletes everything cached for somebody — on sign-out. */
@@ -112,6 +118,7 @@ export async function clearChatCache(_forUser: string | null) {
   }
   timers.clear();
   threads.clear();
+  threadNewest = new Map();
   inbox = null;
   index = null;
   // Nobody, until sign-in says otherwise, so a save racing the sign-out cannot
@@ -271,4 +278,106 @@ export function forgetThread(conversationId: number) {
     timers.delete(threadKey(conversationId));
   }
   void AsyncStorage.removeItem(threadKey(conversationId)).catch(() => {});
+}
+
+/**
+ * The newest message an open thread has, ahead of what the inbox last heard.
+ *
+ * ── Why the inbox lagged a send ─────────────────────────────────────────────
+ *
+ * The inbox re-reads itself on every socket frame, and the server never sends
+ * the sender a frame for their own message: it has already answered them. So a
+ * message you sent reached the inbox only on its next fifteen-second poll, and
+ * going back to Messages showed the line before it.
+ *
+ * Now a thread on screen reports its newest message here, sent or received,
+ * and the inbox draws it over the server's copy until a server answer has it
+ * too. It is an overlay rather than a write into the cached inbox, so a server
+ * read that was already in flight when you sent cannot put the old line back:
+ * the overlay holds until a server answer at least as new as it arrives.
+ */
+export function noteThreadNewest(conversationId: number, message: ChatMessage) {
+  if (!userId) {
+    return;
+  }
+  const known = threadNewest.get(conversationId);
+  if (known && known.id === message.id) {
+    // The same message, edited or deleted since. The overlay follows the edit
+    // and goes with the deletion, so the row never shows words that are gone.
+    if (known === message) {
+      return;
+    }
+    if (message.deleted) {
+      threadNewest.delete(conversationId);
+    } else {
+      threadNewest.set(conversationId, message);
+    }
+    emitThreadNewest();
+    return;
+  }
+  if (message.deleted) {
+    return;
+  }
+  const inInbox = cachedInbox()?.find((conversation) => conversation.id === conversationId)?.last_message;
+  if ((known && known.id > message.id) || (inInbox && inInbox.id >= message.id)) {
+    return;
+  }
+  threadNewest.set(conversationId, message);
+  emitThreadNewest();
+}
+
+function emitThreadNewest() {
+  threadNewestVersion += 1;
+  for (const listener of threadNewestListeners) {
+    listener();
+  }
+}
+
+/** Re-renders a component whenever an open thread reports a newer message. */
+export function useThreadNewestVersion(): number {
+  return useSyncExternalStore(
+    (listener) => {
+      threadNewestListeners.add(listener);
+      return () => {
+        threadNewestListeners.delete(listener);
+      };
+    },
+    () => threadNewestVersion,
+  );
+}
+
+/** The inbox as it should be drawn: each thread's newer message in it, newest activity first. */
+export function withThreadNewest(conversations: Conversation[]): Conversation[] {
+  if (threadNewest.size === 0) {
+    return conversations;
+  }
+  let changed = false;
+  const next = conversations.map((conversation) => {
+    const newer = threadNewest.get(conversation.id);
+    if (!newer || (conversation.last_message?.id ?? 0) >= newer.id) {
+      return conversation;
+    }
+    changed = true;
+    // A reaction is shown only while it is newer than the last message, and
+    // this message is newer than it.
+    return { ...conversation, last_message: newer, last_message_at: newer.created_at, latest_reaction: undefined };
+  });
+  if (!changed) {
+    return conversations;
+  }
+  // The server's order: newest activity first, id breaking ties.
+  return next.sort(
+    (left, right) =>
+      Date.parse(right.last_message_at) - Date.parse(left.last_message_at) || right.id - left.id,
+  );
+}
+
+/** Drops what a server answer has caught up with. */
+export function reconcileThreadNewest(conversations: Conversation[]) {
+  for (const conversation of conversations) {
+    const newer = threadNewest.get(conversation.id);
+    if (newer && (conversation.last_message?.id ?? 0) >= newer.id) {
+      threadNewest.delete(conversation.id);
+    }
+  }
 }

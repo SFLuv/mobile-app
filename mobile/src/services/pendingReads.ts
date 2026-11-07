@@ -300,9 +300,14 @@ export function applyPendingReads(conversations: Conversation[]): Conversation[]
   );
 }
 
-/** The summary's unread conversations, less those read here. */
+/**
+ * Unread messages in the summary's conversations, less those read here. A
+ * server too old to count them per conversation counts each one as one.
+ */
 export function countUnread(items: UnreadItem[]): number {
-  return items.filter((item) => item.last_message_id > readThrough(item.conversation_id)).length;
+  return items
+    .filter((item) => item.last_message_id > readThrough(item.conversation_id))
+    .reduce((total, item) => total + Math.max(1, item.unread_count ?? 1), 0);
 }
 
 /**

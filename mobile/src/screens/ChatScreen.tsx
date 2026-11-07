@@ -34,7 +34,7 @@ import {
 } from "../components/MessageAttachmentCard";
 import { ChatAvatar } from "../components/ChatAvatar";
 import { seedAttachment } from "../services/attachmentCache";
-import { cachedConversation, cachedThread, cachedThreadNow, saveThread } from "../services/chatCache";
+import { cachedConversation, cachedThread, cachedThreadNow, noteThreadNewest, saveThread } from "../services/chatCache";
 import { DerivedLinkCard, LinkifiedText } from "../components/MessageLinks";
 import { firstLink, isSameLink } from "../utils/links";
 import type { ChatTransactionRef } from "../utils/transactions";
@@ -247,6 +247,12 @@ export function ChatScreen({
    * the cache, which would only be the cache's own copy, or less.
    */
   const [pageLoaded, setPageLoaded] = useState(false);
+  /**
+   * The first page has failed every quick retry and is left to the poll. The
+   * header's spinner stops then: a spinner that never stops says "loading"
+   * about a thread that is not, and the toast has already said why.
+   */
+  const [historyStalled, setHistoryStalled] = useState(false);
   /**
    * Which thread the state above belongs to. Saving keys on this rather than
    * on `conversationId`, because for one render after a switch the prop is the
@@ -518,6 +524,7 @@ export function ChatScreen({
         if (firstPage) {
           firstPageLoaded.current = true;
           setPageLoaded(true);
+          setHistoryStalled(false);
           setHasMore(page.has_more);
         }
       } catch (e) {
@@ -548,6 +555,9 @@ export function ChatScreen({
             void refreshRef.current({ silent: true });
           }, delay);
           return;
+        }
+        if (!firstPageLoaded.current) {
+          setHistoryStalled(true);
         }
         if (!options?.silent) {
           // A failed load leaves whatever was already on screen. An empty
@@ -590,6 +600,7 @@ export function ChatScreen({
     setMode("text");
     firstPageLoaded.current = false;
     setPageLoaded(false);
+    setHistoryStalled(false);
     if (seeded.fromMemory) {
       return;
     }
@@ -658,18 +669,19 @@ export function ChatScreen({
   // server to agree behind. It used to wait for this screen's own fetch, then
   // send the read and re-count the badge in the same instant, so the badge
   // usually counted before the read had landed and stayed up until a poll.
-  const newestMessageId = useMemo(() => {
-    let newest = 0;
+  const newestMessage = useMemo(() => {
+    let newest: ChatMessage | null = null;
     for (const message of messages) {
       // For one render after a switch, `messages` is still the last thread's.
       // Ids are global, so without this the thread just opened would be marked
       // read up to a message in another one.
-      if (message.conversation_id === conversationId && message.id > newest) {
-        newest = message.id;
+      if (message.conversation_id === conversationId && message.id > (newest?.id ?? 0)) {
+        newest = message;
       }
     }
     return newest;
   }, [conversationId, messages]);
+  const newestMessageId = newestMessage?.id ?? 0;
   useEffect(() => {
     if (!newestMessageId) {
       return;
@@ -677,6 +689,13 @@ export function ChatScreen({
     noteRead(conversationId, newestMessageId);
     onReadRef.current?.(conversationId);
   }, [conversationId, newestMessageId]);
+  // The same message is the inbox row's last line, at once — including one you
+  // just sent, which the server never tells your own inbox about.
+  useEffect(() => {
+    if (newestMessage) {
+      noteThreadNewest(conversationId, newestMessage);
+    }
+  }, [conversationId, newestMessage]);
 
   // Applied after the reset above rather than with it, so switching threads
   // cannot wipe a draft that was handed in for the thread being opened. Cleared
@@ -1794,6 +1813,12 @@ export function ChatScreen({
             ) : null}
           </View>
         </Pressable>
+        {/* The history behind a thread drawn from the cache, still on its
+            way. Only with something on screen: an empty thread has its own
+            spinner in the middle, and two at once is one too many. */}
+        {!pageLoaded && !historyStalled && messages.length > 0 ? (
+          <ThemedActivityIndicator size="small" accessibilityLabel="Loading messages" />
+        ) : null}
         <Pressable
           onPress={() => {
             // The keyboard goes with it. Info is a screen, not a sheet over
@@ -1834,7 +1859,7 @@ export function ChatScreen({
           wraps every screen in a SafeAreaView — so it overshot by the bottom
           inset and left a band of background under the composer. See
           useKeyboardLift. */}
-      <View ref={keyboardRef} onLayout={measureKeyboardGap} style={[styles.body, { paddingBottom: lift }]}>
+      <Animated.View ref={keyboardRef} onLayout={measureKeyboardGap} style={[styles.body, { paddingBottom: lift }]}>
         <FlatList
           {...stampResponder.panHandlers}
           // Inverted: index 0 is the newest message, so the resting position is
@@ -2015,7 +2040,7 @@ export function ChatScreen({
           />
           </>
         )}
-      </View>
+      </Animated.View>
 
       {/* ── Long-press actions ────────────────────────────────────────────── */}
       <Modal
