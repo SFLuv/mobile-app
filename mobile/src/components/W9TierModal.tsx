@@ -74,7 +74,7 @@ function presentationFor(
       icon: "mail",
       tone: "warning",
       title: "We couldn't verify your W-9",
-      body: "The name and taxpayer number on your W-9 still didn't match IRS records. Please email techsupport@sfluv.org and we'll help sort it out.",
+      body: "The name and taxpayer number on your W-9 still didn't match IRS records. Please use Contact SFLuv in Settings and we'll help sort it out.",
       dismiss: "OK",
       startable: false,
     };
