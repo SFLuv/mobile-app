@@ -5,6 +5,7 @@
 backend/.env
 backend/chains.json
 mobile/.env
+mobile/dist/
 *.pem
 *.key
 
