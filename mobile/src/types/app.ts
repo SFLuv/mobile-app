@@ -134,6 +134,11 @@ export interface AppLocation {
   openingHours: string[];
   /** Structured week, Monday first. Backs the open/closed indicator. */
   hours: AppLocationDayHours[];
+  /**
+   * Approved but not yet listed. Kept off the map and bulletin, and offered in
+   * the payment screen only when it is the nearest merchant.
+   */
+  inSetup?: boolean;
 }
 
 export interface AppOwnedLocation extends AppLocation {

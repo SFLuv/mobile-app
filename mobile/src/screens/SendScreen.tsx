@@ -426,8 +426,14 @@ export function SendScreen({
   );
   const scannerPermissionGranted = permission?.granted === true;
 
+  // A merchant still in setup is offered only to someone for whom it is the
+  // nearest, so whoever is at its counter can pay it and nobody else sees it.
+  // Without a location there is no nearest, and none is offered.
   const payableMerchants = useMemo(
-    () => sortLocationsByProximity(merchants.filter((merchant) => Boolean(merchant.payToAddress)), userLocation),
+    () =>
+      sortLocationsByProximity(merchants.filter((merchant) => Boolean(merchant.payToAddress)), userLocation).filter(
+        (merchant, index) => !merchant.inSetup || (userLocation !== null && index === 0),
+      ),
     [merchants, userLocation],
   );
 
