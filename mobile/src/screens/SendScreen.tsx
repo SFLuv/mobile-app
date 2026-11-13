@@ -31,6 +31,11 @@ import { formatDistanceLabel, locationDistanceMeters, sortLocationsByProximity }
 import { parseSendTarget, parseSfluvUniversalLink, SendTarget, SfluvUniversalLink } from "../utils/universalLinks";
 import { triggerClickHaptic } from "../utils/haptics";
 
+// How close someone must be to a merchant in setup for the payment screen to
+// offer it. Wide enough for indoor GPS drift, narrow enough that it is only
+// offered to someone at or right outside the shop.
+const SETUP_MERCHANT_RADIUS_METERS = 75;
+
 type RecipientKind = "contact" | "merchant" | "payment-link";
 type SendStep = "recipient" | "amount";
 type SendPhase = "editing" | "sending" | "success" | "failure";
@@ -426,13 +431,22 @@ export function SendScreen({
   );
   const scannerPermissionGranted = permission?.granted === true;
 
-  // A merchant still in setup is offered only to someone for whom it is the
-  // nearest, so whoever is at its counter can pay it and nobody else sees it.
-  // Without a location there is no nearest, and none is offered.
+  // A merchant still in setup is offered only to someone standing at it, so
+  // the people we send there can pay it and nobody browsing finds it. "At it"
+  // is a radius, not "the nearest": merchants sit next door to each other
+  // (Emperor Norton's at 510 Larkin, SF OrganiCA at 500), and indoor GPS is
+  // often off by more than the gap between them. Without a location, none is
+  // offered.
   const payableMerchants = useMemo(
     () =>
       sortLocationsByProximity(merchants.filter((merchant) => Boolean(merchant.payToAddress)), userLocation).filter(
-        (merchant, index) => !merchant.inSetup || (userLocation !== null && index === 0),
+        (merchant) => {
+          if (!merchant.inSetup) {
+            return true;
+          }
+          const distance = locationDistanceMeters(merchant, userLocation);
+          return distance !== null && distance <= SETUP_MERCHANT_RADIUS_METERS;
+        },
       ),
     [merchants, userLocation],
   );
