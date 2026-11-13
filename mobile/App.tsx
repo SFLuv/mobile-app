@@ -1888,6 +1888,10 @@ function WalletAppShellContent({
     publishContactOverrides(contacts);
   }, [contacts]);
   const [locations, setLocations] = useState<AppLocation[]>([]);
+  // The merchants anyone may see. `locations` also carries those still in
+  // setup, which the payment screen offers only as the nearest and the
+  // transaction labels name, and which the map and bulletin never show.
+  const listedLocations = useMemo(() => locations.filter((location) => !location.inSetup), [locations]);
   const [ownedLocations, setOwnedLocations] = useState<AppOwnedLocation[]>(() => bootProfile?.locations ?? []);
   const [backendWallets, setBackendWallets] = useState<AppWallet[]>(() => bootProfile?.wallets ?? []);
   const [merchantLabelsByAddress, setMerchantLabelsByAddress] = useState<Record<string, string>>({});
@@ -7026,7 +7030,7 @@ function WalletAppShellContent({
               />
             ) : tab === "map" ? (
               <MapScreen
-                locations={locations}
+                locations={listedLocations}
                 viewMode={merchantMapViewMode}
                 onChangeViewMode={setMerchantMapViewMode}
                 recenterNonce={mapRecenterNonce}
@@ -7056,7 +7060,7 @@ function WalletAppShellContent({
               <BulletinScreen
                 backendClient={backendClient ?? null}
                 tokenSymbol={clientConfig.tokenSymbol}
-                locations={locations}
+                locations={listedLocations}
                 hapticsEnabled={preferences.hapticsEnabled}
                 onMessageAboutPost={async (post: BulletinPost) => {
                   if (!backendClient) {
@@ -7365,7 +7369,7 @@ function WalletAppShellContent({
                   );
                 }}
                 onOpenMerchant={(locationId) => {
-                  const match = locations.find((location) => location.id === locationId);
+                  const match = listedLocations.find((location) => location.id === locationId);
                   if (!match) {
                     showToast("That merchant isn't listed right now.", "info");
                     return;
