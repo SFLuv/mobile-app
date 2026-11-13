@@ -983,9 +983,10 @@ export type RedeemOutcome =
    */
   | { status: "blocked"; amountSfluv: string; taxYear: number; message: string }
   /**
-   * Sent, not yet confirmed. The transfer went out but the backend did not see
-   * it land in time; it settles from the chain on its own. The code stays
-   * spent, so scanning again would only say it was already redeemed.
+   * Not settled yet: sent and still confirming, a code another payout is still
+   * settling, or a request that timed out with its outcome unknown. It settles
+   * from the chain on its own. Scanning again is safe — the backend checks the
+   * payout before answering, and hands back a code whose perk never went out.
    */
   | { status: "pending"; message: string };
 

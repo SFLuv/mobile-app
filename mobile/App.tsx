@@ -226,10 +226,27 @@ type SendDraftOptions = {
 
 type RedeemFlowState = {
   code: string;
-  stage: "awaiting_wallet" | "redeeming" | "success" | "error";
+  stage: "awaiting_wallet" | "redeeming" | "pending" | "success" | "error";
   message?: string;
   walletAddress?: string;
+  /** When the redemption request went out, for the waiting copy. */
+  startedAt?: number;
 };
+
+/**
+ * What the redeeming screen says as the wait goes on. A payout can wait its
+ * turn in the faucet's queue for a few minutes, and a spinner that says the
+ * same thing for three minutes reads as broken.
+ */
+function redeemWaitingText(elapsedSeconds: number, tokenSymbol: string): string {
+  if (elapsedSeconds < 20) {
+    return `Requesting your ${tokenSymbol} reward from the event faucet.`;
+  }
+  if (elapsedSeconds < 90) {
+    return "The faucet is busy, and your reward is in line to be sent. Keep this open.";
+  }
+  return "Still sending. This can take a few minutes when the network is busy. Keep this open, or check your wallet later.";
+}
 
 type ToastState = {
   id: number;
@@ -2122,6 +2139,8 @@ function WalletAppShellContent({
   const [sendReturnTab, setSendReturnTab] = useState<Tab | null>(null);
   const [walletPaneBackSwipeEnabled, setWalletPaneBackSwipeEnabled] = useState(true);
   const [redeemFlow, setRedeemFlow] = useState<RedeemFlowState | null>(null);
+  // Ticks while a redemption is in flight, so the waiting copy can move on.
+  const [redeemClock, setRedeemClock] = useState(() => Date.now());
   const [toast, setToast] = useState<ToastState | null>(null);
   // Stable for the life of the shell. It is handed to nearly every screen as
   // onToast, and as a plain function it was a new identity on every shell
@@ -4776,7 +4795,10 @@ function WalletAppShellContent({
       if (
         current &&
         current.code.trim().toLowerCase() === normalizedCode &&
-        (current.stage === "awaiting_wallet" || current.stage === "redeeming" || current.stage === "success")
+        (current.stage === "awaiting_wallet" ||
+          current.stage === "redeeming" ||
+          current.stage === "pending" ||
+          current.stage === "success")
       ) {
         return current;
       }
@@ -4909,6 +4931,7 @@ function WalletAppShellContent({
                 code: current.code,
                 stage: "redeeming",
                 walletAddress,
+                startedAt: Date.now(),
               }
             : current,
         );
@@ -4933,6 +4956,15 @@ function WalletAppShellContent({
       cancelled = true;
     };
   }, [redeemFlow, runtime.error, runtime.service]);
+
+  useEffect(() => {
+    if (redeemFlow?.stage !== "redeeming") {
+      return;
+    }
+    setRedeemClock(Date.now());
+    const interval = setInterval(() => setRedeemClock(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [redeemFlow?.stage]);
 
   useEffect(() => {
     if (!redeemFlow || redeemFlow.stage !== "redeeming") {
@@ -4968,13 +5000,12 @@ function WalletAppShellContent({
           return;
         }
 
-        // Sent but not yet confirmed. The money is almost always already on
-        // its way, so this reads as a success with a caveat, not an error that
-        // invites a second scan of a code that is already spent.
+        // Not settled yet. Neither a success nor a failure: the perk may be on
+        // its way, or the code may open back up if it never went out.
         if (outcome.status === "pending") {
           setRedeemFlow((current) =>
             current && current.code === code && current.stage === "redeeming"
-              ? { code, stage: "success", walletAddress: payoutAddress, message: outcome.message }
+              ? { code, stage: "pending", walletAddress: payoutAddress, message: outcome.message }
               : current,
           );
           void refreshWalletSurface();
@@ -7981,6 +8012,8 @@ function WalletAppShellContent({
           <View style={styles.sendingCard}>
             {redeemFlow?.stage === "success" ? (
               <Ionicons name="checkmark-circle" size={42} color={palette.success} />
+            ) : redeemFlow?.stage === "pending" ? (
+              <Ionicons name="time-outline" size={42} color={palette.primaryStrong} />
             ) : redeemFlow?.stage === "error" ? (
               <Ionicons name="alert-circle" size={42} color={palette.danger} />
             ) : (
@@ -7991,19 +8024,24 @@ function WalletAppShellContent({
                 ? "Preparing your wallet…"
                 : redeemFlow?.stage === "redeeming"
                   ? "Redeeming your perk…"
-                  : redeemFlow?.stage === "success"
-                    ? "Perk redeemed"
-                    : "Redeem failed"}
+                  : redeemFlow?.stage === "pending"
+                    ? "Still confirming"
+                    : redeemFlow?.stage === "success"
+                      ? "Perk redeemed"
+                      : "Redeem failed"}
             </Text>
             <Text style={styles.sendingText}>
               {redeemFlow?.message ||
                 (redeemFlow?.stage === "awaiting_wallet"
                   ? "Finishing wallet setup before the reward is claimed."
                   : redeemFlow?.stage === "redeeming"
-                    ? `Requesting your ${clientConfig.tokenSymbol} reward from the event faucet.`
+                    ? redeemWaitingText(
+                        Math.max(0, (redeemClock - (redeemFlow.startedAt ?? redeemClock)) / 1000),
+                        clientConfig.tokenSymbol,
+                      )
                     : "Close this modal and try again.")}
             </Text>
-            {redeemFlow?.stage === "success" || redeemFlow?.stage === "error" ? (
+            {redeemFlow?.stage === "success" || redeemFlow?.stage === "pending" || redeemFlow?.stage === "error" ? (
               <Pressable style={styles.dismissButton} onPress={() => setRedeemFlow(null)}>
                 <Text style={styles.dismissButtonText}>Close</Text>
               </Pressable>

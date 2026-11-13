@@ -735,6 +735,22 @@ const POLICY_REQUIRED_REASON = "privacy-policy-required";
 const APP_BACKEND_REQUEST_TIMEOUT_MS = 25_000;
 
 /**
+ * How long a redemption is waited for.
+ *
+ * Longer than any other request on purpose. The backend answers a redemption
+ * only once its payout has gone out or been given up on, and payouts wait their
+ * turn in the faucet's queue: about three minutes in the worst case, more when
+ * a rescan is first checked against the chain. The old 25-second cap gave up
+ * long before that, so a perk that was on its way was reported as failed while
+ * its code was already spent.
+ */
+const REDEEM_REQUEST_TIMEOUT_MS = 300_000;
+
+/** What to say when the outcome of a redemption is not known. */
+const REDEEM_OUTCOME_UNKNOWN_MESSAGE =
+  "This is taking longer than usual, and your perk may still be on its way. Check your wallet in a few minutes. If it hasn't arrived, scan this code again: a code is never paid twice, and one whose perk never went out opens back up.";
+
+/**
  * The ceiling for a multipart attachment upload.
  *
  * Ten files of 25 MB over a phone uplink is minutes of work, so this is sized
@@ -3529,14 +3545,22 @@ export class AppBackendClient {
    * and told people to rescan a QR they had already used.
    */
   async redeemCode(code: string, address: string): Promise<RedeemOutcome> {
-    const response = await fetchWithTimeout(endpoint("/redeem"), {
-      method: "POST",
-      headers: { ...clientMetadataHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify({
-        code,
-        address,
-      }),
-    }, APP_BACKEND_REQUEST_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(endpoint("/redeem"), {
+        method: "POST",
+        headers: { ...clientMetadataHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code,
+          address,
+        }),
+      }, REDEEM_REQUEST_TIMEOUT_MS);
+    } catch {
+      // Timed out or lost the connection. The request may well have reached
+      // the backend and spent the code, so this is never reported as a failure
+      // that invites a rescan as if nothing had happened.
+      return { status: "pending", message: REDEEM_OUTCOME_UNKNOWN_MESSAGE };
+    }
 
     if (response.status === 202) {
       const held = (await response.json()) as {
@@ -3586,7 +3610,16 @@ export class AppBackendClient {
       case "payout pending":
         return {
           status: "pending",
-          message: "Your perk was sent and is still confirming. Check your wallet in a few minutes; there's no need to scan again.",
+          message:
+            "Your perk was sent and is still confirming. Check your wallet in a few minutes. If it hasn't arrived by then, scan this code again: it is never paid twice.",
+        };
+      case "code pending":
+        // Somebody's payout for this code is still settling. If it never goes
+        // out, the backend hands the code back.
+        return {
+          status: "pending",
+          message:
+            "This code was just redeemed and its perk is still confirming. If that doesn't go through, the code opens back up, so try again in a few minutes.",
         };
       case "code not started":
         throw new Error("This perk is not active yet.");
