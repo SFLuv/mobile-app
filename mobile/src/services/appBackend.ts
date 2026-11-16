@@ -2101,6 +2101,7 @@ function mapLocation(input: Record<string, unknown>): AppLocation {
     mapsPage: asString(input.maps_page),
     openingHours: Array.isArray(input.opening_hours) ? input.opening_hours.map((value) => asString(value)) : [],
     hours: mapLocationHours(input.hours),
+    inSetup: input.in_setup === true,
   };
 }
 
@@ -3513,9 +3514,15 @@ export class AppBackendClient {
     ).catch(() => undefined);
   }
 
+  /**
+   * Every listed merchant, plus those still in setup, flagged `inSetup`. The
+   * server leaves setup merchants out unless asked, so builds older than this
+   * never see them; this one filters them back out of everything but the
+   * payment screen.
+   */
   async getPublicLocations(): Promise<AppLocation[]> {
     const response = await fetchWithTimeout(
-      endpoint("/locations"),
+      endpoint("/locations?include_setup=true"),
       { headers: clientMetadataHeaders() },
       APP_BACKEND_REQUEST_TIMEOUT_MS,
     );
