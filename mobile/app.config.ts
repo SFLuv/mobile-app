@@ -79,7 +79,14 @@ const baseConfig = (config: ConfigContext["config"]): ExpoConfig => ({
   // files). JS rendering it on a 2.3 binary would draw an unimplemented view
   // where the message field should be. No new extension or entitlement this
   // time, so no Apple-portal work comes with it.
-  version: "2.4.0",
+  //
+  // 2.5.0: a Notification Content Extension (targets/notification-content,
+  // the conversation above a chat push's Reply field) and
+  // react-native-keyboard-controller with Reanimated, both native. The JS that
+  // follows the keyboard through them would fail at import on a 2.4 binary.
+  // The extension is a new bundle identifier, so the first build registers it
+  // and its provisioning profile.
+  version: "2.5.0",
   description:
     "This app is a nonprofit-run community hub for managing and spending your SFLUV, redeeming perks, and coordinating verified improvers. Improvers can sign up to complete real-world tasks in San Francisco and be rewarded with SFLUV.",
   scheme: "sfluv",
@@ -206,8 +213,8 @@ const baseConfig = (config: ConfigContext["config"]): ExpoConfig => ({
     "expo-secure-store",
     "expo-updates",
     "expo-web-browser",
-    // Builds targets/* into the iOS project — the Notification Service
-    // Extension. Listed before expo-share-intent: both register EAS app
+    // Builds targets/* into the iOS project — the Notification Service and
+    // Content Extensions. Listed before expo-share-intent: both register EAS app
     // extensions, and expo-share-intent mishandles its own entry when it lands
     // at index 0 of that list.
     // The composer's native paste — see plugins/withPasteInput.js.

@@ -53,6 +53,7 @@ import { triggerClickHaptic } from "../utils/haptics";
 import type { RealtimeEvent } from "../services/realtime";
 import { useTypingIndicators, useTypingReporter } from "../hooks/useRealtime";
 import { useKeyboardLift } from "../hooks/useKeyboardLift";
+import Reanimated from "react-native-reanimated";
 
 /**
  * SFLuv's own mark, bundled rather than fetched.
@@ -424,7 +425,7 @@ export function ChatScreen({
   const {
     ref: keyboardRef,
     onLayout: measureKeyboardGap,
-    lift,
+    liftStyle,
   } = useKeyboardLift();
 
   const typing = useTypingIndicators(conversationId, subscribe);
@@ -1859,7 +1860,7 @@ export function ChatScreen({
           wraps every screen in a SafeAreaView — so it overshot by the bottom
           inset and left a band of background under the composer. See
           useKeyboardLift. */}
-      <Animated.View ref={keyboardRef} onLayout={measureKeyboardGap} style={[styles.body, { paddingBottom: lift }]}>
+      <Reanimated.View ref={keyboardRef} onLayout={measureKeyboardGap} style={[styles.body, liftStyle]}>
         <FlatList
           {...stampResponder.panHandlers}
           // Inverted: index 0 is the newest message, so the resting position is
@@ -2040,7 +2041,7 @@ export function ChatScreen({
           />
           </>
         )}
-      </Animated.View>
+      </Reanimated.View>
 
       {/* ── Long-press actions ────────────────────────────────────────────── */}
       <Modal
