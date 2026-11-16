@@ -135,7 +135,18 @@ class NotificationService: UNNotificationServiceExtension {
       }
 
       do {
-        let updated = try content.updating(from: intent)
+        var updated = try content.updating(from: intent)
+        // The Reply action and the conversation above it hang off the push's
+        // category ("chat_message"). updating(from:) is documented to copy the
+        // content it is called on, category included; this makes sure of it,
+        // because without the category the push is drawn with no Reply at all.
+        if updated.categoryIdentifier.isEmpty, !content.categoryIdentifier.isEmpty,
+          let copy = updated.mutableCopy() as? UNMutableNotificationContent
+        {
+          Self.log.notice("category lost in updating(from:); restored")
+          copy.categoryIdentifier = content.categoryIdentifier
+          updated = copy
+        }
         Self.log.info("communication notification, sender picture: \(senderData != nil ? "downloaded" : "initials", privacy: .public)")
         self.deliver(updated)
       } catch {
