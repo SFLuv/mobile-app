@@ -1,5 +1,6 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import { Animated, Dimensions, Easing, PanResponder, StyleSheet, ViewStyle } from "react-native";
+import { dirSign } from "../i18n/direction";
 
 /**
  * Swipe right to go back.
@@ -123,15 +124,15 @@ export const SwipeBack = forwardRef<
       PanResponder.create({
         onMoveShouldSetPanResponder: (_event, gesture) => {
           if (!enabledRef.current) return false;
-          return gesture.dx > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 2;
+          return (gesture.dx * dirSign()) > 8 && Math.abs((gesture.dx * dirSign())) > Math.abs(gesture.dy) * 2;
         },
         onPanResponderMove: (_event, gesture) => {
           // Rightward only. A leftward drag after claiming would otherwise pull
           // the screen off its own left edge.
-          translateX.setValue(Math.max(0, gesture.dx));
+          translateX.setValue(Math.max(0, (gesture.dx * dirSign())));
         },
         onPanResponderRelease: (_event, gesture) => {
-          const committed = gesture.dx > threshold || gesture.vx > velocityThreshold;
+          const committed = (gesture.dx * dirSign()) > threshold || gesture.vx > velocityThreshold;
           if (committed) {
             // ── Why this animates out instead of snapping back ──────────────
             //
@@ -166,7 +167,7 @@ export const SwipeBack = forwardRef<
   );
 
   return (
-    <Animated.View style={[styles.fill, style, { transform: [{ translateX }] }]} {...responder.panHandlers}>
+    <Animated.View style={[styles.fill, style, { transform: [{ translateX: Animated.multiply(translateX, dirSign()) }] }]} {...responder.panHandlers}>
       {children}
     </Animated.View>
   );

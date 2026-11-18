@@ -17,6 +17,7 @@ import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
 import { BulletinRequestError, PublicUser } from "../types/bulletin";
 import { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
 
 /**
  * Choosing who to message: one person, or several for a group.
@@ -169,7 +170,7 @@ export function NewMessageScreen({
     <SwipeBack onBack={onBack} style={styles.screen}>
       <View style={styles.header}>
         <Pressable onPress={onBack} hitSlop={10} accessibilityRole="button" accessibilityLabel={t("newMessage.back")}>
-          <Ionicons name="chevron-back" size={26} color={palette.text} />
+          <Ionicons name={dirIcon("chevron-back")} size={26} color={palette.text} />
         </Pressable>
         <Text style={styles.headerTitle}>
           {isAdding ? t("newMessage.addPeople") : groupMode ? t("newMessage.newGroup") : t("newMessage.newMessage")}
@@ -312,7 +313,7 @@ export function NewMessageScreen({
                   color={chosen ? palette.primary : palette.borderStrong}
                 />
               ) : (
-                <Ionicons name="chevron-forward" size={17} color={palette.textMuted} />
+                <Ionicons name={dirIcon("chevron-forward")} size={17} color={palette.textMuted} />
               )}
             </Pressable>
           );

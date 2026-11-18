@@ -42,6 +42,7 @@ import {
   BulletinRequestError,
 } from "../types/bulletin";
 import { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
 
 const OPTIONAL_IMAGE_PICKER: any = (() => {
   try {
@@ -549,7 +550,7 @@ function PostDetailModal({
                     <Text style={styles.eventTitle}>{post.linked_event.title}</Text>
                     <Text style={styles.eventMeta}>{formatEventTime(post.linked_event.start_at)} · Open in Participate</Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
+                  <Ionicons name={dirIcon("chevron-forward")} size={18} color={palette.textMuted} />
                 </Pressable>
               ) : null}
 
@@ -915,7 +916,7 @@ function ComposeModal({
                           <Ionicons name="close-circle" size={18} color={palette.textMuted} />
                         </Pressable>
                       ) : (
-                        <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
+                        <Ionicons name={dirIcon("chevron-forward")} size={18} color={palette.textMuted} />
                       )}
                     </Pressable>
                   </>
@@ -932,7 +933,7 @@ function ComposeModal({
                           <Ionicons name="close-circle" size={18} color={palette.textMuted} />
                         </Pressable>
                       ) : (
-                        <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
+                        <Ionicons name={dirIcon("chevron-forward")} size={18} color={palette.textMuted} />
                       )}
                     </Pressable>
                     <Text style={styles.fieldHint}>{t("bulletin.neighborsCanOpenItIn")}</Text>

@@ -7,6 +7,7 @@ import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import type { AppMerchantModeLocation } from "../types/app";
 import { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
 
 type Props = {
   /** Shops this device may be put to work at. Empty means none is approved yet. */
@@ -258,7 +259,7 @@ export function MerchantDeviceSetupScreen({
                 <Text style={styles.optionTitle}>{location.name || t("merchantDeviceSetup.merchantLocation")}</Text>
                 {location.street ? <Text style={styles.optionMeta}>{location.street}</Text> : null}
               </View>
-              <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
+              <Ionicons name={dirIcon("chevron-forward")} size={18} color={palette.textMuted} />
             </Pressable>
           ))}
         </View>

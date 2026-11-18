@@ -25,6 +25,7 @@ import { pickAvatarPhoto } from "../utils/avatarPicker";
 import { useCopyFeedback } from "../hooks/useCopyFeedback";
 import { contactPictureChanged } from "../services/contactOverrides";
 import { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
 
 /**
  * One person: what you saved about them, and what they published about
@@ -258,7 +259,7 @@ export function ContactDetailScreen({
     <SwipeBack onBack={leave} style={styles.screen}>
       <View style={styles.header}>
         <Pressable onPress={leave} hitSlop={10} accessibilityRole="button" accessibilityLabel={t("contactDetail.back")}>
-          <Ionicons name="chevron-back" size={26} color={palette.text} />
+          <Ionicons name={dirIcon("chevron-back")} size={26} color={palette.text} />
         </Pressable>
         <Text style={styles.headerTitle}>{t("contactDetail.contact")}</Text>
         <Pressable

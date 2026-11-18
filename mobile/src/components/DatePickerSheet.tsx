@@ -3,6 +3,7 @@ import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import i18next, { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
 
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
 /** Month names in the app's language, from the phone's own date formatting. */
@@ -112,13 +113,13 @@ export function DatePickerSheet({ visible, value, title, minDate, onSelect, onCl
 
           <View style={styles.monthRow}>
             <Pressable style={styles.navButton} onPress={goPrevMonth} hitSlop={8}>
-              <Ionicons name="chevron-back" size={20} color={palette.text} />
+              <Ionicons name={dirIcon("chevron-back")} size={20} color={palette.text} />
             </Pressable>
             <Text style={styles.monthLabel}>
               {new Date(viewYear, viewMonth, 1).toLocaleDateString(i18next.language, { month: "long", year: "numeric" })}
             </Text>
             <Pressable style={styles.navButton} onPress={goNextMonth} hitSlop={8}>
-              <Ionicons name="chevron-forward" size={20} color={palette.text} />
+              <Ionicons name={dirIcon("chevron-forward")} size={20} color={palette.text} />
             </Pressable>
           </View>
 

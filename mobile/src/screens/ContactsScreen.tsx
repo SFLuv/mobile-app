@@ -30,6 +30,7 @@ import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { buildUniversalAddContactLink, parseSendTarget, parseSfluvUniversalLink } from "../utils/universalLinks";
 import { openPhoneSettings, useCameraAccess } from "../utils/phonePermissions";
 import { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
 
 type Props = {
   clientConfig: AppClientConfig;
@@ -520,7 +521,7 @@ export function ContactsScreen({
                       color={contact.isFavorite ? palette.primaryStrong : palette.textMuted}
                     />
                   </Pressable>
-                  <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
+                  <Ionicons name={dirIcon("chevron-forward")} size={16} color={palette.textMuted} />
                 </Pressable>
               );
             }

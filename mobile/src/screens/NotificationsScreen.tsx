@@ -19,6 +19,7 @@ import { SwipeBack } from "../components/SwipeBack";
 import type { AppAlertAction, AppNotificationFeed, AppNotificationItem } from "../types/notifications";
 import { supportRequestDetails } from "../utils/supportRequests";
 import { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
 
 /**
  * The notification screen.
@@ -391,7 +392,7 @@ export function NotificationsScreen({
             {routable || opensDetail ? (
               <View style={styles.openHint}>
                 <Text style={styles.openHintText}>{opensDetail ? t("notifications.tapForDetails") : t("notifications.tapToOpen")}</Text>
-                <Ionicons name="chevron-forward" size={13} color={palette.textMuted} />
+                <Ionicons name={dirIcon("chevron-forward")} size={13} color={palette.textMuted} />
               </View>
             ) : null}
           </Pressable>
@@ -454,7 +455,7 @@ export function NotificationsScreen({
           with the back button. */}
       <View style={styles.topBar}>
         <Pressable style={styles.backButton} onPress={onClose} accessibilityRole="button" accessibilityLabel={t("notifications.back")}>
-          <Ionicons name="chevron-back" size={22} color={palette.primaryStrong} />
+          <Ionicons name={dirIcon("chevron-back")} size={22} color={palette.primaryStrong} />
         </Pressable>
         <View style={styles.tabRow}>
           {(["new", "history"] as const).map((key) => {

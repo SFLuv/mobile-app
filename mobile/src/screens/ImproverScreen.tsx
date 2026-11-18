@@ -43,6 +43,7 @@ import { W9EscrowCard } from "../components/W9EscrowCard";
 import { triggerClickHaptic } from "../utils/haptics";
 import { useCameraAccess } from "../utils/phonePermissions";
 import i18next, { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
 
 type Props = {
   user: AppUser | null;
@@ -3393,7 +3394,7 @@ export function ImproverScreen({
         <View style={[styles.absenceScreen, { paddingTop: topInset }]}>
           <View style={styles.absenceHeader}>
             <Pressable style={styles.absenceBackButton} onPress={closeAbsenceScreen} hitSlop={8}>
-              <Ionicons name="chevron-back" size={22} color={palette.text} />
+              <Ionicons name={dirIcon("chevron-back")} size={22} color={palette.text} />
             </Pressable>
             <Text style={styles.absenceHeaderTitle}>{t("improver.absenceCoverage")}</Text>
             <View style={styles.absenceBackButton} />
@@ -3821,7 +3822,7 @@ export function ImproverScreen({
               </Text>
             </View>
             <Pressable style={styles.iconButton} onPress={closeBadges}>
-              <Ionicons name="arrow-back" size={20} color={palette.primaryStrong} />
+              <Ionicons name={dirIcon("arrow-back")} size={20} color={palette.primaryStrong} />
             </Pressable>
           </View>
           <ScrollView contentContainerStyle={styles.modalContent} showsVerticalScrollIndicator={false}>

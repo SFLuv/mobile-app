@@ -13,6 +13,7 @@ import {
   TransactionDetailPayload,
 } from "../utils/transactions";
 import { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
 
 type Props = {
   transactions: AppTransaction[];
@@ -216,7 +217,7 @@ export function ActivityScreen({
           accessibilityRole="button"
           accessibilityLabel={t("activity.backToWallet")}
         >
-          <Ionicons name="chevron-back" size={22} color={palette.primaryStrong} />
+          <Ionicons name={dirIcon("chevron-back")} size={22} color={palette.primaryStrong} />
         </Pressable>
         <View style={styles.searchField}>
           <Ionicons name="search" size={15} color={palette.textMuted} />

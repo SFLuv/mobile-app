@@ -22,6 +22,7 @@ import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { buildUniversalPayLink, parseSfluvUniversalLink } from "../utils/universalLinks";
 import { AppClientConfig } from "../types/app";
 import { openPhoneSettings, useCameraAccess } from "../utils/phonePermissions";
+import { dirIcon } from "../i18n/direction";
 
 type Props = {
   clientConfig: AppClientConfig;
@@ -162,7 +163,7 @@ export function ReceiveScreen({
           <View style={styles.paneHeaderRow}>
             {onBack ? (
               <Pressable style={styles.paneBackButton} onPress={onBack} hitSlop={8} accessibilityLabel={t("common.back")}>
-                <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
+                <Ionicons name={dirIcon("arrow-back")} size={18} color={palette.primaryStrong} />
               </Pressable>
             ) : null}
             <SegmentedTabs

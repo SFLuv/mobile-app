@@ -69,6 +69,7 @@ import {
   MessageAttachment,
 } from "../types/bulletin";
 import { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
 
 /**
  * One conversation, as a screen.
@@ -1610,7 +1611,7 @@ export function ChatScreen({
                       <Text style={styles.paymentPending}>{t("chat.confirming")}</Text>
                     ) : null}
                   </View>
-                  <Ionicons name="chevron-forward" size={15} color={palette.textMuted} />
+                  <Ionicons name={dirIcon("chevron-forward")} size={15} color={palette.textMuted} />
                 </Pressable>
               ) : (
                 (() => {
@@ -1790,7 +1791,7 @@ export function ChatScreen({
           accessibilityRole="button"
           accessibilityLabel={t("chat.back")}
         >
-          <Ionicons name="chevron-back" size={26} color={palette.text} />
+          <Ionicons name={dirIcon("chevron-back")} size={26} color={palette.text} />
         </Pressable>
         <Pressable
           style={styles.headerIdentity}

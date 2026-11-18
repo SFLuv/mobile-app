@@ -33,6 +33,7 @@ import { parseSendTarget, parseSfluvUniversalLink, SendTarget, SfluvUniversalLin
 import { triggerClickHaptic } from "../utils/haptics";
 import { openPhoneSettings, useCameraAccess } from "../utils/phonePermissions";
 import { t } from "../i18n";
+import { dirIcon, dirSign } from "../i18n/direction";
 
 // How close someone must be to a merchant in setup for the payment screen to
 // offer it. Wide enough for indoor GPS drift, narrow enough that it is only
@@ -253,10 +254,10 @@ function SwipeToSend({
         onMoveShouldSetPanResponder: (_, gesture) =>
           !disabled && !loading && swipeDistance > 0 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
         onPanResponderMove: (_, gesture) => {
-          translateX.setValue(Math.max(0, Math.min(gesture.dx, swipeDistance)));
+          translateX.setValue(Math.max(0, Math.min(gesture.dx * dirSign(), swipeDistance)));
         },
         onPanResponderRelease: (_, gesture) => {
-          if (gesture.dx >= swipeDistance * 0.72) {
+          if (gesture.dx * dirSign() >= swipeDistance * 0.72) {
             Animated.timing(translateX, {
               toValue: swipeDistance,
               duration: 120,
@@ -289,7 +290,7 @@ function SwipeToSend({
         style={[
           styles.swipeThumb,
           {
-            transform: [{ translateX }],
+            transform: [{ translateX: Animated.multiply(translateX, dirSign()) }],
           },
           disabled ? styles.swipeThumbDisabled : undefined,
         ]}
@@ -298,7 +299,7 @@ function SwipeToSend({
         {loading ? (
           <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
         ) : (
-          <Ionicons name="arrow-forward" size={18} color={palette.primaryStrong} />
+          <Ionicons name={dirIcon("arrow-forward")} size={18} color={palette.primaryStrong} />
         )}
       </Animated.View>
     </View>
@@ -1125,7 +1126,7 @@ export function SendScreen({
 
         <View style={styles.entryModeHeaderRow}>
           <Pressable style={styles.iconButton} onPress={handleBack}>
-            <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
+            <Ionicons name={dirIcon("arrow-back")} size={18} color={palette.primaryStrong} />
           </Pressable>
           <SegmentedTabs
             style={styles.entryModeRowFill}
@@ -1255,7 +1256,7 @@ export function SendScreen({
             <View style={styles.amountHero}>
               <View style={styles.amountHeroTop}>
                 <Pressable style={styles.iconButton} onPress={handleBack}>
-                  <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
+                  <Ionicons name={dirIcon("arrow-back")} size={18} color={palette.primaryStrong} />
                 </Pressable>
                 <Text style={[styles.recipientLine, styles.recipientLineInline]} numberOfLines={1}>
                   {t("send.to", { name: primaryRecipientLabel || t("send.recipient") })}

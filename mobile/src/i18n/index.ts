@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { initReactI18next } from "react-i18next";
 import { I18nManager, NativeModules, Platform } from "react-native";
 
+import { ensureDirection } from "./direction";
 import en from "./locales/en.json";
 import es from "./locales/es.json";
 
@@ -113,6 +114,7 @@ export function applyLanguagePreference(preference: LanguagePreference | undefin
   if (i18next.language !== next) {
     void i18next.changeLanguage(next);
   }
+  ensureDirection(Boolean(SUPPORTED_LANGUAGES.find((language) => language.code === next)?.rtl));
 }
 
 /**

@@ -39,6 +39,7 @@ import { W9EscrowCard } from "../components/W9EscrowCard";
 import { triggerClickHaptic } from "../utils/haptics";
 import { ICON_FACE, ICON_TEXT_COLOR, ICON_TEXT_NUDGE_EM, merchantInitials } from "../utils/merchantIcon";
 import { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
 
 /**
  * SFLuv's own mark, bundled rather than fetched.
@@ -1415,7 +1416,7 @@ function EventDetail({
       <View style={styles.detailPage}>
         <View style={styles.detailTitleRow}>
           <Pressable style={styles.backButton} onPress={onBack} hitSlop={10} accessibilityLabel={t("volunteer.allEvents")}>
-            <Ionicons name="chevron-back" size={22} color={palette.primaryStrong} />
+            <Ionicons name={dirIcon("chevron-back")} size={22} color={palette.primaryStrong} />
           </Pressable>
           {event ? (
             <Text style={styles.detailTitle} numberOfLines={2}>
@@ -1625,7 +1626,7 @@ function EventDetail({
               ) : (
                 <Pressable style={styles.primaryButton} onPress={onOpenSignupSheet}>
                   <Text style={styles.primaryButtonText}>{t("volunteer.signUp")}</Text>
-                  <Ionicons name="arrow-forward" size={16} color={palette.white} />
+                  <Ionicons name={dirIcon("arrow-forward")} size={16} color={palette.white} />
                 </Pressable>
               )}
 

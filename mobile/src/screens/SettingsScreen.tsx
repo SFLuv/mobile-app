@@ -33,6 +33,7 @@ import {
   useOnForeground,
 } from "../utils/phonePermissions";
 import { t } from "../i18n";
+import { dirIcon, dirSign } from "../i18n/direction";
 
 type Props = {
   user: AppUser | null;
@@ -246,10 +247,10 @@ function MerchantPinSwipe({
         onMoveShouldSetPanResponder: (_, gesture) =>
           !disabled && !loading && swipeDistance > 0 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
         onPanResponderMove: (_, gesture) => {
-          translateX.setValue(Math.max(0, Math.min(gesture.dx, swipeDistance)));
+          translateX.setValue(Math.max(0, Math.min(gesture.dx * dirSign(), swipeDistance)));
         },
         onPanResponderRelease: (_, gesture) => {
-          if (gesture.dx >= swipeDistance * 0.72) {
+          if (gesture.dx * dirSign() >= swipeDistance * 0.72) {
             Animated.timing(translateX, {
               toValue: swipeDistance,
               duration: 120,
@@ -275,10 +276,10 @@ function MerchantPinSwipe({
         {loading ? loadingLabel : label}
       </Text>
       <Animated.View
-        style={[styles.pinSwipeThumb, disabled ? styles.pinSwipeThumbDisabled : undefined, { transform: [{ translateX }] }]}
+        style={[styles.pinSwipeThumb, disabled ? styles.pinSwipeThumbDisabled : undefined, { transform: [{ translateX: Animated.multiply(translateX, dirSign()) }] }]}
         {...panResponder.panHandlers}
       >
-        <Ionicons name={loading ? "hourglass-outline" : "arrow-forward"} size={18} color={palette.primaryStrong} />
+        <Ionicons name={loading ? "hourglass-outline" : dirIcon("arrow-forward")} size={18} color={palette.primaryStrong} />
       </Animated.View>
     </View>
   );
@@ -1435,7 +1436,7 @@ export function SettingsScreen({
                   {t("settings.questionsProblemsOrAnythingElse")}
                 </Text>
               </View>
-              <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
+              <Ionicons name={dirIcon("chevron-forward")} size={16} color={palette.textMuted} />
             </Pressable>
           ) : null}
 

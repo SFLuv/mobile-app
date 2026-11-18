@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { Palette, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
+import { dirSign } from "../i18n/direction";
 
 /**
  * Swipe a row left to reveal actions behind it.
@@ -96,18 +97,18 @@ export function SwipeableRow({
           // Leftward to open, rightward only when already open — so a closed
           // row never claims a rightward drag and the screen's own back-swipe
           // still works over the top of it.
-          const horizontal = Math.abs(gesture.dx) > Math.abs(gesture.dy) * 2;
-          return horizontal && (gesture.dx < -8 || (openRef.current && gesture.dx > 8));
+          const horizontal = Math.abs((gesture.dx * dirSign())) > Math.abs(gesture.dy) * 2;
+          return horizontal && ((gesture.dx * dirSign()) < -8 || (openRef.current && (gesture.dx * dirSign()) > 8));
         },
         onPanResponderMove: (_event, gesture) => {
           const base = openRef.current ? -trayWidth : 0;
           // Clamped to the tray: dragging further than there is to reveal just
           // feels loose, and past the row's own width it would look detached.
-          translateX.setValue(Math.max(-trayWidth, Math.min(0, base + gesture.dx)));
+          translateX.setValue(Math.max(-trayWidth, Math.min(0, base + (gesture.dx * dirSign()))));
         },
         onPanResponderRelease: (_event, gesture) => {
           const base = openRef.current ? -trayWidth : 0;
-          const position = base + gesture.dx;
+          const position = base + (gesture.dx * dirSign());
           settle(position < -trayWidth / 2);
         },
         onPanResponderTerminate: () => settle(openRef.current),
@@ -159,7 +160,7 @@ export function SwipeableRow({
           overlap the mute button. The row's own styles set no background (it
           inherits the screen's), so the background has to be set here. */}
       <Animated.View
-        style={[styles.content, { transform: [{ translateX }] }]}
+        style={[styles.content, { transform: [{ translateX: Animated.multiply(translateX, dirSign()) }] }]}
         {...responder.panHandlers}
       >
         {/* Tapping an open row closes it rather than opening the conversation,

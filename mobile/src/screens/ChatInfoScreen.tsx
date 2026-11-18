@@ -34,6 +34,7 @@ import {
   ConversationRole,
 } from "../types/bulletin";
 import { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
 
 /**
  * What the info button opens: everything about one conversation.
@@ -217,7 +218,7 @@ export function ChatInfoScreen({
     <SwipeBack onBack={onBack} style={styles.screen}>
       <View style={styles.header}>
         <Pressable onPress={onBack} hitSlop={10} accessibilityRole="button" accessibilityLabel={t("chatInfo.back")}>
-          <Ionicons name="chevron-back" size={26} color={palette.text} />
+          <Ionicons name={dirIcon("chevron-back")} size={26} color={palette.text} />
         </Pressable>
         <Text style={styles.headerTitle}>{isGroup ? t("chatInfo.groupInfo") : t("chatInfo.info")}</Text>
         <View style={{ width: 26 }} />
@@ -367,7 +368,7 @@ export function ChatInfoScreen({
               >
                 <Ionicons name="person-outline" size={19} color={palette.text} />
                 <Text style={styles.actionText}>{t("chatInfo.viewProfile")}</Text>
-                <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
+                <Ionicons name={dirIcon("chevron-forward")} size={16} color={palette.textMuted} />
               </Pressable>
 
               <Pressable
@@ -643,7 +644,7 @@ function ConversationFiles({
                     .join(" · ")}
                 </Text>
               </View>
-              <Ionicons name="chevron-forward" size={15} color={palette.textMuted} />
+              <Ionicons name={dirIcon("chevron-forward")} size={15} color={palette.textMuted} />
             </Pressable>
           );
         }}
