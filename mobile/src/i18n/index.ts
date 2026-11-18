@@ -41,8 +41,16 @@ export const SUPPORTED_LANGUAGES: LanguageOption[] = [
   { code: "es", nativeName: "Español" },
   { code: "zh-Hant", nativeName: "繁體中文" },
   { code: "vi", nativeName: "Tiếng Việt" },
-  { code: "ar", nativeName: "العربية", rtl: true },
 ];
+
+/**
+ * Languages that are translated and wired up but not offered yet. Arabic waits
+ * for its own release: full right-to-left mirroring (src/i18n/direction.ts)
+ * needs a reliable restart and a real-device pass first. Listed here so its
+ * strings stay loaded and the direction code stays in use; move an entry into
+ * SUPPORTED_LANGUAGES to offer it.
+ */
+export const UPCOMING_LANGUAGES: LanguageOption[] = [{ code: "ar", nativeName: "العربية", rtl: true }];
 
 /** "system" follows the phone's language; anything else is a code above. */
 export type LanguagePreference = "system" | string;
