@@ -21,6 +21,15 @@ import {
 } from "../services/appBackend";
 import { AppPreferences, SendFlowEntryMode, ThemePreference } from "../types/preferences";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
+import * as MediaLibrary from "expo-media-library";
+import * as Notifications from "expo-notifications";
+import {
+  PhoneAccess,
+  openPhoneSettings,
+  phoneAccessOf,
+  useCameraAccess,
+  useOnForeground,
+} from "../utils/phonePermissions";
 
 type Props = {
   user: AppUser | null;
@@ -344,6 +353,126 @@ function SendFlowOption({
     <Pressable style={[styles.themeOption, active ? styles.themeOptionActive : undefined]} onPress={onPress}>
       <Text style={[styles.themeOptionText, active ? styles.themeOptionTextActive : undefined]}>{label}</Text>
     </Pressable>
+  );
+}
+
+function PermissionRow({
+  title,
+  body,
+  access,
+  onAllow,
+}: {
+  title: string;
+  body: string;
+  access: PhoneAccess;
+  onAllow: () => void;
+}) {
+  const { palette } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
+
+  const status =
+    access === "granted"
+      ? "Allowed"
+      : access === "blocked"
+        ? "Blocked in your phone's Settings"
+        : access === "askable"
+          ? "Not allowed yet"
+          : "Checking...";
+
+  return (
+    <View style={styles.preferenceRow}>
+      <View style={styles.preferenceCopy}>
+        <Text style={styles.preferenceTitle}>{title}</Text>
+        <Text style={styles.preferenceBody}>{body}</Text>
+        <Text style={[styles.preferenceBody, access === "blocked" ? styles.permissionStatusBlocked : styles.permissionStatus]}>
+          {status}
+        </Text>
+      </View>
+      {access === "askable" || access === "blocked" ? (
+        <Pressable
+          style={styles.syncButton}
+          onPress={() => {
+            if (access === "blocked") {
+              openPhoneSettings();
+              return;
+            }
+            onAllow();
+          }}
+        >
+          <Text style={styles.syncButtonText}>{access === "blocked" ? "Open Settings" : "Allow"}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * The phone-level permissions SFLuv uses, each with the one action that fixes
+ * it. These are not switches: only the phone can grant or revoke them, so a row
+ * either shows the system popup (not asked yet) or opens SFLuv's page in the
+ * phone's Settings (refused, and the popup will not come back).
+ */
+function PhonePermissionsCard({ onNotificationsAllowed }: { onNotificationsAllowed: () => void }) {
+  const { palette } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
+
+  const camera = useCameraAccess();
+  // Add-only, the same access saving a chat photo asks for (attachmentFiles.ts).
+  const [photos, requestPhotos, getPhotos] = MediaLibrary.usePermissions({ writeOnly: true });
+
+  const [notifications, setNotifications] = useState<Notifications.NotificationPermissionsStatus | null>(null);
+  const notificationsGrantedRef = useRef<boolean | null>(null);
+  const readNotifications = useCallback(async () => {
+    try {
+      const next = await Notifications.getPermissionsAsync();
+      // Turned on in the phone's Settings while away: register this phone for
+      // push now, rather than at the next launch.
+      if (notificationsGrantedRef.current === false && next.granted) {
+        onNotificationsAllowed();
+      }
+      notificationsGrantedRef.current = next.granted;
+      setNotifications(next);
+    } catch {
+      // Leave the row as it was.
+    }
+  }, [onNotificationsAllowed]);
+
+  useEffect(() => {
+    void readNotifications();
+  }, [readNotifications]);
+
+  useOnForeground(() => {
+    void getPhotos();
+    void readNotifications();
+  });
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.sectionTitle}>Phone permissions</Text>
+      <PermissionRow
+        title="Camera"
+        body="Scan payment, reward and contact QR codes, and take workflow photos."
+        access={camera.access}
+        onAllow={() => void camera.ask()}
+      />
+      <PermissionRow
+        title="Photos"
+        body="Save pictures from your chats to your photo library."
+        access={phoneAccessOf(photos)}
+        onAllow={() => void requestPhotos()}
+      />
+      <PermissionRow
+        title="Notifications"
+        body="Payments, messages, reminders and other updates."
+        access={phoneAccessOf(notifications)}
+        onAllow={() => {
+          void (async () => {
+            await Notifications.requestPermissionsAsync();
+            await readNotifications();
+          })();
+        }}
+      />
+    </View>
   );
 }
 
@@ -1039,17 +1168,13 @@ export function SettingsScreen({
             </View>
           </View>
 
+          <PhonePermissionsCard onNotificationsAllowed={onSyncNotifications} />
+
           {/* Everything notification-related lives together, with the technical
               diagnostics kept but folded away — they are for troubleshooting,
               not for every visit. */}
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Notifications</Text>
-            <PreferenceRow
-              title="Payment alerts"
-              body="Get notified when money lands in one of your wallets."
-              value={preferences.notificationsEnabled}
-              onValueChange={(notificationsEnabled) => onUpdatePreferences({ ...preferences, notificationsEnabled })}
-            />
             {volunteerPanelAvailable ? (
               <>
                 <PreferenceRow
@@ -1749,6 +1874,14 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     preferenceBody: {
       color: palette.textMuted,
       lineHeight: 20,
+    },
+    permissionStatus: {
+      color: palette.text,
+      fontWeight: "700",
+    },
+    permissionStatusBlocked: {
+      color: palette.danger,
+      fontWeight: "700",
     },
     merchantModeActiveCard: {
       flexDirection: "row",

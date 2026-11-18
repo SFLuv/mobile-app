@@ -83,6 +83,8 @@ export type SaveOutcome =
   | { status: "saved-to-photos" }
   | { status: "shared" }
   | { status: "denied"; message: string }
+  // Refused before, and the phone will not ask again: only Settings can fix it.
+  | { status: "blocked" }
   | { status: "failed"; message: string };
 
 /**
@@ -109,7 +111,11 @@ export async function saveAttachment(
   if (attachment.kind === "image") {
     // Add-only: saving a photo needs no access to the rest of the library,
     // and Android no longer declares library-read permissions (app.config.ts).
-    const permission = await MediaLibrary.requestPermissionsAsync(true);
+    const current = await MediaLibrary.getPermissionsAsync(true);
+    if (!current.granted && !current.canAskAgain) {
+      return { status: "blocked" };
+    }
+    const permission = current.granted ? current : await MediaLibrary.requestPermissionsAsync(true);
     if (!permission.granted) {
       // Refused rather than silently falling back to the share sheet: they
       // asked to save it to their photos, and a share sheet is a different

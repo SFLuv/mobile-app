@@ -15,7 +15,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import Constants from "expo-constants";
-import { CameraView, useCameraPermissions } from "expo-camera";
+import { CameraView } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { ethers } from "ethers";
 import { ScannerCornerGuide } from "../components/ScannerCornerGuide";
@@ -30,6 +30,7 @@ import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { formatDistanceLabel, locationDistanceMeters, sortLocationsByProximity } from "../utils/location";
 import { parseSendTarget, parseSfluvUniversalLink, SendTarget, SfluvUniversalLink } from "../utils/universalLinks";
 import { triggerClickHaptic } from "../utils/haptics";
+import { openPhoneSettings, useCameraAccess } from "../utils/phonePermissions";
 
 // How close someone must be to a merchant in setup for the payment screen to
 // offer it. Wide enough for indoor GPS drift, narrow enough that it is only
@@ -405,7 +406,7 @@ export function SendScreen({
   const [tipStatus, setTipStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [tipMessage, setTipMessage] = useState<string | null>(null);
   const [noteFocused, setNoteFocused] = useState(false);
-  const [permission, requestPermission] = useCameraPermissions();
+  const { permission, access: cameraAccess, ask: askCamera } = useCameraAccess();
   const { location: userLocation } = useCurrentLocation(step === "recipient" && phase === "editing");
 
   const parsedTarget = useMemo(() => parseSendTarget(recipientInput, clientConfig), [clientConfig, recipientInput]);
@@ -750,9 +751,9 @@ export function SendScreen({
       entryMode === "scan" &&
       permission?.status === "undetermined"
     ) {
-      void requestPermission();
+      void askCamera();
     }
-  }, [entryMode, permission?.status, phase, requestPermission, step]);
+  }, [askCamera, entryMode, permission?.status, phase, step]);
 
   const dismissNoteEditor = useCallback(() => {
     setNoteFocused(false);
@@ -1180,15 +1181,27 @@ export function SendScreen({
               ) : (
                 <View style={styles.inlinePermissionCard}>
                   <Ionicons name="camera-outline" size={28} color={palette.primaryStrong} />
-                  <Text style={styles.inlinePermissionTitle}>Camera access needed</Text>
-                  <Text style={styles.inlinePermissionBody}>Allow camera access to scan payment QRs here.</Text>
+                  <Text style={styles.inlinePermissionTitle}>
+                    {cameraAccess === "blocked" ? "Camera access is off" : "Camera access needed"}
+                  </Text>
+                  <Text style={styles.inlinePermissionBody}>
+                    {cameraAccess === "blocked"
+                      ? "Turn on Camera for SFLuv in your phone's Settings to scan payment QRs here."
+                      : "Allow camera access to scan payment QRs here."}
+                  </Text>
                   <Pressable
                     style={styles.inlinePermissionButton}
                     onPress={() => {
-                      void requestPermission();
+                      if (cameraAccess === "blocked") {
+                        openPhoneSettings();
+                        return;
+                      }
+                      void askCamera();
                     }}
                   >
-                    <Text style={styles.inlinePermissionButtonText}>Enable camera</Text>
+                    <Text style={styles.inlinePermissionButtonText}>
+                      {cameraAccess === "blocked" ? "Open Settings" : "Enable camera"}
+                    </Text>
                   </Pressable>
                 </View>
               )}

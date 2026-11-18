@@ -53,6 +53,13 @@ import { triggerClickHaptic } from "../utils/haptics";
 import type { RealtimeEvent } from "../services/realtime";
 import { useTypingIndicators, useTypingReporter } from "../hooks/useRealtime";
 import { useKeyboardLift } from "../hooks/useKeyboardLift";
+import {
+  CAMERA_BLOCKED_MESSAGE,
+  CAMERA_BLOCKED_TITLE,
+  PHOTOS_BLOCKED_MESSAGE,
+  PHOTOS_BLOCKED_TITLE,
+  promptOpenSettings,
+} from "../utils/phonePermissions";
 
 /**
  * SFLuv's own mark, bundled rather than fetched.
@@ -1005,11 +1012,11 @@ export function ChatScreen({
         icon: "image-outline",
         onPress: () => {
           void (async () => {
-            const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (!permission.granted) {
-              onToast("SFLuv needs photo access to send a picture.", "error");
-              return;
-            }
+            // No permission to ask for: the system photo picker shows the
+            // library itself and hands back only what is chosen. Asking for
+            // library access here was a dead end, and on Android one that
+            // could never succeed, since the app deliberately does not
+            // declare library-read permissions (see app.config.ts).
             const result = await ImagePicker.launchImageLibraryAsync({
               mediaTypes: ["images"],
               allowsMultipleSelection: true,
@@ -1036,7 +1043,13 @@ export function ChatScreen({
         icon: "camera-outline",
         onPress: () => {
           void (async () => {
-            const permission = await ImagePicker.requestCameraPermissionsAsync();
+            const current = await ImagePicker.getCameraPermissionsAsync();
+            if (!current.granted && !current.canAskAgain) {
+              // Asking again would show nothing: explain, and offer Settings.
+              promptOpenSettings(CAMERA_BLOCKED_TITLE, CAMERA_BLOCKED_MESSAGE);
+              return;
+            }
+            const permission = current.granted ? current : await ImagePicker.requestCameraPermissionsAsync();
             if (!permission.granted) {
               onToast("SFLuv needs camera access to take a picture.", "error");
               return;
@@ -2141,6 +2154,8 @@ export function ChatScreen({
                     const outcome = await saveAttachment(backendClient, conversationId, target);
                     if (outcome.status === "saved-to-photos") {
                       onToast("Saved to your photos.", "success");
+                    } else if (outcome.status === "blocked") {
+                      promptOpenSettings(PHOTOS_BLOCKED_TITLE, PHOTOS_BLOCKED_MESSAGE);
                     } else if (outcome.status === "denied" || outcome.status === "failed") {
                       onToast(outcome.message, "error");
                     }
