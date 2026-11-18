@@ -13,7 +13,7 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import { CameraView, useCameraPermissions } from "expo-camera";
+import { CameraView } from "expo-camera";
 import Constants from "expo-constants";
 import { Ionicons } from "@expo/vector-icons";
 import { DatePickerSheet } from "../components/DatePickerSheet";
@@ -41,6 +41,7 @@ import {
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { W9EscrowCard } from "../components/W9EscrowCard";
 import { triggerClickHaptic } from "../utils/haptics";
+import { useCameraAccess } from "../utils/phonePermissions";
 
 type Props = {
   user: AppUser | null;
@@ -602,7 +603,7 @@ export function ImproverScreen({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionKey, setActionKey] = useState("");
-  const [permission, requestPermission] = useCameraPermissions();
+  const { permission, access: cameraAccess, ask: askCamera } = useCameraAccess();
   const cameraRef = useRef<CameraView | null>(null);
   const detailScrollRef = useRef<ScrollView | null>(null);
   const detailScrollYRef = useRef(0);
@@ -1676,13 +1677,18 @@ export function ImproverScreen({
         aspectRatio,
         maxCount,
       });
-      const currentPermission = permission?.granted ? permission : await requestPermission();
-      if (!currentPermission?.granted) {
+      // A blocked camera gets an explanation and a way to Settings from
+      // askCamera(), not an endless "Waiting for camera permission".
+      const wasBlocked = cameraAccess === "blocked";
+      if (!(await askCamera())) {
         setCameraTarget(null);
-        setCompletionItemError(stepId, itemId, "Camera permission is required to add workflow photos.");
+        // A blocked camera already got the Settings prompt from askCamera().
+        if (!wasBlocked) {
+          setCompletionItemError(stepId, itemId, "Camera permission is required to add workflow photos.");
+        }
       }
     },
-    [permission, requestPermission, setCompletionItemError],
+    [askCamera, cameraAccess, setCompletionItemError],
   );
 
   const captureWorkflowPhoto = useCallback(async () => {

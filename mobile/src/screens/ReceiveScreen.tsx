@@ -10,7 +10,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import Constants from "expo-constants";
-import { CameraView, useCameraPermissions } from "expo-camera";
+import { CameraView } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { SegmentedTabs } from "../components/SegmentedTabs";
 import { SfluvQRCode, prewarmQRCode } from "../components/SfluvQRCode";
@@ -20,6 +20,7 @@ import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { buildUniversalPayLink, parseSfluvUniversalLink } from "../utils/universalLinks";
 import { AppClientConfig } from "../types/app";
+import { openPhoneSettings, useCameraAccess } from "../utils/phonePermissions";
 
 type Props = {
   clientConfig: AppClientConfig;
@@ -90,7 +91,7 @@ export function ReceiveScreen({
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanLocked, setScanLocked] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
-  const [permission, requestPermission] = useCameraPermissions();
+  const { permission, access: cameraAccess, ask: askCamera } = useCameraAccess();
   const copyResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -121,9 +122,13 @@ export function ReceiveScreen({
   const qrCaption = mode === "link" ? shortLink(paymentLink) : shortAddress(accountAddress);
 
   const openRedeemScanner = async () => {
-    const currentPermission = permission?.granted ? permission : await requestPermission();
-    if (!currentPermission?.granted) {
-      setScanError("Camera permission is required to scan faucet reward QRs.");
+    // A blocked camera gets an explanation and a way to Settings from ask(),
+    // so the banner is only for someone who just said no to the popup.
+    const wasBlocked = cameraAccess === "blocked";
+    if (!(await askCamera())) {
+      if (!wasBlocked) {
+        setScanError("Camera permission is required to scan faucet reward QRs.");
+      }
       return;
     }
 
@@ -263,15 +268,27 @@ export function ReceiveScreen({
               />
             ) : (
               <View style={styles.permissionCard}>
-                <Text style={styles.permissionTitle}>Camera access needed</Text>
-                <Text style={styles.permissionBody}>Allow camera access to scan faucet reward QR codes here.</Text>
+                <Text style={styles.permissionTitle}>
+                  {cameraAccess === "blocked" ? "Camera access is off" : "Camera access needed"}
+                </Text>
+                <Text style={styles.permissionBody}>
+                  {cameraAccess === "blocked"
+                    ? "Turn on Camera for SFLuv in your phone's Settings to scan faucet reward QR codes here."
+                    : "Allow camera access to scan faucet reward QR codes here."}
+                </Text>
                 <Pressable
                   style={styles.permissionButton}
                   onPress={() => {
-                    void requestPermission();
+                    if (cameraAccess === "blocked") {
+                      openPhoneSettings();
+                      return;
+                    }
+                    void askCamera();
                   }}
                 >
-                  <Text style={styles.permissionButtonText}>Enable camera</Text>
+                  <Text style={styles.permissionButtonText}>
+                    {cameraAccess === "blocked" ? "Open Settings" : "Enable camera"}
+                  </Text>
                 </Pressable>
               </View>
             )}
