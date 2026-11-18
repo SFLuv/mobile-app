@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Text } from "../components/AppText";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { t } from "../i18n";
 

@@ -9,11 +9,11 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
   type KeyboardEvent,
 } from "react-native";
+import { Text } from "../components/AppText";
 import { CameraView } from "expo-camera";
 import { useTranslation } from "react-i18next";
 import { Ionicons } from "@expo/vector-icons";

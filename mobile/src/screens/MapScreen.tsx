@@ -9,10 +9,10 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from "react-native";
+import { Text } from "../components/AppText";
 import MapView, { Marker, PROVIDER_GOOGLE, Region } from "react-native-maps";
 import { useCurrentLocation } from "../hooks/useCurrentLocation";
 import { AppLocation } from "../types/app";

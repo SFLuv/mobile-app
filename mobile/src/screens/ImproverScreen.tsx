@@ -8,11 +8,11 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
   useWindowDimensions,
 } from "react-native";
+import { Text } from "../components/AppText";
 import { CameraView } from "expo-camera";
 import Constants from "expo-constants";
 import { Ionicons } from "@expo/vector-icons";

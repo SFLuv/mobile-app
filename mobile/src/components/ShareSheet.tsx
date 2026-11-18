@@ -9,10 +9,10 @@ import {
   SafeAreaView,
   Share,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from "react-native";
+import { Text } from "./AppText";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 

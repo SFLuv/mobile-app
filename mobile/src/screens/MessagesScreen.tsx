@@ -6,10 +6,10 @@ import {
   Pressable,
   RefreshControl,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from "react-native";
+import { Text } from "../components/AppText";
 import { Ionicons } from "@expo/vector-icons";
 
 import { AppBackendClient } from "../services/appBackend";

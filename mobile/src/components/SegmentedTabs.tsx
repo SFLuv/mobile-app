@@ -1,14 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { I18nManager,
+import {
+  I18nManager,
   Animated,
   LayoutChangeEvent,
   Pressable,
   StyleProp,
   StyleSheet,
-  Text,
   View,
   ViewStyle,
 } from "react-native";
+import { Text } from "./AppText";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
 

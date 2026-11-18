@@ -13,10 +13,10 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from "react-native";
+import { Text } from "../components/AppText";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import * as ImagePicker from "expo-image-picker";

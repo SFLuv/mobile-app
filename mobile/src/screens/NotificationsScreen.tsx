@@ -7,9 +7,9 @@ import {
   Pressable,
   RefreshControl,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
+import { Text } from "../components/AppText";
 import { Ionicons } from "@expo/vector-icons";
 
 import { SupportRequestModal } from "../components/SupportRequestModal";

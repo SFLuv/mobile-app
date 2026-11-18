@@ -13,11 +13,11 @@ import {
   ScrollView,
   StyleSheet,
   Switch,
-  Text,
   TextInput,
   View,
   useWindowDimensions,
 } from "react-native";
+import { Text } from "../components/AppText";
 import { Ionicons } from "@expo/vector-icons";
 import { SegmentedTabs } from "../components/SegmentedTabs";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";

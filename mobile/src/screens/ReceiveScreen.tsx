@@ -5,10 +5,10 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   View,
   useWindowDimensions,
 } from "react-native";
+import { Text } from "../components/AppText";
 import Constants from "expo-constants";
 import { CameraView } from "expo-camera";
 import { useTranslation } from "react-i18next";

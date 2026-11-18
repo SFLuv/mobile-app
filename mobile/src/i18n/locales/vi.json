@@ -1528,5 +1528,9 @@
       "improver": "Improver",
       "verifiedVolunteer": "Tình nguyện viên đã xác minh"
     }
+  },
+  "direction": {
+    "reopenTitle": "Mở lại SFLuv",
+    "reopenBody": "Hãy đóng SFLuv rồi mở lại để hoàn tất việc đổi bố cục."
   }
 }

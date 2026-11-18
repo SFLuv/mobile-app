@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Animated, PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, PanResponder, Pressable, StyleSheet, View } from "react-native";
+import { Text } from "./AppText";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Palette, radii, spacing, useAppTheme } from "../theme";

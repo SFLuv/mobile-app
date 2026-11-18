@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, Pressable, StyleSheet, View } from "react-native";
+import { Text } from "./AppText";
 import { Ionicons } from "@expo/vector-icons";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import i18next, { t } from "../i18n";

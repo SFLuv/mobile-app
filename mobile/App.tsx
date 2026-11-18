@@ -1,5 +1,6 @@
 import "./src/polyfills";
 import { applyLanguagePreference, t, useAppLanguage } from "./src/i18n";
+import { loadReturnPoint, peekReturnPoint } from "./src/i18n/returnPoint";
 import { useTranslation } from "react-i18next";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
@@ -17,11 +18,11 @@ import {
   SafeAreaView,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   TouchableWithoutFeedback,
   View,
 } from "react-native";
+import { Text } from "./src/components/AppText";
 import { Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -1419,9 +1420,15 @@ function useStoredPreferences(): [AppPreferences, React.Dispatch<React.SetStateA
   }, [preferences, preferencesLoaded]);
 
   // The app's language follows the saved choice, or the phone when it is "system".
+  // Only once the saved preferences have loaded: before that this holds the
+  // default ("system"), and applying it would switch the layout direction (and
+  // restart) away from a saved right-to-left choice, then back, forever.
   useEffect(() => {
+    if (!preferencesLoaded) {
+      return;
+    }
     applyLanguagePreference(preferences.languagePreference);
-  }, [preferences.languagePreference]);
+  }, [preferences.languagePreference, preferencesLoaded]);
 
   return [preferences, setPreferences, preferencesLoaded];
 }
@@ -1879,7 +1886,19 @@ function WalletAppShellContent({
 }) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
-  const [tab, setTab] = useState<Tab>("wallet");
+  // Back where they were after a language change (see src/i18n/returnPoint).
+  const [tab, setTab] = useState<Tab>(() => (peekReturnPoint()?.tab as Tab | undefined) ?? "wallet");
+  useEffect(() => {
+    if (peekReturnPoint()) {
+      return;
+    }
+    // After a restart (right-to-left switch) the point is only in storage.
+    void loadReturnPoint().then((point) => {
+      if (point?.tab) {
+        setTab(point.tab as Tab);
+      }
+    });
+  }, []);
   // Every screen change goes into the trail a Sentry issue carries.
   useEffect(() => {
     recordStep("navigation", `tab: ${tab}`);

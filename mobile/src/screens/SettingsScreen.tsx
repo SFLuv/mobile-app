@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { ethers } from "ethers";
-import { Animated, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { Animated, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from "react-native";
+import { Text } from "../components/AppText";
 import {
   AppCredentialRequest,
   AppGlobalCredentialType,
@@ -24,6 +25,7 @@ import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import * as MediaLibrary from "expo-media-library";
 import { useTranslation } from "react-i18next";
 import i18next, { LanguagePreference, SUPPORTED_LANGUAGES } from "../i18n";
+import { clearReturnPoint, loadReturnPoint, peekReturnPoint, rememberReturnPoint } from "../i18n/returnPoint";
 import * as Notifications from "expo-notifications";
 import {
   PhoneAccess,
@@ -33,7 +35,7 @@ import {
   useOnForeground,
 } from "../utils/phonePermissions";
 import { t } from "../i18n";
-import { dirIcon, dirSign } from "../i18n/direction";
+import { directionRestartPending, dirIcon, dirSign } from "../i18n/direction";
 
 type Props = {
   user: AppUser | null;
@@ -1094,7 +1096,22 @@ export function SettingsScreen({
   const { palette, shadows } = useAppTheme();
   const { t } = useTranslation();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
-  const [section, setSection] = useState<SettingsSection>("general");
+  const [section, setSection] = useState<SettingsSection>(
+    () => (peekReturnPoint()?.section as SettingsSection | undefined) ?? "general",
+  );
+  useEffect(() => {
+    // Applied: a language change brought them back here. Clear it so it is
+    // not reused, after picking up a point saved before a restart.
+    void loadReturnPoint().then((point) => {
+      if (point?.section) {
+        setSection(point.section as SettingsSection);
+      }
+      // Keep it through a right-to-left restart, which comes back here too.
+      if (!directionRestartPending()) {
+        clearReturnPoint();
+      }
+    });
+  }, []);
   const [showPushDetails, setShowPushDetails] = useState(false);
   const [rewardsWalletDraft, setRewardsWalletDraft] = useState(
     improver?.primaryRewardsAccount?.trim() || primaryWalletAddress || "",
@@ -1225,7 +1242,11 @@ export function SettingsScreen({
 
           <LanguageCard
             value={preferences.languagePreference}
-            onChange={(languagePreference) => onUpdatePreferences({ ...preferences, languagePreference })}
+            onChange={(languagePreference) => {
+              // Come back to this screen after the redraw (or restart).
+              rememberReturnPoint({ tab: "settings", section: "general" });
+              onUpdatePreferences({ ...preferences, languagePreference });
+            }}
           />
 
           <PhonePermissionsCard onNotificationsAllowed={onSyncNotifications} />

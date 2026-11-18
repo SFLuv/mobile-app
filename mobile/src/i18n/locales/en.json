@@ -1544,5 +1544,9 @@
       "improver": "Improver",
       "verifiedVolunteer": "Verified volunteer"
     }
+  },
+  "direction": {
+    "reopenTitle": "Reopen SFLuv",
+    "reopenBody": "Close SFLuv and open it again to finish switching the layout."
   }
 }

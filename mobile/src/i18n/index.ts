@@ -36,7 +36,7 @@ export type LanguageOption = {
  * Languages the app ships. A language is listed here only once its file
  * exists; the Settings picker stays hidden while English is the only one.
  */
-export const SUPPORTED_LANGUAGES: LanguageOption[] = [
+const RELEASED_LANGUAGES: LanguageOption[] = [
   { code: "en", nativeName: "English" },
   { code: "es", nativeName: "Español" },
   { code: "zh-Hant", nativeName: "繁體中文" },
@@ -51,6 +51,15 @@ export const SUPPORTED_LANGUAGES: LanguageOption[] = [
  * SUPPORTED_LANGUAGES to offer it.
  */
 export const UPCOMING_LANGUAGES: LanguageOption[] = [{ code: "ar", nativeName: "العربية", rtl: true }];
+
+/**
+ * What the app offers and matches the phone's language against. Development
+ * builds include the upcoming languages so they can be worked on and tested;
+ * release builds (OTA updates and store builds) only offer released ones.
+ */
+export const SUPPORTED_LANGUAGES: LanguageOption[] = __DEV__
+  ? [...RELEASED_LANGUAGES, ...UPCOMING_LANGUAGES]
+  : RELEASED_LANGUAGES;
 
 /** "system" follows the phone's language; anything else is a code above. */
 export type LanguagePreference = "system" | string;

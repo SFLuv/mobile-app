@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import { Animated, Easing, StyleSheet, Text, View } from "react-native";
+import { Animated, Easing, StyleSheet, View } from "react-native";
+import { Text } from "./AppText";
 import { Ionicons } from "@expo/vector-icons";
 import { t } from "../i18n";
 

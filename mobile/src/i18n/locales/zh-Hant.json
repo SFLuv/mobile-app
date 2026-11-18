@@ -1528,5 +1528,9 @@
       "improver": "改善者",
       "verifiedVolunteer": "已核實義工"
     }
+  },
+  "direction": {
+    "reopenTitle": "請重新開啟 SFLuv",
+    "reopenBody": "請關閉 SFLuv 再重新開啟，以完成版面切換。"
   }
 }

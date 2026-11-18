@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Text } from "./AppText";
 
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import type { AppAlertAction } from "../types/notifications";

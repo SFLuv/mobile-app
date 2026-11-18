@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Text } from "./AppText";
 import { Ionicons } from "@expo/vector-icons";
 import { Paths } from "expo-file-system";
 import { WebView } from "react-native-webview";

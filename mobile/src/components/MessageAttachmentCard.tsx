@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
-import { ActivityIndicator, Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Linking, Pressable, StyleSheet, View } from "react-native";
+import { Text } from "./AppText";
 import { Ionicons } from "@expo/vector-icons";
 
 import { AppBackendClient } from "../services/appBackend";

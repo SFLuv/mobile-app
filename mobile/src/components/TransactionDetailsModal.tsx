@@ -10,10 +10,10 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   useWindowDimensions,
   View,
 } from "react-native";
+import { Text } from "./AppText";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { TransactionDetailPayload } from "../utils/transactions";
 import { t } from "../i18n";

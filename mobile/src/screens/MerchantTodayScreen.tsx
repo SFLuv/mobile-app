@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { Text } from "../components/AppText";
 import { Ionicons } from "@expo/vector-icons";
 import { palette } from "../theme";
 import type { MerchantDayRow, MerchantToday } from "../types/app";

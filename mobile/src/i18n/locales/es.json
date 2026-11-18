@@ -1560,5 +1560,9 @@
       "improver": "Improver",
       "verifiedVolunteer": "Voluntario verificado"
     }
+  },
+  "direction": {
+    "reopenTitle": "Vuelva a abrir SFLuv",
+    "reopenBody": "Cierre SFLuv y vuelva a abrirla para terminar de cambiar el diseño."
   }
 }

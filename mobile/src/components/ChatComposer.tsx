@@ -7,10 +7,10 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from "react-native";
+import { Text } from "./AppText";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Palette, radii, spacing, useAppTheme } from "../theme";

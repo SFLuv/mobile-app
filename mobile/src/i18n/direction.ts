@@ -1,8 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { DevSettings, I18nManager } from "react-native";
+import { Alert, DevSettings, I18nManager } from "react-native";
 import * as Updates from "expo-updates";
+import i18next from "i18next";
 
-const RELOAD_ATTEMPT_KEY = "sfluv-wallet:rtl-reload-attempt";
+const t = (key: string) => i18next.t(key) as string;
+
+const PENDING_KEY = "sfluv-wallet:rtl-pending-switch";
 let reloadScheduled = false;
 
 /**
@@ -10,19 +13,22 @@ let reloadScheduled = false;
  *
  * React Native mirrors layout (rows, margins, left/right) when I18nManager is
  * in RTL mode, but reads the mode when it starts, so a switch needs a restart.
- * forceRTL is saved natively and takes effect on the next start.
+ * forceRTL is saved natively and applies from the next start.
  *
- * Restarting is guarded two ways, because a restart that does not apply the
- * new direction (a JS-only reload in a development build) would otherwise
- * loop forever:
- *  - at most one attempt a minute, recorded in storage so it survives the
- *    reload itself; after that the text is still Arabic and the mirrored
- *    layout applies at the next full launch;
- *  - deferred by a moment: reloading in the middle of the redraw that a
- *    language change causes crashes React Native's renderer.
+ * Each switch gets exactly one restart. Before restarting, the wanted
+ * direction is recorded; when the app comes back in that direction the record
+ * is cleared, so the next switch (say straight back to English) gets its own
+ * restart however soon it follows. If the app comes back still in the old
+ * direction, the restart did not apply it (a JS-only reload does that in
+ * development builds): instead of looping, the person is asked to reopen the
+ * app, which always applies it.
+ *
+ * The restart is deferred a moment: reloading in the middle of the redraw a
+ * language change causes crashes React Native's renderer.
  */
 export function ensureDirection(rtl: boolean): void {
   if (I18nManager.isRTL === rtl) {
+    void AsyncStorage.removeItem(PENDING_KEY).catch(() => undefined);
     return;
   }
   I18nManager.allowRTL(rtl);
@@ -32,25 +38,34 @@ export function ensureDirection(rtl: boolean): void {
   }
   reloadScheduled = true;
   void (async () => {
+    let pending: boolean | null = null;
     try {
-      const last = Number((await AsyncStorage.getItem(RELOAD_ATTEMPT_KEY)) || 0);
-      if (Date.now() - last < 60_000) {
-        return;
-      }
-      await AsyncStorage.setItem(RELOAD_ATTEMPT_KEY, String(Date.now()));
+      const raw = await AsyncStorage.getItem(PENDING_KEY);
+      pending = raw === null ? null : raw === "rtl";
     } catch {
-      // Storage unavailable: don't risk a loop.
+      pending = null;
+    }
+    if (pending === rtl) {
+      // Already restarted for exactly this switch and it didn't take.
+      Alert.alert(t("direction.reopenTitle"), t("direction.reopenBody"));
       return;
     }
-    // A short delay, not InteractionManager: the app runs looping animations,
-    // so "after interactions" may never arrive. The language change's redraw
-    // has committed well within this.
+    try {
+      await AsyncStorage.setItem(PENDING_KEY, rtl ? "rtl" : "ltr");
+    } catch {
+      return; // Can't record the attempt, so don't risk a loop.
+    }
     setTimeout(() => {
       void Updates.reloadAsync().catch(() => {
         DevSettings.reload();
       });
     }, 700);
   })();
+}
+
+/** Whether a direction restart is about to happen in this session. */
+export function directionRestartPending(): boolean {
+  return reloadScheduled;
 }
 
 const MIRRORED: Record<string, string> = {

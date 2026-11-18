@@ -10,11 +10,11 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
   useWindowDimensions,
 } from "react-native";
+import { Text } from "../components/AppText";
 import { Ionicons } from "@expo/vector-icons";
 import { AppBackendClient } from "../services/appBackend";
 import { useCurrentLocation } from "../hooks/useCurrentLocation";
