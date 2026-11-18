@@ -1,0 +1,60 @@
+{
+  "common": {
+    "back": "Back",
+    "close": "Close",
+    "copy": "Copy",
+    "copied": "Copied",
+    "notNow": "Not now",
+    "openSettings": "Open Settings",
+    "allow": "Allow"
+  },
+  "permissions": {
+    "camera": {
+      "offTitle": "Camera access is off",
+      "neededTitle": "Camera access needed",
+      "blockedMessage": "SFLuv can't use your camera. Turn on Camera for SFLuv in Settings.",
+      "enable": "Enable camera",
+      "turnOnForPayments": "Turn on Camera for SFLuv in your phone's Settings to scan payment QRs here.",
+      "allowForPayments": "Allow camera access to scan payment QRs here.",
+      "turnOnForRewards": "Turn on Camera for SFLuv in your phone's Settings to scan faucet reward QR codes here.",
+      "allowForRewards": "Allow camera access to scan faucet reward QR codes here.",
+      "turnOnForContacts": "Camera access is off. Turn on Camera for SFLuv in your phone's Settings to scan contact QR codes here.",
+      "allowForContacts": "Allow camera access to scan contact QR codes here."
+    },
+    "photos": {
+      "offTitle": "Photo access is off",
+      "blockedMessage": "SFLuv can't save to your photos. Turn on Photos for SFLuv in Settings."
+    }
+  },
+  "receive": {
+    "tabLink": "Link",
+    "tabAddress": "Address",
+    "paymentLink": "Payment link",
+    "walletAddress": "Wallet address",
+    "redeemCode": "Redeem code",
+    "scanRewardTitle": "Scan reward QR",
+    "scanRewardHint": "Center the faucet QR inside the frame to redeem it to this wallet.",
+    "cameraRequired": "Camera permission is required to scan faucet reward QRs.",
+    "unsupportedQr": "Unsupported QR. Scan a faucet reward QR code from the SFLUV web app."
+  },
+  "settings": {
+    "language": {
+      "title": "Language",
+      "body": "The app follows your phone's language. Choose one here to use a different language in SFLuv.",
+      "system": "Phone setting"
+    },
+    "permissions": {
+      "title": "Phone permissions",
+      "cameraTitle": "Camera",
+      "cameraBody": "Scan payment, reward and contact QR codes, and take workflow photos.",
+      "photosTitle": "Photos",
+      "photosBody": "Save pictures from your chats to your photo library.",
+      "notificationsTitle": "Notifications",
+      "notificationsBody": "Payments, messages, reminders and other updates.",
+      "statusAllowed": "Allowed",
+      "statusBlocked": "Blocked in your phone's Settings",
+      "statusAskable": "Not allowed yet",
+      "statusChecking": "Checking..."
+    }
+  }
+}

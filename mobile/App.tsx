@@ -1,4 +1,5 @@
 import "./src/polyfills";
+import { applyLanguagePreference } from "./src/i18n";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
@@ -1363,6 +1364,10 @@ function mergePreferences(input: unknown): AppPreferences {
       typeof candidate.showVolunteerPanel === "boolean"
         ? candidate.showVolunteerPanel
         : defaultAppPreferences.showVolunteerPanel,
+    languagePreference:
+      typeof candidate.languagePreference === "string" && candidate.languagePreference
+        ? candidate.languagePreference
+        : defaultAppPreferences.languagePreference,
   };
 }
 
@@ -1403,6 +1408,11 @@ function useStoredPreferences(): [AppPreferences, React.Dispatch<React.SetStateA
       console.warn("Unable to persist app preferences", error);
     });
   }, [preferences, preferencesLoaded]);
+
+  // The app's language follows the saved choice, or the phone when it is "system".
+  useEffect(() => {
+    applyLanguagePreference(preferences.languagePreference);
+  }, [preferences.languagePreference]);
 
   return [preferences, setPreferences, preferencesLoaded];
 }

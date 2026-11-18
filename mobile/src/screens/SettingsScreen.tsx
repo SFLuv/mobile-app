@@ -22,6 +22,8 @@ import {
 import { AppPreferences, SendFlowEntryMode, ThemePreference } from "../types/preferences";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import * as MediaLibrary from "expo-media-library";
+import { useTranslation } from "react-i18next";
+import { LanguagePreference, SUPPORTED_LANGUAGES } from "../i18n";
 import * as Notifications from "expo-notifications";
 import {
   PhoneAccess,
@@ -369,15 +371,16 @@ function PermissionRow({
 }) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
+  const { t } = useTranslation();
 
   const status =
     access === "granted"
-      ? "Allowed"
+      ? t("settings.permissions.statusAllowed")
       : access === "blocked"
-        ? "Blocked in your phone's Settings"
+        ? t("settings.permissions.statusBlocked")
         : access === "askable"
-          ? "Not allowed yet"
-          : "Checking...";
+          ? t("settings.permissions.statusAskable")
+          : t("settings.permissions.statusChecking");
 
   return (
     <View style={styles.preferenceRow}>
@@ -399,7 +402,7 @@ function PermissionRow({
             onAllow();
           }}
         >
-          <Text style={styles.syncButtonText}>{access === "blocked" ? "Open Settings" : "Allow"}</Text>
+          <Text style={styles.syncButtonText}>{access === "blocked" ? t("common.openSettings") : t("common.allow")}</Text>
         </Pressable>
       ) : null}
     </View>
@@ -415,6 +418,7 @@ function PermissionRow({
 function PhonePermissionsCard({ onNotificationsAllowed }: { onNotificationsAllowed: () => void }) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
+  const { t } = useTranslation();
 
   const camera = useCameraAccess();
   // Add-only, the same access saving a chat photo asks for (attachmentFiles.ts).
@@ -448,22 +452,22 @@ function PhonePermissionsCard({ onNotificationsAllowed }: { onNotificationsAllow
 
   return (
     <View style={styles.card}>
-      <Text style={styles.sectionTitle}>Phone permissions</Text>
+      <Text style={styles.sectionTitle}>{t("settings.permissions.title")}</Text>
       <PermissionRow
-        title="Camera"
-        body="Scan payment, reward and contact QR codes, and take workflow photos."
+        title={t("settings.permissions.cameraTitle")}
+        body={t("settings.permissions.cameraBody")}
         access={camera.access}
         onAllow={() => void camera.ask()}
       />
       <PermissionRow
-        title="Photos"
-        body="Save pictures from your chats to your photo library."
+        title={t("settings.permissions.photosTitle")}
+        body={t("settings.permissions.photosBody")}
         access={phoneAccessOf(photos)}
         onAllow={() => void requestPhotos()}
       />
       <PermissionRow
-        title="Notifications"
-        body="Payments, messages, reminders and other updates."
+        title={t("settings.permissions.notificationsTitle")}
+        body={t("settings.permissions.notificationsBody")}
         access={phoneAccessOf(notifications)}
         onAllow={() => {
           void (async () => {
@@ -472,6 +476,48 @@ function PhonePermissionsCard({ onNotificationsAllowed }: { onNotificationsAllow
           })();
         }}
       />
+    </View>
+  );
+}
+
+/**
+ * Language choice: follow the phone, or pick one of the app's languages.
+ * Hidden while English is the only language the app ships.
+ */
+function LanguageCard({
+  value,
+  onChange,
+}: {
+  value: LanguagePreference;
+  onChange: (next: LanguagePreference) => void;
+}) {
+  const { palette } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
+  const { t } = useTranslation();
+
+  if (SUPPORTED_LANGUAGES.length < 2) {
+    return null;
+  }
+
+  const options: Array<{ code: LanguagePreference; label: string }> = [
+    { code: "system", label: t("settings.language.system") },
+    ...SUPPORTED_LANGUAGES.map((language) => ({ code: language.code, label: language.nativeName })),
+  ];
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.sectionTitle}>{t("settings.language.title")}</Text>
+      <Text style={styles.preferenceBody}>{t("settings.language.body")}</Text>
+      <View style={styles.languageOptions}>
+        {options.map((option) => (
+          <ThemeOption
+            key={option.code}
+            label={option.label}
+            active={value === option.code}
+            onPress={() => onChange(option.code)}
+          />
+        ))}
+      </View>
     </View>
   );
 }
@@ -1167,6 +1213,11 @@ export function SettingsScreen({
               <ThemeOption label="Dark" active={preferences.themePreference === "dark"} onPress={() => applyThemePreference("dark")} />
             </View>
           </View>
+
+          <LanguageCard
+            value={preferences.languagePreference}
+            onChange={(languagePreference) => onUpdatePreferences({ ...preferences, languagePreference })}
+          />
 
           <PhonePermissionsCard onNotificationsAllowed={onSyncNotifications} />
 
@@ -1874,6 +1925,11 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     preferenceBody: {
       color: palette.textMuted,
       lineHeight: 20,
+    },
+    languageOptions: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: spacing.sm,
     },
     permissionStatus: {
       color: palette.text,

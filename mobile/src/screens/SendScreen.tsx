@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import Constants from "expo-constants";
 import { CameraView } from "expo-camera";
+import { useTranslation } from "react-i18next";
 import { Ionicons } from "@expo/vector-icons";
 import { ethers } from "ethers";
 import { ScannerCornerGuide } from "../components/ScannerCornerGuide";
@@ -407,6 +408,7 @@ export function SendScreen({
   const [tipMessage, setTipMessage] = useState<string | null>(null);
   const [noteFocused, setNoteFocused] = useState(false);
   const { permission, access: cameraAccess, ask: askCamera } = useCameraAccess();
+  const { t } = useTranslation();
   const { location: userLocation } = useCurrentLocation(step === "recipient" && phase === "editing");
 
   const parsedTarget = useMemo(() => parseSendTarget(recipientInput, clientConfig), [clientConfig, recipientInput]);
@@ -1182,12 +1184,12 @@ export function SendScreen({
                 <View style={styles.inlinePermissionCard}>
                   <Ionicons name="camera-outline" size={28} color={palette.primaryStrong} />
                   <Text style={styles.inlinePermissionTitle}>
-                    {cameraAccess === "blocked" ? "Camera access is off" : "Camera access needed"}
+                    {cameraAccess === "blocked" ? t("permissions.camera.offTitle") : t("permissions.camera.neededTitle")}
                   </Text>
                   <Text style={styles.inlinePermissionBody}>
                     {cameraAccess === "blocked"
-                      ? "Turn on Camera for SFLuv in your phone's Settings to scan payment QRs here."
-                      : "Allow camera access to scan payment QRs here."}
+                      ? t("permissions.camera.turnOnForPayments")
+                      : t("permissions.camera.allowForPayments")}
                   </Text>
                   <Pressable
                     style={styles.inlinePermissionButton}
@@ -1200,7 +1202,7 @@ export function SendScreen({
                     }}
                   >
                     <Text style={styles.inlinePermissionButtonText}>
-                      {cameraAccess === "blocked" ? "Open Settings" : "Enable camera"}
+                      {cameraAccess === "blocked" ? t("common.openSettings") : t("permissions.camera.enable")}
                     </Text>
                   </Pressable>
                 </View>

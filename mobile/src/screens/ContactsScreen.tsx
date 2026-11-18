@@ -15,6 +15,7 @@ import {
   type KeyboardEvent,
 } from "react-native";
 import { CameraView } from "expo-camera";
+import { useTranslation } from "react-i18next";
 import { Ionicons } from "@expo/vector-icons";
 import { prewarmQRCode } from "../components/SfluvQRCode";
 import { ethers } from "ethers";
@@ -151,6 +152,7 @@ export function ContactsScreen({
   const [pendingScannedAddress, setPendingScannedAddress] = useState<string | null>(null);
   const [pendingScannedName, setPendingScannedName] = useState("");
   const { permission, access: cameraAccess, ask: askCamera } = useCameraAccess();
+  const { t } = useTranslation();
   const scanCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scanLockedRef = useRef(false);
 
@@ -728,8 +730,8 @@ export function ContactsScreen({
                   <Ionicons name="camera-outline" size={24} color={palette.primaryStrong} />
                   <Text style={styles.permissionText}>
                     {cameraAccess === "blocked"
-                      ? "Camera access is off. Turn on Camera for SFLuv in your phone's Settings to scan contact QR codes here."
-                      : "Allow camera access to scan contact QR codes here."}
+                      ? t("permissions.camera.turnOnForContacts")
+                      : t("permissions.camera.allowForContacts")}
                   </Text>
                   <Pressable
                     style={styles.permissionButton}
@@ -742,7 +744,7 @@ export function ContactsScreen({
                     }}
                   >
                     <Text style={styles.permissionButtonText}>
-                      {cameraAccess === "blocked" ? "Open Settings" : "Enable Camera"}
+                      {cameraAccess === "blocked" ? t("common.openSettings") : t("permissions.camera.enable")}
                     </Text>
                   </Pressable>
                 </View>
