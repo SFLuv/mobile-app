@@ -295,7 +295,7 @@ function formatWorkItemRequirements(item: AppWorkflowWorkItem): string {
   if (item.requiresPhoto) {
     const countLabel = item.photoAllowAnyCount
       ? t("improver.anyCount")
-      : `${Math.max(1, item.photoRequiredCount || 1)} photo${Math.max(1, item.photoRequiredCount || 1) === 1 ? "" : "s"}`;
+      : t("improver.photoCount", { count: Math.max(1, item.photoRequiredCount || 1) });
     const aspectLabel =
       item.photoAspectRatio === "vertical"
         ? "vertical"
@@ -3427,7 +3427,7 @@ export function ImproverScreen({
               </Text>
               {absenceAllWorkflows ? (
                 <Text style={styles.absenceCoverageSummary}>
-                  All {absenceTargetGroups.length} recurring workflow{absenceTargetGroups.length === 1 ? "" : "s"}
+                  {t("improver.allRecurringWorkflows", { count: absenceTargetGroups.length })}
                 </Text>
               ) : selectedWorkflowGroups.length === 0 ? (
                 <Text style={styles.absenceEmptyHint}>
@@ -3819,7 +3819,7 @@ export function ImproverScreen({
             <View style={styles.modalHeaderCopy}>
               <Text style={styles.modalTitle}>{t("improver.myBadges")}</Text>
               <Text style={styles.modalSubtitle}>
-                {filteredBadgeItems.length} result{filteredBadgeItems.length === 1 ? "" : "s"}
+                {t("improver.resultCount", { count: filteredBadgeItems.length })}
               </Text>
             </View>
             <Pressable style={styles.iconButton} onPress={closeBadges}>

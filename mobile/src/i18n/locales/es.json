@@ -526,7 +526,16 @@
     "revokeWorkflow": "¿Anular el flujo de trabajo?",
     "thisRecurringWorkflowClaim": "esta asignación recurrente de flujo de trabajo",
     "hideDetails": "Ocultar detalles",
-    "stepTitle": "Paso {{step}}: {{title}}"
+    "stepTitle": "Paso {{step}}: {{title}}",
+    "photoCount_one": "{{count}} foto",
+    "photoCount_many": "{{count}} fotos",
+    "photoCount_other": "{{count}} fotos",
+    "allRecurringWorkflows_one": "El {{count}} flujo de trabajo recurrente",
+    "allRecurringWorkflows_many": "Los {{count}} flujos de trabajo recurrentes",
+    "allRecurringWorkflows_other": "Los {{count}} flujos de trabajo recurrentes",
+    "resultCount_one": "{{count}} resultado",
+    "resultCount_many": "{{count}} resultados",
+    "resultCount_other": "{{count}} resultados"
   },
   "bulletin": {
     "couldnTLoadTheBulletin": "No se pudo cargar el Tablón.",
@@ -614,7 +623,11 @@
     "comesDownWhenTheEvent": "Se retira cuando termina el evento.",
     "next": "Siguiente",
     "posting": "Publicando...",
-    "meetupSpot": "Lugar de encuentro"
+    "meetupSpot": "Lugar de encuentro",
+    "photosFailed_one": "No se subió {{count}} foto. Puede intentarlo de nuevo desde su publicación.",
+    "photosFailed_many": "No se subieron {{count}} fotos. Puede intentarlo de nuevo desde su publicación.",
+    "photosFailed_other": "No se subieron {{count}} fotos. Puede intentarlo de nuevo desde su publicación.",
+    "whatArePostingQ": "¿Qué va a publicar?"
   },
   "volunteer": {
     "volunteerEvent": "Evento de voluntariado",
@@ -685,7 +698,12 @@
     "hideSearch": "Ocultar búsqueda",
     "loading": "Cargando...",
     "yourSignUpIsNo": " Su inscripción ya no está activa.",
-    "signingUp": "Inscribiendo..."
+    "signingUp": "Inscribiendo...",
+    "spotsCount_one": "{{count}} lugar",
+    "spotsCount_many": "{{count}} lugares",
+    "spotsCount_other": "{{count}} lugares",
+    "remainingOf": "Quedan {{remaining}} / {{total}}",
+    "eventWasCancelled": "Este evento fue cancelado."
   },
   "merchantApplication": {
     "publicInformation": "Información pública",
@@ -748,7 +766,10 @@
     "tellUsWhetherThisLocation": "Díganos si esta ubicación acepta propinas.",
     "locationAddress": "Dirección de la ubicación",
     "startTypingYourStreetAddress": "Empiece a escribir su dirección",
-    "submitting": "Enviando..."
+    "submitting": "Enviando...",
+    "howHeardQ": "¿Cómo se enteró de SFLuv?",
+    "acceptTipsQ": "¿Acepta propinas?",
+    "deviceForStaffQ": "¿El personal tiene una tableta o un teléfono disponible?"
   },
   "chat": {
     "couldnTSendTryAgain": "No se pudo enviar. Intente de nuevo.",
@@ -801,7 +822,11 @@
     "deleteThisMessage": "¿Eliminar este mensaje?",
     "yours": ", suyo",
     "groupInfo": "Info. del grupo",
-    "editYourMessage": "Editar su mensaje"
+    "editYourMessage": "Editar su mensaje",
+    "deleteMessages_one": "Eliminar {{count}} mensaje",
+    "deleteMessages_many": "Eliminar {{count}} mensajes",
+    "deleteMessages_other": "Eliminar {{count}} mensajes",
+    "isTyping": "{{name}} está escribiendo"
   },
   "map": {
     "searchMerchants": "Buscar comercios",
@@ -817,7 +842,10 @@
     "paymentIsNotAvailableFor": "El pago no está disponible para este comercio por ahora.",
     "openWebsite": "Abrir sitio web",
     "payMerchant": "Pagar al comercio",
-    "showingNearestMerchantsFirst": "Mostrando primero los comercios más cercanos."
+    "showingNearestMerchantsFirst": "Mostrando primero los comercios más cercanos.",
+    "merchantCount_one": "{{count}} comercio",
+    "merchantCount_many": "{{count}} comercios",
+    "merchantCount_other": "{{count}} comercios"
   },
   "messages": {
     "couldnTDoThatTry": "No se pudo hacer eso. Intente de nuevo.",
@@ -861,7 +889,15 @@
     "contacts": "Contactos",
     "you2": "Usted",
     "group": "Grupo",
-    "unmute": "Activar sonido"
+    "unmute": "Activar sonido",
+    "filesCount_one": "📎 {{count}} archivo",
+    "filesCount_many": "📎 {{count}} archivos",
+    "filesCount_other": "📎 {{count}} archivos",
+    "attachmentsCount_one": "📎 {{count}} adjunto",
+    "attachmentsCount_many": "📎 {{count}} adjuntos",
+    "attachmentsCount_other": "📎 {{count}} adjuntos",
+    "leaveGroupQ": "¿Salir de este grupo?",
+    "deleteConversationQ": "¿Eliminar esta conversación?"
   },
   "myProfile": {
     "couldnTLoadYourProfile": "No se pudo cargar su perfil.",
@@ -918,7 +954,8 @@
     "thisLocationCannotTakePayments": "Esta ubicación todavía no puede recibir pagos",
     "enterYourMerchantPin": "Ingrese su PIN del comercio",
     "slideToUnlock": "Deslice para desbloquear",
-    "checking": "Verificando"
+    "checking": "Verificando",
+    "whichLocationQ": "¿En qué ubicación está este dispositivo?"
   },
   "chatInfo": {
     "couldnTRenameTheGroup": "No se pudo cambiar el nombre del grupo.",
@@ -1135,7 +1172,11 @@
       "justNow": "hace un momento",
       "free": "Gratis",
       "saving": "Guardando...",
-      "sending": "Enviando..."
+      "sending": "Enviando...",
+      "goodTrades_one": "{{count}} buen intercambio",
+      "goodTrades_many": "{{count}} buenos intercambios",
+      "goodTrades_other": "{{count}} buenos intercambios",
+      "howNeighborsSeeQ": "¿Cómo quiere que lo vean sus vecinos?"
     },
     "chatComposer": {
       "sendsWhenYouHitSend": "Se envía cuando toque enviar",
@@ -1166,7 +1207,8 @@
       "yourMessage": "Su mensaje",
       "tellUsWhatYouNeed": "Díganos qué necesita. Mientras más detalles, mejor.",
       "sendMessage": "Enviar mensaje",
-      "sending": "Enviando…"
+      "sending": "Enviando…",
+      "whereReplyQ": "¿A dónde le respondemos?"
     },
     "datePickerSheet": {
       "selectADate": "Seleccione una fecha"
@@ -1214,7 +1256,8 @@
       "merchantLabel": "Comercio: {{name}}",
       "fileLabel": "Archivo: {{name}}",
       "attachmentName": "adjunto",
-      "sizeSuffix": ", {{size}}"
+      "sizeSuffix": ", {{size}}",
+      "requestReceived": "Recibimos su solicitud y alguien la está revisando."
     },
     "paymentReceivedOverlay": {
       "paymentReceived": "Pago recibido"
@@ -1519,7 +1562,11 @@
     },
     "pushActiveForWallets_one": "Las notificaciones están activas para {{count}} billetera en este dispositivo.",
     "pushActiveForWallets_other": "Las notificaciones están activas para {{count}} billeteras en este dispositivo.",
-    "pushActiveForWallets_many": "Las notificaciones están activas para {{count}} billeteras en este dispositivo."
+    "pushActiveForWallets_many": "Las notificaciones están activas para {{count}} billeteras en este dispositivo.",
+    "notificationsOutstanding_one": "Notificaciones, {{count}} pendiente",
+    "notificationsOutstanding_many": "Notificaciones, {{count}} pendientes",
+    "notificationsOutstanding_other": "Notificaciones, {{count}} pendientes",
+    "whichLocationQ": "¿Qué ubicación?"
   },
   "walletHome": {},
   "utils": {

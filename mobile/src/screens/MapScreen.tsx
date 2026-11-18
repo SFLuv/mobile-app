@@ -632,7 +632,7 @@ export function MapScreen({
 
         <View style={styles.resultsHeader}>
           <Text style={styles.resultsTitle}>
-            {filteredLocations.length} merchant{filteredLocations.length === 1 ? "" : "s"}
+            {t("map.merchantCount", { count: filteredLocations.length })}
           </Text>
           <Text style={styles.resultsSubtitle}>
             {userLocation ? t("map.showingNearestMerchantsFirst") : t("map.enableLocationToSortBy")}

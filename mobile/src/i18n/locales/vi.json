@@ -514,7 +514,10 @@
     "revokeWorkflow": "Thu hồi công việc?",
     "thisRecurringWorkflowClaim": "công việc định kỳ đã nhận này",
     "hideDetails": "Ẩn chi tiết",
-    "stepTitle": "Bước {{step}}: {{title}}"
+    "stepTitle": "Bước {{step}}: {{title}}",
+    "photoCount_other": "{{count}} ảnh",
+    "allRecurringWorkflows_other": "Tất cả {{count}} công việc định kỳ",
+    "resultCount_other": "{{count}} kết quả"
   },
   "bulletin": {
     "couldnTLoadTheBulletin": "Không thể tải Bảng tin.",
@@ -602,7 +605,9 @@
     "comesDownWhenTheEvent": "Sẽ được gỡ xuống khi sự kiện kết thúc.",
     "next": "Tiếp",
     "posting": "Đang đăng...",
-    "meetupSpot": "Điểm hẹn"
+    "meetupSpot": "Điểm hẹn",
+    "photosFailed_other": "{{count}} ảnh chưa tải lên được. Bạn có thể thử lại từ bài đăng.",
+    "whatArePostingQ": "Bạn muốn đăng gì?"
   },
   "volunteer": {
     "volunteerEvent": "Sự kiện tình nguyện",
@@ -673,7 +678,10 @@
     "hideSearch": "Ẩn tìm kiếm",
     "loading": "Đang tải...",
     "yourSignUpIsNo": " Đăng ký của bạn không còn hiệu lực.",
-    "signingUp": "Đang đăng ký..."
+    "signingUp": "Đang đăng ký...",
+    "spotsCount_other": "{{count}} chỗ",
+    "remainingOf": "Còn {{remaining}} / {{total}}",
+    "eventWasCancelled": "Sự kiện này đã bị hủy."
   },
   "merchantApplication": {
     "publicInformation": "Thông tin công khai",
@@ -736,7 +744,10 @@
     "tellUsWhetherThisLocation": "Hãy cho chúng tôi biết địa điểm này có nhận tiền tip không.",
     "locationAddress": "Địa chỉ địa điểm",
     "startTypingYourStreetAddress": "Bắt đầu nhập địa chỉ đường phố của bạn",
-    "submitting": "Đang gửi..."
+    "submitting": "Đang gửi...",
+    "howHeardQ": "Bạn biết đến SFLuv qua đâu?",
+    "acceptTipsQ": "Bạn có nhận tiền boa không?",
+    "deviceForStaffQ": "Nhân viên có máy tính bảng hoặc điện thoại để dùng không?"
   },
   "chat": {
     "couldnTSendTryAgain": "Không gửi được. Hãy thử lại.",
@@ -787,7 +798,9 @@
     "deleteThisMessage": "Xóa tin nhắn này?",
     "yours": ", của bạn",
     "groupInfo": "Thông tin nhóm",
-    "editYourMessage": "Sửa tin nhắn của bạn"
+    "editYourMessage": "Sửa tin nhắn của bạn",
+    "deleteMessages_other": "Xóa {{count}} tin nhắn",
+    "isTyping": "{{name}} đang nhập"
   },
   "map": {
     "searchMerchants": "Tìm cửa hàng",
@@ -803,7 +816,8 @@
     "paymentIsNotAvailableFor": "Hiện không thể thanh toán cho cửa hàng này.",
     "openWebsite": "Mở trang web",
     "payMerchant": "Thanh toán cho cửa hàng",
-    "showingNearestMerchantsFirst": "Đang hiển thị các cửa hàng gần nhất trước."
+    "showingNearestMerchantsFirst": "Đang hiển thị các cửa hàng gần nhất trước.",
+    "merchantCount_other": "{{count}} cửa hàng"
   },
   "messages": {
     "couldnTDoThatTry": "Không thực hiện được. Hãy thử lại.",
@@ -845,7 +859,11 @@
     "contacts": "Danh bạ",
     "you2": "Bạn",
     "group": "Nhóm",
-    "unmute": "Bật tiếng"
+    "unmute": "Bật tiếng",
+    "filesCount_other": "📎 {{count}} tệp",
+    "attachmentsCount_other": "📎 {{count}} tệp đính kèm",
+    "leaveGroupQ": "Rời khỏi nhóm này?",
+    "deleteConversationQ": "Xóa cuộc trò chuyện này?"
   },
   "myProfile": {
     "couldnTLoadYourProfile": "Không thể tải hồ sơ của bạn.",
@@ -902,7 +920,8 @@
     "thisLocationCannotTakePayments": "Địa điểm này chưa thể nhận thanh toán",
     "enterYourMerchantPin": "Nhập mã PIN cửa hàng",
     "slideToUnlock": "Trượt để mở khóa",
-    "checking": "Đang kiểm tra"
+    "checking": "Đang kiểm tra",
+    "whichLocationQ": "Thiết bị này ở địa điểm nào?"
   },
   "chatInfo": {
     "couldnTRenameTheGroup": "Không thể đổi tên nhóm.",
@@ -1119,7 +1138,9 @@
       "justNow": "vừa xong",
       "free": "Miễn phí",
       "saving": "Đang lưu...",
-      "sending": "Đang gửi..."
+      "sending": "Đang gửi...",
+      "goodTrades_other": "{{count}} giao dịch tốt",
+      "howNeighborsSeeQ": "Bạn muốn hàng xóm thấy bạn thế nào?"
     },
     "chatComposer": {
       "sendsWhenYouHitSend": "Sẽ gửi khi bạn bấm gửi",
@@ -1150,7 +1171,8 @@
       "yourMessage": "Tin nhắn của bạn",
       "tellUsWhatYouNeed": "Hãy cho chúng tôi biết bạn cần gì. Càng chi tiết càng tốt.",
       "sendMessage": "Gửi tin nhắn",
-      "sending": "Đang gửi…"
+      "sending": "Đang gửi…",
+      "whereReplyQ": "Chúng tôi nên trả lời bạn ở đâu?"
     },
     "datePickerSheet": {
       "selectADate": "Chọn ngày"
@@ -1198,7 +1220,8 @@
       "merchantLabel": "Cửa hàng: {{name}}",
       "fileLabel": "Tệp: {{name}}",
       "attachmentName": "tệp đính kèm",
-      "sizeSuffix": ", {{size}}"
+      "sizeSuffix": ", {{size}}",
+      "requestReceived": "Chúng tôi đã nhận yêu cầu của bạn và đang có người xem xét."
     },
     "paymentReceivedOverlay": {
       "paymentReceived": "Đã nhận thanh toán"
@@ -1485,7 +1508,9 @@
       "includes": " Bao gồm {{list}}.",
       "listSeparator": ", "
     },
-    "pushActiveForWallets_other": "Thông báo đẩy đang bật cho {{count}} ví trên thiết bị này."
+    "pushActiveForWallets_other": "Thông báo đẩy đang bật cho {{count}} ví trên thiết bị này.",
+    "notificationsOutstanding_other": "Thông báo, còn {{count}}",
+    "whichLocationQ": "Địa điểm nào?"
   },
   "walletHome": {},
   "utils": {

@@ -514,7 +514,10 @@
     "revokeWorkflow": "撤銷工作流程？",
     "thisRecurringWorkflowClaim": "這項已認領的定期工作流程",
     "hideDetails": "隱藏詳情",
-    "stepTitle": "第 {{step}} 步：{{title}}"
+    "stepTitle": "第 {{step}} 步：{{title}}",
+    "photoCount_other": "{{count}} 張相片",
+    "allRecurringWorkflows_other": "全部 {{count}} 個定期工作流程",
+    "resultCount_other": "{{count}} 個結果"
   },
   "bulletin": {
     "couldnTLoadTheBulletin": "無法載入告示板。",
@@ -602,7 +605,9 @@
     "comesDownWhenTheEvent": "活動結束時會撤下。",
     "next": "下一步",
     "posting": "發佈中...",
-    "meetupSpot": "見面地點"
+    "meetupSpot": "見面地點",
+    "photosFailed_other": "有 {{count}} 張相片未能上載。您可以在帖子中再試一次。",
+    "whatArePostingQ": "您想發佈甚麼？"
   },
   "volunteer": {
     "volunteerEvent": "義工活動",
@@ -673,7 +678,10 @@
     "hideSearch": "隱藏搜尋",
     "loading": "載入中...",
     "yourSignUpIsNo": " 您的報名已不再有效。",
-    "signingUp": "報名中..."
+    "signingUp": "報名中...",
+    "spotsCount_other": "{{count}} 個名額",
+    "remainingOf": "尚餘 {{remaining}} / {{total}}",
+    "eventWasCancelled": "此活動已取消。"
   },
   "merchantApplication": {
     "publicInformation": "公開資料",
@@ -736,7 +744,10 @@
     "tellUsWhetherThisLocation": "請告訴我們這個地點是否接受小費。",
     "locationAddress": "地點地址",
     "startTypingYourStreetAddress": "開始輸入您的街道地址",
-    "submitting": "提交中..."
+    "submitting": "提交中...",
+    "howHeardQ": "您是如何得知 SFLuv 的？",
+    "acceptTipsQ": "您接受小費嗎？",
+    "deviceForStaffQ": "員工有平板電腦或手機可用嗎？"
   },
   "chat": {
     "couldnTSendTryAgain": "無法傳送，請再試一次。",
@@ -787,7 +798,9 @@
     "deleteThisMessage": "刪除這則訊息？",
     "yours": "，您的",
     "groupInfo": "群組資料",
-    "editYourMessage": "編輯您的訊息"
+    "editYourMessage": "編輯您的訊息",
+    "deleteMessages_other": "刪除 {{count}} 則訊息",
+    "isTyping": "{{name}} 正在輸入"
   },
   "map": {
     "searchMerchants": "搜尋商戶",
@@ -803,7 +816,8 @@
     "paymentIsNotAvailableFor": "這間商戶暫時無法接受付款。",
     "openWebsite": "開啟網站",
     "payMerchant": "付款給商戶",
-    "showingNearestMerchantsFirst": "正優先顯示最近的商戶。"
+    "showingNearestMerchantsFirst": "正優先顯示最近的商戶。",
+    "merchantCount_other": "{{count}} 間商戶"
   },
   "messages": {
     "couldnTDoThatTry": "無法完成，請再試一次。",
@@ -845,7 +859,11 @@
     "contacts": "聯絡人",
     "you2": "您",
     "group": "群組",
-    "unmute": "取消靜音"
+    "unmute": "取消靜音",
+    "filesCount_other": "📎 {{count}} 個檔案",
+    "attachmentsCount_other": "📎 {{count}} 個附件",
+    "leaveGroupQ": "要離開這個群組嗎？",
+    "deleteConversationQ": "要刪除這段對話嗎？"
   },
   "myProfile": {
     "couldnTLoadYourProfile": "無法載入您的個人資料。",
@@ -902,7 +920,8 @@
     "thisLocationCannotTakePayments": "這個地點暫時無法收款",
     "enterYourMerchantPin": "輸入您的商戶 PIN",
     "slideToUnlock": "滑動以解鎖",
-    "checking": "檢查中"
+    "checking": "檢查中",
+    "whichLocationQ": "這部裝置屬於哪個地點？"
   },
   "chatInfo": {
     "couldnTRenameTheGroup": "無法重新命名群組。",
@@ -1119,7 +1138,9 @@
       "justNow": "剛剛",
       "free": "免費",
       "saving": "儲存中...",
-      "sending": "傳送中..."
+      "sending": "傳送中...",
+      "goodTrades_other": "{{count}} 次良好交易",
+      "howNeighborsSeeQ": "您希望街坊怎樣看到您？"
     },
     "chatComposer": {
       "sendsWhenYouHitSend": "按下傳送時會一併送出",
@@ -1150,7 +1171,8 @@
       "yourMessage": "您的訊息",
       "tellUsWhatYouNeed": "請告訴我們您需要甚麼協助，越詳細越好。",
       "sendMessage": "傳送訊息",
-      "sending": "傳送中…"
+      "sending": "傳送中…",
+      "whereReplyQ": "我們應回覆到哪裏？"
     },
     "datePickerSheet": {
       "selectADate": "選擇日期"
@@ -1198,7 +1220,8 @@
       "merchantLabel": "商戶：{{name}}",
       "fileLabel": "檔案：{{name}}",
       "attachmentName": "附件",
-      "sizeSuffix": "，{{size}}"
+      "sizeSuffix": "，{{size}}",
+      "requestReceived": "我們已收到您的請求，並有人正在處理。"
     },
     "paymentReceivedOverlay": {
       "paymentReceived": "已收到付款"
@@ -1485,7 +1508,9 @@
       "includes": "當中包括{{list}}。",
       "listSeparator": "、"
     },
-    "pushActiveForWallets_other": "此裝置已為 {{count}} 個錢包啟用推送通知。"
+    "pushActiveForWallets_other": "此裝置已為 {{count}} 個錢包啟用推送通知。",
+    "notificationsOutstanding_other": "通知，{{count}} 則未處理",
+    "whichLocationQ": "哪個地點？"
   },
   "walletHome": {},
   "utils": {

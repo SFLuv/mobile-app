@@ -204,12 +204,12 @@ function signupSuccessMessage(result: AppVolunteerSignupResult): string {
 function remainingSpotsLabel(event: AppVolunteerEvent): string | null {
   if (typeof event.spotsRemaining === "number" && typeof event.maxParticipants === "number") {
     return event.spotsRemaining > 0
-      ? `${event.spotsRemaining} / ${event.maxParticipants} Remaining`
+      ? t("volunteer.remainingOf", { remaining: event.spotsRemaining, total: event.maxParticipants })
       : t("volunteer.full");
   }
   // External and no-signup events publish a cap but not a live count.
   if (typeof event.maxParticipants === "number") {
-    return `${event.maxParticipants} spots`;
+    return t("volunteer.spotsCount", { count: event.maxParticipants });
   }
   return null;
 }
@@ -221,7 +221,7 @@ function spotsLabel(event: AppVolunteerEvent): string | null {
       : t("volunteer.full");
   }
   if (typeof event.maxParticipants === "number") {
-    return `${event.maxParticipants} spots`;
+    return t("volunteer.spotsCount", { count: event.maxParticipants });
   }
   return null;
 }
@@ -1545,7 +1545,7 @@ function EventDetail({
                 <View style={styles.cancelledBanner}>
                   <Ionicons name="close-circle" size={16} color={palette.danger} />
                   <Text style={styles.cancelledBannerText}>
-                    This event was cancelled.
+                    {t("volunteer.eventWasCancelled")}
                     {signedUp ? t("volunteer.yourSignUpIsNo") : ""}
                   </Text>
                 </View>

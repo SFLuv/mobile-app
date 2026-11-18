@@ -620,7 +620,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
             autoCorrect={false}
           />
 
-          <Text style={styles.label}>How did you hear about SFLuv?</Text>
+          <Text style={styles.label}>{t("merchantApplication.howHeardQ")}</Text>
           <OptionRow
             options={REFERRAL_OPTIONS}
             value={draft.referralSource}
@@ -664,7 +664,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
             />
           )}
 
-          <Text style={styles.label}>Do you accept tips?</Text>
+          <Text style={styles.label}>{t("merchantApplication.acceptTipsQ")}</Text>
           <Text style={styles.hint}>
             {t("merchantApplication.yesGivesThisLocationIts")}
           </Text>
@@ -674,7 +674,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
             styles={styles}
           />
 
-          <Text style={styles.label}>Tablet or phone available to staff?</Text>
+          <Text style={styles.label}>{t("merchantApplication.deviceForStaffQ")}</Text>
           <YesNoRow
             value={draft.hasStaffTablet}
             onSelect={(value) => updateDraft({ hasStaffTablet: value })}

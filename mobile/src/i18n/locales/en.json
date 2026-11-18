@@ -520,7 +520,13 @@
     "revokeWorkflow": "Revoke workflow?",
     "thisRecurringWorkflowClaim": "this recurring workflow claim",
     "hideDetails": "Hide details",
-    "stepTitle": "Step {{step}}: {{title}}"
+    "stepTitle": "Step {{step}}: {{title}}",
+    "photoCount_one": "{{count}} photo",
+    "photoCount_other": "{{count}} photos",
+    "allRecurringWorkflows_one": "All {{count}} recurring workflow",
+    "allRecurringWorkflows_other": "All {{count}} recurring workflows",
+    "resultCount_one": "{{count}} result",
+    "resultCount_other": "{{count}} results"
   },
   "bulletin": {
     "couldnTLoadTheBulletin": "Couldn't load the Bulletin.",
@@ -608,7 +614,10 @@
     "comesDownWhenTheEvent": "Comes down when the event ends.",
     "next": "Next",
     "posting": "Posting...",
-    "meetupSpot": "Meetup spot"
+    "meetupSpot": "Meetup spot",
+    "photosFailed_one": "{{count}} photo didn't upload. You can try again from your post.",
+    "photosFailed_other": "{{count}} photos didn't upload. You can try again from your post.",
+    "whatArePostingQ": "What are you posting?"
   },
   "volunteer": {
     "volunteerEvent": "Volunteer event",
@@ -679,7 +688,11 @@
     "hideSearch": "Hide search",
     "loading": "Loading...",
     "yourSignUpIsNo": " Your sign up is no longer active.",
-    "signingUp": "Signing up..."
+    "signingUp": "Signing up...",
+    "spotsCount_one": "{{count}} spot",
+    "spotsCount_other": "{{count}} spots",
+    "remainingOf": "{{remaining}} / {{total}} Remaining",
+    "eventWasCancelled": "This event was cancelled."
   },
   "merchantApplication": {
     "publicInformation": "Public Information",
@@ -742,7 +755,10 @@
     "tellUsWhetherThisLocation": "Tell us whether this location accepts tips.",
     "locationAddress": "Location Address",
     "startTypingYourStreetAddress": "Start typing your street address",
-    "submitting": "Submitting..."
+    "submitting": "Submitting...",
+    "howHeardQ": "How did you hear about SFLuv?",
+    "acceptTipsQ": "Do you accept tips?",
+    "deviceForStaffQ": "Tablet or phone available to staff?"
   },
   "chat": {
     "couldnTSendTryAgain": "Couldn't send. Try again.",
@@ -794,7 +810,10 @@
     "deleteThisMessage": "Delete this message?",
     "yours": ", yours",
     "groupInfo": "Group info",
-    "editYourMessage": "Edit your message"
+    "editYourMessage": "Edit your message",
+    "deleteMessages_one": "Delete {{count}} message",
+    "deleteMessages_other": "Delete {{count}} messages",
+    "isTyping": "{{name}} is typing"
   },
   "map": {
     "searchMerchants": "Search merchants",
@@ -810,7 +829,9 @@
     "paymentIsNotAvailableFor": "Payment is not available for this merchant right now.",
     "openWebsite": "Open website",
     "payMerchant": "Pay merchant",
-    "showingNearestMerchantsFirst": "Showing nearest merchants first."
+    "showingNearestMerchantsFirst": "Showing nearest merchants first.",
+    "merchantCount_one": "{{count}} merchant",
+    "merchantCount_other": "{{count}} merchants"
   },
   "messages": {
     "couldnTDoThatTry": "Couldn't do that. Try again.",
@@ -853,7 +874,13 @@
     "contacts": "Contacts",
     "you2": "You",
     "group": "Group",
-    "unmute": "Unmute"
+    "unmute": "Unmute",
+    "filesCount_one": "📎 {{count}} file",
+    "filesCount_other": "📎 {{count}} files",
+    "attachmentsCount_one": "📎 {{count}} attachment",
+    "attachmentsCount_other": "📎 {{count}} attachments",
+    "leaveGroupQ": "Leave this group?",
+    "deleteConversationQ": "Delete this conversation?"
   },
   "myProfile": {
     "couldnTLoadYourProfile": "Couldn't load your profile.",
@@ -910,7 +937,8 @@
     "thisLocationCannotTakePayments": "This location cannot take payments yet",
     "enterYourMerchantPin": "Enter your Merchant PIN",
     "slideToUnlock": "Slide to unlock",
-    "checking": "Checking"
+    "checking": "Checking",
+    "whichLocationQ": "Which location is this device?"
   },
   "chatInfo": {
     "couldnTRenameTheGroup": "Couldn't rename the group.",
@@ -1127,7 +1155,10 @@
       "justNow": "just now",
       "free": "Free",
       "saving": "Saving...",
-      "sending": "Sending..."
+      "sending": "Sending...",
+      "goodTrades_one": "{{count}} good trade",
+      "goodTrades_other": "{{count}} good trades",
+      "howNeighborsSeeQ": "How should neighbors see you?"
     },
     "chatComposer": {
       "sendsWhenYouHitSend": "Sends when you hit send",
@@ -1158,7 +1189,8 @@
       "yourMessage": "Your message",
       "tellUsWhatYouNeed": "Tell us what you need. The more detail the better.",
       "sendMessage": "Send message",
-      "sending": "Sending…"
+      "sending": "Sending…",
+      "whereReplyQ": "Where should we reply?"
     },
     "datePickerSheet": {
       "selectADate": "Select a date"
@@ -1206,7 +1238,8 @@
       "merchantLabel": "Merchant: {{name}}",
       "fileLabel": "File: {{name}}",
       "attachmentName": "attachment",
-      "sizeSuffix": ", {{size}}"
+      "sizeSuffix": ", {{size}}",
+      "requestReceived": "We have your request and someone is looking at it."
     },
     "paymentReceivedOverlay": {
       "paymentReceived": "Payment received"
@@ -1502,7 +1535,10 @@
       "listSeparator": ", "
     },
     "pushActiveForWallets_one": "Push notifications are active for {{count}} wallet on this device.",
-    "pushActiveForWallets_other": "Push notifications are active for {{count}} wallets on this device."
+    "pushActiveForWallets_other": "Push notifications are active for {{count}} wallets on this device.",
+    "notificationsOutstanding_one": "Notifications, {{count}} outstanding",
+    "notificationsOutstanding_other": "Notifications, {{count}} outstanding",
+    "whichLocationQ": "Which location?"
   },
   "walletHome": {},
   "utils": {

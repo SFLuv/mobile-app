@@ -544,7 +544,25 @@
     "revokeWorkflow": "إلغاء مسار العمل؟",
     "thisRecurringWorkflowClaim": "حجز مسار العمل المتكرر هذا",
     "hideDetails": "إخفاء التفاصيل",
-    "stepTitle": "الخطوة {{step}}: {{title}}"
+    "stepTitle": "الخطوة {{step}}: {{title}}",
+    "photoCount_zero": "{{count}} صورة",
+    "photoCount_one": "صورة واحدة",
+    "photoCount_two": "{{count}} صورة",
+    "photoCount_few": "{{count}} صورة",
+    "photoCount_many": "{{count}} صورة",
+    "photoCount_other": "{{count}} صورة",
+    "allRecurringWorkflows_zero": "جميع مسارات العمل المتكررة ({{count}})",
+    "allRecurringWorkflows_one": "مسار العمل المتكرر الوحيد",
+    "allRecurringWorkflows_two": "جميع مسارات العمل المتكررة ({{count}})",
+    "allRecurringWorkflows_few": "جميع مسارات العمل المتكررة ({{count}})",
+    "allRecurringWorkflows_many": "جميع مسارات العمل المتكررة ({{count}})",
+    "allRecurringWorkflows_other": "جميع مسارات العمل المتكررة ({{count}})",
+    "resultCount_zero": "{{count}} نتيجة",
+    "resultCount_one": "نتيجة واحدة",
+    "resultCount_two": "{{count}} نتيجة",
+    "resultCount_few": "{{count}} نتيجة",
+    "resultCount_many": "{{count}} نتيجة",
+    "resultCount_other": "{{count}} نتيجة"
   },
   "bulletin": {
     "couldnTLoadTheBulletin": "تعذّر تحميل لوحة الإعلانات.",
@@ -632,7 +650,14 @@
     "comesDownWhenTheEvent": "يُزال عند انتهاء الفعالية.",
     "next": "التالي",
     "posting": "جارٍ النشر...",
-    "meetupSpot": "مكان اللقاء"
+    "meetupSpot": "مكان اللقاء",
+    "photosFailed_zero": "لم تُرفع {{count}} صورة. يمكنك المحاولة مرة أخرى من منشورك.",
+    "photosFailed_one": "لم تُرفع صورة واحدة. يمكنك المحاولة مرة أخرى من منشورك.",
+    "photosFailed_two": "لم تُرفع {{count}} صورة. يمكنك المحاولة مرة أخرى من منشورك.",
+    "photosFailed_few": "لم تُرفع {{count}} صورة. يمكنك المحاولة مرة أخرى من منشورك.",
+    "photosFailed_many": "لم تُرفع {{count}} صورة. يمكنك المحاولة مرة أخرى من منشورك.",
+    "photosFailed_other": "لم تُرفع {{count}} صورة. يمكنك المحاولة مرة أخرى من منشورك.",
+    "whatArePostingQ": "ماذا تريد أن تنشر؟"
   },
   "volunteer": {
     "volunteerEvent": "فعالية تطوعية",
@@ -703,7 +728,15 @@
     "hideSearch": "إخفاء البحث",
     "loading": "جارٍ التحميل...",
     "yourSignUpIsNo": " لم يعد تسجيلك نشطًا.",
-    "signingUp": "جارٍ التسجيل..."
+    "signingUp": "جارٍ التسجيل...",
+    "spotsCount_zero": "لا أماكن",
+    "spotsCount_one": "مكان واحد",
+    "spotsCount_two": "مكانان",
+    "spotsCount_few": "{{count}} أماكن",
+    "spotsCount_many": "{{count}} مكانًا",
+    "spotsCount_other": "{{count}} مكان",
+    "remainingOf": "متبقٍ {{remaining}} / {{total}}",
+    "eventWasCancelled": "أُلغيت هذه الفعالية."
   },
   "merchantApplication": {
     "publicInformation": "المعلومات العامة",
@@ -766,7 +799,10 @@
     "tellUsWhetherThisLocation": "أخبرنا إن كان هذا الموقع يقبل الإكراميات.",
     "locationAddress": "عنوان الموقع",
     "startTypingYourStreetAddress": "ابدأ بكتابة عنوان الشارع",
-    "submitting": "جارٍ التقديم..."
+    "submitting": "جارٍ التقديم...",
+    "howHeardQ": "كيف سمعت عن SFLuv؟",
+    "acceptTipsQ": "هل تقبل الإكراميات؟",
+    "deviceForStaffQ": "هل يتوفر جهاز لوحي أو هاتف للموظفين؟"
   },
   "chat": {
     "couldnTSendTryAgain": "تعذّر الإرسال. حاول مرة أخرى.",
@@ -822,7 +858,14 @@
     "deleteThisMessage": "حذف هذه الرسالة؟",
     "yours": "، منك",
     "groupInfo": "معلومات المجموعة",
-    "editYourMessage": "عدّل رسالتك"
+    "editYourMessage": "عدّل رسالتك",
+    "deleteMessages_zero": "حذف {{count}} رسالة",
+    "deleteMessages_one": "حذف رسالة واحدة",
+    "deleteMessages_two": "حذف {{count}} رسالة",
+    "deleteMessages_few": "حذف {{count}} رسالة",
+    "deleteMessages_many": "حذف {{count}} رسالة",
+    "deleteMessages_other": "حذف {{count}} رسالة",
+    "isTyping": "{{name}} يكتب الآن"
   },
   "map": {
     "searchMerchants": "ابحث عن التجار",
@@ -838,7 +881,13 @@
     "paymentIsNotAvailableFor": "الدفع غير متاح لهذا التاجر الآن.",
     "openWebsite": "فتح الموقع الإلكتروني",
     "payMerchant": "الدفع للتاجر",
-    "showingNearestMerchantsFirst": "عرض أقرب التجار أولًا."
+    "showingNearestMerchantsFirst": "عرض أقرب التجار أولًا.",
+    "merchantCount_zero": "{{count}} تاجر",
+    "merchantCount_one": "تاجر واحد",
+    "merchantCount_two": "{{count}} تاجر",
+    "merchantCount_few": "{{count}} تاجر",
+    "merchantCount_many": "{{count}} تاجر",
+    "merchantCount_other": "{{count}} تاجر"
   },
   "messages": {
     "couldnTDoThatTry": "تعذّر تنفيذ ذلك. حاول مرة أخرى.",
@@ -885,7 +934,21 @@
     "contacts": "جهات الاتصال",
     "you2": "أنت",
     "group": "مجموعة",
-    "unmute": "إلغاء الكتم"
+    "unmute": "إلغاء الكتم",
+    "filesCount_zero": "📎 {{count}} ملف",
+    "filesCount_one": "📎 ملف واحد",
+    "filesCount_two": "📎 {{count}} ملف",
+    "filesCount_few": "📎 {{count}} ملف",
+    "filesCount_many": "📎 {{count}} ملف",
+    "filesCount_other": "📎 {{count}} ملف",
+    "attachmentsCount_zero": "📎 {{count}} مرفق",
+    "attachmentsCount_one": "📎 مرفق واحد",
+    "attachmentsCount_two": "📎 {{count}} مرفق",
+    "attachmentsCount_few": "📎 {{count}} مرفق",
+    "attachmentsCount_many": "📎 {{count}} مرفق",
+    "attachmentsCount_other": "📎 {{count}} مرفق",
+    "leaveGroupQ": "هل تريد مغادرة هذه المجموعة؟",
+    "deleteConversationQ": "هل تريد حذف هذه المحادثة؟"
   },
   "myProfile": {
     "couldnTLoadYourProfile": "تعذّر تحميل ملفك الشخصي.",
@@ -942,7 +1005,8 @@
     "thisLocationCannotTakePayments": "لا يمكن لهذا الموقع استقبال المدفوعات بعد",
     "enterYourMerchantPin": "أدخل رمز PIN للتاجر",
     "slideToUnlock": "اسحب لفتح القفل",
-    "checking": "جارٍ التحقق"
+    "checking": "جارٍ التحقق",
+    "whichLocationQ": "ما الموقع الذي يتبع له هذا الجهاز؟"
   },
   "chatInfo": {
     "couldnTRenameTheGroup": "تعذّرت إعادة تسمية المجموعة.",
@@ -1159,7 +1223,14 @@
       "justNow": "الآن",
       "free": "مجاني",
       "saving": "جارٍ الحفظ...",
-      "sending": "جارٍ الإرسال..."
+      "sending": "جارٍ الإرسال...",
+      "goodTrades_zero": "{{count}} صفقة جيدة",
+      "goodTrades_one": "صفقة جيدة واحدة",
+      "goodTrades_two": "{{count}} صفقة جيدة",
+      "goodTrades_few": "{{count}} صفقة جيدة",
+      "goodTrades_many": "{{count}} صفقة جيدة",
+      "goodTrades_other": "{{count}} صفقة جيدة",
+      "howNeighborsSeeQ": "كيف تريد أن يراك جيرانك؟"
     },
     "chatComposer": {
       "sendsWhenYouHitSend": "تُرسل عند الضغط على إرسال",
@@ -1190,7 +1261,8 @@
       "yourMessage": "رسالتك",
       "tellUsWhatYouNeed": "أخبرنا بما تحتاجه. كلما زادت التفاصيل كان أفضل.",
       "sendMessage": "إرسال الرسالة",
-      "sending": "جارٍ الإرسال…"
+      "sending": "جارٍ الإرسال…",
+      "whereReplyQ": "أين نرسل الرد؟"
     },
     "datePickerSheet": {
       "selectADate": "اختر تاريخًا"
@@ -1238,7 +1310,8 @@
       "merchantLabel": "التاجر: {{name}}",
       "fileLabel": "الملف: {{name}}",
       "attachmentName": "مرفق",
-      "sizeSuffix": "، {{size}}"
+      "sizeSuffix": "، {{size}}",
+      "requestReceived": "استلمنا طلبك ويتولى أحد مراجعته."
     },
     "paymentReceivedOverlay": {
       "paymentReceived": "تم استلام الدفعة"
@@ -1570,7 +1643,14 @@
     "pushActiveForWallets_two": "الإشعارات مفعّلة لمحفظتين على هذا الجهاز.",
     "pushActiveForWallets_few": "الإشعارات مفعّلة لـ {{count}} محافظ على هذا الجهاز.",
     "pushActiveForWallets_many": "الإشعارات مفعّلة لـ {{count}} محفظة على هذا الجهاز.",
-    "pushActiveForWallets_other": "الإشعارات مفعّلة لـ {{count}} محفظة على هذا الجهاز."
+    "pushActiveForWallets_other": "الإشعارات مفعّلة لـ {{count}} محفظة على هذا الجهاز.",
+    "notificationsOutstanding_zero": "الإشعارات، {{count}} معلّقة",
+    "notificationsOutstanding_one": "الإشعارات، إشعار واحد معلّق",
+    "notificationsOutstanding_two": "الإشعارات، {{count}} معلّقة",
+    "notificationsOutstanding_few": "الإشعارات، {{count}} معلّقة",
+    "notificationsOutstanding_many": "الإشعارات، {{count}} معلّقة",
+    "notificationsOutstanding_other": "الإشعارات، {{count}} معلّقة",
+    "whichLocationQ": "أي موقع؟"
   },
   "walletHome": {},
   "utils": {

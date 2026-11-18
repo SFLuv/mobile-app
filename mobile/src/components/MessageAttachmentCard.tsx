@@ -352,7 +352,7 @@ export function MessageAttachmentCard({
             </Text>
             <Text style={styles.referenceDetail}>
               {/* Never the body or the email — see resolveSupportCard. */}
-              We have your request and someone is looking at it.
+              {t("components.messageAttachmentCard.requestReceived")}
             </Text>
           </View>
         </Pressable>

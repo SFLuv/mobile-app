@@ -244,7 +244,7 @@ export function MerchantDeviceSetupScreen({
         <View style={styles.iconWrap}>
           <Ionicons name="storefront-outline" size={26} color={palette.primaryStrong} />
         </View>
-        <Text style={styles.title}>Which location is this device?</Text>
+        <Text style={styles.title}>{t("merchantDeviceSetup.whichLocationQ")}</Text>
         <Text style={styles.body}>
           Payments taken here land in this location&apos;s wallet, and the day it shows is this location&apos;s day.
         </Text>

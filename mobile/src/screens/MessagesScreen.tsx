@@ -567,7 +567,7 @@ export function MessagesScreen({
               </>
             ) : rowAction?.conversation.kind === "group" ? (
               <>
-                <Text style={styles.sheetTitle}>Leave this group?</Text>
+                <Text style={styles.sheetTitle}>{t("messages.leaveGroupQ")}</Text>
                 <Text style={styles.sheetBody}>
                   You&apos;ll stop receiving its messages. The group carries on without
                   you.
@@ -598,7 +598,7 @@ export function MessagesScreen({
               </>
             ) : (
               <>
-                <Text style={styles.sheetTitle}>Delete this conversation?</Text>
+                <Text style={styles.sheetTitle}>{t("messages.deleteConversationQ")}</Text>
                 <Pressable
                   style={styles.sheetOption}
                   disabled={actionBusy}
@@ -812,9 +812,9 @@ function attachmentPreviewLabel(attachments: MessageAttachment[]): string {
       return t("messages.photosAndVideos", { count: images + videos });
     }
     if (images + videos === 0) {
-      return files > 1 ? `📎 ${files} files` : `📎 ${displayFileName(attachment.file_name) || t("messages.file")}`;
+      return files > 1 ? t("messages.filesCount", { count: files }) : `📎 ${displayFileName(attachment.file_name) || t("messages.file")}`;
     }
-    return `📎 ${media.length} attachments`;
+    return t("messages.attachmentsCount", { count: media.length });
   }
   switch (attachment.kind) {
     case "link":

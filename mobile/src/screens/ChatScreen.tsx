@@ -1927,7 +1927,7 @@ export function ChatScreen({
             {isGroup ? (
               <Text style={styles.typingWho} numberOfLines={1}>
                 {typing.length === 1
-                  ? `${typing[0].userName} is typing`
+                  ? t("chat.isTyping", { name: typing[0].userName })
                   : t("chat.peopleAreTyping", { count: typing.length })}
               </Text>
             ) : null}
@@ -1953,7 +1953,7 @@ export function ChatScreen({
               onPress={() => confirmDelete(selectedIds)}
               disabled={selectedIds.length === 0}
               accessibilityRole="button"
-              accessibilityLabel={`Delete ${selectedIds.length} messages`}
+              accessibilityLabel={t("chat.deleteMessages", { count: selectedIds.length })}
             >
               <Ionicons name="trash-outline" size={16} color={palette.white} />
               <Text style={styles.selectionDeleteText}>{t("chat.delete")}</Text>

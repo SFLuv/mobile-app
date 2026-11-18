@@ -179,7 +179,7 @@ export function ContactSupportModal({
                   textAlignVertical="top"
                 />
 
-                <Text style={styles.label}>Where should we reply?</Text>
+                <Text style={styles.label}>{t("components.contactSupportModal.whereReplyQ")}</Text>
                 <TextInput
                   style={styles.input}
                   value={email}

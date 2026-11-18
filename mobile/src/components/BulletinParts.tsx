@@ -106,7 +106,7 @@ export function BadgeLine({ user }: { user: PublicUser }) {
   const { palette } = useAppTheme();
   const parts: string[] = user.badges.map((badge) => bulletinBadgeLabel(badge)).filter(Boolean);
   if (user.good_trades > 0) {
-    parts.push(`${user.good_trades} good trade${user.good_trades === 1 ? "" : "s"}`);
+    parts.push(t("components.bulletinParts.goodTrades", { count: user.good_trades }));
   }
   if (parts.length === 0) return null;
   return <Text style={{ color: palette.textMuted, fontSize: 12 }}>{parts.join(" · ")}</Text>;
@@ -241,7 +241,7 @@ export function ProfileSetupSheet({
           <Pressable style={{ flex: 1 }} onPress={onClose} />
           <View style={styles.card}>
             <View style={styles.header}>
-              <Text style={styles.title}>How should neighbors see you?</Text>
+              <Text style={styles.title}>{t("components.bulletinParts.howNeighborsSeeQ")}</Text>
               <Pressable onPress={onClose} hitSlop={8} accessibilityLabel={t("components.bulletinParts.close")}>
                 <Ionicons name="close" size={20} color={palette.textMuted} />
               </Pressable>

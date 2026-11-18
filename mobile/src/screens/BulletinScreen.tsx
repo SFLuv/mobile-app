@@ -773,7 +773,7 @@ function ComposeModal({
           }
         }
         if (failed > 0) {
-          onToast(`${failed} photo${failed === 1 ? "" : "s"} didn't upload. You can try again from your post.`, "error");
+          onToast(t("bulletin.photosFailed", { count: failed }), "error");
         }
         triggerClickHaptic(hapticsEnabled, "medium");
         onPosted(created);
@@ -814,7 +814,7 @@ function ComposeModal({
           <ScrollView contentContainerStyle={styles.composeContent} keyboardShouldPersistTaps="handled">
             {step === 1 ? (
               <>
-                <Text style={styles.composeLead}>What are you posting?</Text>
+                <Text style={styles.composeLead}>{t("bulletin.whatArePostingQ")}</Text>
                 {categories.map((c) => (
                   <Pressable
                     key={c.value}

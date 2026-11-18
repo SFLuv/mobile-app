@@ -340,10 +340,11 @@ const TAB_SLIDE_ORDER: Tab[] = [
 const TAB_SLIDE_DISTANCE = 26;
 
 /** The panels reachable from the Participate slot, in the order they're offered. */
-const PARTICIPATE_ENTRIES: Record<
+/** Built per call so labels follow the current language. */
+const PARTICIPATE_ENTRIES = (): Record<
   Extract<Tab, "volunteer" | "improver">,
   { label: string; body: string; icon: keyof typeof Ionicons.glyphMap; activeIcon: keyof typeof Ionicons.glyphMap }
-> = {
+> => ({
   volunteer: {
     label: t("app.volunteer"),
     body: t("app.findVolunteerEventsAndEarn"),
@@ -356,7 +357,7 @@ const PARTICIPATE_ENTRIES: Record<
     icon: "construct-outline",
     activeIcon: "construct",
   },
-};
+});
 type WalletPane = "home" | "send" | "receive";
 type OverlayWalletPane = Exclude<WalletPane, "home">;
 
@@ -6869,7 +6870,7 @@ function WalletAppShellContent({
                     backgroundLoading
                       ? t("app.notificationsStillLoading")
                       : panelNotificationCount > 0
-                        ? `Notifications, ${panelNotificationCount} outstanding`
+                        ? t("app.notificationsOutstanding", { count: panelNotificationCount })
                         : t("app.notifications")
                   }
                 >
@@ -7811,7 +7812,7 @@ function WalletAppShellContent({
           <Pressable style={styles.walletChooserCard} onPress={() => {}} accessible={false}>
             <View style={styles.walletChooserHeader}>
               <View style={styles.walletChooserHeaderCopy}>
-                <Text style={styles.walletChooserTitle}>Which location?</Text>
+                <Text style={styles.walletChooserTitle}>{t("app.whichLocationQ")}</Text>
               </View>
               <Pressable style={styles.walletChooserClose} onPress={() => setMerchantLocationChooserOpen(false)}>
                 <Ionicons name="close" size={20} color={palette.primaryStrong} />
@@ -8028,7 +8029,7 @@ function WalletAppShellContent({
 
             <View style={styles.moreMenuList}>
               {participateTargets.map((target) => {
-                const entry = PARTICIPATE_ENTRIES[target];
+                const entry = PARTICIPATE_ENTRIES()[target];
                 const active = tab === target;
                 return (
                   <Pressable
