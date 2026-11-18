@@ -123,6 +123,10 @@ export function SegmentedTabs<T extends string>({
           >
             <Text
               numberOfLines={1}
+              // Translations run longer than English ("Billetera" for "Wallets"):
+              // shrink a little to fit before falling back to an ellipsis.
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
               style={[styles.segmentText, active ? styles.segmentTextActive : undefined]}
             >
               {segment.label}

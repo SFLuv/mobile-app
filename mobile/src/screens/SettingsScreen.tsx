@@ -325,16 +325,19 @@ function ThemeOption({
   label,
   active,
   onPress,
+  fitContent = false,
 }: {
   label: string;
   active: boolean;
+  /** Size to the label rather than share the row equally, for longer translations. */
+  fitContent?: boolean;
   onPress: () => void;
 }) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
 
   return (
-    <Pressable style={[styles.themeOption, active ? styles.themeOptionActive : undefined]} onPress={onPress}>
+    <Pressable style={[styles.themeOption, fitContent ? styles.themeOptionFit : undefined, active ? styles.themeOptionActive : undefined]} onPress={onPress}>
       <Text style={[styles.themeOptionText, active ? styles.themeOptionTextActive : undefined]}>{label}</Text>
     </Pressable>
   );
@@ -514,6 +517,7 @@ function LanguageCard({
           <ThemeOption
             key={option.code}
             label={option.label}
+            fitContent
             active={value === option.code}
             onPress={() => onChange(option.code)}
           />
@@ -1809,6 +1813,11 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       backgroundColor: palette.surfaceStrong,
       paddingVertical: 12,
       alignItems: "center",
+    },
+    themeOptionFit: {
+      flex: 0,
+      flexGrow: 1,
+      paddingHorizontal: 16,
     },
     themeOptionActive: {
       borderColor: palette.primary,
