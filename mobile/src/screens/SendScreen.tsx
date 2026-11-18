@@ -44,10 +44,6 @@ type SendPhase = "editing" | "sending" | "success" | "failure";
 type TipChoice = "10" | "15" | "20" | "custom";
 type RecipientEntryMode = SendFlowEntryMode;
 
-const ENTRY_MODE_TABS: Array<{ value: RecipientEntryMode; label: string }> = [
-  { value: "manual", label: "Search" },
-  { value: "scan", label: "Scan" },
-];
 type SendLayoutMode = "regular" | "compact" | "dense";
 
 type RecipientSuggestion = {
@@ -222,6 +218,7 @@ function SwipeToSend({
   layoutMode?: SendLayoutMode;
 }) {
   const { palette, shadows } = useAppTheme();
+  const { t } = useTranslation();
   const styles = useMemo(() => createStyles(palette, shadows, layoutMode), [layoutMode, palette, shadows]);
   const translateX = useRef(new Animated.Value(0)).current;
   const [trackWidth, setTrackWidth] = useState(0);
@@ -285,7 +282,7 @@ function SwipeToSend({
       }}
     >
       <Text style={[styles.swipeTrackText, disabled ? styles.swipeTrackTextDisabled : undefined]}>
-        {loading ? "Sending" : label}
+        {loading ? t("send.sending") : label}
       </Text>
       <Animated.View
         style={[
@@ -409,6 +406,10 @@ export function SendScreen({
   const [noteFocused, setNoteFocused] = useState(false);
   const { permission, access: cameraAccess, ask: askCamera } = useCameraAccess();
   const { t } = useTranslation();
+  const entryModeTabs: Array<{ value: RecipientEntryMode; label: string }> = [
+    { value: "manual", label: t("send.tabSearch") },
+    { value: "scan", label: t("send.tabScan") },
+  ];
   const { location: userLocation } = useCurrentLocation(step === "recipient" && phase === "editing");
 
   const parsedTarget = useMemo(() => parseSendTarget(recipientInput, clientConfig), [clientConfig, recipientInput]);
@@ -548,7 +549,7 @@ export function SendScreen({
     if (!target || !recipientLookup?.found || !recipientLookup.isMerchant) {
       return null;
     }
-    const label = (recipientLookup.merchantName || recipientLookup.walletName || "Merchant").trim() || "Merchant";
+    const label = (recipientLookup.merchantName || recipientLookup.walletName || t("send.merchant")).trim() || t("send.merchant");
     const subtitle =
       recipientLookup.walletName?.trim() && recipientLookup.walletName.trim() !== label
         ? recipientLookup.walletName.trim()
@@ -575,7 +576,7 @@ export function SendScreen({
     return {
       key: `payment-link:${target.recipient.toLowerCase()}`,
       kind: "payment-link",
-      label: "Payment link",
+      label: t("send.paymentLink"),
       address: target.recipient,
       subtitle: shortAddress(target.recipient),
       tipToAddress: target.tipToAddress,
@@ -623,7 +624,7 @@ export function SendScreen({
       recipientLookup.tipToAddress.toLowerCase() !== target.recipient.toLowerCase()
     ) {
       return {
-        merchantName: (recipientLookup.merchantName || recipientLookup.walletName || resolvedRecipient?.label || "Merchant").trim() || "Merchant",
+        merchantName: (recipientLookup.merchantName || recipientLookup.walletName || resolvedRecipient?.label || t("send.merchant")).trim() || t("send.merchant"),
         tipToAddress: recipientLookup.tipToAddress,
       };
     }
@@ -968,14 +969,14 @@ export function SendScreen({
     try {
       await onPrepareSend(resultAttempt.tipTarget.tipToAddress, selectedTipAmount, "token", "");
       setTipStatus("sent");
-      setTipMessage("Tip sent.");
+      setTipMessage(t("send.tipSent"));
       tipExitTimeoutRef.current = setTimeout(() => {
         exitFlow();
       }, 2000);
     } catch {
       tipSubmissionLockedRef.current = false;
       setTipStatus("error");
-      setTipMessage("Tip failed to send.");
+      setTipMessage(t("send.tipFailed"));
       setTipChoice(null);
       setCustomTipInput("");
     }
@@ -1008,7 +1009,7 @@ export function SendScreen({
           onOpenUniversalLink(universalLink);
           return;
         }
-        setFeedback("Unsupported QR.");
+        setFeedback(t("send.unsupportedQr"));
         setScanLocked(false);
         return;
       }
@@ -1027,7 +1028,7 @@ export function SendScreen({
       setActiveTarget(null);
       setDraftRecipient(null);
       setEntryMode("manual");
-      setFeedback("Scanned.");
+      setFeedback(t("send.scanned"));
     },
     [clientConfig, continueToAmount, hapticsEnabled, onOpenUniversalLink, scanLocked, suggestionByAddress],
   );
@@ -1052,7 +1053,7 @@ export function SendScreen({
                 suggestion.kind === "merchant" ? styles.kindBadgeTextMerchant : styles.kindBadgeTextContact,
               ]}
             >
-              {suggestion.kind === "merchant" ? "Merchant" : suggestion.kind === "payment-link" ? "Link" : "Contact"}
+              {suggestion.kind === "merchant" ? t("send.merchant") : suggestion.kind === "payment-link" ? t("send.link") : t("send.contact")}
             </Text>
           </View>
         </View>
@@ -1083,7 +1084,7 @@ export function SendScreen({
                 suggestion.kind === "merchant" ? styles.kindBadgeTextMerchant : styles.kindBadgeTextContact,
               ]}
             >
-              {suggestion.kind === "merchant" ? "Merchant" : suggestion.kind === "payment-link" ? "Link" : "Contact"}
+              {suggestion.kind === "merchant" ? t("send.merchant") : suggestion.kind === "payment-link" ? t("send.link") : t("send.contact")}
             </Text>
           </View>
         </View>
@@ -1093,7 +1094,7 @@ export function SendScreen({
       </View>
       <Pressable
         style={styles.selectedRecipientClearButton}
-        accessibilityLabel="Clear selected recipient"
+        accessibilityLabel={t("send.clearRecipient")}
         accessibilityRole="button"
         onPress={clearRecipientSelection}
       >
@@ -1127,7 +1128,7 @@ export function SendScreen({
           </Pressable>
           <SegmentedTabs
             style={styles.entryModeRowFill}
-            segments={ENTRY_MODE_TABS}
+            segments={entryModeTabs}
             value={entryMode}
             onChange={setEntryMode}
             hapticsEnabled={hapticsEnabled}
@@ -1150,7 +1151,7 @@ export function SendScreen({
                       setDraftRecipient(null);
                       setFeedback(null);
                     }}
-                    placeholder="Search or paste an address"
+                    placeholder={t("send.searchPlaceholder")}
                     placeholderTextColor={palette.textMuted}
                     autoCapitalize="none"
                     autoCorrect={false}
@@ -1209,7 +1210,7 @@ export function SendScreen({
               )}
             </View>
 
-            <Text style={styles.inlineScannerHint}>Scan a payment QR inside the frame.</Text>
+            <Text style={styles.inlineScannerHint}>{t("send.scanHint")}</Text>
           </View>
         )}
       </ScrollView>
@@ -1225,7 +1226,7 @@ export function SendScreen({
               }
             }}
           >
-            <Text style={styles.primaryButtonText}>Continue</Text>
+            <Text style={styles.primaryButtonText}>{t("send.continue")}</Text>
           </Pressable>
         </View>
       ) : null}
@@ -1256,7 +1257,7 @@ export function SendScreen({
                   <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
                 </Pressable>
                 <Text style={[styles.recipientLine, styles.recipientLineInline]} numberOfLines={1}>
-                  To {primaryRecipientLabel || "Recipient"}
+                  {t("send.to", { name: primaryRecipientLabel || t("send.recipient") })}
                 </Text>
               </View>
               <Pressable
@@ -1296,7 +1297,7 @@ export function SendScreen({
                   onChangeText={setMemoInput}
                   onFocus={() => setNoteFocused(true)}
                   onBlur={() => setNoteFocused(false)}
-                  placeholder="Add a note"
+                  placeholder={t("send.notePlaceholder")}
                   placeholderTextColor={palette.textMuted}
                   returnKeyType="done"
                 />
@@ -1319,7 +1320,7 @@ export function SendScreen({
                 layoutMode={layoutMode}
                 disabled={!activeTarget || !amountRaw || amountRaw.lte(0) || exceedsBalance || phase !== "editing"}
                 loading={phase === "sending"}
-                label="Slide to send"
+                label={t("send.slideToSend")}
                 onComplete={() => {
                   void submitPayment();
                 }}
@@ -1332,14 +1333,14 @@ export function SendScreen({
   );
 
   const renderStateScreen = (success: boolean) => {
-    const title = success ? "Sent" : "Failed";
+    const title = success ? t("send.sent") : t("send.failed");
     const message = resultAttempt
       ? success
-        ? `Sent ${resultAttempt.amountLabel} to ${resultAttempt.recipientLabel}`
-        : `Failed to send ${resultAttempt.amountLabel} to ${resultAttempt.recipientLabel}`
+        ? t("send.sentAmountTo", { amount: resultAttempt.amountLabel, name: resultAttempt.recipientLabel })
+        : t("send.failedAmountTo", { amount: resultAttempt.amountLabel, name: resultAttempt.recipientLabel })
       : success
-        ? "Sent"
-        : "Failed";
+        ? t("send.sent")
+        : t("send.failed");
     const canTip = success && Boolean(resultAttempt?.tipTarget);
     const tipSelectionLocked = tipStatus === "sending" || tipStatus === "sent";
     const customTipActive = tipChoice === "custom";
@@ -1375,14 +1376,14 @@ export function SendScreen({
 
               {canTip ? (
                 <View style={styles.tipCard}>
-                  <Text style={styles.tipTitle}>Add tip</Text>
+                  <Text style={styles.tipTitle}>{t("send.addTip")}</Text>
                   {resultAttempt?.tipTarget ? (
                     <Text style={styles.tipBody}>For {resultAttempt.tipTarget.merchantName}</Text>
                   ) : null}
 
                   {customTipActive ? (
                     <View style={styles.customTipBlock}>
-                      <Text style={styles.customTipLabel}>Custom tip amount</Text>
+                      <Text style={styles.customTipLabel}>{t("send.customTipAmount")}</Text>
                       <TextInput
                         style={[
                           styles.customTipInput,
@@ -1524,21 +1525,21 @@ export function SendScreen({
                   ) : tipStatus === "sent" ? (
                     <View style={styles.buttonRow}>
                       <Ionicons name="checkmark-circle" size={16} color={palette.white} />
-                      <Text style={styles.primaryButtonText}>Tip sent</Text>
+                      <Text style={styles.primaryButtonText}>{t("send.tipSentButton")}</Text>
                     </View>
                   ) : (
                     <Text style={styles.primaryButtonText}>
-                      {selectedTipAmountRaw && selectedTipAmountRaw.gt(0) ? "Send tip" : "Done"}
+                      {selectedTipAmountRaw && selectedTipAmountRaw.gt(0) ? t("send.sendTip") : t("common.done")}
                     </Text>
                   )}
                 </Pressable>
               ) : (
                 <>
                   <Pressable style={styles.primaryButton} onPress={retryPayment}>
-                    <Text style={styles.primaryButtonText}>Try again</Text>
+                    <Text style={styles.primaryButtonText}>{t("send.tryAgain")}</Text>
                   </Pressable>
                   <Pressable style={styles.secondaryButton} onPress={exitFlow}>
-                    <Text style={styles.secondaryButtonText}>Done</Text>
+                    <Text style={styles.secondaryButtonText}>{t("common.done")}</Text>
                   </Pressable>
                 </>
               )}
@@ -1554,7 +1555,7 @@ export function SendScreen({
       <View style={[styles.stateScreen, { paddingTop: spacing.lg, paddingBottom: spacing.xl }]}>
         <View style={styles.stateInner}>
           <ThemedActivityIndicator size="large" color={palette.primaryStrong} />
-          <Text style={styles.resultTitle}>Sending</Text>
+          <Text style={styles.resultTitle}>{t("send.sending")}</Text>
         </View>
       </View>
     );
