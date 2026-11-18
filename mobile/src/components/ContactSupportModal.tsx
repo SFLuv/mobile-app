@@ -45,6 +45,9 @@ const CATEGORIES: Array<{ id: string; label: string }> = [
   { id: "merchant-onboarding", label: "Becoming a merchant" },
   { id: "become-an-improver", label: "Becoming an improver" },
   { id: "events", label: "Events and volunteering" },
+  // The W-9 card and pop-ups send people here, and until this was added they
+  // had to pick something that was not what they were writing about.
+  { id: "w9", label: "My W-9 or taxes" },
   { id: "other", label: "Something else" },
 ];
 

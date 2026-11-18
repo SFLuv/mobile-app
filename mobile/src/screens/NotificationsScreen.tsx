@@ -345,7 +345,7 @@ export function NotificationsScreen({
                       size={12}
                       color={internal.urgent && !resolved ? palette.danger : palette.textMuted}
                     />
-                    <Text style={styles.setLabel}>{internal.setLabel || internal.set}</Text>
+                    <Text style={styles.setLabel}>{internal.topicLabel || internal.setLabel || internal.set}</Text>
                   </View>
                 ) : null}
                 <Text style={styles.cardTitle}>{support ? support.subject : item.title}</Text>

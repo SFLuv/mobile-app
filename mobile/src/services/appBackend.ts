@@ -1983,6 +1983,8 @@ function mapInternalNotification(input: unknown): AppInternalNotification | null
     id,
     set: asString(record.set),
     setLabel: asString(record.set_label),
+    topic: asString(record.topic),
+    topicLabel: asString(record.topic_label),
     alertKey: asString(record.alert_key),
     fields: mapNotificationFields(record.fields),
     urgent: record.urgent === true,
@@ -2042,6 +2044,7 @@ function mapNotificationFeed(input: unknown): AppNotificationFeed {
     // right when the active list is capped.
     unseenCount: readOptionalNumber(record.unseen_count) ?? active.length,
     sets: Array.isArray(record.sets) ? record.sets.map((entry) => asString(entry)).filter(Boolean) : [],
+    teams: Array.isArray(record.teams) ? record.teams.map((entry) => asString(entry)).filter(Boolean) : [],
   };
 }
 
@@ -2608,6 +2611,22 @@ export class AppBackendClient {
         refund: row.refund === true,
       })),
     };
+  }
+
+  /**
+   * Asks SFLuv to reset a forgotten Merchant PIN. The backend puts it in the
+   * notification hub for whichever team takes PIN help; the route existed
+   * before this, but nothing in the app called it.
+   */
+  async requestMerchantModePinHelp(contactEmail?: string): Promise<void> {
+    const response = await this.authFetch("/merchant-mode/pin/help", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contact_email: contactEmail || "" }),
+    });
+    if (!response.ok) {
+      await throwRequestError(response, "Unable to ask for PIN help");
+    }
   }
 
   async setMerchantModePin(pin: string, currentPin?: string): Promise<AppMerchantModeStatus> {

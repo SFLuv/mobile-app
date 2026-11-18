@@ -6571,6 +6571,13 @@ function WalletAppShellContent({
       onSelectLocation={handleEnableMerchantMode}
       onRefresh={refreshEverything}
       onLogout={confirmLogout}
+      onContactSupport={() => setContactSupportOpen(true)}
+      onRequestPinHelp={async () => {
+        if (!backendClient) {
+          throw new Error("Not signed in — log out and back in, then try again.");
+        }
+        await backendClient.requestMerchantModePinHelp(appUser?.contactEmail ?? undefined);
+      }}
     />
   );
   const merchantTodayContent = (
