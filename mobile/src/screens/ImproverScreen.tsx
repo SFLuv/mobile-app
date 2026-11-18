@@ -603,7 +603,7 @@ export function ImproverScreen({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionKey, setActionKey] = useState("");
-  const { permission, ask: askCamera } = useCameraAccess();
+  const { permission, access: cameraAccess, ask: askCamera } = useCameraAccess();
   const cameraRef = useRef<CameraView | null>(null);
   const detailScrollRef = useRef<ScrollView | null>(null);
   const detailScrollYRef = useRef(0);
@@ -1679,12 +1679,16 @@ export function ImproverScreen({
       });
       // A blocked camera gets an explanation and a way to Settings from
       // askCamera(), not an endless "Waiting for camera permission".
+      const wasBlocked = cameraAccess === "blocked";
       if (!(await askCamera())) {
         setCameraTarget(null);
-        setCompletionItemError(stepId, itemId, "Camera permission is required to add workflow photos.");
+        // A blocked camera already got the Settings prompt from askCamera().
+        if (!wasBlocked) {
+          setCompletionItemError(stepId, itemId, "Camera permission is required to add workflow photos.");
+        }
       }
     },
-    [askCamera, setCompletionItemError],
+    [askCamera, cameraAccess, setCompletionItemError],
   );
 
   const captureWorkflowPhoto = useCallback(async () => {

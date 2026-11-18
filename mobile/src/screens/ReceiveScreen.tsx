@@ -122,9 +122,13 @@ export function ReceiveScreen({
   const qrCaption = mode === "link" ? shortLink(paymentLink) : shortAddress(accountAddress);
 
   const openRedeemScanner = async () => {
-    // A blocked camera gets an explanation and a way to Settings from ask().
+    // A blocked camera gets an explanation and a way to Settings from ask(),
+    // so the banner is only for someone who just said no to the popup.
+    const wasBlocked = cameraAccess === "blocked";
     if (!(await askCamera())) {
-      setScanError("Camera permission is required to scan faucet reward QRs.");
+      if (!wasBlocked) {
+        setScanError("Camera permission is required to scan faucet reward QRs.");
+      }
       return;
     }
 
