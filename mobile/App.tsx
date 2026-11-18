@@ -1344,10 +1344,12 @@ function mergePreferences(input: unknown): AppPreferences {
       candidate.themePreference === "light" || candidate.themePreference === "dark" || candidate.themePreference === "system"
         ? candidate.themePreference
         : defaultAppPreferences.themePreference,
-    notificationsEnabled:
-      typeof candidate.notificationsEnabled === "boolean"
-        ? candidate.notificationsEnabled
-        : defaultAppPreferences.notificationsEnabled,
+    // Always on. This was the "Payment alerts" switch, which in fact turned
+    // every push off for the phone; it is gone from Settings (2026-11-18, when
+    // nobody had it off). Whether notifications arrive is now the phone's
+    // permission alone, shown under Settings > Phone permissions. A stored
+    // false is ignored so no one is left switched off with no switch to undo it.
+    notificationsEnabled: true,
     hapticsEnabled:
       typeof candidate.hapticsEnabled === "boolean" ? candidate.hapticsEnabled : defaultAppPreferences.hapticsEnabled,
     defaultSendEntryMode:
@@ -2937,9 +2939,11 @@ function WalletAppShellContent({
       const userPreferenceChangePending =
         pendingPushPreferenceChangeRef.current !== null ||
         pushSyncRequestVersion !== handledPushSyncRequestVersionRef.current;
+      // Only ever adopt "on" from the backend: with the switch gone from
+      // Settings, adopting "off" would silence the phone with no way back.
       if (
         !userPreferenceChangePending &&
-        typeof preferenceEnabled === "boolean" &&
+        preferenceEnabled === true &&
         preferenceEnabled !== preferences.notificationsEnabled
       ) {
         onUpdatePreferences({ ...preferences, notificationsEnabled: preferenceEnabled });

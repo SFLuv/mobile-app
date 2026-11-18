@@ -14,7 +14,7 @@ import {
   View,
   type KeyboardEvent,
 } from "react-native";
-import { CameraView, useCameraPermissions } from "expo-camera";
+import { CameraView } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { prewarmQRCode } from "../components/SfluvQRCode";
 import { ethers } from "ethers";
@@ -27,6 +27,7 @@ import type { AppBackendClient } from "../services/appBackend";
 import { AppClientConfig, AppContact } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { buildUniversalAddContactLink, parseSendTarget, parseSfluvUniversalLink } from "../utils/universalLinks";
+import { openPhoneSettings, useCameraAccess } from "../utils/phonePermissions";
 
 type Props = {
   clientConfig: AppClientConfig;
@@ -149,7 +150,7 @@ export function ContactsScreen({
   const [scanErrorMessage, setScanErrorMessage] = useState<string | null>(null);
   const [pendingScannedAddress, setPendingScannedAddress] = useState<string | null>(null);
   const [pendingScannedName, setPendingScannedName] = useState("");
-  const [permission, requestPermission] = useCameraPermissions();
+  const { permission, access: cameraAccess, ask: askCamera } = useCameraAccess();
   const scanCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scanLockedRef = useRef(false);
 
@@ -191,11 +192,13 @@ export function ContactsScreen({
     if (!addSheetOpen) {
       return;
     }
-    if (permission?.status === "granted") {
+    // Only the first time: after a refusal the card below explains what to
+    // do, rather than a popup (or a Settings prompt) every time the sheet opens.
+    if (permission?.status !== "undetermined") {
       return;
     }
-    void requestPermission();
-  }, [addSheetOpen, permission?.status, requestPermission]);
+    void askCamera();
+  }, [addSheetOpen, askCamera, permission?.status]);
 
   useEffect(() => {
     return () => {
@@ -724,12 +727,23 @@ export function ContactsScreen({
                 <View style={styles.permissionCard}>
                   <Ionicons name="camera-outline" size={24} color={palette.primaryStrong} />
                   <Text style={styles.permissionText}>
-                    {permission?.status === "undetermined"
-                      ? "Allow camera access to scan contact QR codes here."
-                      : "Camera access is required to scan contact QR codes here."}
+                    {cameraAccess === "blocked"
+                      ? "Camera access is off. Turn on Camera for SFLuv in your phone's Settings to scan contact QR codes here."
+                      : "Allow camera access to scan contact QR codes here."}
                   </Text>
-                  <Pressable style={styles.permissionButton} onPress={() => void requestPermission()}>
-                    <Text style={styles.permissionButtonText}>Enable Camera</Text>
+                  <Pressable
+                    style={styles.permissionButton}
+                    onPress={() => {
+                      if (cameraAccess === "blocked") {
+                        openPhoneSettings();
+                        return;
+                      }
+                      void askCamera();
+                    }}
+                  >
+                    <Text style={styles.permissionButtonText}>
+                      {cameraAccess === "blocked" ? "Open Settings" : "Enable Camera"}
+                    </Text>
                   </Pressable>
                 </View>
               )}

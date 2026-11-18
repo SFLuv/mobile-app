@@ -9,6 +9,7 @@ import { downloadAttachment, localAttachmentUri } from "../services/attachmentCa
 import { ThemedActivityIndicator } from "./ThemedActivityIndicator";
 import { formatFileSize } from "./MessageAttachmentCard";
 import { cacheAttachment, displayFileName, fileTypeIcon, saveAttachment } from "../utils/attachmentFiles";
+import { PHOTOS_BLOCKED_MESSAGE, PHOTOS_BLOCKED_TITLE, promptOpenSettings } from "../utils/phonePermissions";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import type { MessageAttachment } from "../types/bulletin";
 
@@ -138,6 +139,9 @@ export function AttachmentPreview({
         case "shared":
           // No toast: the share sheet is its own confirmation, and one behind
           // it would land after the person has already moved on.
+          break;
+        case "blocked":
+          promptOpenSettings(PHOTOS_BLOCKED_TITLE, PHOTOS_BLOCKED_MESSAGE);
           break;
         case "denied":
         case "failed":
