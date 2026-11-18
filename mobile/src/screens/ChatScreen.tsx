@@ -266,8 +266,8 @@ export function ChatScreen({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   // A thread that never loads, and a message that never finishes sending.
-  useStuckWatch(t("chat.chatOpenConversation"), conversation === null, { conversation_id: conversationId });
-  useStuckWatch(t("chat.chatSendMessage"), sending, { conversation_id: conversationId });
+  useStuckWatch("chat: open conversation", conversation === null, { conversation_id: conversationId });
+  useStuckWatch("chat: send message", sending, { conversation_id: conversationId });
   const [mode, setMode] = useState<ComposerMode>("text");
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [actionTarget, setActionTarget] = useState<ChatMessage | null>(null);
@@ -2499,7 +2499,7 @@ function isEmojiOnly(body: string): boolean {
     return false;
   }
   const segmenter =
-    typeof Intl !== "undefined" && t("chat.segmenter") in Intl
+    typeof Intl !== "undefined" && "Segmenter" in Intl
       ? new (Intl as unknown as { Segmenter: new (l?: string, o?: object) => { segment: (s: string) => Iterable<unknown> } }).Segmenter(
           undefined,
           { granularity: "grapheme" },

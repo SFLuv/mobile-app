@@ -141,7 +141,7 @@ export function MessagesScreen({
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PublicUser[] | null>(null);
-  useStuckWatch(t("messages.messagesLoadConversations"), segment === "chats" && conversations === null);
+  useStuckWatch("messages: load conversations", segment === "chats" && conversations === null);
   const [merchantResults, setMerchantResults] = useState<
     Array<{ location_id: number; name: string; owner_user_id: string }>
   >([]);

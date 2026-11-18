@@ -743,7 +743,6 @@
     "submitting": "Submitting..."
   },
   "chat": {
-    "chatSendMessage": "chat: send message",
     "couldnTSendTryAgain": "Couldn't send. Try again.",
     "couldnTSendThat": "Couldn't send that.",
     "photos": "Photos",
@@ -790,8 +789,6 @@
     "canTReceiveMessagesRight": "{{otherName}} can't receive messages right now.",
     "peopleAreTyping_one": "{{count}} person is typing",
     "peopleAreTyping_other": "{{count}} people are typing",
-    "chatOpenConversation": "chat: open conversation",
-    "segmenter": "Segmenter",
     "deleteThisMessage": "Delete this message?",
     "yours": ", yours",
     "groupInfo": "Group info",
@@ -852,7 +849,6 @@
     "photosAndVideos_other": "📷 {{count}} photos and videos",
     "chats": "Chats",
     "contacts": "Contacts",
-    "messagesLoadConversations": "messages: load conversations",
     "you2": "You",
     "group": "Group",
     "unmute": "Unmute"
