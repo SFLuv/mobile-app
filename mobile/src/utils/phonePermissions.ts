@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { Alert, AppState, Linking } from "react-native";
 import { useCameraPermissions } from "expo-camera";
+import i18next from "../i18n";
 
 /**
  * Where the phone stands on one of SFLuv's permissions.
@@ -37,8 +38,8 @@ export function openPhoneSettings(): void {
  */
 export function promptOpenSettings(title: string, message: string): void {
   Alert.alert(title, message, [
-    { text: "Not now", style: "cancel" },
-    { text: "Open Settings", onPress: openPhoneSettings },
+    { text: i18next.t("common.notNow"), style: "cancel" },
+    { text: i18next.t("common.openSettings"), onPress: openPhoneSettings },
   ]);
 }
 
@@ -63,11 +64,15 @@ export function useOnForeground(onActive: () => void): void {
   }, []);
 }
 
-export const PHOTOS_BLOCKED_TITLE = "Photo access is off";
-export const PHOTOS_BLOCKED_MESSAGE = "SFLuv can't save to your photos. Turn on Photos for SFLuv in Settings.";
+/** The Settings prompt for a blocked camera, in the current language. */
+export function promptCameraBlocked(): void {
+  promptOpenSettings(i18next.t("permissions.camera.offTitle"), i18next.t("permissions.camera.blockedMessage"));
+}
 
-export const CAMERA_BLOCKED_TITLE = "Camera access is off";
-export const CAMERA_BLOCKED_MESSAGE = "SFLuv can't use your camera. Turn on Camera for SFLuv in Settings.";
+/** The Settings prompt for blocked photo access, in the current language. */
+export function promptPhotosBlocked(): void {
+  promptOpenSettings(i18next.t("permissions.photos.offTitle"), i18next.t("permissions.photos.blockedMessage"));
+}
 
 /**
  * Camera permission with a way out of the blocked state.
@@ -90,7 +95,7 @@ export function useCameraAccess() {
       return true;
     }
     if (permission && !permission.canAskAgain) {
-      promptOpenSettings(CAMERA_BLOCKED_TITLE, CAMERA_BLOCKED_MESSAGE);
+      promptCameraBlocked();
       return false;
     }
     const next = await requestPermission();

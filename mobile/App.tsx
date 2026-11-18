@@ -1,4 +1,6 @@
 import "./src/polyfills";
+import { applyLanguagePreference } from "./src/i18n";
+import { useTranslation } from "react-i18next";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
@@ -1364,6 +1366,10 @@ function mergePreferences(input: unknown): AppPreferences {
       typeof candidate.showVolunteerPanel === "boolean"
         ? candidate.showVolunteerPanel
         : defaultAppPreferences.showVolunteerPanel,
+    languagePreference:
+      typeof candidate.languagePreference === "string" && candidate.languagePreference
+        ? candidate.languagePreference
+        : defaultAppPreferences.languagePreference,
   };
 }
 
@@ -1404,6 +1410,11 @@ function useStoredPreferences(): [AppPreferences, React.Dispatch<React.SetStateA
       console.warn("Unable to persist app preferences", error);
     });
   }, [preferences, preferencesLoaded]);
+
+  // The app's language follows the saved choice, or the phone when it is "system".
+  useEffect(() => {
+    applyLanguagePreference(preferences.languagePreference);
+  }, [preferences.languagePreference]);
 
   return [preferences, setPreferences, preferencesLoaded];
 }
@@ -8150,6 +8161,7 @@ function PrivyWalletApp({
   onSignedInChange: (signedIn: boolean) => void;
 }) {
   const { palette, shadows, isDark } = useAppTheme();
+  const { t } = useTranslation();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const { user, isReady, logout, getAccessToken } = usePrivy();
   // Ties Sentry events to the signed-in Privy DID, and unties them when Privy
@@ -9310,8 +9322,8 @@ function PrivyWalletApp({
             >
               <View style={styles.loginWrap}>
                 <Text style={styles.loginBrand}>SFLUV</Text>
-                <Text style={styles.loginTitle}>A community currency for San Francisco</Text>
-                <Text style={styles.loginBody}>Sign in to send, receive, and redeem SFLUV.</Text>
+                <Text style={styles.loginTitle}>{t("login.title")}</Text>
+                <Text style={styles.loginBody}>{t("login.body")}</Text>
                 {loginNotice ? <Text style={styles.loginNotice}>{loginNotice}</Text> : null}
                 {loginMode === "email" ? (
                   <>
@@ -9324,7 +9336,7 @@ function PrivyWalletApp({
                         inputMode="email"
                         keyboardType="email-address"
                         onChangeText={setEmailAddress}
-                        placeholder="Email address"
+                        placeholder={t("login.emailPlaceholder")}
                         placeholderTextColor={palette.textMuted}
                         textContentType="emailAddress"
                         value={emailAddress}
@@ -9333,7 +9345,7 @@ function PrivyWalletApp({
                     {emailCodeSent ? (
                       <>
                         <Text style={styles.loginCodePrompt}>
-                          Input the 6 digit code sent to your email at {emailAddress.trim()}.
+                          {t("login.codePrompt", { email: emailAddress.trim() })}
                         </Text>
                         <Pressable
                           style={styles.loginCodeInputWrap}
@@ -9386,11 +9398,11 @@ function PrivyWalletApp({
                       <Text style={styles.loginButtonText}>
                         {emailLoading
                           ? emailCodeSent
-                            ? "Verifying..."
-                            : "Sending code..."
+                            ? t("login.verifying")
+                            : t("login.sendingCode")
                           : emailCodeSent
-                            ? "Continue"
-                            : "Email me a code"}
+                            ? t("login.continue")
+                            : t("login.emailMeCode")}
                       </Text>
                     </Pressable>
                     {emailCodeSent ? (
@@ -9401,7 +9413,7 @@ function PrivyWalletApp({
                           void handleSendEmailCode();
                         }}
                       >
-                        <Text style={styles.loginSecondaryButtonText}>Send a new code</Text>
+                        <Text style={styles.loginSecondaryButtonText}>{t("login.sendNewCode")}</Text>
                       </Pressable>
                     ) : null}
                     <Pressable
@@ -9416,7 +9428,7 @@ function PrivyWalletApp({
                       }}
                     >
                       <Text style={styles.loginTertiaryButtonText}>
-                        {emailCodeSent ? "Use a different email or sign-in option" : "Other sign-in options"}
+                        {emailCodeSent ? t("login.differentEmail") : t("login.otherOptions")}
                       </Text>
                     </Pressable>
                   </>
@@ -9424,7 +9436,7 @@ function PrivyWalletApp({
                   <>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Continue with Google"
+                      accessibilityLabel={t("login.google")}
                       style={[
                         styles.loginOptionButton,
                         styles.loginOptionButtonLight,
@@ -9440,14 +9452,14 @@ function PrivyWalletApp({
                           <Ionicons name="logo-google" size={20} color={palette.text} />
                         </View>
                         <Text style={styles.loginOptionButtonText}>
-                          {oauthLoading ? "Connecting..." : "Continue with Google"}
+                          {oauthLoading ? t("login.connecting") : t("login.google")}
                         </Text>
                         <View style={styles.loginOptionIconSlot} />
                       </View>
                     </Pressable>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Continue with Email"
+                      accessibilityLabel={t("login.email")}
                       style={[
                         styles.loginOptionButton,
                         styles.loginOptionButtonOutline,
@@ -9464,13 +9476,13 @@ function PrivyWalletApp({
                         <View style={styles.loginOptionIconSlot}>
                           <Ionicons name="mail-outline" size={20} color={palette.primaryStrong} />
                         </View>
-                        <Text style={styles.loginOptionOutlineText}>Continue with Email</Text>
+                        <Text style={styles.loginOptionOutlineText}>{t("login.email")}</Text>
                         <View style={styles.loginOptionIconSlot} />
                       </View>
                     </Pressable>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Continue with Apple"
+                      accessibilityLabel={t("login.apple")}
                       style={[
                         styles.loginOptionButton,
                         styles.loginOptionButtonDark,
@@ -9486,7 +9498,7 @@ function PrivyWalletApp({
                           <Ionicons name="logo-apple" size={20} color={palette.white} />
                         </View>
                         <Text style={styles.loginOptionButtonTextDark}>
-                          {oauthLoading ? "Connecting..." : "Continue with Apple"}
+                          {oauthLoading ? t("login.connecting") : t("login.apple")}
                         </Text>
                         <View style={styles.loginOptionIconSlot} />
                       </View>
@@ -9500,7 +9512,7 @@ function PrivyWalletApp({
                       void Linking.openURL(buildPublicPolicyURL(PRIVACY_POLICY_PATH, clientConfig));
                     }}
                   >
-                    <Text style={styles.loginPolicyLinkText}>Privacy Policy</Text>
+                    <Text style={styles.loginPolicyLinkText}>{t("login.privacyPolicy")}</Text>
                   </Pressable>
                   <Text style={styles.loginPolicyLinkDivider}>•</Text>
                   <Pressable
@@ -9509,16 +9521,14 @@ function PrivyWalletApp({
                       void Linking.openURL(buildPublicPolicyURL(EMAIL_OPT_IN_POLICY_PATH, clientConfig));
                     }}
                   >
-                    <Text style={styles.loginPolicyLinkText}>Email Opt-In Policy</Text>
+                    <Text style={styles.loginPolicyLinkText}>{t("login.emailOptInPolicy")}</Text>
                   </Pressable>
                 </View>
                 {runtime.error ? (
                   runtimeOffline ? (
                     <View style={styles.loginConnectionStateCard}>
-                      <Text style={styles.connectionStateTitle}>No Connection</Text>
-                      <Text style={styles.connectionStateBody}>
-                        The app needs an internet connection before we can finish loading your account.
-                      </Text>
+                      <Text style={styles.connectionStateTitle}>{t("login.noConnectionTitle")}</Text>
+                      <Text style={styles.connectionStateBody}>{t("login.noConnectionBody")}</Text>
                     </View>
                   ) : (
                     <Text style={styles.errorText}>{runtime.error}</Text>
