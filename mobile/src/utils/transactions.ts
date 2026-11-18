@@ -1,4 +1,5 @@
 import { AppContact, AppLocation, AppTransaction } from "../types/app";
+import { t } from "../i18n";
 
 export type TransactionDetailPayload = {
   transaction: AppTransaction;
@@ -86,7 +87,7 @@ export function buildChatTransactionPayload(
   const label = (address: string) =>
     address
       ? resolveAddressLabel(address, activeAddress, contactNameByAddress, merchantNameByAddress, faucetAddress)
-      : "Unknown";
+      : t("utils.transactions.unknown");
 
   return {
     transaction: {
@@ -104,8 +105,8 @@ export function buildChatTransactionPayload(
     received,
     fromLabel: label(from),
     toLabel: label(to),
-    typeLabel: "Currency Transfer",
-    statusLabel: "Completed",
+    typeLabel: t("utils.transactions.currencyTransfer"),
+    statusLabel: t("utils.transactions.completed"),
   };
 }
 
@@ -176,11 +177,11 @@ export function resolveAddressLabel(
 ): string {
   const normalizedAddress = address.toLowerCase();
   if (activeAddress && normalizedAddress === activeAddress.toLowerCase()) {
-    return "You";
+    return t("utils.transactions.you");
   }
   const normalizedFaucet = normalizeAddress(faucetAddress);
   if (normalizedFaucet && normalizedAddress === normalizedFaucet) {
-    return "SFLUV Faucet";
+    return t("utils.transactions.sfluvFaucet");
   }
   const contactName = contactNameByAddress[normalizedAddress];
   if (contactName) {
@@ -208,7 +209,7 @@ export function buildTransactionDetailPayload(
     received,
     fromLabel: resolveAddressLabel(transaction.from, activeAddress, contactNameByAddress, merchantNameByAddress, faucetAddress),
     toLabel: resolveAddressLabel(transaction.to, activeAddress, contactNameByAddress, merchantNameByAddress, faucetAddress),
-    typeLabel: reward ? "Reward" : "Currency Transfer",
-    statusLabel: "Completed",
+    typeLabel: reward ? t("utils.transactions.reward") : t("utils.transactions.currencyTransfer"),
+    statusLabel: t("utils.transactions.completed"),
   };
 }

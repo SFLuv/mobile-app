@@ -3658,19 +3658,19 @@ function WalletAppShellContent({
         icon: participateActive ? "people-circle" : "people-circle-outline",
       });
     }
-    tabs.push({ key: "map", label: "Map", icon: tab === "map" ? "map" : "map-outline" });
-    tabs.push({ key: "wallet", label: "Wallet", icon: "wallet", center: true });
+    tabs.push({ key: "map", label: t("app.map"), icon: tab === "map" ? "map" : "map-outline" });
+    tabs.push({ key: "wallet", label: t("app.wallet"), icon: "wallet", center: true });
     // The dock is five slots, always. Each beta surface SWAPS the tab already
     // in its slot rather than adding one: Bulletin takes Activity's, Messages
     // takes Contacts'. Turning a beta on therefore changes what a slot leads
     // to and never how many there are, so the row does not reflow around
     // somebody's thumb when their access changes.
     if (bulletinEnabled) {
-      tabs.push({ key: "bulletin", label: "Bulletin", icon: tab === "bulletin" ? "newspaper" : "newspaper-outline" });
+      tabs.push({ key: "bulletin", label: t("app.bulletin"), icon: tab === "bulletin" ? "newspaper" : "newspaper-outline" });
     } else {
       // Activity is still reachable from the wallet's "See all" when Bulletin
       // has the slot — this is a second way in, not the only one.
-      tabs.push({ key: "activity", label: "Activity", icon: tab === "activity" ? "pulse" : "pulse-outline" });
+      tabs.push({ key: "activity", label: t("app.activity"), icon: tab === "activity" ? "pulse" : "pulse-outline" });
     }
     if (chatEnabled) {
       // The one dock tab with its own indicator, and for the same reason the
@@ -3689,7 +3689,7 @@ function WalletAppShellContent({
       // where Contacts lives, so without it the only remaining way in is an
       // addcontact deep link, and a screen reachable solely by link is a
       // screen nobody finds.
-      tabs.push({ key: "contacts", label: "Contacts", icon: tab === "contacts" ? "people" : "people-outline" });
+      tabs.push({ key: "contacts", label: t("app.contacts"), icon: tab === "contacts" ? "people" : "people-outline" });
     }
     return tabs;
   }, [bulletinEnabled, chatEnabled, messagesUnread, participateActive, participateTargets, tab]);
@@ -5511,7 +5511,7 @@ function WalletAppShellContent({
       const baseState = {
         addressCount,
         syncState: "syncing" as const,
-        message: preferences.notificationsEnabled ? "Syncing push notifications..." : t("app.removingPushNotifications"),
+        message: preferences.notificationsEnabled ? t("app.syncingPushNotifications") : t("app.removingPushNotifications"),
       };
 
       setPushSyncState((current) => ({
@@ -6429,7 +6429,7 @@ function WalletAppShellContent({
    */
   const shareTransactionToChat = useCallback(
     (txHash: string) => {
-      setShareTarget({ kind: "transaction", txHash, label: "Transaction" });
+      setShareTarget({ kind: "transaction", txHash, label: t("app.transaction") });
     },
     [],
   );
@@ -6887,9 +6887,9 @@ function WalletAppShellContent({
                   // Icon-only, and in merchant mode it is the ONLY control on the
                   // screen — without a label it reaches VoiceOver as a bare glyph.
                   accessibilityRole="button"
-                  accessibilityLabel={merchantModeActive ? "Merchant mode options" : t("app.settings")}
+                  accessibilityLabel={merchantModeActive ? t("app.merchantModeOptions") : t("app.settings")}
                   accessibilityHint={
-                    merchantModeActive ? "Move this device to another location, or sign out" : undefined
+                    merchantModeActive ? t("app.moveThisDeviceToAnother") : undefined
                   }
                   onPress={() => {
                     if (merchantModeActive) {
@@ -6964,7 +6964,7 @@ function WalletAppShellContent({
                       <Ionicons name="alert-circle-outline" size={26} color={palette.primaryStrong} />
                     </View>
                     <Text style={styles.connectionStateTitle}>
-                      {runtimeNodeIssue ? "Network hiccup" : t("app.somethingWentWrong")}
+                      {runtimeNodeIssue ? t("app.networkHiccup") : t("app.somethingWentWrong")}
                     </Text>
                     <Text style={styles.connectionStateBody}>
                       {runtimeNodeIssue
@@ -7679,7 +7679,7 @@ function WalletAppShellContent({
               // Both halves are now conditional on there being somewhere to go.
               <View style={styles.merchantExitCard}>
                 <Text style={styles.merchantExitTitle}>
-                  {merchantModeLocations.length > 1 ? "This device is a till" : t("app.thisDeviceStaysATill")}
+                  {merchantModeLocations.length > 1 ? t("app.thisDeviceIsATill") : t("app.thisDeviceStaysATill")}
                 </Text>
                 <Text style={styles.merchantExitBody}>
                   {merchantModeLocations.length > 1
@@ -8327,9 +8327,9 @@ function PrivyWalletApp({
   const canDisconnectApple = appleLinked && signInMethodCount > 1;
   const canDisconnectGoogle = googleLinked && signInMethodCount > 1;
   const appleDisconnectDisabledReason =
-    appleLinked && !canDisconnectApple ? "Add email or Google before disconnecting Apple." : null;
+    appleLinked && !canDisconnectApple ? t("app.addEmailOrGoogleBefore") : null;
   const googleDisconnectDisabledReason =
-    googleLinked && !canDisconnectGoogle ? "Add email or Apple before disconnecting Google." : null;
+    googleLinked && !canDisconnectGoogle ? t("app.addEmailOrAppleBefore") : null;
   const appleActionBusy = linkOauthState.status === "loading" || appleUnlinkBusy;
   const googleActionBusy = linkOauthState.status === "loading" || googleUnlinkBusy;
   const googleLinkedEmail = linkedGoogleAccount?.email?.trim() || undefined;
@@ -8958,7 +8958,7 @@ function PrivyWalletApp({
       ? t("app.loadingWalletPreferences")
       : !embeddedWallet
         ? t("app.creatingYourPrivyWallet")
-        : runtime.loadingMessage || (runtime.loading ? "Preparing your wallet..." : null);
+        : runtime.loadingMessage || (runtime.loading ? t("app.preparingYourWallet") : null);
   const walletInitializing =
     Boolean(user) &&
     !runtime.error &&
@@ -9632,7 +9632,7 @@ function DeletedAccountScreen({
           onPress={onReactivate}
         >
           <Text style={styles.loginButtonText}>
-            {action === "reactivating" ? "Re-activating..." : "Yes, re-activate it"}
+            {action === "reactivating" ? t("app.reActivating") : t("app.yesReActivateIt")}
           </Text>
         </Pressable>
         <Pressable
@@ -9641,7 +9641,7 @@ function DeletedAccountScreen({
           onPress={onReturnToLogin}
         >
           <Text style={styles.loginSecondaryButtonText}>
-            {action === "returning" ? "Returning..." : "No, take me back"}
+            {action === "returning" ? t("app.returning") : t("app.noTakeMeBack")}
           </Text>
         </Pressable>
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -9767,7 +9767,7 @@ function PolicyAcceptanceScreen({
             onPress={() => onAccept(mailingListOptIn)}
           >
             <Text style={styles.loginButtonText}>
-              {action === "submitting" ? "Saving..." : "Continue"}
+              {action === "submitting" ? t("app.saving") : t("app.continue")}
             </Text>
           </Pressable>
           <Pressable
@@ -9776,7 +9776,7 @@ function PolicyAcceptanceScreen({
             onPress={onReturnToLogin}
           >
             <Text style={styles.loginSecondaryButtonText}>
-              {action === "returning" ? "Logging out..." : "Log out"}
+              {action === "returning" ? t("app.loggingOut") : t("app.logOut2")}
             </Text>
           </Pressable>
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -9975,7 +9975,7 @@ function blockedCompatibilityState(
   if (version.forceUpdate || version.status === "update_required" || version.status === "unsupported_platform") {
     return {
       status: "blocked",
-      title: version.status === "unsupported_platform" ? "Unsupported App" : "Update Required",
+      title: version.status === "unsupported_platform" ? t("app.unsupportedApp") : t("app.updateRequired"),
       message: version.message || t("app.anSfluvWalletUpdateIs"),
       updateUrl: version.updateUrl || undefined,
     };

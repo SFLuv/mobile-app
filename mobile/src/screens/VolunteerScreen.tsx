@@ -77,9 +77,9 @@ type FeedOption = {
 };
 
 const FEED_OPTIONS: FeedOption[] = [
-  { value: "upcoming", label: "Upcoming" },
-  { value: "past", label: "Past" },
-  { value: "mine", label: "My events" },
+  { value: "upcoming", label: t("volunteer.upcoming") },
+  { value: "past", label: t("volunteer.past") },
+  { value: "mine", label: t("volunteer.myEvents") },
 ];
 
 const SEARCH_DEBOUNCE_MS = 350;
@@ -936,7 +936,7 @@ export function VolunteerScreen({
             onPress={toggleSearch}
             hitSlop={6}
             accessibilityRole="button"
-            accessibilityLabel={searchOpen ? "Hide search" : t("volunteer.searchEvents")}
+            accessibilityLabel={searchOpen ? t("volunteer.hideSearch") : t("volunteer.searchEvents")}
           >
             <Ionicons
               name={searchOpen ? "close" : "search"}
@@ -1079,7 +1079,7 @@ export function VolunteerScreen({
             onPress={() => void loadMore()}
           >
             {loadingMore ? <ThemedActivityIndicator size="small" color={palette.white} /> : null}
-            <Text style={styles.loadMoreText}>{loadingMore ? "Loading..." : t("volunteer.loadMoreEvents")}</Text>
+            <Text style={styles.loadMoreText}>{loadingMore ? t("volunteer.loading") : t("volunteer.loadMoreEvents")}</Text>
           </Pressable>
         ) : null}
       </ScrollView>
@@ -1543,7 +1543,7 @@ function EventDetail({
                   <Ionicons name="close-circle" size={16} color={palette.danger} />
                   <Text style={styles.cancelledBannerText}>
                     This event was cancelled.
-                    {signedUp ? " Your sign up is no longer active." : ""}
+                    {signedUp ? t("volunteer.yourSignUpIsNo") : ""}
                   </Text>
                 </View>
               ) : null}
@@ -1697,7 +1697,7 @@ function EventDetail({
               onPress={onConfirmSignup}
             >
               {signupBusy ? <ThemedActivityIndicator size="small" color={palette.white} /> : null}
-              <Text style={styles.primaryButtonText}>{signupBusy ? "Signing up..." : t("volunteer.confirmSignUp")}</Text>
+              <Text style={styles.primaryButtonText}>{signupBusy ? t("volunteer.signingUp") : t("volunteer.confirmSignUp")}</Text>
             </Pressable>
           </Pressable>
         </Pressable>

@@ -110,7 +110,7 @@ export function ActivityScreen({
         details.fromLabel,
         details.toLabel,
         details.typeLabel,
-        details.received ? "received in" : t("activity.sentOut"),
+        details.received ? t("activity.receivedIn") : t("activity.sentOut"),
         details.transaction.from,
         details.transaction.to,
         details.transaction.hash,

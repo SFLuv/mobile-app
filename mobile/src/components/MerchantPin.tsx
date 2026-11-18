@@ -192,7 +192,7 @@ export function OpenStatusBadge({ state }: { state: OpenState }) {
         <View style={[styles.dot, { backgroundColor: open ? palette.primary : palette.textMuted }]} />
       </View>
       <Text style={[styles.text, { color: open ? palette.primaryStrong : palette.textMuted }]}>
-        {open ? "Open now" : t("components.merchantPin.closed")}
+        {open ? t("components.merchantPin.openNow") : t("components.merchantPin.closed")}
       </Text>
     </View>
   );

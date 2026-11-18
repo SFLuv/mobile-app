@@ -573,7 +573,7 @@ function AmountPad({
                 style={styles.padKey}
                 onPress={() => press(key)}
                 accessibilityRole="button"
-                accessibilityLabel={key === "del" ? "Delete" : key}
+                accessibilityLabel={key === "del" ? t("components.chatComposer.delete") : key}
               >
                 {key === "del" ? (
                   <Ionicons name="backspace-outline" size={20} color={palette.text} />

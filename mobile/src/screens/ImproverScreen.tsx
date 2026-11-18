@@ -66,8 +66,8 @@ type Props = {
 type ImproverSection = "workflows" | "credentials";
 
 const IMPROVER_SECTION_TABS: Array<{ value: ImproverSection; label: string }> = [
-  { value: "workflows", label: "Workflows" },
-  { value: "credentials", label: "Credentials" },
+  { value: "workflows", label: t("improver.workflows") },
+  { value: "credentials", label: t("improver.credentials") },
 ];
 type WorkflowView = "my-workflows" | "workflow-board" | "unpaid-workflows";
 
@@ -300,7 +300,7 @@ function formatWorkItemRequirements(item: AppWorkflowWorkItem): string {
         : item.photoAspectRatio === "horizontal"
           ? "horizontal"
           : "square";
-    const sourceLabel = item.cameraCaptureOnly ? "live camera only" : t("improver.cameraOrUpload");
+    const sourceLabel = item.cameraCaptureOnly ? t("improver.liveCameraOnly") : t("improver.cameraOrUpload");
     requirements.push(`Photo (${countLabel}, ${aspectLabel}, ${sourceLabel})`);
   }
   if (item.requiresWrittenResponse) {
@@ -1222,9 +1222,9 @@ export function ImproverScreen({
   const workflowSelectorOptions = useMemo<WorkflowSelectorOption[]>(
     () =>
       [
-        { value: "my-workflows", label: "My workflows" },
-        { value: "workflow-board", label: "Workflow board" },
-        ...(hasUnpaidWorkflowOption ? [{ value: "unpaid-workflows" as const, label: "Unpaid workflows" }] : []),
+        { value: "my-workflows", label: t("improver.myWorkflows") },
+        { value: "workflow-board", label: t("improver.workflowBoard") },
+        ...(hasUnpaidWorkflowOption ? [{ value: "unpaid-workflows" as const, label: t("improver.unpaidWorkflows") }] : []),
       ],
     [hasUnpaidWorkflowOption],
   );
@@ -1868,7 +1868,7 @@ export function ImproverScreen({
               : t("improver.stepCompletedYouReAlso", { stepOrder: nextStep.stepOrder, title: nextStep.title }),
           );
         } else {
-          setNotice(payload.stepNotPossible ? "Step marked not possible." : t("improver.workflowStepCompleted"));
+          setNotice(payload.stepNotPossible ? t("improver.stepMarkedNotPossible") : t("improver.workflowStepCompleted"));
         }
         setError(null);
         setCompletionForms((current) => {
@@ -1956,7 +1956,7 @@ export function ImproverScreen({
         for (const step of failedSteps) {
           await backendClient.requestWorkflowStepPayoutRetry(workflow.id, step.id);
         }
-        setNotice(failedSteps.length === 1 ? "Payout retry requested." : t("improver.payoutRetriesRequested", { count: failedSteps.length }));
+        setNotice(failedSteps.length === 1 ? t("improver.payoutRetryRequested") : t("improver.payoutRetriesRequested", { count: failedSteps.length }));
         setError(null);
         await loadUnpaidData(true);
         await refreshSelectedWorkflow(workflow.id);
@@ -2248,7 +2248,7 @@ export function ImproverScreen({
   }, []);
 
   const currentWorkflowOptionsLabel =
-    workflowSelectorOptions.find((option) => option.value === workflowView)?.label || "My workflows";
+    workflowSelectorOptions.find((option) => option.value === workflowView)?.label || t("improver.myWorkflows");
 
   const selectedWorkflowAssignedStep = useMemo(
     () => (selectedWorkflow ? resolveAssignedStep(selectedWorkflow, user?.id) : null),
@@ -2571,7 +2571,7 @@ export function ImproverScreen({
             }}
           >
             <Text style={styles.primaryButtonText}>
-              {actionKey === `claim:${claimableStep.id}` ? "Claiming..." : t("improver.claimStep", { stepOrder: claimableStep.stepOrder })}
+              {actionKey === `claim:${claimableStep.id}` ? t("improver.claiming") : t("improver.claimStep", { stepOrder: claimableStep.stepOrder })}
             </Text>
           </Pressable>
         ) : null}
@@ -2594,12 +2594,12 @@ export function ImproverScreen({
             <Text style={styles.meta}>Pending payouts: {unpaidSteps.length}</Text>
             {failedSteps.length > 0 ? (
               <Text style={styles.inlineError}>
-                {failedSteps.length === 1 ? "1 payout needs attention" : t("improver.payoutsNeedAttention", { count: failedSteps.length })}
+                {failedSteps.length === 1 ? t("improver.1PayoutNeedsAttention") : t("improver.payoutsNeedAttention", { count: failedSteps.length })}
               </Text>
             ) : null}
           </View>
           {renderStatusChip(
-            failedSteps.length > 0 ? "Action needed" : t("improver.pending"),
+            failedSteps.length > 0 ? t("improver.actionNeeded") : t("improver.pending"),
             failedSteps.length > 0 ? "danger" : "warning",
           )}
         </View>
@@ -2676,7 +2676,7 @@ export function ImproverScreen({
                     setSelectedWorkflowKeys([]);
                   }}
                 >
-                  <Text style={styles.compactActionButtonText}>{workflowEditMode ? "Done" : t("improver.edit")}</Text>
+                  <Text style={styles.compactActionButtonText}>{workflowEditMode ? t("improver.done") : t("improver.edit")}</Text>
                 </Pressable>
               ) : null}
             </View>
@@ -2694,11 +2694,11 @@ export function ImproverScreen({
           </View>
         </View>
 
-        {workflowView === "my-workflows" && !workflowDataLoaded ? renderLoadingCard("Loading workflows...") : null}
+        {workflowView === "my-workflows" && !workflowDataLoaded ? renderLoadingCard(t("improver.loadingWorkflows")) : null}
         {workflowView === "workflow-board" && (!workflowDataLoaded || !absenceDataLoaded)
           ? renderLoadingCard(t("improver.loadingWorkflowBoard"))
           : null}
-        {workflowView === "unpaid-workflows" && !unpaidDataLoaded ? renderLoadingCard("Loading unpaid workflows...") : null}
+        {workflowView === "unpaid-workflows" && !unpaidDataLoaded ? renderLoadingCard(t("improver.loadingUnpaidWorkflows")) : null}
 
         {workflowView === "my-workflows" && workflowDataLoaded
           ? filteredMyWorkflowGroups.length === 0
@@ -2774,7 +2774,7 @@ export function ImproverScreen({
                   <View style={styles.choiceCopy}>
                     <Text style={styles.choiceTitle}>{credentialType.label}</Text>
                     <Text style={styles.choiceBody}>
-                      {pendingCredentialSet.has(credentialType.value) ? "Request already pending." : t("improver.availableToRequest")}
+                      {pendingCredentialSet.has(credentialType.value) ? t("improver.requestAlreadyPending") : t("improver.availableToRequest")}
                     </Text>
                   </View>
                   <Pressable
@@ -2789,7 +2789,7 @@ export function ImproverScreen({
                     }}
                   >
                     <Text style={styles.secondaryButtonText}>
-                      {actionKey === `credential:${credentialType.value}` ? "Sending..." : "Request"}
+                      {actionKey === `credential:${credentialType.value}` ? t("improver.sending") : t("improver.request")}
                     </Text>
                   </Pressable>
                 </Pressable>
@@ -2876,7 +2876,7 @@ export function ImproverScreen({
               ) : (
                 <View style={styles.photoPlaceholder}>
                   <Text style={styles.photoPlaceholderText}>
-                    {previewLoading ? "Loading..." : t("improver.previewUnavailable")}
+                    {previewLoading ? t("improver.loading") : t("improver.previewUnavailable")}
                   </Text>
                 </View>
               )}
@@ -2989,7 +2989,7 @@ export function ImproverScreen({
             }}
           >
             <Text style={styles.primaryButtonText}>
-              {actionKey === `claim:${step.id}` ? "Claiming..." : t("improver.claimStep2", { stepOrder: step.stepOrder })}
+              {actionKey === `claim:${step.id}` ? t("improver.claiming") : t("improver.claimStep2", { stepOrder: step.stepOrder })}
             </Text>
           </Pressable>
         ) : null}
@@ -3003,7 +3003,7 @@ export function ImproverScreen({
             }}
           >
             <Text style={styles.secondaryButtonText}>
-              {actionKey === `start:${step.id}` ? "Starting..." : "Start step"}
+              {actionKey === `start:${step.id}` ? t("improver.starting") : t("improver.startStep")}
             </Text>
           </Pressable>
         ) : null}
@@ -3161,7 +3161,7 @@ export function ImproverScreen({
                               }
                             >
                               <Text style={styles.secondaryButtonText}>
-                                {form.photos.length > 0 ? "Capture another live photo" : t("improver.captureLivePhoto")}
+                                {form.photos.length > 0 ? t("improver.captureAnotherLivePhoto") : t("improver.captureLivePhoto")}
                               </Text>
                             </Pressable>
                             {!effectiveCameraOnly ? (
@@ -3365,7 +3365,7 @@ export function ImproverScreen({
               onPress={revokeSelectedWorkflows}
             >
               <Text style={styles.secondaryButtonText}>
-                {actionKey === "bulk-revoke" ? "Revoking..." : "Revoke selected"}
+                {actionKey === "bulk-revoke" ? t("improver.revoking") : t("improver.revokeSelected")}
               </Text>
             </Pressable>
             <Pressable
@@ -3421,7 +3421,7 @@ export function ImproverScreen({
 
             <View style={styles.absenceSection}>
               <Text style={styles.absenceSectionLabel}>
-                {absenceAllWorkflows ? "Covering" : t("improver.selectedWorkflows")}
+                {absenceAllWorkflows ? t("improver.covering") : t("improver.selectedWorkflows")}
               </Text>
               {absenceAllWorkflows ? (
                 <Text style={styles.absenceCoverageSummary}>
@@ -3473,7 +3473,7 @@ export function ImproverScreen({
               onPress={saveAbsenceCoverage}
             >
               <Text style={styles.primaryButtonText}>
-                {actionKey === "bulk-absence" ? "Saving..." : "Save absence"}
+                {actionKey === "bulk-absence" ? t("improver.saving") : t("improver.saveAbsence")}
               </Text>
             </Pressable>
           </ScrollView>
@@ -3512,10 +3512,10 @@ export function ImproverScreen({
         <Pressable style={styles.modalOverlay} onPress={() => setRevokeConfirmVisible(false)}>
           <Pressable style={styles.selectorSheetCard} onPress={() => {}}>
             <Text style={styles.sectionTitle}>
-              {selectedWorkflowGroups.length === 1 ? "Revoke workflow?" : "Revoke selected workflows?"}
+              {selectedWorkflowGroups.length === 1 ? t("improver.revokeWorkflow") : t("improver.revokeSelectedWorkflows")}
             </Text>
             <Text style={styles.confirmBody}>
-              This releases {selectedWorkflowGroups.length === 1 ? "this recurring workflow claim" : t("improver.theseRecurringWorkflowClaims", { count: selectedWorkflowGroups.length })} to other improvers.
+              This releases {selectedWorkflowGroups.length === 1 ? t("improver.thisRecurringWorkflowClaim") : t("improver.theseRecurringWorkflowClaims", { count: selectedWorkflowGroups.length })} to other improvers.
             </Text>
             <View style={styles.bulkActionButtons}>
               <Pressable
@@ -3651,7 +3651,7 @@ export function ImproverScreen({
                       }
                     >
                       <Text style={styles.secondaryButtonText}>
-                        {actionKey === `absence-delete:${selectedWorkflowAbsence.id}` ? "Revoking..." : "Revoke absence"}
+                        {actionKey === `absence-delete:${selectedWorkflowAbsence.id}` ? t("improver.revoking") : t("improver.revokeAbsence2")}
                       </Text>
                     </Pressable>
                   ) : null}
@@ -3743,7 +3743,7 @@ export function ImproverScreen({
                                     }
                                   >
                                     <Text style={styles.compactActionButtonText}>
-                                      {detailSubmissionExpanded ? "Hide details" : t("improver.viewDetails")}
+                                      {detailSubmissionExpanded ? t("improver.hideDetails") : t("improver.viewDetails")}
                                     </Text>
                                   </Pressable>
                                 </View>
@@ -3785,7 +3785,7 @@ export function ImproverScreen({
                               }}
                             >
                               <Text style={styles.secondaryButtonText}>
-                                {actionKey === `retry:${currentDetailStep.id}` ? "Requesting..." : "Retry payout"}
+                                {actionKey === `retry:${currentDetailStep.id}` ? t("improver.requesting") : t("improver.retryPayout")}
                               </Text>
                             </Pressable>
                           ) : null}

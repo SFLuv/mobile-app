@@ -487,7 +487,38 @@
     "workflowsRevoked_one": "{{count}} workflow revoked.",
     "workflowsRevoked_other": "{{count}} workflows revoked.",
     "payoutsNeedAttention_one": "{{count}} payout needs attention",
-    "payoutsNeedAttention_other": "{{count}} payouts need attention"
+    "payoutsNeedAttention_other": "{{count}} payouts need attention",
+    "workflows": "Workflows",
+    "credentials": "Credentials",
+    "myWorkflows": "My workflows",
+    "workflowBoard": "Workflow board",
+    "unpaidWorkflows": "Unpaid workflows",
+    "loadingWorkflows": "Loading workflows...",
+    "loadingUnpaidWorkflows": "Loading unpaid workflows...",
+    "request": "Request",
+    "startStep": "Start step",
+    "revokeSelected": "Revoke selected",
+    "saveAbsence": "Save absence",
+    "revokeSelectedWorkflows": "Revoke selected workflows?",
+    "revokeAbsence2": "Revoke absence",
+    "retryPayout": "Retry payout",
+    "liveCameraOnly": "live camera only",
+    "stepMarkedNotPossible": "Step marked not possible.",
+    "claiming": "Claiming...",
+    "1PayoutNeedsAttention": "1 payout needs attention",
+    "actionNeeded": "Action needed",
+    "done": "Done",
+    "requestAlreadyPending": "Request already pending.",
+    "sending": "Sending...",
+    "loading": "Loading...",
+    "starting": "Starting...",
+    "captureAnotherLivePhoto": "Capture another live photo",
+    "revoking": "Revoking...",
+    "covering": "Covering",
+    "saving": "Saving...",
+    "revokeWorkflow": "Revoke workflow?",
+    "thisRecurringWorkflowClaim": "this recurring workflow claim",
+    "hideDetails": "Hide details"
   },
   "bulletin": {
     "couldnTLoadTheBulletin": "Couldn't load the Bulletin.",
@@ -546,7 +577,36 @@
     "addAPrice": "Add a price.",
     "pricesCanHaveAtMost": "Prices can have at most two decimal places.",
     "showingPostsWithinMilesTap": "Showing posts within {{radius}} miles. Tap to change.",
-    "sellForOrCash": "Sell for {{tokenSymbol}} or cash"
+    "sellForOrCash": "Sell for {{tokenSymbol}} or cash",
+    "all": "All",
+    "forSale": "For sale",
+    "notices": "Notices",
+    "yourPosts": "Your posts",
+    "nothingNearbyYet": "Nothing nearby yet",
+    "reportPost": "Report post",
+    "thisPost": "this post",
+    "expired": "Expired",
+    "markedSold": "Marked sold",
+    "markSold": "Mark sold",
+    "noLongerAvailable": "No longer available",
+    "giveSomethingAway": "Give something away",
+    "neighborhoodNotice": "Neighborhood notice",
+    "newsInvitesAndHeadsUps": "News, invites, and heads-ups",
+    "preview": "Preview",
+    "commuterBike7Speed": "Commuter bike, 7-speed",
+    "volunteerEvents": "Volunteer events",
+    "event": "Event",
+    "findingYourLocation": "Finding your location...",
+    "youHavenTPostedYet": "You haven't posted yet",
+    "markedClaimed": "Marked claimed",
+    "markClaimed": "Mark claimed",
+    "message": "Message",
+    "onePhotoWasTooLarge": "One photo was too large and was skipped.",
+    "goingToTheCleanupToday": "Going to the cleanup today, come with?",
+    "comesDownWhenTheEvent": "Comes down when the event ends.",
+    "next": "Next",
+    "posting": "Posting...",
+    "meetupSpot": "Meetup spot"
   },
   "volunteer": {
     "volunteerEvent": "Volunteer event",
@@ -610,7 +670,14 @@
     "signUpsHaveNotOpened": "Sign ups have not opened yet",
     "ofSpotsLeft": "{{spotsRemaining}} of {{maxParticipants}} spots left",
     "seeAllEventsFrom": "See all events from {{name}}",
-    "youAreSigningUpFor2": "You are signing up for \"{{title}}\"."
+    "youAreSigningUpFor2": "You are signing up for \"{{title}}\".",
+    "upcoming": "Upcoming",
+    "past": "Past",
+    "myEvents": "My events",
+    "hideSearch": "Hide search",
+    "loading": "Loading...",
+    "yourSignUpIsNo": " Your sign up is no longer active.",
+    "signingUp": "Signing up..."
   },
   "merchantApplication": {
     "publicInformation": "Public Information",
@@ -669,7 +736,11 @@
     "tellUsHowYouHeard": "Tell us how you heard about SFLuv.",
     "posTypeIsRequired": "POS type is required.",
     "tellUsWhichPointOf": "Tell us which point of sale system you use.",
-    "tellUsWhetherStaffHave": "Tell us whether staff have a tablet or phone available."
+    "tellUsWhetherStaffHave": "Tell us whether staff have a tablet or phone available.",
+    "tellUsWhetherThisLocation": "Tell us whether this location accepts tips.",
+    "locationAddress": "Location Address",
+    "startTypingYourStreetAddress": "Start typing your street address",
+    "submitting": "Submitting..."
   },
   "chat": {
     "chatSendMessage": "chat: send message",
@@ -718,7 +789,13 @@
     "youBlocked": "You blocked {{otherName}}.",
     "canTReceiveMessagesRight": "{{otherName}} can't receive messages right now.",
     "peopleAreTyping_one": "{{count}} person is typing",
-    "peopleAreTyping_other": "{{count}} people are typing"
+    "peopleAreTyping_other": "{{count}} people are typing",
+    "chatOpenConversation": "chat: open conversation",
+    "segmenter": "Segmenter",
+    "deleteThisMessage": "Delete this message?",
+    "yours": ", yours",
+    "groupInfo": "Group info",
+    "editYourMessage": "Edit your message"
   },
   "map": {
     "searchMerchants": "Search merchants",
@@ -733,7 +810,8 @@
     "getDirections": "Get directions",
     "paymentIsNotAvailableFor": "Payment is not available for this merchant right now.",
     "openWebsite": "Open website",
-    "payMerchant": "Pay merchant"
+    "payMerchant": "Pay merchant",
+    "showingNearestMerchantsFirst": "Showing nearest merchants first."
   },
   "messages": {
     "couldnTDoThatTry": "Couldn't do that. Try again.",
@@ -771,7 +849,13 @@
     "youSent": "You sent {{amount}} {{tokenSymbol}}",
     "sentYou": "Sent you {{amount}} {{tokenSymbol}}",
     "photosAndVideos_one": "📷 {{count}} photo or video",
-    "photosAndVideos_other": "📷 {{count}} photos and videos"
+    "photosAndVideos_other": "📷 {{count}} photos and videos",
+    "chats": "Chats",
+    "contacts": "Contacts",
+    "messagesLoadConversations": "messages: load conversations",
+    "you2": "You",
+    "group": "Group",
+    "unmute": "Unmute"
   },
   "myProfile": {
     "couldnTLoadYourProfile": "Couldn't load your profile.",
@@ -802,7 +886,9 @@
     "couldnTSaveThatPicture": "Couldn't save that picture.",
     "couldnTRemoveThatPicture": "Couldn't remove that picture.",
     "yourPicture": "Your picture",
-    "everyoneWhoCanSeeYour": "Everyone who can see your name can see this."
+    "everyoneWhoCanSeeYour": "Everyone who can see your name can see this.",
+    "copied": "Copied",
+    "saving": "Saving…"
   },
   "merchantDeviceSetup": {
     "thosePinsDoNotMatch": "Those PINs do not match.",
@@ -822,7 +908,11 @@
     "enterItAgain": "Enter it again",
     "slideToSavePin": "Slide to save PIN",
     "saving": "Saving",
-    "merchantLocation": "Merchant location"
+    "merchantLocation": "Merchant location",
+    "thisLocationCannotTakePayments": "This location cannot take payments yet",
+    "enterYourMerchantPin": "Enter your Merchant PIN",
+    "slideToUnlock": "Slide to unlock",
+    "checking": "Checking"
   },
   "chatInfo": {
     "couldnTRenameTheGroup": "Couldn't rename the group.",
@@ -864,7 +954,17 @@
     "unblocked": "Unblocked.",
     "blockedTheyCanTMessage": "Blocked. They can't message you.",
     "couldnTLoadThisConversation": "Couldn't load this conversation's files.",
-    "willOwnThisGroupAnd": "{{memberName}} will own this group and you'll become an admin. This can't be undone by you."
+    "willOwnThisGroupAnd": "{{memberName}} will own this group and you'll become an admin. This can't be undone by you.",
+    "about": "About",
+    "files": "Files",
+    "back": "Back",
+    "groupInfo": "Group info",
+    "changeTheGroupPicture": "Change the group picture",
+    "group": "Group",
+    "owner": "Owner",
+    "admin": "Admin",
+    "you": "You",
+    "nothingMatchesThat": "Nothing matches that."
   },
   "notifications": {
     "cancel": "Cancel",
@@ -875,7 +975,14 @@
     "updateSfluv": "Update SFLuv",
     "thisNeedsANewerVersion": "This needs a newer version of the app.",
     "nothingToOpenThatWith": "Nothing to open that with",
-    "thisDeviceHasNoApp": "This device has no app set up for that link."
+    "thisDeviceHasNoApp": "This device has no app set up for that link.",
+    "youAreAllCaughtUp": "You are all caught up.",
+    "back": "Back",
+    "notificationHistory": "Notification history",
+    "history": "History",
+    "tapForDetails": "Tap for details",
+    "newNotifications": "New notifications",
+    "new": "New"
   },
   "merchantToday": {
     "moveThisDeviceToAnother": "Move this device to another location",
@@ -905,7 +1012,9 @@
     "saveChanges": "Save changes",
     "couldnTSaveThat": "Couldn't save that.",
     "couldnTSaveThatPicture": "Couldn't save that picture.",
-    "couldnTRemoveThatPicture": "Couldn't remove that picture."
+    "couldnTRemoveThatPicture": "Couldn't remove that picture.",
+    "back": "Back",
+    "saving": "Saving…"
   },
   "activity": {
     "sentOut": "sent out",
@@ -920,7 +1029,8 @@
     "noTransactionsYet": "No transactions yet",
     "yourSendsAndReceivesWill": "Your sends and receives will show up here after the first payment.",
     "receivedFrom": "Received from {{fromLabel}}",
-    "sentTo": "Sent to {{toLabel}}"
+    "sentTo": "Sent to {{toLabel}}",
+    "receivedIn": "received in"
   },
   "newMessage": {
     "couldnTDoThat": "Couldn't do that.",
@@ -936,7 +1046,11 @@
     "add": "Add",
     "addCount": "Add {{count}}",
     "createGroup": "Create group",
-    "createGroupCount": "Create group ({{count}})"
+    "createGroupCount": "Create group ({{count}})",
+    "back": "Back",
+    "addPeople": "Add people",
+    "newGroup": "New group",
+    "messageOnePersonInstead": "Message one person instead"
   },
   "merchantOnboarding": {
     "setUpYourMerchantAccount": "Set up your merchant account",
@@ -945,7 +1059,9 @@
     "checkAgain": "Check again",
     "startApplication": "Start application",
     "logOut": "Log out",
-    "pendingReview": "{{name}} is with the SFLuv team. We will email you when it has been reviewed."
+    "pendingReview": "{{name}} is with the SFLuv team. We will email you when it has been reviewed.",
+    "merchantStatusPending": "Merchant status pending",
+    "checking": "Checking..."
   },
   "contacts": {
     "thatIsNotAWallet": "That is not a wallet address or a SFLuv link.",
@@ -977,7 +1093,14 @@
     "enterAValidWalletAddress": "Enter a valid wallet address.",
     "isAlreadySavedInYour": "{{name}} is already saved in your contacts.",
     "isAlreadySavedInYour2": "{{name}} is already saved in your contacts.",
-    "isAlreadySavedInYour3": "{{name}} is already saved in your contacts."
+    "isAlreadySavedInYour3": "{{name}} is already saved in your contacts.",
+    "myContacts": "My Contacts",
+    "myProfile": "My Profile",
+    "hideSearch": "Hide search",
+    "noContactsMatchThatSearch": "No contacts match that search.",
+    "note": "Note",
+    "removeFromFavorites": "Remove from favorites",
+    "favorite": "Favorite"
   },
   "components": {
     "attachmentPreview": {
@@ -986,7 +1109,8 @@
       "save": "Save",
       "thatFileCouldnTBe": "That file couldn't be downloaded. Try again, or save it to open elsewhere.",
       "saveItToOpenIn": "Save it to open in another app.",
-      "savedToYourPhotos": "Saved to your photos."
+      "savedToYourPhotos": "Saved to your photos.",
+      "saving": "Saving…"
     },
     "bulletinParts": {
       "couldnTSaveTryAgain": "Couldn't save. Try again.",
@@ -1002,7 +1126,10 @@
       "couldnTSendTheReport": "Couldn't send the report. Try again.",
       "anSfluvAdminWillReview": "An SFLuv admin will review this within 24 hours. The other person isn't told who reported them.",
       "sendReport": "Send report",
-      "justNow": "just now"
+      "justNow": "just now",
+      "free": "Free",
+      "saving": "Saving...",
+      "sending": "Sending..."
     },
     "chatComposer": {
       "sendsWhenYouHitSend": "Sends when you hit send",
@@ -1015,7 +1142,8 @@
       "sendMessage": "Send message",
       "cancelPayment": "Cancel payment",
       "whatSItForOptional": "What's it for? (optional)",
-      "attachPayment": "Attach a payment of {{amount}} {{tokenSymbol}}"
+      "attachPayment": "Attach a payment of {{amount}} {{tokenSymbol}}",
+      "delete": "Delete"
     },
     "contactSupportModal": {
       "somethingIsnTWorking": "Something isn't working",
@@ -1031,7 +1159,8 @@
       "close": "Close",
       "yourMessage": "Your message",
       "tellUsWhatYouNeed": "Tell us what you need. The more detail the better.",
-      "sendMessage": "Send message"
+      "sendMessage": "Send message",
+      "sending": "Sending…"
     },
     "datePickerSheet": {
       "selectADate": "Select a date"
@@ -1041,7 +1170,8 @@
     },
     "merchantPin": {
       "hoursNotAvailable": "Hours not available",
-      "closed": "Closed"
+      "closed": "Closed",
+      "openNow": "Open now"
     },
     "merchantPinEntry": {},
     "messageAttachmentCard": {
@@ -1069,7 +1199,12 @@
       "unavailable": "unavailable",
       "downloadingPhoto": "Downloading photo",
       "downloadPhoto": "Download photo",
-      "downloadPhotoSize": "Download photo, {{size}}"
+      "downloadPhotoSize": "Download photo, {{size}}",
+      "merchantNoLongerListed": "Merchant no longer listed",
+      "pastEvent": "Past event",
+      "thisEventHasFinished": "This event has finished",
+      "onThisDevice": "On this device",
+      "onThisDevice2": ", on this device"
     },
     "paymentReceivedOverlay": {
       "paymentReceived": "Payment received"
@@ -1082,7 +1217,10 @@
       "mariaG": "Maria G.",
       "shownOnYourMessagesAnd": "Shown on your messages and posts.",
       "username": "Username",
-      "letNeighborsFindMe": "Let neighbors find me"
+      "letNeighborsFindMe": "Let neighbors find me",
+      "yourProfile": "Your profile",
+      "cancel": "Cancel",
+      "save": "Save"
     },
     "sfluvQRCode": {},
     "shareSheet": {
@@ -1111,7 +1249,10 @@
       "emailAddress": "email address",
       "noEmailAddressWasGiven": "No email address was given.",
       "message": "Message",
-      "noMessage": "(No message)"
+      "noMessage": "(No message)",
+      "copy": "Copy",
+      "close": "Close",
+      "copied": "Copied"
     },
     "swipeableRow": {},
     "transactionDetailsModal": {
@@ -1123,7 +1264,16 @@
       "shareThisTransaction": "Share this transaction",
       "share": "Share",
       "viewOnExplorer": "View on Explorer"
-    }
+    },
+    "chatAvatar": {},
+    "messageLinks": {},
+    "scannerCornerGuide": {},
+    "segmentedTabs": {},
+    "swipeBack": {},
+    "themedActivityIndicator": {},
+    "w9CompleteModal": {},
+    "w9EscrowCard": {},
+    "w9TierModal": {}
   },
   "app": {
     "theFaucetIsBusyAnd": "The faucet is busy, and your reward is in line to be sent. Keep this open.",
@@ -1315,6 +1465,74 @@
     "beforeTheDeleteRequestIs": "{{preview}} Before the delete request is sent, any {{tokenSymbol}} in your accessible wallets will be transferred out of your account. If you later reactivate during the grace period, use {{ACCOUNT_RECOVERY_CONTACT}} to recover those funds.",
     "transferringOutOfYourAccessible": "Transferring {{tokenSymbol}} out of your accessible wallets before submitting the deletion request...",
     "submittingYourDeletionRequestIf": "Submitting your deletion request. If you later stop the scheduled deletion, use {{ACCOUNT_RECOVERY_CONTACT}} to recover your transferred funds.",
-    "thisAccountIsInactiveAnd": "This account is inactive and scheduled for deletion on {{deleteDateLabel}}. Sign in again during that window if you want to reactivate it. If you reactivate later, use {{ACCOUNT_RECOVERY_CONTACT}} to recover any {{tokenSymbol}} transferred out during the deletion request."
+    "thisAccountIsInactiveAnd": "This account is inactive and scheduled for deletion on {{deleteDateLabel}}. Sign in again during that window if you want to reactivate it. If you reactivate later, use {{ACCOUNT_RECOVERY_CONTACT}} to recover any {{tokenSymbol}} transferred out during the deletion request.",
+    "map": "Map",
+    "contacts": "Contacts",
+    "transaction": "Transaction",
+    "yesReActivateIt": "Yes, re-activate it",
+    "noTakeMeBack": "No, take me back",
+    "continue": "Continue",
+    "updateRequired": "Update Required",
+    "syncingPushNotifications": "Syncing push notifications...",
+    "merchantModeOptions": "Merchant mode options",
+    "moveThisDeviceToAnother": "Move this device to another location, or sign out",
+    "networkHiccup": "Network hiccup",
+    "thisDeviceIsATill": "This device is a till",
+    "addEmailOrGoogleBefore": "Add email or Google before disconnecting Apple.",
+    "addEmailOrAppleBefore": "Add email or Apple before disconnecting Google.",
+    "reActivating": "Re-activating...",
+    "returning": "Returning...",
+    "saving": "Saving...",
+    "loggingOut": "Logging out...",
+    "unsupportedApp": "Unsupported App"
+  },
+  "walletHome": {},
+  "utils": {
+    "attachmentFiles": {
+      "thatFileCouldNotBe": "That file could not be downloaded.",
+      "sfluvNeedsPermissionToAdd": "SFLuv needs permission to add photos to your library.",
+      "couldnTSaveThatPhoto": "Couldn't save that photo.",
+      "thisDeviceHasNowhereTo": "This device has nowhere to save that file.",
+      "saveFile": "Save file",
+      "couldnTSaveThatFile": "Couldn't save that file.",
+      "photo": "Photo",
+      "spreadsheet": "Spreadsheet",
+      "document": "Document",
+      "slides": "Slides",
+      "archive": "Archive",
+      "calendar": "Calendar",
+      "text": "Text",
+      "file": "File"
+    },
+    "sharedIntent": {
+      "file": "File",
+      "text": "Text",
+      "photo": "Photo"
+    },
+    "transactions": {
+      "unknown": "Unknown",
+      "currencyTransfer": "Currency Transfer",
+      "completed": "Completed",
+      "you": "You",
+      "sfluvFaucet": "SFLUV Faucet",
+      "reward": "Reward"
+    },
+    "supportRequests": {
+      "noSubject": "No subject"
+    },
+    "bulletin": {
+      "notAllowedOnTheBulletin": "Not allowed on the Bulletin",
+      "scamOrFraud": "Scam or fraud",
+      "harassment": "Harassment",
+      "spam": "Spam",
+      "feelsUnsafe": "Feels unsafe",
+      "somethingElse": "Something else",
+      "free": "Free",
+      "forSale": "For sale",
+      "neighborhoodNotice": "Neighborhood notice",
+      "merchant": "Merchant",
+      "improver": "Improver",
+      "verifiedVolunteer": "Verified volunteer"
+    }
   }
 }

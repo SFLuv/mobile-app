@@ -635,7 +635,7 @@ export function MapScreen({
             {filteredLocations.length} merchant{filteredLocations.length === 1 ? "" : "s"}
           </Text>
           <Text style={styles.resultsSubtitle}>
-            {userLocation ? "Showing nearest merchants first." : t("map.enableLocationToSortBy")}
+            {userLocation ? t("map.showingNearestMerchantsFirst") : t("map.enableLocationToSortBy")}
           </Text>
         </View>
 

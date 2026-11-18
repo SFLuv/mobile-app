@@ -208,7 +208,7 @@ export function MyProfileScreen({
                 size={16}
                 color={palette.primaryStrong}
               />
-              <Text style={styles.qrActionText}>{addressCopied ? "Copied" : t("myProfile.copyAddress")}</Text>
+              <Text style={styles.qrActionText}>{addressCopied ? t("myProfile.copied") : t("myProfile.copyAddress")}</Text>
             </Pressable>
           </View>
         </View>
@@ -336,7 +336,7 @@ export function MyProfileScreen({
               disabled={saving}
               accessibilityRole="button"
             >
-              <Text style={styles.saveButtonText}>{saving ? "Saving…" : t("myProfile.saveProfile")}</Text>
+              <Text style={styles.saveButtonText}>{saving ? t("myProfile.saving") : t("myProfile.saveProfile")}</Text>
             </Pressable>
           ) : null}
         </View>

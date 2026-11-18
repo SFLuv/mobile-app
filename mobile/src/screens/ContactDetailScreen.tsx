@@ -257,7 +257,7 @@ export function ContactDetailScreen({
   return (
     <SwipeBack onBack={leave} style={styles.screen}>
       <View style={styles.header}>
-        <Pressable onPress={leave} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
+        <Pressable onPress={leave} hitSlop={10} accessibilityRole="button" accessibilityLabel={t("contactDetail.back")}>
           <Ionicons name="chevron-back" size={26} color={palette.text} />
         </Pressable>
         <Text style={styles.headerTitle}>{t("contactDetail.contact")}</Text>
@@ -439,7 +439,7 @@ export function ContactDetailScreen({
             accessibilityRole="button"
             accessibilityLabel={t("contactDetail.saveChanges")}
           >
-            <Text style={styles.saveButtonText}>{saving ? "Saving…" : t("contactDetail.saveChanges")}</Text>
+            <Text style={styles.saveButtonText}>{saving ? t("contactDetail.saving") : t("contactDetail.saveChanges")}</Text>
           </Pressable>
         ) : null}
       </ScrollView>

@@ -68,8 +68,8 @@ import { t } from "../i18n";
 type Segment = "about" | "files";
 
 const SEGMENTS: Array<{ value: Segment; label: string }> = [
-  { value: "about", label: "About" },
-  { value: "files", label: "Files" },
+  { value: "about", label: t("chatInfo.about") },
+  { value: "files", label: t("chatInfo.files") },
 ];
 
 export function ChatInfoScreen({
@@ -216,10 +216,10 @@ export function ChatInfoScreen({
   return (
     <SwipeBack onBack={onBack} style={styles.screen}>
       <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
+        <Pressable onPress={onBack} hitSlop={10} accessibilityRole="button" accessibilityLabel={t("chatInfo.back")}>
           <Ionicons name="chevron-back" size={26} color={palette.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>{isGroup ? "Group info" : t("chatInfo.info")}</Text>
+        <Text style={styles.headerTitle}>{isGroup ? t("chatInfo.groupInfo") : t("chatInfo.info")}</Text>
         <View style={{ width: 26 }} />
       </View>
 
@@ -245,14 +245,14 @@ export function ChatInfoScreen({
               onPress={isGroup && canAdminister ? () => void changePicture() : undefined}
               disabled={!isGroup || !canAdminister}
               accessibilityRole={isGroup && canAdminister ? "button" : undefined}
-              accessibilityLabel={isGroup && canAdminister ? "Change the group picture" : undefined}
+              accessibilityLabel={isGroup && canAdminister ? t("chatInfo.changeTheGroupPicture") : undefined}
             >
               {iconUri ? (
                 <Image source={{ uri: iconUri }} style={styles.icon} />
               ) : (
                 <ChatAvatar
                   client={backendClient}
-                  name={isGroup ? conversation.title || "Group" : otherName}
+                  name={isGroup ? conversation.title || t("chatInfo.group") : otherName}
                   size={76}
                   userId={isGroup ? null : conversation.other_user.user_id}
                 />
@@ -291,7 +291,7 @@ export function ChatInfoScreen({
                 disabled={!isGroup || !canAdminister}
               >
                 <Text style={styles.name}>
-                  {isGroup ? conversation.title || "Group" : otherName}
+                  {isGroup ? conversation.title || t("chatInfo.group") : otherName}
                 </Text>
                 {isGroup && canAdminister ? (
                   <Ionicons name="pencil" size={14} color={palette.textMuted} />
@@ -512,8 +512,8 @@ function MemberRow({
             : member.inactive
               ? t("chatInfo.canTReceiveMessagesRight")
               : [
-                  member.role === "owner" ? "Owner" : member.role === "admin" ? "Admin" : "",
-                  isMe ? "You" : member.user.handle ? `@${member.user.handle}` : "",
+                  member.role === "owner" ? t("chatInfo.owner") : member.role === "admin" ? t("chatInfo.admin") : "",
+                  isMe ? t("chatInfo.you") : member.user.handle ? `@${member.user.handle}` : "",
                 ]
                   .filter(Boolean)
                   .join(" · ") || t("chatInfo.member")}
@@ -604,7 +604,7 @@ function ConversationFiles({
             <View style={styles.filesEmpty}>
               <Ionicons name="folder-open-outline" size={28} color={palette.textMuted} />
               <Text style={styles.filesEmptyText}>
-                {query ? "Nothing matches that." : t("chatInfo.noPhotosOrFilesShared")}
+                {query ? t("chatInfo.nothingMatchesThat") : t("chatInfo.noPhotosOrFilesShared")}
               </Text>
             </View>
           )

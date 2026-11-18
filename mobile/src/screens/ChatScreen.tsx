@@ -266,7 +266,7 @@ export function ChatScreen({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   // A thread that never loads, and a message that never finishes sending.
-  useStuckWatch("chat: open conversation", conversation === null, { conversation_id: conversationId });
+  useStuckWatch(t("chat.chatOpenConversation"), conversation === null, { conversation_id: conversationId });
   useStuckWatch(t("chat.chatSendMessage"), sending, { conversation_id: conversationId });
   const [mode, setMode] = useState<ComposerMode>("text");
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
@@ -1288,7 +1288,7 @@ export function ChatScreen({
 
   const confirmDelete = (ids: number[]) => {
     Alert.alert(
-      ids.length === 1 ? "Delete this message?" : `Delete ${ids.length} messages?`,
+      ids.length === 1 ? t("chat.deleteThisMessage") : `Delete ${ids.length} messages?`,
       t("chat.thisRemovesItForEveryone"),
       [
         { text: t("chat.cancel"), style: "cancel" },
@@ -1739,7 +1739,7 @@ export function ChatScreen({
                   style={[styles.reactionChip, reaction.mine ? styles.reactionChipMine : undefined]}
                   onPress={() => void toggleReaction(item, reaction.emoji)}
                   accessibilityRole="button"
-                  accessibilityLabel={`${reaction.emoji} ${reaction.count}${reaction.mine ? ", yours" : ""}`}
+                  accessibilityLabel={`${reaction.emoji} ${reaction.count}${reaction.mine ? t("chat.yours") : ""}`}
                 >
                   <Text style={styles.reactionEmoji}>{reaction.emoji}</Text>
                   {reaction.count > 1 ? (
@@ -1796,7 +1796,7 @@ export function ChatScreen({
           style={styles.headerIdentity}
           onPress={() => conversation && onOpenInfo(conversation)}
           accessibilityRole="button"
-          accessibilityLabel={isGroup ? "Group info" : t("chat.contactInfo")}
+          accessibilityLabel={isGroup ? t("chat.groupInfo") : t("chat.contactInfo")}
         >
           {/* The person's picture, or the group's — the same face the inbox
               row and the in-app banner show, over the same initials. */}
@@ -1843,7 +1843,7 @@ export function ChatScreen({
           // Replaces the "..." this had: a menu glyph promises a list of
           // actions, and what is actually behind it is a screen about this
           // conversation. The actions moved onto that screen.
-          accessibilityLabel={isGroup ? "Group info" : t("chat.conversationInfo")}
+          accessibilityLabel={isGroup ? t("chat.groupInfo") : t("chat.conversationInfo")}
         >
           <Ionicons name="information-circle-outline" size={24} color={palette.text} />
         </Pressable>
@@ -2040,7 +2040,7 @@ export function ChatScreen({
             }}
             hapticsEnabled={hapticsEnabled}
             inputRef={inputRef}
-            placeholder={editing ? "Edit your message" : t("chat.message")}
+            placeholder={editing ? t("chat.editYourMessage") : t("chat.message")}
             // Photos and files pasted into the field itself — staged like any
             // picked from the library, through the same payment guard. Not
             // while editing: an edit changes words, it cannot gain a photo.
@@ -2499,7 +2499,7 @@ function isEmojiOnly(body: string): boolean {
     return false;
   }
   const segmenter =
-    typeof Intl !== "undefined" && "Segmenter" in Intl
+    typeof Intl !== "undefined" && t("chat.segmenter") in Intl
       ? new (Intl as unknown as { Segmenter: new (l?: string, o?: object) => { segment: (s: string) => Iterable<unknown> } }).Segmenter(
           undefined,
           { granularity: "grapheme" },

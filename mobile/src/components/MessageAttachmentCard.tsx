@@ -266,7 +266,7 @@ export function MessageAttachmentCard({
           </View>
           <View style={styles.referenceBody}>
             <Text style={styles.referenceTitle} numberOfLines={2}>
-              {attachment.unavailable ? "Merchant no longer listed" : attachment.location_name}
+              {attachment.unavailable ? t("components.messageAttachmentCard.merchantNoLongerListed") : attachment.location_name}
             </Text>
             {!attachment.unavailable && attachment.location_address ? (
               <Text style={styles.referenceDetail} numberOfLines={2}>
@@ -302,7 +302,7 @@ export function MessageAttachmentCard({
           <View style={styles.referenceBanner}>
             <Ionicons name="calendar" size={15} color={palette.primaryStrong} />
             <Text style={styles.referenceKicker} numberOfLines={1}>
-              {attachment.unavailable ? "Past event" : t("components.messageAttachmentCard.volunteerEvent")}
+              {attachment.unavailable ? t("components.messageAttachmentCard.pastEvent") : t("components.messageAttachmentCard.volunteerEvent")}
             </Text>
           </View>
           <View style={styles.referenceBody}>
@@ -318,7 +318,7 @@ export function MessageAttachmentCard({
               {/* An event that has finished still shows its title and date — it
                   is marked past rather than hidden, because "we did this
                   together last week" is a thing people share. */}
-              {attachment.unavailable ? "This event has finished" : t("components.messageAttachmentCard.viewEventAndSignUp")}
+              {attachment.unavailable ? t("components.messageAttachmentCard.thisEventHasFinished") : t("components.messageAttachmentCard.viewEventAndSignUp")}
             </Text>
           </View>
         </Pressable>
@@ -408,7 +408,7 @@ function AttachmentFileCard({
   const meta =
     state.status === "downloading"
       ? t("components.messageAttachmentCard.downloading")
-      : [size, onDevice ? "On this device" : null].filter(Boolean).join(" · ");
+      : [size, onDevice ? t("components.messageAttachmentCard.onThisDevice") : null].filter(Boolean).join(" · ");
 
   return (
     <Pressable
@@ -418,7 +418,7 @@ function AttachmentFileCard({
       delayLongPress={280}
       accessibilityRole="button"
       accessibilityLabel={`File: ${displayFileName(attachment.file_name) || "attachment"}${size ? `, ${size}` : ""}${
-        onDevice ? ", on this device" : t("components.messageAttachmentCard.notDownloaded")
+        onDevice ? t("components.messageAttachmentCard.onThisDevice2") : t("components.messageAttachmentCard.notDownloaded")
       }`}
     >
       <View style={styles.iconWrap}>

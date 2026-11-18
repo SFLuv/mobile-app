@@ -47,7 +47,7 @@ export function MerchantOnboardingScreen({
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.card}>
         <Text style={styles.title}>
-          {pending ? "Merchant status pending" : t("merchantOnboarding.setUpYourMerchantAccount")}
+          {pending ? t("merchantOnboarding.merchantStatusPending") : t("merchantOnboarding.setUpYourMerchantAccount")}
         </Text>
         <Text style={styles.body}>
           {pending
@@ -62,7 +62,7 @@ export function MerchantOnboardingScreen({
             onPress={onRefresh}
           >
             <Text style={styles.primaryButtonText}>
-              {busy ? "Checking..." : t("merchantOnboarding.checkAgain")}
+              {busy ? t("merchantOnboarding.checking") : t("merchantOnboarding.checkAgain")}
             </Text>
           </Pressable>
         ) : (

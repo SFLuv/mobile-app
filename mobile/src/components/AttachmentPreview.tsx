@@ -167,7 +167,7 @@ export function AttachmentPreview({
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel={t("components.attachmentPreview.close")} />
 
         <View style={styles.header}>
-          <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close">
+          <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel={t("components.attachmentPreview.close")}>
             <Ionicons name="close" size={26} color={palette.white} />
           </Pressable>
           {showTitle ? (
@@ -188,7 +188,7 @@ export function AttachmentPreview({
             accessibilityLabel={kind === "image" ? "Save to photos" : "Save file"}
           >
             <Ionicons name="download-outline" size={17} color={palette.white} />
-            <Text style={styles.saveText}>{saving ? "Saving…" : t("components.attachmentPreview.save")}</Text>
+            <Text style={styles.saveText}>{saving ? t("components.attachmentPreview.saving") : t("components.attachmentPreview.save")}</Text>
           </Pressable>
         </View>
 

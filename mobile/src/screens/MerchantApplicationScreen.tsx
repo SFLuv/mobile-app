@@ -317,7 +317,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
     if (draft.posSystem === OTHER && !posOther.trim()) {
       return t("merchantApplication.tellUsWhichPointOf");
     }
-    if (draft.acceptsTips === null) return "Tell us whether this location accepts tips.";
+    if (draft.acceptsTips === null) return t("merchantApplication.tellUsWhetherThisLocation");
     if (draft.hasStaffTablet === null) {
       return t("merchantApplication.tellUsWhetherStaffHave");
     }
@@ -388,7 +388,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
   const locationChooser = (
     <View style={styles.chooser}>
       <Text style={styles.label}>
-        {showManualFields ? "Location Address" : t("merchantApplication.findYourLocation")}
+        {showManualFields ? t("merchantApplication.locationAddress") : t("merchantApplication.findYourLocation")}
       </Text>
       <View style={styles.searchWrap}>
         <TextInput
@@ -404,7 +404,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
             }
           }}
           placeholder={
-            manualEntry ? "Start typing your street address" : t("merchantApplication.searchForYourBusinessOr")
+            manualEntry ? t("merchantApplication.startTypingYourStreetAddress") : t("merchantApplication.searchForYourBusinessOr")
           }
           placeholderTextColor={palette.textMuted}
           autoCorrect={false}
@@ -707,7 +707,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
             onPress={() => void submit()}
           >
             <Text style={styles.primaryButtonText}>
-              {submitting ? "Submitting..." : t("merchantApplication.submitApplication")}
+              {submitting ? t("merchantApplication.submitting") : t("merchantApplication.submitApplication")}
             </Text>
           </Pressable>
         )}

@@ -168,11 +168,11 @@ export function NewMessageScreen({
   return (
     <SwipeBack onBack={onBack} style={styles.screen}>
       <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
+        <Pressable onPress={onBack} hitSlop={10} accessibilityRole="button" accessibilityLabel={t("newMessage.back")}>
           <Ionicons name="chevron-back" size={26} color={palette.text} />
         </Pressable>
         <Text style={styles.headerTitle}>
-          {isAdding ? "Add people" : groupMode ? "New group" : t("newMessage.newMessage")}
+          {isAdding ? t("newMessage.addPeople") : groupMode ? t("newMessage.newGroup") : t("newMessage.newMessage")}
         </Text>
         {isAdding ? (
           <View style={{ width: 26 }} />
@@ -184,7 +184,7 @@ export function NewMessageScreen({
             }}
             hitSlop={10}
             accessibilityRole="button"
-            accessibilityLabel={groupMode ? "Message one person instead" : t("newMessage.createAGroupInstead")}
+            accessibilityLabel={groupMode ? t("newMessage.messageOnePersonInstead") : t("newMessage.createAGroupInstead")}
           >
             <Ionicons
               name={groupMode ? "person-outline" : "people-outline"}

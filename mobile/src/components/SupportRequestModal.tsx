@@ -83,7 +83,7 @@ export function SupportRequestModal({ visible, request, actions, busyActionId, o
         color={copied === id ? palette.success : palette.primaryStrong}
       />
       <Text style={[styles.copyLabel, copied === id ? { color: palette.success } : null]}>
-        {copied === id ? "Copied" : "Copy"}
+        {copied === id ? t("components.supportRequestModal.copied") : t("components.supportRequestModal.copy")}
       </Text>
     </Pressable>
   );
@@ -93,7 +93,7 @@ export function SupportRequestModal({ visible, request, actions, busyActionId, o
       <View style={styles.root}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>{t("components.supportRequestModal.supportRequest")}</Text>
-          <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" hitSlop={8}>
+          <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel={t("components.supportRequestModal.close")} hitSlop={8}>
             <Ionicons name="close" size={22} color={palette.text} />
           </Pressable>
         </View>

@@ -200,7 +200,7 @@ export function ContactSupportModal({
                 disabled={!ready || sending}
                 accessibilityRole="button"
               >
-                <Text style={styles.primaryText}>{sending ? "Sending…" : t("components.contactSupportModal.sendMessage")}</Text>
+                <Text style={styles.primaryText}>{sending ? t("components.contactSupportModal.sending") : t("components.contactSupportModal.sendMessage")}</Text>
               </Pressable>
             </>
           )}

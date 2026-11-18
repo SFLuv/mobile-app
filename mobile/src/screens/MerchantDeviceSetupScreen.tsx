@@ -146,7 +146,7 @@ export function MerchantDeviceSetupScreen({
             <Ionicons name="time-outline" size={26} color={palette.primaryStrong} />
           </View>
           <Text style={styles.title}>
-            {hasApprovedLocation ? "This location cannot take payments yet" : t("merchantDeviceSetup.yourLocationIsBeingReviewed")}
+            {hasApprovedLocation ? t("merchantDeviceSetup.thisLocationCannotTakePayments") : t("merchantDeviceSetup.yourLocationIsBeingReviewed")}
           </Text>
           <Text style={styles.body}>
             {hasApprovedLocation
@@ -171,7 +171,7 @@ export function MerchantDeviceSetupScreen({
           <View style={styles.iconWrap}>
             <Ionicons name="lock-closed-outline" size={26} color={palette.primaryStrong} />
           </View>
-          <Text style={styles.title}>{passcodeSet ? "Enter your Merchant PIN" : t("merchantDeviceSetup.chooseAMerchantPin")}</Text>
+          <Text style={styles.title}>{passcodeSet ? t("merchantDeviceSetup.enterYourMerchantPin") : t("merchantDeviceSetup.chooseAMerchantPin")}</Text>
           <Text style={styles.body}>
             {passcodeSet
               ? t("merchantDeviceSetup.the6DigitPinFor")
@@ -222,8 +222,8 @@ export function MerchantDeviceSetupScreen({
           <MerchantPinSlider
             disabled={busy || !pinValid || (!passcodeSet && !confirmValid)}
             loading={Boolean(busy)}
-            label={passcodeSet ? "Slide to unlock" : t("merchantDeviceSetup.slideToSavePin")}
-            loadingLabel={passcodeSet ? "Checking" : t("merchantDeviceSetup.saving")}
+            label={passcodeSet ? t("merchantDeviceSetup.slideToUnlock") : t("merchantDeviceSetup.slideToSavePin")}
+            loadingLabel={passcodeSet ? t("merchantDeviceSetup.checking") : t("merchantDeviceSetup.saving")}
             onComplete={() => {
               void submitPin();
             }}

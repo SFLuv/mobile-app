@@ -4,6 +4,7 @@ import { initReactI18next } from "react-i18next";
 import { I18nManager, NativeModules, Platform } from "react-native";
 
 import en from "./locales/en.json";
+import es from "./locales/es.json";
 
 /**
  * Translations for the app's own text.
@@ -31,13 +32,17 @@ export type LanguageOption = {
  * Languages the app ships. A language is listed here only once its file
  * exists; the Settings picker stays hidden while English is the only one.
  */
-export const SUPPORTED_LANGUAGES: LanguageOption[] = [{ code: "en", nativeName: "English" }];
+export const SUPPORTED_LANGUAGES: LanguageOption[] = [
+  { code: "en", nativeName: "English" },
+  { code: "es", nativeName: "Español" },
+];
 
 /** "system" follows the phone's language; anything else is a code above. */
 export type LanguagePreference = "system" | string;
 
 const resources = {
   en: { translation: en },
+  es: { translation: es },
 };
 
 /** The phone's preferred locale, e.g. "es-US", read without a native add-on. */

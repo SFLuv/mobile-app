@@ -156,7 +156,7 @@ export function ProfileSetupModal({
               <Ionicons name="person-circle-outline" size={22} color={palette.primaryStrong} />
             </View>
             <Text style={styles.title}>
-              {mode === "required" ? "Set up your profile" : "Your profile"}
+              {mode === "required" ? "Set up your profile" : t("components.profileSetupModal.yourProfile")}
             </Text>
             <Text style={styles.subtitle}>
               {mode === "required"
@@ -226,7 +226,7 @@ export function ProfileSetupModal({
 
           <View style={styles.actions}>
             <Pressable style={styles.secondary} onPress={onCancel} disabled={saving}>
-              <Text style={styles.secondaryText}>{mode === "required" ? "Not now" : "Cancel"}</Text>
+              <Text style={styles.secondaryText}>{mode === "required" ? "Not now" : t("components.profileSetupModal.cancel")}</Text>
             </Pressable>
             <Pressable
               style={[styles.primary, (!ready || saving) && styles.primaryDisabled]}
@@ -234,7 +234,7 @@ export function ProfileSetupModal({
               disabled={!ready || saving}
             >
               <Text style={styles.primaryText}>
-                {saving ? "Saving…" : mode === "required" ? "Continue" : "Save"}
+                {saving ? "Saving…" : mode === "required" ? "Continue" : t("components.profileSetupModal.save")}
               </Text>
             </Pressable>
           </View>

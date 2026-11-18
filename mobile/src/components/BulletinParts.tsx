@@ -19,12 +19,12 @@ import { AppBackendClient } from "../services/appBackend";
 import { useBulletinPhoto } from "../hooks/useBulletinPhoto";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import {
-  BULLETIN_BADGE_LABELS,
+  bulletinBadgeLabel,
   BulletinCategory,
   BulletinPost,
   BulletinRequestError,
   PublicUser,
-  REPORT_REASONS,
+  reportReasons,
   ReportReason,
   UserProfile,
 } from "../types/bulletin";
@@ -37,7 +37,7 @@ export const CATEGORY_ICONS: Record<BulletinCategory, keyof typeof Ionicons.glyp
 };
 
 export function formatPrice(post: Pick<BulletinPost, "category" | "price_sfluv">, tokenSymbol: string): string {
-  if (post.category === "free") return "Free";
+  if (post.category === "free") return t("components.bulletinParts.free");
   if (post.category === "notice") return "";
   return post.price_sfluv ? `${post.price_sfluv} ${tokenSymbol}` : "";
 }
@@ -104,7 +104,7 @@ export function Avatar({ name, size = 36 }: { name: string; size?: number }) {
 
 export function BadgeLine({ user }: { user: PublicUser }) {
   const { palette } = useAppTheme();
-  const parts: string[] = user.badges.map((badge) => BULLETIN_BADGE_LABELS[badge]).filter(Boolean);
+  const parts: string[] = user.badges.map((badge) => bulletinBadgeLabel(badge)).filter(Boolean);
   if (user.good_trades > 0) {
     parts.push(`${user.good_trades} good trade${user.good_trades === 1 ? "" : "s"}`);
   }
@@ -271,7 +271,7 @@ export function ProfileSetupSheet({
             </View>
             {error ? <Text style={styles.error}>{error}</Text> : null}
             <Pressable style={[styles.primary, saving && { opacity: 0.6 }]} onPress={save} disabled={saving}>
-              <Text style={styles.primaryText}>{saving ? "Saving..." : t("components.bulletinParts.save")}</Text>
+              <Text style={styles.primaryText}>{saving ? t("components.bulletinParts.saving") : t("components.bulletinParts.save")}</Text>
             </Pressable>
           </View>
         </View>
@@ -337,7 +337,7 @@ export function ReportSheet({
             </View>
             <Text style={styles.body}>{t("components.bulletinParts.anSfluvAdminWillReview")}</Text>
             <ScrollView keyboardShouldPersistTaps="handled">
-              {REPORT_REASONS.map((option) => (
+              {reportReasons().map((option) => (
                 <Pressable
                   key={option.value}
                   style={[styles.option, reason === option.value && styles.optionActive]}
@@ -361,7 +361,7 @@ export function ReportSheet({
               />
               {error ? <Text style={styles.error}>{error}</Text> : null}
               <Pressable style={[styles.primary, sending && { opacity: 0.6 }]} onPress={send} disabled={sending}>
-                <Text style={styles.primaryText}>{sending ? "Sending..." : t("components.bulletinParts.sendReport")}</Text>
+                <Text style={styles.primaryText}>{sending ? t("components.bulletinParts.sending") : t("components.bulletinParts.sendReport")}</Text>
               </Pressable>
             </ScrollView>
           </View>

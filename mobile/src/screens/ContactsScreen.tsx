@@ -72,8 +72,8 @@ type Props = {
 type ContactMode = "contacts" | "profile";
 
 const CONTACT_TABS: Array<{ value: ContactMode; label: string }> = [
-  { value: "contacts", label: "My Contacts" },
-  { value: "profile", label: "My Profile" },
+  { value: "contacts", label: t("contacts.myContacts") },
+  { value: "profile", label: t("contacts.myProfile") },
 ];
 
 function shortAddress(address: string): string {
@@ -417,7 +417,7 @@ export function ContactsScreen({
               onPress={toggleContactSearch}
               hitSlop={6}
               accessibilityRole="button"
-              accessibilityLabel={searchOpen ? "Hide search" : t("contacts.searchContacts")}
+              accessibilityLabel={searchOpen ? t("contacts.hideSearch") : t("contacts.searchContacts")}
             >
               <Ionicons
                 name={searchOpen ? "close" : "search"}
@@ -465,7 +465,7 @@ export function ContactsScreen({
 
         {visibleContacts.length === 0 ? (
           <Text style={styles.body}>
-            {contactSearch.trim() ? "No contacts match that search." : t("contacts.noContactsSavedYet")}
+            {contactSearch.trim() ? t("contacts.noContactsMatchThatSearch") : t("contacts.noContactsSavedYet")}
           </Text>
         ) : (
           visibleContacts.map((contact) => {
@@ -492,7 +492,7 @@ export function ContactsScreen({
                       {contact.name}
                     </Text>
                     <Text style={styles.meta} numberOfLines={1}>
-                      {[shortAddress(contact.address), contact.notes?.trim() ? "Note" : ""]
+                      {[shortAddress(contact.address), contact.notes?.trim() ? t("contacts.note") : ""]
                         .filter(Boolean)
                         .join(" · ")}
                     </Text>
@@ -512,7 +512,7 @@ export function ContactsScreen({
                       }
                     }}
                     accessibilityRole="button"
-                    accessibilityLabel={contact.isFavorite ? "Remove from favorites" : t("contacts.markAsFavorite")}
+                    accessibilityLabel={contact.isFavorite ? t("contacts.removeFromFavorites") : t("contacts.markAsFavorite")}
                   >
                     <Ionicons
                       name={contact.isFavorite ? "star" : "star-outline"}
@@ -552,7 +552,7 @@ export function ContactsScreen({
                       color={contact.isFavorite ? palette.primaryStrong : palette.textMuted}
                     />
                     <Text style={[styles.favoriteChipText, contact.isFavorite ? styles.favoriteChipTextActive : undefined]}>
-                      {contact.isFavorite ? "Favorite" : t("contacts.markFavorite")}
+                      {contact.isFavorite ? t("contacts.favorite") : t("contacts.markFavorite")}
                     </Text>
                   </Pressable>
                 </View>

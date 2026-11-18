@@ -259,7 +259,7 @@ export function NotificationsScreen({
     // of.
     if (activeTab === "new") {
       if (active.length === 0) {
-        out.push({ kind: "empty", key: "empty:active", message: "You are all caught up." });
+        out.push({ kind: "empty", key: "empty:active", message: t("notifications.youAreAllCaughtUp") });
       }
       for (const item of active) {
         out.push({ kind: "item", key: `active:${item.id}`, item, fresh: true });
@@ -390,7 +390,7 @@ export function NotificationsScreen({
 
             {routable || opensDetail ? (
               <View style={styles.openHint}>
-                <Text style={styles.openHintText}>{opensDetail ? "Tap for details" : t("notifications.tapToOpen")}</Text>
+                <Text style={styles.openHintText}>{opensDetail ? t("notifications.tapForDetails") : t("notifications.tapToOpen")}</Text>
                 <Ionicons name="chevron-forward" size={13} color={palette.textMuted} />
               </View>
             ) : null}
@@ -453,7 +453,7 @@ export function NotificationsScreen({
           place you can already see. The tabs take that space instead, inline
           with the back button. */}
       <View style={styles.topBar}>
-        <Pressable style={styles.backButton} onPress={onClose} accessibilityRole="button" accessibilityLabel="Back">
+        <Pressable style={styles.backButton} onPress={onClose} accessibilityRole="button" accessibilityLabel={t("notifications.back")}>
           <Ionicons name="chevron-back" size={22} color={palette.primaryStrong} />
         </Pressable>
         <View style={styles.tabRow}>
@@ -467,7 +467,7 @@ export function NotificationsScreen({
                 onPress={() => setActiveTab(key)}
                 accessibilityRole="button"
                 accessibilityState={{ selected }}
-                accessibilityLabel={key === "new" ? "New notifications" : "Notification history"}
+                accessibilityLabel={key === "new" ? t("notifications.newNotifications") : t("notifications.notificationHistory")}
               >
                 <Text
                   style={[styles.tabLabel, selected && styles.tabLabelActive]}
@@ -476,7 +476,7 @@ export function NotificationsScreen({
                   minimumFontScale={0.8}
                   maxFontSizeMultiplier={1.2}
                 >
-                  {key === "new" ? "New" : "History"}
+                  {key === "new" ? t("notifications.new") : t("notifications.history")}
                 </Text>
                 {count > 0 ? (
                   <View style={styles.tabCount}>

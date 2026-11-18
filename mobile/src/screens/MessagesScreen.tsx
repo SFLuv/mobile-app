@@ -49,8 +49,8 @@ import { t } from "../i18n";
 type Segment = "chats" | "contacts";
 
 const SEGMENTS: Array<{ value: Segment; label: string }> = [
-  { value: "chats", label: "Chats" },
-  { value: "contacts", label: "Contacts" },
+  { value: "chats", label: t("messages.chats") },
+  { value: "contacts", label: t("messages.contacts") },
 ];
 
 /**
@@ -141,7 +141,7 @@ export function MessagesScreen({
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PublicUser[] | null>(null);
-  useStuckWatch("messages: load conversations", segment === "chats" && conversations === null);
+  useStuckWatch(t("messages.messagesLoadConversations"), segment === "chats" && conversations === null);
   const [merchantResults, setMerchantResults] = useState<
     Array<{ location_id: number; name: string; owner_user_id: string }>
   >([]);
@@ -371,7 +371,7 @@ export function MessagesScreen({
     // what the row describes. The server only sets this when that is the case.
     const reaction = conversation.latest_reaction;
     if (reaction) {
-      const who = reaction.is_mine ? "You" : reaction.user_name || t("messages.someone");
+      const who = reaction.is_mine ? t("messages.you2") : reaction.user_name || t("messages.someone");
       const what = reaction.message_excerpt?.trim();
       return what
         ? `${who} reacted ${reaction.emoji} to "${what}"`
@@ -415,7 +415,7 @@ export function MessagesScreen({
 
   const renderConversation = ({ item }: { item: Conversation }) => {
     const isGroup = item.kind === "group";
-    const title = isGroup ? item.title || "Group" : nameFor(item.other_user.user_id, item.other_user.public_name);
+    const title = isGroup ? item.title || t("messages.group") : nameFor(item.other_user.user_id, item.other_user.public_name);
     const unread = item.unread_count > 0;
 
     return (
@@ -426,7 +426,7 @@ export function MessagesScreen({
             key: "mute",
             // The icon states the CURRENT state's inverse, which is what the
             // button does — a bell-off on an unmuted row, a bell on a muted one.
-            label: item.muted ? "Unmute" : t("messages.mute"),
+            label: item.muted ? t("messages.unmute") : t("messages.mute"),
             icon: item.muted ? "notifications" : "notifications-off",
             tone: "neutral",
             onPress: () => {
@@ -443,7 +443,7 @@ export function MessagesScreen({
             key: "delete",
             // A group is left, not deleted — the conversation belongs to
             // everybody in it, and the icon says which of the two this is.
-            label: isGroup ? "Leave" : t("messages.delete"),
+            label: isGroup ? t("messages.leave") : t("messages.delete"),
             icon: isGroup ? "exit-outline" : "trash-outline",
             tone: "danger",
             onPress: () => setRowAction({ conversation: item, kind: "delete" }),
