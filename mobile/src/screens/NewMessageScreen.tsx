@@ -16,6 +16,7 @@ import { Avatar, BadgeLine } from "../components/BulletinParts";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
 import { BulletinRequestError, PublicUser } from "../types/bulletin";
+import { t } from "../i18n";
 
 /**
  * Choosing who to message: one person, or several for a group.
@@ -128,7 +129,7 @@ export function NewMessageScreen({
       }
       const title = groupTitle.trim();
       if (!title) {
-        onToast("Give the group a name.", "error");
+        onToast(t("newMessage.giveTheGroupAName"), "error");
         return;
       }
       await onCreateGroup(
@@ -136,7 +137,7 @@ export function NewMessageScreen({
         selected.map((entry) => entry.user_id),
       );
     } catch (e) {
-      onToast(e instanceof BulletinRequestError ? e.message : "Couldn't do that.", "error");
+      onToast(e instanceof BulletinRequestError ? e.message : t("newMessage.couldnTDoThat"), "error");
     } finally {
       setBusy(false);
     }
@@ -171,7 +172,7 @@ export function NewMessageScreen({
           <Ionicons name="chevron-back" size={26} color={palette.text} />
         </Pressable>
         <Text style={styles.headerTitle}>
-          {isAdding ? "Add people" : groupMode ? "New group" : "New message"}
+          {isAdding ? "Add people" : groupMode ? "New group" : t("newMessage.newMessage")}
         </Text>
         {isAdding ? (
           <View style={{ width: 26 }} />
@@ -183,7 +184,7 @@ export function NewMessageScreen({
             }}
             hitSlop={10}
             accessibilityRole="button"
-            accessibilityLabel={groupMode ? "Message one person instead" : "Create a group instead"}
+            accessibilityLabel={groupMode ? "Message one person instead" : t("newMessage.createAGroupInstead")}
           >
             <Ionicons
               name={groupMode ? "person-outline" : "people-outline"}
@@ -199,7 +200,7 @@ export function NewMessageScreen({
           style={styles.groupTitleInput}
           value={groupTitle}
           onChangeText={setGroupTitle}
-          placeholder="Group name"
+          placeholder={t("newMessage.groupName")}
           placeholderTextColor={palette.textMuted}
           maxLength={60}
         />
@@ -230,14 +231,14 @@ export function NewMessageScreen({
           style={styles.searchInput}
           value={query}
           onChangeText={setQuery}
-          placeholder="Search contacts and people on SFLuv"
+          placeholder={t("newMessage.searchContactsAndPeopleOn")}
           placeholderTextColor={palette.textMuted}
           autoCapitalize="none"
           autoCorrect={false}
           autoFocus
         />
         {query ? (
-          <Pressable onPress={() => setQuery("")} hitSlop={8} accessibilityLabel="Clear search">
+          <Pressable onPress={() => setQuery("")} hitSlop={8} accessibilityLabel={t("newMessage.clearSearch")}>
             <Ionicons name="close-circle" size={18} color={palette.textMuted} />
           </Pressable>
         ) : null}
@@ -297,11 +298,11 @@ export function NewMessageScreen({
                   {item.title}
                 </Text>
                 {item.user?.saved_contact ? (
-                  <Text style={styles.rowContact}>In your contacts</Text>
+                  <Text style={styles.rowContact}>{t("newMessage.inYourContacts")}</Text>
                 ) : item.user ? (
                   <BadgeLine user={item.user} />
                 ) : (
-                  <Text style={styles.rowMeta}>Merchant</Text>
+                  <Text style={styles.rowMeta}>{t("newMessage.merchant")}</Text>
                 )}
               </View>
               {groupMode || isAdding ? (
@@ -328,10 +329,14 @@ export function NewMessageScreen({
           >
             <Text style={styles.submitText}>
               {busy
-                ? "Working…"
+                ? t("newMessage.working")
                 : isAdding
-                  ? `Add ${selected.length || ""}`.trim()
-                  : `Create group${selected.length ? ` (${selected.length + 1})` : ""}`}
+                  ? selected.length
+                    ? t("newMessage.addCount", { count: selected.length })
+                    : t("newMessage.add")
+                  : selected.length
+                    ? t("newMessage.createGroupCount", { count: selected.length + 1 })
+                    : t("newMessage.createGroup")}
             </Text>
           </Pressable>
         </View>

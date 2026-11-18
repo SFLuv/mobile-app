@@ -31,6 +31,7 @@ import { triggerClickHaptic } from "../utils/haptics";
 import type { RealtimeEvent } from "../services/realtime";
 import { BulletinRequestError, Conversation, MessageAttachment, PublicUser, type UnreadItem } from "../types/bulletin";
 import { displayFileName } from "../utils/attachmentFiles";
+import { t } from "../i18n";
 
 /**
  * The inbox.
@@ -321,7 +322,7 @@ export function MessagesScreen({
       );
       setRowAction(null);
     } catch {
-      onToast("Couldn't change notifications for that conversation.", "error");
+      onToast(t("messages.couldnTChangeNotificationsFor"), "error");
     } finally {
       setActionBusy(false);
     }
@@ -352,7 +353,7 @@ export function MessagesScreen({
       void loadInbox();
     } catch (e) {
       onToast(
-        e instanceof BulletinRequestError ? e.message : "Couldn't do that. Try again.",
+        e instanceof BulletinRequestError ? e.message : t("messages.couldnTDoThatTry"),
         "error",
       );
     } finally {
@@ -370,7 +371,7 @@ export function MessagesScreen({
     // what the row describes. The server only sets this when that is the case.
     const reaction = conversation.latest_reaction;
     if (reaction) {
-      const who = reaction.is_mine ? "You" : reaction.user_name || "Someone";
+      const who = reaction.is_mine ? "You" : reaction.user_name || t("messages.someone");
       const what = reaction.message_excerpt?.trim();
       return what
         ? `${who} reacted ${reaction.emoji} to "${what}"`
@@ -386,8 +387,8 @@ export function MessagesScreen({
     if (last.kind === "payment") {
       const amount = formatSfluvAmount(last.amount_sfluv_base);
       const sent = last.is_mine
-        ? `You sent ${amount} ${tokenSymbol}`
-        : `Sent you ${amount} ${tokenSymbol}`;
+        ? t("messages.youSent", { amount, tokenSymbol })
+        : t("messages.sentYou", { amount, tokenSymbol });
       // The note, when there is one, is the informative half.
       return last.body?.trim() ? `${sent} · ${last.body.trim()}` : sent.replace(/\s+/g, " ");
     }
@@ -395,7 +396,7 @@ export function MessagesScreen({
     // In a group the speaker matters; in a direct thread the row's own name
     // already says who the other person is, so only "You" is worth marking.
     const who = last.is_mine
-      ? "You: "
+      ? t("messages.you")
       : conversation.kind === "group" && last.sender_name
         ? `${nameFor(last.sender_id, last.sender_name)}: `
         : "";
@@ -425,7 +426,7 @@ export function MessagesScreen({
             key: "mute",
             // The icon states the CURRENT state's inverse, which is what the
             // button does — a bell-off on an unmuted row, a bell on a muted one.
-            label: item.muted ? "Unmute" : "Mute",
+            label: item.muted ? "Unmute" : t("messages.mute"),
             icon: item.muted ? "notifications" : "notifications-off",
             tone: "neutral",
             onPress: () => {
@@ -442,7 +443,7 @@ export function MessagesScreen({
             key: "delete",
             // A group is left, not deleted — the conversation belongs to
             // everybody in it, and the icon says which of the two this is.
-            label: isGroup ? "Leave" : "Delete",
+            label: isGroup ? "Leave" : t("messages.delete"),
             icon: isGroup ? "exit-outline" : "trash-outline",
             tone: "danger",
             onPress: () => setRowAction({ conversation: item, kind: "delete" }),
@@ -489,7 +490,7 @@ export function MessagesScreen({
             <Text style={[styles.rowPreview, unread && styles.rowPreviewUnread]} numberOfLines={2}>
               {/* Greyed is not self-explanatory, so the row says why. */}
               {item.other_user_inactive
-                ? "Can't receive messages right now"
+                ? t("messages.canTReceiveMessagesRight")
                 : `${item.post ? `${item.post.title} · ` : ""}${previewFor(item)}`}
             </Text>
           </View>
@@ -540,17 +541,17 @@ export function MessagesScreen({
           <Pressable style={styles.sheet} onPress={() => {}}>
             {rowAction?.kind === "mute" ? (
               <>
-                <Text style={styles.sheetTitle}>Mute notifications</Text>
+                <Text style={styles.sheetTitle}>{t("messages.muteNotifications")}</Text>
                 <Text style={styles.sheetBody}>
                   Messages still arrive and still show as unread — your phone just
                   won&apos;t buzz.
                 </Text>
                 {[
-                  { label: "For one hour", minutes: 60 },
-                  { label: "For a day", minutes: 60 * 24 },
+                  { label: t("messages.forOneHour"), minutes: 60 },
+                  { label: t("messages.forADay"), minutes: 60 * 24 },
                   // A hundred years. The server caps it; "forever" is a long
                   // deadline rather than a separate mode.
-                  { label: "Until I turn it back on", minutes: 60 * 24 * 365 * 100 },
+                  { label: t("messages.untilITurnItBack"), minutes: 60 * 24 * 365 * 100 },
                 ].map((option) => (
                   <Pressable
                     key={option.label}
@@ -576,7 +577,7 @@ export function MessagesScreen({
                   onPress={() => void runDelete(rowAction.conversation, "leave")}
                 >
                   <Ionicons name="exit-outline" size={18} color={palette.text} />
-                  <Text style={styles.sheetOptionText}>Leave</Text>
+                  <Text style={styles.sheetOptionText}>{t("messages.leave")}</Text>
                 </Pressable>
                 <Pressable
                   style={styles.sheetOption}
@@ -586,10 +587,10 @@ export function MessagesScreen({
                   <Ionicons name="trash-outline" size={18} color={palette.danger} />
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.sheetOptionText, { color: palette.danger }]}>
-                      Delete my messages and leave
+                      {t("messages.deleteMyMessagesAndLeave")}
                     </Text>
                     <Text style={styles.sheetOptionHint}>
-                      Everything you sent shows as deleted to the people still there.
+                      {t("messages.everythingYouSentShowsAs")}
                     </Text>
                   </View>
                 </Pressable>
@@ -604,7 +605,7 @@ export function MessagesScreen({
                 >
                   <Ionicons name="eye-off-outline" size={18} color={palette.text} />
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.sheetOptionText}>Delete for me</Text>
+                    <Text style={styles.sheetOptionText}>{t("messages.deleteForMe")}</Text>
                     <Text style={styles.sheetOptionHint}>
                       Hides it from your inbox. It comes back, with its history, if
                       either of you sends a message.
@@ -619,7 +620,7 @@ export function MessagesScreen({
                   <Ionicons name="trash-outline" size={18} color={palette.danger} />
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.sheetOptionText, { color: palette.danger }]}>
-                      Delete for both of us
+                      {t("messages.deleteForBothOfUs")}
                     </Text>
                     <Text style={styles.sheetOptionHint}>
                       Removes it from their inbox too. This can&apos;t be undone.
@@ -629,7 +630,7 @@ export function MessagesScreen({
               </>
             )}
             <Pressable style={styles.sheetCancel} onPress={() => setRowAction(null)}>
-              <Text style={styles.sheetCancelText}>Cancel</Text>
+              <Text style={styles.sheetCancelText}>{t("messages.cancel")}</Text>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -645,13 +646,13 @@ export function MessagesScreen({
               style={styles.searchInput}
               value={query}
               onChangeText={setQuery}
-              placeholder="Search people on SFLuv"
+              placeholder={t("messages.searchPeopleOnSfluv")}
               placeholderTextColor={palette.textMuted}
               autoCapitalize="none"
               autoCorrect={false}
             />
             {query ? (
-              <Pressable onPress={() => setQuery("")} hitSlop={8} accessibilityLabel="Clear search">
+              <Pressable onPress={() => setQuery("")} hitSlop={8} accessibilityLabel={t("messages.clearSearch")}>
                 <Ionicons name="close-circle" size={18} color={palette.textMuted} />
               </Pressable>
             ) : null}
@@ -700,11 +701,11 @@ export function MessagesScreen({
                   <View style={styles.rowBody}>
                     <Text style={styles.rowName}>{item.title}</Text>
                     {item.user?.saved_contact ? (
-                      <Text style={styles.rowContact}>In your contacts</Text>
+                      <Text style={styles.rowContact}>{t("messages.inYourContacts")}</Text>
                     ) : item.user ? (
                       <BadgeLine user={item.user} />
                     ) : (
-                      <Text style={styles.rowPreview}>Merchant</Text>
+                      <Text style={styles.rowPreview}>{t("messages.merchant")}</Text>
                     )}
                   </View>
                   <Ionicons name="chatbubble-outline" size={18} color={palette.textMuted} />
@@ -746,9 +747,9 @@ export function MessagesScreen({
                 ) : (
                   <View style={styles.centerState}>
                     <Ionicons name="chatbubbles-outline" size={32} color={palette.textMuted} />
-                    <Text style={styles.emptyTitle}>No messages yet</Text>
+                    <Text style={styles.emptyTitle}>{t("messages.noMessagesYet")}</Text>
                     <Text style={styles.emptyBody}>
-                      Tap the button below to start a chat, or message someone from a Bulletin post.
+                      {t("messages.tapTheButtonBelowTo")}
                     </Text>
                   </View>
                 )
@@ -768,7 +769,7 @@ export function MessagesScreen({
                 onNewMessage();
               }}
               accessibilityRole="button"
-              accessibilityLabel="New message"
+              accessibilityLabel={t("messages.newMessage")}
             >
               <Ionicons name="create-outline" size={23} color={palette.white} />
             </Pressable>
@@ -801,30 +802,30 @@ function attachmentPreviewLabel(attachments: MessageAttachment[]): string {
     const videos = media.filter(isVideo).length;
     const files = media.length - images - videos;
     if (files === 0 && videos === 0) {
-      return images > 1 ? `📷 ${images} photos` : "📷 Photo";
+      return images > 1 ? `📷 ${images} photos` : t("messages.photo");
     }
     if (files === 0 && images === 0) {
-      return videos > 1 ? `🎥 ${videos} videos` : "🎥 Video";
+      return videos > 1 ? `🎥 ${videos} videos` : t("messages.video");
     }
     if (files === 0) {
-      return `📷 ${images + videos} photos and videos`;
+      return t("messages.photosAndVideos", { count: images + videos });
     }
     if (images + videos === 0) {
-      return files > 1 ? `📎 ${files} files` : `📎 ${displayFileName(attachment.file_name) || "File"}`;
+      return files > 1 ? `📎 ${files} files` : `📎 ${displayFileName(attachment.file_name) || t("messages.file")}`;
     }
     return `📎 ${media.length} attachments`;
   }
   switch (attachment.kind) {
     case "link":
-      return `🔗 ${attachment.link_title || attachment.link_site_name || "Link"}`;
+      return `🔗 ${attachment.link_title || attachment.link_site_name || t("messages.link")}`;
     case "transaction":
-      return "🧾 Shared a transaction";
+      return t("messages.sharedATransaction");
     case "merchant":
-      return `📍 Shared ${attachment.location_name || "a merchant"}`;
+      return `📍 Shared ${attachment.location_name || t("messages.aMerchant")}`;
     case "event":
-      return `📅 Shared ${attachment.event_title || "an event"}`;
+      return `📅 Shared ${attachment.event_title || t("messages.anEvent")}`;
     case "support":
-      return "About your message to SFLuv";
+      return t("messages.aboutYourMessageToSfluv");
     default:
       // A kind this build does not know, from a newer server. Named rather
       // than blank, so the row is still worth tapping.

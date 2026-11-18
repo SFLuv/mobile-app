@@ -6,6 +6,7 @@ import type { AppBackendClient } from "../services/appBackend";
 import { getShadows, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
 import { ChatAvatar } from "./ChatAvatar";
+import { t } from "../i18n";
 
 /**
  * Notifications while the app is open, drawn over the top bar.
@@ -221,7 +222,7 @@ export function InAppBanner({
         <Pressable
           hitSlop={10}
           accessibilityRole="button"
-          accessibilityLabel="Dismiss"
+          accessibilityLabel={t("components.inAppBanner.dismiss")}
           onPress={() => close(visible.id)}
         >
           <Ionicons name="close" size={16} color={palette.textMuted} />

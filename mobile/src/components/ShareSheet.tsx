@@ -30,6 +30,7 @@ import { Avatar } from "./BulletinParts";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
 import { BulletinRequestError, Conversation } from "../types/bulletin";
+import { t } from "../i18n";
 
 /**
  * The share sheet: three routes out of one tray.
@@ -216,8 +217,8 @@ export function ShareSheet({
     await Clipboard.setStringAsync(shareLink);
     onToast(
       hasPublicLanding(target!)
-        ? "Link copied."
-        : "Link copied. It opens in SFLuv for people who have the app.",
+        ? t("components.shareSheet.linkCopied")
+        : t("components.shareSheet.linkCopiedItOpensIn"),
       "success",
     );
     onClose();
@@ -317,20 +318,20 @@ export function ShareSheet({
     if (sent.length > 0) {
       onToast(
         failed.length === 0
-          ? `Sent to ${sent.length === 1 ? "1 chat" : `${sent.length} chats`}.`
-          : `Sent to ${sent.length} of ${selected.length} chats.`,
+          ? t("components.shareSheet.sentToChats", { count: sent.length })
+          : t("components.shareSheet.sentToOfChats", { count: sent.length, count2: selected.length }),
         failed.length === 0 ? "success" : "info",
       );
       onShared(sent);
       onClose();
       return;
     }
-    onToast("Couldn't share that. Try again.", "error");
+    onToast(t("components.shareSheet.couldnTShareThatTry"), "error");
   };
 
   const title = (conversation: Conversation) =>
     conversation.kind === "group"
-      ? conversation.title || "Group"
+      ? conversation.title || t("components.shareSheet.group")
       : conversation.other_user.public_name;
 
   return (
@@ -353,7 +354,7 @@ export function ShareSheet({
       }}
     >
       <Animated.View style={[styles.backdrop, { opacity: backdropFade }]}>
-        <Pressable style={{ flex: 1 }} onPress={dismiss} accessibilityLabel="Close" />
+        <Pressable style={{ flex: 1 }} onPress={dismiss} accessibilityLabel={t("components.shareSheet.close")} />
         <Animated.View
           style={[
             styles.card,
@@ -366,14 +367,14 @@ export function ShareSheet({
         >
           <View style={styles.header}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.title}>Send to…</Text>
+              <Text style={styles.title}>{t("components.shareSheet.sendTo")}</Text>
               {target ? (
                 <Text style={styles.subtitle} numberOfLines={1}>
                   {target.label}
                 </Text>
               ) : null}
             </View>
-            <Pressable onPress={onClose} hitSlop={10} accessibilityLabel="Close">
+            <Pressable onPress={onClose} hitSlop={10} accessibilityLabel={t("components.shareSheet.close")}>
               <Ionicons name="close" size={20} color={palette.textMuted} />
             </Pressable>
           </View>
@@ -393,7 +394,7 @@ export function ShareSheet({
                 <View style={styles.empty}>
                   <Ionicons name="chatbubbles-outline" size={26} color={palette.textMuted} />
                   <Text style={styles.emptyText}>
-                    No chats yet. Start one from Messages and you can share things into it.
+                    {t("components.shareSheet.noChatsYetStartOne")}
                   </Text>
                 </View>
               )
@@ -445,7 +446,7 @@ export function ShareSheet({
                 style={styles.note}
                 value={note}
                 onChangeText={setNote}
-                placeholder="Add a message (optional)"
+                placeholder={t("components.shareSheet.addAMessageOptional")}
                 placeholderTextColor={palette.textMuted}
                 maxLength={2000}
               />
@@ -454,7 +455,7 @@ export function ShareSheet({
                 onPress={() => void share()}
                 disabled={sending}
                 accessibilityRole="button"
-                accessibilityLabel={`Send to ${selected.length === 1 ? "1 chat" : `${selected.length} chats`}`}
+                accessibilityLabel={t("components.shareSheet.sendToChats", { count: selected.length })}
               >
                 <Ionicons name="arrow-up" size={19} color={palette.white} />
               </Pressable>
@@ -466,10 +467,10 @@ export function ShareSheet({
               event the person you want to tell is often not on SFLuv yet. */}
           {shareLink ? (
             <View style={styles.actions}>
-              <ShareAction icon="link-outline" label="Copy link" onPress={() => void copyLink()} />
+              <ShareAction icon="link-outline" label={t("components.shareSheet.copyLink")} onPress={() => void copyLink()} />
               <ShareAction
                 icon="share-outline"
-                label="Share"
+                label={t("components.shareSheet.share")}
                 onPress={() => void shareExternally()}
               />
             </View>
@@ -477,7 +478,7 @@ export function ShareSheet({
 
           {target?.kind === "transaction" && !hasPublicLanding(target) ? (
             <Text style={styles.linkNote}>
-              This link opens in SFLuv. People without the app will be asked to install it.
+              {t("components.shareSheet.thisLinkOpensInSfluv")}
             </Text>
           ) : null}
 

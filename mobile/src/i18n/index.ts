@@ -1,4 +1,5 @@
-import i18next from "i18next";
+import i18next, { type TOptions } from "i18next";
+import { useEffect, useState } from "react";
 import { initReactI18next } from "react-i18next";
 import { I18nManager, NativeModules, Platform } from "react-native";
 
@@ -107,6 +108,30 @@ export function applyLanguagePreference(preference: LanguagePreference | undefin
   if (i18next.language !== next) {
     void i18next.changeLanguage(next);
   }
+}
+
+/**
+ * Translate outside a component: helpers, alerts, toasts, error messages. The
+ * app remounts its screens when the language changes (useAppLanguage below),
+ * so text produced this way is never left in the old language on screen.
+ * Never call it at module load: a constant built from it would freeze the
+ * language the app happened to start in.
+ */
+export function t(key: string, options?: TOptions): string {
+  return i18next.t(key, options) as string;
+}
+
+/** The current language, re-rendering on change. App keys its screens on it. */
+export function useAppLanguage(): string {
+  const [language, setLanguage] = useState(i18next.language);
+  useEffect(() => {
+    const onChange = (next: string) => setLanguage(next);
+    i18next.on("languageChanged", onChange);
+    return () => {
+      i18next.off("languageChanged", onChange);
+    };
+  }, []);
+  return language;
 }
 
 export default i18next;

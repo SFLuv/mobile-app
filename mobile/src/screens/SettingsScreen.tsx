@@ -32,6 +32,7 @@ import {
   useCameraAccess,
   useOnForeground,
 } from "../utils/phonePermissions";
+import { t } from "../i18n";
 
 type Props = {
   user: AppUser | null;
@@ -568,10 +569,9 @@ function reminderHourOptions(current: number): number[] {
 
 function formatReminderHours(hours: number): string {
   if (hours % 24 === 0) {
-    const days = hours / 24;
-    return days === 1 ? "1 day" : `${days} days`;
+    return i18next.t("settings.notifications.reminderDays", { count: hours / 24 });
   }
-  return hours === 1 ? "1 hour" : `${hours} hours`;
+  return i18next.t("settings.notifications.reminderHours", { count: hours });
 }
 
 function SocialAccountRow({
@@ -1310,14 +1310,6 @@ export function SettingsScreen({
               value={preferences.hapticsEnabled}
               onValueChange={(hapticsEnabled) => onUpdatePreferences({ ...preferences, hapticsEnabled })}
             />
-            {volunteerPanelAvailable ? (
-              <PreferenceRow
-                title={t("settings.behavior.showVolunteer")}
-                body={t("settings.behavior.showVolunteerBody")}
-                value={preferences.showVolunteerPanel}
-                onValueChange={(showVolunteerPanel) => onUpdatePreferences({ ...preferences, showVolunteerPanel })}
-              />
-            ) : null}
             <View style={styles.preferenceStack}>
               <View style={styles.preferenceCopy}>
                 <Text style={styles.preferenceTitle}>{t("settings.behavior.sendOpensOn")}</Text>
@@ -1436,7 +1428,7 @@ export function SettingsScreen({
               <View style={{ flex: 1 }}>
                 <Text style={styles.supportButtonText}>{t("settings.account.contact")}</Text>
                 <Text style={styles.supportButtonHint}>
-                  Questions, problems, or anything else.
+                  {t("settings.questionsProblemsOrAnythingElse")}
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
@@ -1622,7 +1614,7 @@ export function SettingsScreen({
       ) : null}
         {/* Which build this is, for support. */}
         <Text style={styles.versionFooter}>
-          Version {getClientMetadata().version} (build {getClientMetadata().buildLabel})
+          {t("settings.version", { version: getClientMetadata().version, build: getClientMetadata().buildLabel })}
         </Text>
       </ScrollView>
       <Modal

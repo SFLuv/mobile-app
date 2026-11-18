@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Animated, Easing, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { t } from "../i18n";
 
 export type PaymentReceipt = {
   /** Display amount, already converted out of base units. */
@@ -64,7 +65,7 @@ export function PaymentReceivedOverlay({ receipt, onDismiss, durationMs = 3200 }
         <Ionicons name="checkmark" size={92} color="#ffffff" />
       </Animated.View>
 
-      <Text style={styles.title}>Payment received</Text>
+      <Text style={styles.title}>{t("components.paymentReceivedOverlay.paymentReceived")}</Text>
       <Text style={styles.amount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5}>
         {receipt.amount} {receipt.tokenSymbol}
       </Text>

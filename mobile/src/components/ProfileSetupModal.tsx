@@ -17,6 +17,7 @@ import { AppBackendClient } from "../services/appBackend";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { BulletinRequestError, UserProfile } from "../types/bulletin";
 import { ThemedActivityIndicator } from "./ThemedActivityIndicator";
+import { t } from "../i18n";
 
 /**
  * The one thing somebody has to do before they can use Messages: choose how
@@ -135,7 +136,7 @@ export function ProfileSetupModal({
       });
       onSaved(profile);
     } catch (e) {
-      setError(e instanceof BulletinRequestError ? e.message : "Couldn't save. Try again.");
+      setError(e instanceof BulletinRequestError ? e.message : t("components.profileSetupModal.couldnTSaveTryAgain"));
     } finally {
       setSaving(false);
     }
@@ -159,8 +160,8 @@ export function ProfileSetupModal({
             </Text>
             <Text style={styles.subtitle}>
               {mode === "required"
-                ? "Messages need a name other people can recognise. You can change it any time."
-                : "This is how neighbors see you on the Bulletin and in Messages."}
+                ? t("components.profileSetupModal.messagesNeedANameOther")
+                : t("components.profileSetupModal.thisIsHowNeighborsSee")}
             </Text>
           </View>
 
@@ -174,19 +175,19 @@ export function ProfileSetupModal({
               showsVerticalScrollIndicator={false}
               style={styles.scroll}
             >
-              <Text style={styles.label}>Display name</Text>
+              <Text style={styles.label}>{t("components.profileSetupModal.displayName")}</Text>
               <TextInput
                 style={styles.input}
                 value={name}
                 onChangeText={setName}
                 maxLength={40}
-                placeholder="Maria G."
+                placeholder={t("components.profileSetupModal.mariaG")}
                 placeholderTextColor={palette.textMuted}
                 autoCapitalize="words"
               />
-              <Text style={styles.hint}>Shown on your messages and posts.</Text>
+              <Text style={styles.hint}>{t("components.profileSetupModal.shownOnYourMessagesAnd")}</Text>
 
-              <Text style={styles.label}>Username</Text>
+              <Text style={styles.label}>{t("components.profileSetupModal.username")}</Text>
               <View style={styles.handleRow}>
                 <Text style={styles.handlePrefix}>@</Text>
                 <TextInput
@@ -207,7 +208,7 @@ export function ProfileSetupModal({
 
               <View style={styles.row}>
                 <View style={styles.rowText}>
-                  <Text style={styles.rowTitle}>Let neighbors find me</Text>
+                  <Text style={styles.rowTitle}>{t("components.profileSetupModal.letNeighborsFindMe")}</Text>
                   <Text style={styles.rowHint}>
                     Off: only people who know your username can start a chat.
                   </Text>

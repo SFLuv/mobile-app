@@ -19,6 +19,7 @@ import {
   pinColor,
 } from "../utils/merchantIcon";
 import { OpenState } from "../utils/openingHours";
+import { t } from "../i18n";
 
 type MerchantIconProps = {
   name: string;
@@ -168,7 +169,7 @@ export function OpenStatusBadge({ state }: { state: OpenState }) {
     return (
       <View style={styles.row}>
         <View style={[styles.dot, { backgroundColor: palette.textMuted, opacity: 0.4 }]} />
-        <Text style={styles.mutedText}>Hours not available</Text>
+        <Text style={styles.mutedText}>{t("components.merchantPin.hoursNotAvailable")}</Text>
       </View>
     );
   }
@@ -191,7 +192,7 @@ export function OpenStatusBadge({ state }: { state: OpenState }) {
         <View style={[styles.dot, { backgroundColor: open ? palette.primary : palette.textMuted }]} />
       </View>
       <Text style={[styles.text, { color: open ? palette.primaryStrong : palette.textMuted }]}>
-        {open ? "Open now" : "Closed"}
+        {open ? "Open now" : t("components.merchantPin.closed")}
       </Text>
     </View>
   );

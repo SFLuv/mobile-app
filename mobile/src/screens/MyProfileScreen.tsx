@@ -22,6 +22,7 @@ import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { BulletinRequestError, UserProfile } from "../types/bulletin";
 import { pickAvatarPhoto } from "../utils/avatarPicker";
 import { useCopyFeedback } from "../hooks/useCopyFeedback";
+import { t } from "../i18n";
 
 /**
  * "My Profile" — what used to be "My QR".
@@ -91,7 +92,7 @@ export function MyProfileScreen({
         setAvatarUri(uri);
       }
     } catch {
-      setError("Couldn't load your profile.");
+      setError(t("myProfile.couldnTLoadYourProfile"));
     } finally {
       setLoading(false);
     }
@@ -107,7 +108,7 @@ export function MyProfileScreen({
     }
     const trimmedName = name.trim();
     if (!trimmedName) {
-      setError("Your profile needs a display name.");
+      setError(t("myProfile.yourProfileNeedsADisplay"));
       return;
     }
     setSaving(true);
@@ -120,9 +121,9 @@ export function MyProfileScreen({
       });
       setProfile(saved);
       setDiscoverable(saved.discoverable);
-      onToast("Profile saved.", "success");
+      onToast(t("myProfile.profileSaved"), "success");
     } catch (e) {
-      setError(e instanceof BulletinRequestError ? e.message : "Couldn't save your profile.");
+      setError(e instanceof BulletinRequestError ? e.message : t("myProfile.couldnTSaveYourProfile"));
       // Put the switch back where it was: leaving it showing a state the server
       // refused is how somebody believes they are hidden when they are not.
       if (next?.discoverable !== undefined) {
@@ -145,9 +146,9 @@ export function MyProfileScreen({
       }
       await backendClient.uploadMyProfileAvatar(picked);
       setAvatarUri(picked.uri);
-      onToast("Picture saved.", "success");
+      onToast(t("myProfile.pictureSaved"), "success");
     } catch {
-      onToast("Couldn't save that picture.", "error");
+      onToast(t("myProfile.couldnTSaveThatPicture"), "error");
     } finally {
       setPictureBusy(false);
     }
@@ -162,7 +163,7 @@ export function MyProfileScreen({
       await backendClient.deleteMyProfileAvatar();
       setAvatarUri(null);
     } catch {
-      onToast("Couldn't remove that picture.", "error");
+      onToast(t("myProfile.couldnTRemoveThatPicture"), "error");
     } finally {
       setPictureBusy(false);
     }
@@ -191,23 +192,23 @@ export function MyProfileScreen({
                 void Share.share({ message: shareQRValue }).catch(() => {});
               }}
               accessibilityRole="button"
-              accessibilityLabel="Share your contact link"
+              accessibilityLabel={t("myProfile.shareYourContactLink")}
             >
               <Ionicons name="share-social-outline" size={16} color={palette.primaryStrong} />
-              <Text style={styles.qrActionText}>Share</Text>
+              <Text style={styles.qrActionText}>{t("myProfile.share")}</Text>
             </Pressable>
             <Pressable
               style={styles.qrAction}
-              onPress={() => void copy(shareAddress || shareQRValue, "Address copied")}
+              onPress={() => void copy(shareAddress || shareQRValue, t("myProfile.addressCopied"))}
               accessibilityRole="button"
-              accessibilityLabel="Copy your wallet address"
+              accessibilityLabel={t("myProfile.copyYourWalletAddress")}
             >
               <Ionicons
                 name={addressCopied ? "checkmark" : "copy-outline"}
                 size={16}
                 color={palette.primaryStrong}
               />
-              <Text style={styles.qrActionText}>{addressCopied ? "Copied" : "Copy address"}</Text>
+              <Text style={styles.qrActionText}>{addressCopied ? "Copied" : t("myProfile.copyAddress")}</Text>
             </Pressable>
           </View>
         </View>
@@ -221,11 +222,11 @@ export function MyProfileScreen({
       )}
 
       {/* ── The public profile ───────────────────────────────────────────── */}
-      <Text style={styles.sectionTitle}>Public profile</Text>
+      <Text style={styles.sectionTitle}>{t("myProfile.publicProfile")}</Text>
       <Text style={styles.sectionBody}>
         {chatEnabled
-          ? "How neighbors see you on the Bulletin and in Messages."
-          : "How neighbors see you on the Bulletin."}
+          ? t("myProfile.howNeighborsSeeYouOn")
+          : t("myProfile.howNeighborsSeeYouOn2")}
       </Text>
 
       {loading ? (
@@ -238,16 +239,16 @@ export function MyProfileScreen({
             <Pressable
               onPress={() =>
                 avatarUri
-                  ? Alert.alert("Your picture", "Everyone who can see your name can see this.", [
-                      { text: "Change", onPress: () => void changePicture() },
-                      { text: "Remove", style: "destructive", onPress: () => void removePicture() },
-                      { text: "Cancel", style: "cancel" },
+                  ? Alert.alert(t("myProfile.yourPicture"), t("myProfile.everyoneWhoCanSeeYour"), [
+                      { text: t("myProfile.change"), onPress: () => void changePicture() },
+                      { text: t("myProfile.remove"), style: "destructive", onPress: () => void removePicture() },
+                      { text: t("myProfile.cancel"), style: "cancel" },
                     ])
                   : void changePicture()
               }
               disabled={pictureBusy}
               accessibilityRole="button"
-              accessibilityLabel="Your profile picture"
+              accessibilityLabel={t("myProfile.yourProfilePicture")}
               accessibilityState={{ busy: pictureBusy }}
             >
               {avatarUri ? (
@@ -265,25 +266,25 @@ export function MyProfileScreen({
               </View>
             </Pressable>
             <View style={styles.avatarText}>
-              <Text style={styles.avatarTitle}>Profile picture</Text>
+              <Text style={styles.avatarTitle}>{t("myProfile.profilePicture")}</Text>
               <Text style={styles.avatarHint}>
-                Public. Everyone who can see your name can see this.
+                {t("myProfile.publicEveryoneWhoCanSee")}
               </Text>
             </View>
           </View>
 
-          <Text style={styles.label}>Display name</Text>
+          <Text style={styles.label}>{t("myProfile.displayName")}</Text>
           <TextInput
             style={styles.input}
             value={name}
             onChangeText={setName}
             maxLength={40}
-            placeholder="Maria G."
+            placeholder={t("myProfile.mariaG")}
             placeholderTextColor={palette.textMuted}
             autoCapitalize="words"
           />
 
-          <Text style={styles.label}>Username</Text>
+          <Text style={styles.label}>{t("myProfile.username")}</Text>
           <View style={styles.handleRow}>
             <Text style={styles.handlePrefix}>@</Text>
             <TextInput
@@ -303,7 +304,7 @@ export function MyProfileScreen({
 
           <View style={styles.switchRow}>
             <View style={styles.switchText}>
-              <Text style={styles.switchTitle}>Let neighbors find me</Text>
+              <Text style={styles.switchTitle}>{t("myProfile.letNeighborsFindMe")}</Text>
               <Text style={styles.switchHint}>
                 Off: only people who know your username can start a chat.
               </Text>
@@ -322,7 +323,7 @@ export function MyProfileScreen({
           </View>
           {!profile?.exists ? (
             <Text style={styles.hint}>
-              Save your name first, then you can choose whether to be listed.
+              {t("myProfile.saveYourNameFirstThen")}
             </Text>
           ) : null}
 
@@ -335,7 +336,7 @@ export function MyProfileScreen({
               disabled={saving}
               accessibilityRole="button"
             >
-              <Text style={styles.saveButtonText}>{saving ? "Saving…" : "Save profile"}</Text>
+              <Text style={styles.saveButtonText}>{saving ? "Saving…" : t("myProfile.saveProfile")}</Text>
             </Pressable>
           ) : null}
         </View>

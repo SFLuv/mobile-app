@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
+import { t } from "../i18n";
 
 /**
  * What a merchant account sees on a phone before it has a till to run.
@@ -46,12 +47,12 @@ export function MerchantOnboardingScreen({
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.card}>
         <Text style={styles.title}>
-          {pending ? "Merchant status pending" : "Set up your merchant account"}
+          {pending ? "Merchant status pending" : t("merchantOnboarding.setUpYourMerchantAccount")}
         </Text>
         <Text style={styles.body}>
           {pending
-            ? `${locationName || "Your location"} is with the SFLuv team. We will email you when it has been reviewed.`
-            : "List your business to put it on the SFLuv map and turn this device into a till."}
+            ? t("merchantOnboarding.pendingReview", { name: locationName || t("merchantOnboarding.yourLocation") })
+            : t("merchantOnboarding.listYourBusinessToPut")}
         </Text>
 
         {pending ? (
@@ -61,7 +62,7 @@ export function MerchantOnboardingScreen({
             onPress={onRefresh}
           >
             <Text style={styles.primaryButtonText}>
-              {busy ? "Checking..." : "Check again"}
+              {busy ? "Checking..." : t("merchantOnboarding.checkAgain")}
             </Text>
           </Pressable>
         ) : (
@@ -70,7 +71,7 @@ export function MerchantOnboardingScreen({
             disabled={busy}
             onPress={onStartApplication}
           >
-            <Text style={styles.primaryButtonText}>Start application</Text>
+            <Text style={styles.primaryButtonText}>{t("merchantOnboarding.startApplication")}</Text>
           </Pressable>
         )}
       </View>
@@ -78,7 +79,7 @@ export function MerchantOnboardingScreen({
       {/* Both states carry it. This screen is the whole app for these accounts,
           so without it there is no way off it at all. */}
       <Pressable onPress={onLogout} hitSlop={12}>
-        <Text style={styles.logout}>Log out</Text>
+        <Text style={styles.logout}>{t("merchantOnboarding.logOut")}</Text>
       </Pressable>
     </ScrollView>
   );

@@ -18,6 +18,7 @@ import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { SwipeBack } from "../components/SwipeBack";
 import type { AppAlertAction, AppNotificationFeed, AppNotificationItem } from "../types/notifications";
 import { supportRequestDetails } from "../utils/supportRequests";
+import { t } from "../i18n";
 
 /**
  * The notification screen.
@@ -88,7 +89,7 @@ function relativeTime(at: number): string {
     return "";
   }
   const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
-  if (seconds < 60) return "just now";
+  if (seconds < 60) return t("notifications.justNow");
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.round(minutes / 60);
@@ -181,7 +182,7 @@ export function NotificationsScreen({
         }
         // An instruction this build does not know: a newer server added one.
         // Saying so beats a button that silently does nothing.
-        RNAlert.alert("Update SFLuv", "This needs a newer version of the app.");
+        RNAlert.alert(t("notifications.updateSfluv"), t("notifications.thisNeedsANewerVersion"));
         return;
       }
 
@@ -192,7 +193,7 @@ export function NotificationsScreen({
         try {
           await Linking.openURL(action.url);
         } catch {
-          RNAlert.alert("Nothing to open that with", "This device has no app set up for that link.");
+          RNAlert.alert(t("notifications.nothingToOpenThatWith"), t("notifications.thisDeviceHasNoApp"));
         }
         return;
       }
@@ -212,7 +213,7 @@ export function NotificationsScreen({
 
       if (action.confirm) {
         RNAlert.alert(action.label, action.confirm, [
-          { text: "Cancel", style: "cancel" },
+          { text: t("notifications.cancel"), style: "cancel" },
           { text: action.label, style: action.style === "danger" ? "destructive" : "default", onPress: () => void run() },
         ]);
         return;
@@ -270,7 +271,7 @@ export function NotificationsScreen({
       out.push({
         kind: "empty",
         key: "empty:history",
-        message: "Notifications move here once they have been read or handled.",
+        message: t("notifications.notificationsMoveHereOnceThey"),
       });
     }
     for (const item of history) {
@@ -389,7 +390,7 @@ export function NotificationsScreen({
 
             {routable || opensDetail ? (
               <View style={styles.openHint}>
-                <Text style={styles.openHintText}>{opensDetail ? "Tap for details" : "Tap to open"}</Text>
+                <Text style={styles.openHintText}>{opensDetail ? "Tap for details" : t("notifications.tapToOpen")}</Text>
                 <Ionicons name="chevron-forward" size={13} color={palette.textMuted} />
               </View>
             ) : null}
@@ -496,7 +497,7 @@ export function NotificationsScreen({
           <Ionicons name="cloud-offline-outline" size={14} color={palette.danger} />
           <Text style={styles.errorText}>{error}</Text>
           <Pressable onPress={() => void refresh()} accessibilityRole="button">
-            <Text style={styles.errorRetry}>Retry</Text>
+            <Text style={styles.errorRetry}>{t("notifications.retry")}</Text>
           </Pressable>
         </View>
       ) : null}

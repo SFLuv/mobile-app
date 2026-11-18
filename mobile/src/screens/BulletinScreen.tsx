@@ -41,6 +41,7 @@ import {
   BulletinPost,
   BulletinRequestError,
 } from "../types/bulletin";
+import { t } from "../i18n";
 
 const OPTIONAL_IMAGE_PICKER: any = (() => {
   try {
@@ -158,7 +159,7 @@ export function BulletinScreen({
         setCursor(page.next_cursor);
       } catch (e) {
         if (id === loadId.current) {
-          setError(e instanceof BulletinRequestError ? e.message : "Couldn't load the Bulletin.");
+          setError(e instanceof BulletinRequestError ? e.message : t("bulletin.couldnTLoadTheBulletin"));
         }
       } finally {
         if (id === loadId.current) {
@@ -184,11 +185,11 @@ export function BulletinScreen({
       } catch (e) {
         if (e instanceof BulletinRequestError && e.code === "profile_required") {
           setProfileSheet(() => () => {
-            void action().catch((err) => onToast(err?.message || "Something went wrong.", "error"));
+            void action().catch((err) => onToast(err?.message || t("bulletin.somethingWentWrong"), "error"));
           });
           return;
         }
-        onToast(e instanceof Error ? e.message : "Something went wrong.", "error");
+        onToast(e instanceof Error ? e.message : t("bulletin.somethingWentWrong"), "error");
       }
     },
     [onToast],
@@ -221,7 +222,7 @@ export function BulletinScreen({
         </Text>
         {item.category === "notice" ? (
           <View style={styles.tilePillRow}>
-            <Pill label={item.linked_event ? "Event" : "Notice"} />
+            <Pill label={item.linked_event ? "Event" : t("bulletin.notice")} />
           </View>
         ) : (
           <Text style={[styles.tilePrice, item.category === "free" && { color: palette.success }]}>{price}</Text>
@@ -233,7 +234,7 @@ export function BulletinScreen({
         </Text>
         {item.author.badges.includes("merchant") && filter !== "mine" ? (
           <View style={styles.tilePillRow}>
-            <Pill label="Merchant" tone="primary" />
+            <Pill label={t("bulletin.merchant")} tone="primary" />
           </View>
         ) : null}
       </Pressable>
@@ -249,7 +250,7 @@ export function BulletinScreen({
             const next = RADIUS_OPTIONS[(RADIUS_OPTIONS.indexOf(radius) + 1) % RADIUS_OPTIONS.length];
             setRadius(next);
           }}
-          accessibilityLabel={`Showing posts within ${radius} miles. Tap to change.`}
+          accessibilityLabel={t("bulletin.showingPostsWithinMilesTap", { radius })}
           disabled={filter === "mine"}
         >
           <Ionicons name="location-outline" size={16} color={palette.textMuted} />
@@ -263,10 +264,10 @@ export function BulletinScreen({
             setView({ kind: "compose" });
           }}
           accessibilityRole="button"
-          accessibilityLabel="New post"
+          accessibilityLabel={t("bulletin.newPost")}
         >
           <Ionicons name="add" size={18} color={palette.white} />
-          <Text style={styles.newPostText}>Post</Text>
+          <Text style={styles.newPostText}>{t("bulletin.post")}</Text>
         </Pressable>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
@@ -296,9 +297,9 @@ export function BulletinScreen({
       return (
         <View style={styles.centerState}>
           <Ionicons name="location-outline" size={32} color={palette.textMuted} />
-          <Text style={styles.emptyTitle}>{permissionGranted ? "Finding your location..." : "Location is off"}</Text>
+          <Text style={styles.emptyTitle}>{permissionGranted ? "Finding your location..." : t("bulletin.locationIsOff")}</Text>
           <Text style={styles.emptyBody}>
-            The Bulletin shows posts near you. Turn on location for SFLuv in Settings to see them.
+            {t("bulletin.theBulletinShowsPostsNear")}
           </Text>
         </View>
       );
@@ -307,7 +308,7 @@ export function BulletinScreen({
       <View style={styles.centerState}>
         <Ionicons name="newspaper-outline" size={32} color={palette.textMuted} />
         <Text style={styles.emptyTitle}>{filter === "mine" ? "You haven't posted yet" : "Nothing nearby yet"}</Text>
-        <Text style={styles.emptyBody}>Give something away, sell something, or share a neighborhood notice.</Text>
+        <Text style={styles.emptyBody}>{t("bulletin.giveSomethingAwaySellSomething")}</Text>
       </View>
     );
   };
@@ -358,7 +359,7 @@ export function BulletinScreen({
         onPosted={(post) => {
           setView({ kind: "detail", postId: post.id });
           void loadFeed("replace");
-          onToast("Posted", "success");
+          onToast(t("bulletin.posted"), "success");
         }}
         withProfile={withProfile}
         onToast={onToast}
@@ -381,13 +382,13 @@ export function BulletinScreen({
 function statusLabel(post: BulletinPost): string {
   switch (post.status) {
     case "sold":
-      return "Sold";
+      return t("bulletin.sold");
     case "claimed":
-      return "Claimed";
+      return t("bulletin.claimed");
     case "hidden":
-      return "Under review";
+      return t("bulletin.underReview");
     default:
-      return new Date(post.expires_at).getTime() < Date.now() ? "Expired" : "Active";
+      return new Date(post.expires_at).getTime() < Date.now() ? "Expired" : t("bulletin.active");
   }
 }
 
@@ -432,7 +433,7 @@ function PostDetailModal({
       .getBulletinPost(postId, near)
       .then(setPost)
       .catch((e) => {
-        onToast(e instanceof BulletinRequestError ? e.message : "Couldn't load this post.", "error");
+        onToast(e instanceof BulletinRequestError ? e.message : t("bulletin.couldnTLoadThisPost"), "error");
         onClose();
       })
       .finally(() => setLoading(false));
@@ -447,7 +448,7 @@ function PostDetailModal({
       onToast(success, "success");
       onChanged();
     } catch (e) {
-      onToast(e instanceof BulletinRequestError ? e.message : "Something went wrong.", "error");
+      onToast(e instanceof BulletinRequestError ? e.message : t("bulletin.somethingWentWrong"), "error");
     } finally {
       setBusy(false);
     }
@@ -456,17 +457,17 @@ function PostDetailModal({
   const openMenu = () => {
     if (!post || !backendClient) return;
     if (post.is_mine) {
-      Alert.alert("Your post", undefined, [
+      Alert.alert(t("bulletin.yourPost"), undefined, [
         {
-          text: "Delete post",
+          text: t("bulletin.deletePost"),
           style: "destructive",
           onPress: () =>
             void act(async () => {
               await backendClient.deleteBulletinPost(post.id);
               onClose();
-            }, "Post deleted"),
+            }, t("bulletin.postDeleted")),
         },
-        { text: "Cancel", style: "cancel" },
+        { text: t("bulletin.cancel"), style: "cancel" },
       ]);
       return;
     }
@@ -480,9 +481,9 @@ function PostDetailModal({
           void act(async () => {
             await backendClient.blockUser(post.author.user_id);
             onClose();
-          }, "Blocked. You won't see their posts or messages."),
+          }, t("bulletin.blockedYouWonTSee")),
       },
-      { text: "Cancel", style: "cancel" },
+      { text: t("bulletin.cancel"), style: "cancel" },
     ]);
   };
 
@@ -493,11 +494,11 @@ function PostDetailModal({
     <Modal visible={postId !== null} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={styles.modalScreen}>
         <View style={styles.modalHeader}>
-          <Pressable onPress={onClose} hitSlop={10} accessibilityLabel="Back">
+          <Pressable onPress={onClose} hitSlop={10} accessibilityLabel={t("bulletin.back")}>
             <Ionicons name="chevron-down" size={24} color={palette.text} />
           </Pressable>
           {post ? (
-            <Pressable onPress={openMenu} hitSlop={10} accessibilityLabel="More options">
+            <Pressable onPress={openMenu} hitSlop={10} accessibilityLabel={t("bulletin.moreOptions")}>
               <Ionicons name="ellipsis-horizontal" size={22} color={palette.text} />
             </Pressable>
           ) : null}
@@ -534,7 +535,7 @@ function PostDetailModal({
               {post.category === "for_sale" ? (
                 <View style={styles.pillRow}>
                   {post.accepts_sfluv ? <Pill label={`${tokenSymbol} accepted`} tone="primary" /> : null}
-                  {post.accepts_cash ? <Pill label="Cash OK" /> : null}
+                  {post.accepts_cash ? <Pill label={t("bulletin.cashOk")} /> : null}
                 </View>
               ) : null}
               {post.body ? <Text style={styles.detailBody}>{post.body}</Text> : null}
@@ -564,7 +565,7 @@ function PostDetailModal({
                 <Text style={styles.metaText}>
                   {[post.distance_miles != null ? `About ${formatDistance(post.distance_miles)} away` : "", post.area_label]
                     .filter(Boolean)
-                    .join(" · ") || "Location hidden"}
+                    .join(" · ") || t("bulletin.locationHidden")}
                 </Text>
               </View>
               {post.meetup_location ? (
@@ -575,7 +576,7 @@ function PostDetailModal({
               ) : post.category !== "notice" && !post.is_mine ? (
                 <View style={styles.hintCard}>
                   <Ionicons name="shield-checkmark-outline" size={16} color={palette.textMuted} />
-                  <Text style={styles.hintText}>Meet somewhere public, like an SFLuv partner merchant.</Text>
+                  <Text style={styles.hintText}>{t("bulletin.meetSomewherePublicLikeAn")}</Text>
                 </View>
               ) : null}
             </ScrollView>
@@ -601,15 +602,15 @@ function PostDetailModal({
                     <Pressable
                       style={[styles.secondaryButton, busy && { opacity: 0.6 }]}
                       disabled={busy}
-                      onPress={() => void act(() => backendClient!.updateBulletinPost(post.id, { renew: true }), "Renewed for 30 days")}
+                      onPress={() => void act(() => backendClient!.updateBulletinPost(post.id, { renew: true }), t("bulletin.renewedFor30Days"))}
                     >
-                      <Text style={styles.secondaryButtonText}>Renew</Text>
+                      <Text style={styles.secondaryButtonText}>{t("bulletin.renew")}</Text>
                     </Pressable>
                   ) : null}
                 </View>
               ) : post.category === "notice" && post.linked_event ? (
                 <Pressable style={styles.primaryButton} onPress={() => onOpenEvent(post.linked_event!.id)}>
-                  <Text style={styles.primaryButtonText}>See the event</Text>
+                  <Text style={styles.primaryButtonText}>{t("bulletin.seeTheEvent")}</Text>
                 </Pressable>
               ) : (
                 <Pressable
@@ -632,7 +633,7 @@ function PostDetailModal({
           onClose={() => setReport(null)}
           onReported={() => {
             setReport(null);
-            onToast("Thanks. We'll take a look.", "success");
+            onToast(t("bulletin.thanksWeLlTakeA"), "success");
             onChanged();
             onClose();
           }}
@@ -701,7 +702,7 @@ function ComposeModal({
 
   const pickPhotos = async () => {
     if (!OPTIONAL_IMAGE_PICKER?.launchImageLibraryAsync) {
-      setError("Photo uploads aren't available on this build.");
+      setError(t("bulletin.photoUploadsArenTAvailable"));
       return;
     }
     const remaining = MAX_PHOTOS - draft.photos.length;
@@ -722,17 +723,17 @@ function ComposeModal({
       update({ photos: [...draft.photos, ...ok].slice(0, MAX_PHOTOS) });
       setError(tooBig ? "One photo was too large and was skipped." : null);
     } catch {
-      setError("Couldn't open your photos.");
+      setError(t("bulletin.couldnTOpenYourPhotos"));
     }
   };
 
   const validateStep2 = (): string | null => {
     const title = draft.title.trim();
-    if (title.length < 3) return "Add a title (at least 3 characters).";
+    if (title.length < 3) return t("bulletin.addATitleAtLeast");
     if (draft.category === "for_sale") {
       const price = Number(draft.price);
-      if (!draft.price.trim() || !Number.isFinite(price) || price <= 0) return "Add a price.";
-      if (!/^\d+(\.\d{1,2})?$/.test(draft.price.trim())) return "Prices can have at most two decimal places.";
+      if (!draft.price.trim() || !Number.isFinite(price) || price <= 0) return t("bulletin.addAPrice");
+      if (!/^\d+(\.\d{1,2})?$/.test(draft.price.trim())) return t("bulletin.pricesCanHaveAtMost");
       if (!draft.acceptsSfluv && !draft.acceptsCash) return `Choose ${tokenSymbol}, cash, or both.`;
     }
     return null;
@@ -742,7 +743,7 @@ function ComposeModal({
     withProfile(async () => {
       if (!backendClient || !draft.category) return;
       if (!location) {
-        setError("Your location is needed to post. Turn on location for SFLuv.");
+        setError(t("bulletin.yourLocationIsNeededTo"));
         return;
       }
       setPosting(true);
@@ -775,7 +776,7 @@ function ComposeModal({
         onPosted(created);
       } catch (e) {
         if (e instanceof BulletinRequestError && e.code === "profile_required") throw e;
-        setError(e instanceof BulletinRequestError ? e.message : "Couldn't post. Try again.");
+        setError(e instanceof BulletinRequestError ? e.message : t("bulletin.couldnTPostTryAgain"));
       } finally {
         setPosting(false);
       }
@@ -785,7 +786,7 @@ function ComposeModal({
 
   const categories: Array<{ value: BulletinCategory; title: string; hint: string }> = [
     { value: "free", title: "Free", hint: "Give something away" },
-    { value: "for_sale", title: "For sale", hint: `Sell for ${tokenSymbol} or cash` },
+    { value: "for_sale", title: "For sale", hint: t("bulletin.sellForOrCash", { tokenSymbol }) },
     { value: "notice", title: "Neighborhood notice", hint: "News, invites, and heads-ups" },
   ];
 
@@ -844,21 +845,21 @@ function ComposeModal({
                       <Pressable
                         style={styles.photoRemove}
                         onPress={() => update({ photos: draft.photos.filter((_, i) => i !== index) })}
-                        accessibilityLabel="Remove photo"
+                        accessibilityLabel={t("bulletin.removePhoto")}
                       >
                         <Ionicons name="close" size={14} color={palette.white} />
                       </Pressable>
                     </View>
                   ))}
                   {draft.photos.length < MAX_PHOTOS ? (
-                    <Pressable style={styles.photoAdd} onPress={() => void pickPhotos()} accessibilityLabel="Add photos">
+                    <Pressable style={styles.photoAdd} onPress={() => void pickPhotos()} accessibilityLabel={t("bulletin.addPhotos")}>
                       <Ionicons name="camera-outline" size={22} color={palette.textMuted} />
-                      <Text style={styles.photoAddText}>Add</Text>
+                      <Text style={styles.photoAddText}>{t("bulletin.add")}</Text>
                     </Pressable>
                   ) : null}
                 </ScrollView>
 
-                <Text style={styles.fieldLabel}>Title</Text>
+                <Text style={styles.fieldLabel}>{t("bulletin.title")}</Text>
                 <TextInput
                   style={styles.input}
                   value={draft.title}
@@ -867,14 +868,14 @@ function ComposeModal({
                   placeholder={draft.category === "notice" ? "Going to the cleanup today, come with?" : "Commuter bike, 7-speed"}
                   placeholderTextColor={palette.textMuted}
                 />
-                <Text style={styles.fieldLabel}>Description</Text>
+                <Text style={styles.fieldLabel}>{t("bulletin.description")}</Text>
                 <TextInput
                   style={[styles.input, styles.textArea]}
                   value={draft.body}
                   onChangeText={(body) => update({ body })}
                   maxLength={2000}
                   multiline
-                  placeholder="Add details neighbors would want to know"
+                  placeholder={t("bulletin.addDetailsNeighborsWouldWant")}
                   placeholderTextColor={palette.textMuted}
                 />
 
@@ -889,28 +890,28 @@ function ComposeModal({
                       placeholder="40"
                       placeholderTextColor={palette.textMuted}
                     />
-                    <Text style={styles.fieldLabel}>Accept</Text>
+                    <Text style={styles.fieldLabel}>{t("bulletin.accept")}</Text>
                     <Pressable style={styles.checkRow} onPress={() => update({ acceptsSfluv: !draft.acceptsSfluv })}>
                       <Ionicons name={draft.acceptsSfluv ? "checkbox" : "square-outline"} size={20} color={palette.primary} />
                       <Text style={styles.checkText}>{tokenSymbol}</Text>
                     </Pressable>
                     <Pressable style={styles.checkRow} onPress={() => update({ acceptsCash: !draft.acceptsCash })}>
                       <Ionicons name={draft.acceptsCash ? "checkbox" : "square-outline"} size={20} color={palette.primary} />
-                      <Text style={styles.checkText}>Cash OK</Text>
+                      <Text style={styles.checkText}>{t("bulletin.cashOk")}</Text>
                     </Pressable>
                   </>
                 ) : null}
 
                 {draft.category !== "notice" ? (
                   <>
-                    <Text style={styles.fieldLabel}>Meetup spot (optional)</Text>
+                    <Text style={styles.fieldLabel}>{t("bulletin.meetupSpotOptional")}</Text>
                     <Pressable style={styles.pickerRow} onPress={() => setPicker("meetup")}>
                       <Ionicons name="storefront-outline" size={18} color={palette.textMuted} />
                       <Text style={[styles.pickerText, !draft.meetup && { color: palette.textMuted }]}>
-                        {draft.meetup ? draft.meetup.name : "Suggest a partner merchant"}
+                        {draft.meetup ? draft.meetup.name : t("bulletin.suggestAPartnerMerchant")}
                       </Text>
                       {draft.meetup ? (
-                        <Pressable onPress={() => update({ meetup: null })} hitSlop={8} accessibilityLabel="Clear meetup spot">
+                        <Pressable onPress={() => update({ meetup: null })} hitSlop={8} accessibilityLabel={t("bulletin.clearMeetupSpot")}>
                           <Ionicons name="close-circle" size={18} color={palette.textMuted} />
                         </Pressable>
                       ) : (
@@ -920,21 +921,21 @@ function ComposeModal({
                   </>
                 ) : (
                   <>
-                    <Text style={styles.fieldLabel}>Link a volunteer event (optional)</Text>
+                    <Text style={styles.fieldLabel}>{t("bulletin.linkAVolunteerEventOptional")}</Text>
                     <Pressable style={styles.pickerRow} onPress={() => setPicker("event")}>
                       <Ionicons name="calendar-outline" size={18} color={palette.textMuted} />
                       <Text style={[styles.pickerText, !draft.event && { color: palette.textMuted }]}>
-                        {draft.event ? draft.event.title : "Choose from Participate"}
+                        {draft.event ? draft.event.title : t("bulletin.chooseFromParticipate")}
                       </Text>
                       {draft.event ? (
-                        <Pressable onPress={() => update({ event: null })} hitSlop={8} accessibilityLabel="Remove event">
+                        <Pressable onPress={() => update({ event: null })} hitSlop={8} accessibilityLabel={t("bulletin.removeEvent")}>
                           <Ionicons name="close-circle" size={18} color={palette.textMuted} />
                         </Pressable>
                       ) : (
                         <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
                       )}
                     </Pressable>
-                    <Text style={styles.fieldHint}>Neighbors can open it in Participate and sign up there. The notice ends when the event does.</Text>
+                    <Text style={styles.fieldHint}>{t("bulletin.neighborsCanOpenItIn")}</Text>
                   </>
                 )}
               </>
@@ -957,23 +958,23 @@ function ComposeModal({
                     </Text>
                     <View style={styles.pillRow}>
                       {draft.acceptsSfluv ? <Pill label={`${tokenSymbol} accepted`} tone="primary" /> : null}
-                      {draft.acceptsCash ? <Pill label="Cash OK" /> : null}
+                      {draft.acceptsCash ? <Pill label={t("bulletin.cashOk")} /> : null}
                     </View>
                   </>
                 ) : draft.category === "free" ? (
-                  <Text style={[styles.detailPrice, { color: palette.success }]}>Free</Text>
+                  <Text style={[styles.detailPrice, { color: palette.success }]}>{t("bulletin.free")}</Text>
                 ) : null}
                 {draft.body.trim() ? <Text style={styles.detailBody}>{draft.body.trim()}</Text> : null}
                 {draft.event ? <Text style={styles.fieldHint}>Linked event: {draft.event.title}</Text> : null}
                 {draft.meetup ? <Text style={styles.fieldHint}>Meet at {draft.meetup.name}</Text> : null}
                 <View style={styles.hintCard}>
                   <Ionicons name="location-outline" size={16} color={palette.textMuted} />
-                  <Text style={styles.hintText}>Neighbors see roughly how far away you are and your neighborhood, never your exact location.</Text>
+                  <Text style={styles.hintText}>{t("bulletin.neighborsSeeRoughlyHowFar")}</Text>
                 </View>
                 <View style={styles.hintCard}>
                   <Ionicons name="time-outline" size={16} color={palette.textMuted} />
                   <Text style={styles.hintText}>
-                    {draft.event ? "Comes down when the event ends." : "Stays up for 30 days. You can renew it or mark it done anytime."}
+                    {draft.event ? "Comes down when the event ends." : t("bulletin.staysUpFor30Days")}
                   </Text>
                 </View>
               </>
@@ -1010,7 +1011,7 @@ function ComposeModal({
         <Modal visible={picker !== null} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setPicker(null)}>
           <View style={styles.modalScreen}>
             <View style={styles.modalHeader}>
-              <Pressable onPress={() => setPicker(null)} hitSlop={10} accessibilityLabel="Close">
+              <Pressable onPress={() => setPicker(null)} hitSlop={10} accessibilityLabel={t("bulletin.close")}>
                 <Ionicons name="close" size={22} color={palette.text} />
               </Pressable>
               <Text style={styles.modalTitle}>{picker === "meetup" ? "Meetup spot" : "Volunteer events"}</Text>
@@ -1043,7 +1044,7 @@ function ComposeModal({
                 data={events}
                 keyExtractor={(e) => e.id}
                 contentContainerStyle={{ padding: spacing.md }}
-                ListEmptyComponent={<Text style={styles.emptyBody}>No upcoming events right now.</Text>}
+                ListEmptyComponent={<Text style={styles.emptyBody}>{t("bulletin.noUpcomingEventsRightNow")}</Text>}
                 renderItem={({ item }) => (
                   <Pressable
                     style={styles.listRow}

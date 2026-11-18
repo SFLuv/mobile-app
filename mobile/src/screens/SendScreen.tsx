@@ -32,6 +32,7 @@ import { formatDistanceLabel, locationDistanceMeters, sortLocationsByProximity }
 import { parseSendTarget, parseSfluvUniversalLink, SendTarget, SfluvUniversalLink } from "../utils/universalLinks";
 import { triggerClickHaptic } from "../utils/haptics";
 import { openPhoneSettings, useCameraAccess } from "../utils/phonePermissions";
+import { t } from "../i18n";
 
 // How close someone must be to a merchant in setup for the payment screen to
 // offer it. Wide enough for indoor GPS drift, narrow enough that it is only
@@ -611,8 +612,8 @@ export function SendScreen({
       return {
         merchantName:
           resolvedRecipient?.kind === "payment-link"
-            ? "this merchant"
-            : resolvedRecipient?.label || "this merchant",
+            ? t("send.thisMerchant")
+            : resolvedRecipient?.label || t("send.thisMerchant"),
         tipToAddress: target.tipToAddress,
       };
     }
@@ -1482,7 +1483,7 @@ export function SendScreen({
                             tipSelectionLocked ? styles.tipChoiceTextDisabled : undefined,
                           ]}
                         >
-                          Custom
+                          {t("send.custom")}
                         </Text>
                       </Pressable>
                     ) : null}

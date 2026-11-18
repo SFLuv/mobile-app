@@ -68,6 +68,7 @@ import {
   Conversation,
   MessageAttachment,
 } from "../types/bulletin";
+import { t } from "../i18n";
 
 /**
  * One conversation, as a screen.
@@ -266,7 +267,7 @@ export function ChatScreen({
   const [sending, setSending] = useState(false);
   // A thread that never loads, and a message that never finishes sending.
   useStuckWatch("chat: open conversation", conversation === null, { conversation_id: conversationId });
-  useStuckWatch("chat: send message", sending, { conversation_id: conversationId });
+  useStuckWatch(t("chat.chatSendMessage"), sending, { conversation_id: conversationId });
   const [mode, setMode] = useState<ComposerMode>("text");
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [actionTarget, setActionTarget] = useState<ChatMessage | null>(null);
@@ -564,7 +565,7 @@ export function ChatScreen({
           // A failed load leaves whatever was already on screen. An empty
           // thread and an unreachable one are different things, and showing
           // the first for the second is how a chat looks deleted.
-          onToastRef.current("Couldn't refresh this conversation.", "error");
+          onToastRef.current(t("chat.couldnTRefreshThisConversation"), "error");
         }
       }
     },
@@ -841,7 +842,7 @@ export function ChatScreen({
       setReplyingTo(null);
       reportTyping(false);
     } catch (e) {
-      onToast(e instanceof BulletinRequestError ? e.message : "Couldn't send. Try again.", "error");
+      onToast(e instanceof BulletinRequestError ? e.message : t("chat.couldnTSendTryAgain"), "error");
     } finally {
       setSending(false);
     }
@@ -858,7 +859,7 @@ export function ChatScreen({
     // here, so this is where a staged payment is protected. Rebuilding `staged`
     // below without it is exactly how one used to vanish.
     if (staged?.payment) {
-      onToast("Send or remove the payment first.", "error");
+      onToast(t("chat.sendOrRemoveThePayment"), "error");
       return;
     }
     setMode("text");
@@ -918,7 +919,7 @@ export function ChatScreen({
           // Refused out loud. Falling through would send the text and quietly
           // drop the payment, which is the one failure here nobody would
           // notice until they were asked where the money was.
-          onToast("This conversation can't take a payment.", "error");
+          onToast(t("chat.thisConversationCanTTake"), "error");
           return;
         }
         await onSendPayment({
@@ -989,7 +990,7 @@ export function ChatScreen({
       setReplyingTo(null);
       reportTyping(false);
     } catch (e) {
-      onToast(e instanceof BulletinRequestError ? e.message : "Couldn't send that.", "error");
+      onToast(e instanceof BulletinRequestError ? e.message : t("chat.couldnTSendThat"), "error");
     } finally {
       setSending(false);
     }
@@ -1002,7 +1003,7 @@ export function ChatScreen({
     const options: AttachmentOption[] = [
       {
         id: "photo",
-        label: "Photos",
+        label: t("chat.photos"),
         icon: "image-outline",
         onPress: () => {
           void (async () => {
@@ -1033,7 +1034,7 @@ export function ChatScreen({
       },
       {
         id: "camera",
-        label: "Camera",
+        label: t("chat.camera"),
         icon: "camera-outline",
         onPress: () => {
           void (async () => {
@@ -1045,7 +1046,7 @@ export function ChatScreen({
             }
             const permission = current.granted ? current : await ImagePicker.requestCameraPermissionsAsync();
             if (!permission.granted) {
-              onToast("SFLuv needs camera access to take a picture.", "error");
+              onToast(t("chat.sfluvNeedsCameraAccessTo"), "error");
               return;
             }
             const result = await ImagePicker.launchCameraAsync({ quality: 0.85 });
@@ -1065,7 +1066,7 @@ export function ChatScreen({
       },
       {
         id: "file",
-        label: "File",
+        label: t("chat.file"),
         icon: "document-outline",
         onPress: () => {
           void (async () => {
@@ -1244,7 +1245,7 @@ export function ChatScreen({
       setDraft("");
     } catch (e) {
       onToast(
-        e instanceof BulletinRequestError ? e.message : "Couldn't save that edit.",
+        e instanceof BulletinRequestError ? e.message : t("chat.couldnTSaveThatEdit"),
         "error",
       );
     } finally {
@@ -1278,7 +1279,7 @@ export function ChatScreen({
     if (failed.length > 0) {
       onToast(
         failed.length === ids.length
-          ? "Couldn't delete that."
+          ? t("chat.couldnTDeleteThat")
           : `Deleted ${ids.length - failed.length} of ${ids.length}.`,
         "error",
       );
@@ -1288,10 +1289,10 @@ export function ChatScreen({
   const confirmDelete = (ids: number[]) => {
     Alert.alert(
       ids.length === 1 ? "Delete this message?" : `Delete ${ids.length} messages?`,
-      "This removes it for everyone in the chat. They'll see that a message was deleted.",
+      t("chat.thisRemovesItForEveryone"),
       [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: () => void deleteMessages(ids) },
+        { text: t("chat.cancel"), style: "cancel" },
+        { text: t("chat.delete"), style: "destructive", onPress: () => void deleteMessages(ids) },
       ],
     );
   };
@@ -1354,11 +1355,11 @@ export function ChatScreen({
     const text = body && !bodyIsJustTheLink ? body : fromAttachment || body;
 
     if (!text) {
-      onToast("There's nothing to copy.", "info");
+      onToast(t("chat.thereSNothingToCopy"), "info");
       return;
     }
     await Clipboard.setStringAsync(text);
-    onToast("Copied.", "success");
+    onToast(t("chat.copied"), "success");
   };
 
   // ── Rendering ─────────────────────────────────────────────────────────────
@@ -1529,7 +1530,7 @@ export function ChatScreen({
                   there is nothing here to hide. */}
               {item.deleted ? (
                 <View style={styles.deletedBubble}>
-                  <Text style={styles.deletedText}>Message was deleted</Text>
+                  <Text style={styles.deletedText}>{t("chat.messageWasDeleted")}</Text>
                 </View>
               ) : null}
 
@@ -1538,14 +1539,14 @@ export function ChatScreen({
                   <View style={styles.quoteStripe} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.quoteName} numberOfLines={1}>
-                      {nameFor(item.reply_to.sender_id, item.reply_to.sender_name || "Message")}
+                      {nameFor(item.reply_to.sender_id, item.reply_to.sender_name || t("chat.message"))}
                     </Text>
                     <Text
                       style={[styles.quoteBody, item.reply_to.deleted && styles.quoteBodyDeleted]}
                       numberOfLines={2}
                     >
                       {item.reply_to.deleted
-                        ? "Message was deleted"
+                        ? t("chat.messageWasDeleted")
                         : item.reply_to.body?.trim() ||
                           attachmentKindLabel(item.reply_to.attachment_kind)}
                     </Text>
@@ -1606,7 +1607,7 @@ export function ChatScreen({
                     {/* A state, not a detail: an unconfirmed amount must not read
                         as a settled one. */}
                     {!item.payment_verified ? (
-                      <Text style={styles.paymentPending}>Confirming…</Text>
+                      <Text style={styles.paymentPending}>{t("chat.confirming")}</Text>
                     ) : null}
                   </View>
                   <Ionicons name="chevron-forward" size={15} color={palette.textMuted} />
@@ -1721,8 +1722,8 @@ export function ChatScreen({
           {item.is_mine && !item.deleted && item.id === lastOwnMessageId ? (
             <Text style={styles.deliveryState}>
               {conversation && (conversation.other_last_read_message_id ?? 0) >= item.id
-                ? "Read"
-                : "Delivered"}
+                ? t("chat.read")
+                : t("chat.delivered")}
             </Text>
           ) : null}
 
@@ -1763,16 +1764,16 @@ export function ChatScreen({
   const headerTitle = !conversation
     ? placeholderTitle || ""
     : isGroup
-      ? conversation.title || "Group"
+      ? conversation.title || t("chat.group")
       : otherName;
   const headerSubtitle = isGroup
     ? `${conversation?.member_count ?? 0} ${conversation?.member_count === 1 ? "person" : "people"}`
     : null;
 
   const composerDisabledReason = conversation?.blocked_by_me
-    ? `You blocked ${otherName}.`
+    ? t("chat.youBlocked", { otherName })
     : conversation?.other_user_inactive
-      ? `${otherName} can't receive messages right now.`
+      ? t("chat.canTReceiveMessagesRight", { otherName })
       : null;
 
   return (
@@ -1787,7 +1788,7 @@ export function ChatScreen({
           onPress={() => swipeRef.current?.close()}
           hitSlop={10}
           accessibilityRole="button"
-          accessibilityLabel="Back"
+          accessibilityLabel={t("chat.back")}
         >
           <Ionicons name="chevron-back" size={26} color={palette.text} />
         </Pressable>
@@ -1795,7 +1796,7 @@ export function ChatScreen({
           style={styles.headerIdentity}
           onPress={() => conversation && onOpenInfo(conversation)}
           accessibilityRole="button"
-          accessibilityLabel={isGroup ? "Group info" : "Contact info"}
+          accessibilityLabel={isGroup ? "Group info" : t("chat.contactInfo")}
         >
           {/* The person's picture, or the group's — the same face the inbox
               row and the in-app banner show, over the same initials. */}
@@ -1824,7 +1825,7 @@ export function ChatScreen({
             way. Only with something on screen: an empty thread has its own
             spinner in the middle, and two at once is one too many. */}
         {!pageLoaded && !historyStalled && messages.length > 0 ? (
-          <ThemedActivityIndicator size="small" accessibilityLabel="Loading messages" />
+          <ThemedActivityIndicator size="small" accessibilityLabel={t("chat.loadingMessages")} />
         ) : null}
         <Pressable
           onPress={() => {
@@ -1842,7 +1843,7 @@ export function ChatScreen({
           // Replaces the "..." this had: a menu glyph promises a list of
           // actions, and what is actually behind it is a screen about this
           // conversation. The actions moved onto that screen.
-          accessibilityLabel={isGroup ? "Group info" : "Conversation info"}
+          accessibilityLabel={isGroup ? "Group info" : t("chat.conversationInfo")}
         >
           <Ionicons name="information-circle-outline" size={24} color={palette.text} />
         </Pressable>
@@ -1895,7 +1896,7 @@ export function ChatScreen({
             conversation && pageLoaded ? (
               <View style={styles.empty}>
                 <Ionicons name="chatbubbles-outline" size={30} color={palette.textMuted} />
-                <Text style={styles.emptyText}>Say hello.</Text>
+                <Text style={styles.emptyText}>{t("chat.sayHello")}</Text>
               </View>
             ) : (
               <View style={styles.empty}>
@@ -1925,7 +1926,7 @@ export function ChatScreen({
               <Text style={styles.typingWho} numberOfLines={1}>
                 {typing.length === 1
                   ? `${typing[0].userName} is typing`
-                  : `${typing.length} people are typing`}
+                  : t("chat.peopleAreTyping", { count: typing.length })}
               </Text>
             ) : null}
           </View>
@@ -1937,7 +1938,7 @@ export function ChatScreen({
         {selectedIds !== null ? (
           <View style={styles.selectionBar}>
             <Pressable onPress={() => setSelectedIds(null)} hitSlop={8}>
-              <Text style={styles.selectionCount}>Cancel</Text>
+              <Text style={styles.selectionCount}>{t("chat.cancel")}</Text>
             </Pressable>
             <Text style={styles.selectionCount}>
               {selectedIds.length} selected
@@ -1953,7 +1954,7 @@ export function ChatScreen({
               accessibilityLabel={`Delete ${selectedIds.length} messages`}
             >
               <Ionicons name="trash-outline" size={16} color={palette.white} />
-              <Text style={styles.selectionDeleteText}>Delete</Text>
+              <Text style={styles.selectionDeleteText}>{t("chat.delete")}</Text>
             </Pressable>
           </View>
         ) : composerDisabledReason ? (
@@ -1966,7 +1967,7 @@ export function ChatScreen({
             <View style={styles.editBanner}>
               <Ionicons name="pencil" size={13} color={palette.primaryStrong} />
               <Text style={styles.editBannerText} numberOfLines={1}>
-                Editing a message
+                {t("chat.editingAMessage")}
               </Text>
               <Pressable
                 onPress={() => {
@@ -1975,7 +1976,7 @@ export function ChatScreen({
                 }}
                 hitSlop={10}
                 accessibilityRole="button"
-                accessibilityLabel="Stop editing"
+                accessibilityLabel={t("chat.stopEditing")}
               >
                 <Ionicons name="close" size={16} color={palette.textMuted} />
               </Pressable>
@@ -2015,8 +2016,8 @@ export function ChatScreen({
                 ? {
                     id: replyingTo.id,
                     senderName: replyingTo.is_mine
-                      ? "You"
-                      : nameFor(replyingTo.sender_id, replyingTo.sender_name || otherName || "Message"),
+                      ? t("chat.you")
+                      : nameFor(replyingTo.sender_id, replyingTo.sender_name || otherName || t("chat.message")),
                     body: replyingTo.body?.trim() || attachmentKindLabel(replyingTo.attachments?.[0]?.kind),
                   }
                 : null
@@ -2039,7 +2040,7 @@ export function ChatScreen({
             }}
             hapticsEnabled={hapticsEnabled}
             inputRef={inputRef}
-            placeholder={editing ? "Edit your message" : "Message"}
+            placeholder={editing ? "Edit your message" : t("chat.message")}
             // Photos and files pasted into the field itself — staged like any
             // picked from the library, through the same payment guard. Not
             // while editing: an edit changes words, it cannot gain a photo.
@@ -2088,7 +2089,7 @@ export function ChatScreen({
                   setActionTarget(null);
                 }}
                 accessibilityRole="button"
-                accessibilityLabel="More reactions"
+                accessibilityLabel={t("chat.moreReactions")}
               >
                 <Ionicons name="add" size={20} color={palette.textMuted} />
               </Pressable>
@@ -2096,7 +2097,7 @@ export function ChatScreen({
 
             <ActionRow
               icon="arrow-undo-outline"
-              label="Reply"
+              label={t("chat.reply")}
               onPress={() => {
                 setReplyingTo(actionTarget);
                 setActionTarget(null);
@@ -2106,7 +2107,7 @@ export function ChatScreen({
             />
             <ActionRow
               icon="copy-outline"
-              label="Copy"
+              label={t("chat.copy")}
               onPress={() => actionTarget && void copyMessage(actionTarget)}
             />
             {/* Editing is offered only inside the window, and the window is
@@ -2116,7 +2117,7 @@ export function ChatScreen({
             {actionTarget && canEdit(actionTarget) ? (
               <ActionRow
                 icon="pencil-outline"
-                label="Edit"
+                label={t("chat.edit")}
                 onPress={() => {
                   const target = actionTarget;
                   setActionTarget(null);
@@ -2147,7 +2148,7 @@ export function ChatScreen({
                   void (async () => {
                     const outcome = await saveAttachment(backendClient, conversationId, target);
                     if (outcome.status === "saved-to-photos") {
-                      onToast("Saved to your photos.", "success");
+                      onToast(t("chat.savedToYourPhotos"), "success");
                     } else if (outcome.status === "blocked") {
                       promptPhotosBlocked();
                     } else if (outcome.status === "denied" || outcome.status === "failed") {
@@ -2160,7 +2161,7 @@ export function ChatScreen({
             {actionTarget?.is_mine ? (
               <ActionRow
                 icon="trash-outline"
-                label="Delete"
+                label={t("chat.delete")}
                 destructive
                 onPress={() => {
                   const target = actionTarget;
@@ -2174,7 +2175,7 @@ export function ChatScreen({
             {actionTarget?.is_mine ? (
               <ActionRow
                 icon="checkmark-circle-outline"
-                label="Select more…"
+                label={t("chat.selectMore")}
                 onPress={() => {
                   const target = actionTarget;
                   setActionTarget(null);
@@ -2188,7 +2189,7 @@ export function ChatScreen({
             {actionTarget && !actionTarget.is_mine ? (
               <ActionRow
                 icon="flag-outline"
-                label="Report"
+                label={t("chat.report")}
                 destructive
                 onPress={() => {
                   const target = actionTarget;
@@ -2197,12 +2198,12 @@ export function ChatScreen({
                     return;
                   }
                   Alert.alert(
-                    "Report this message?",
-                    "An SFLuv admin will review it. The sender isn't told who reported them.",
+                    t("chat.reportThisMessage"),
+                    t("chat.anSfluvAdminWillReview"),
                     [
-                      { text: "Cancel", style: "cancel" },
+                      { text: t("chat.cancel"), style: "cancel" },
                       {
-                        text: "Report",
+                        text: t("chat.report"),
                         style: "destructive",
                         onPress: () =>
                           void backendClient
@@ -2211,8 +2212,8 @@ export function ChatScreen({
                               target_id: String(target.id),
                               reason: "other",
                             })
-                            .then(() => onToast("Thanks. We'll take a look.", "success"))
-                            .catch(() => onToast("Couldn't send that report.", "error")),
+                            .then(() => onToast(t("chat.thanksWeLlTakeA"), "success"))
+                            .catch(() => onToast(t("chat.couldnTSendThatReport"), "error")),
                       },
                     ],
                   );
@@ -2232,7 +2233,7 @@ export function ChatScreen({
       >
         <Pressable style={styles.sheetBackdrop} onPress={() => setReactionPickerFor(null)}>
           <Pressable style={styles.pickerCard} onPress={() => {}}>
-            <Text style={styles.pickerTitle}>React</Text>
+            <Text style={styles.pickerTitle}>{t("chat.react")}</Text>
             <View style={styles.pickerGrid}>
               {[...DEFAULT_REACTIONS, ...MORE_REACTIONS].map((emoji) => (
                 <Pressable

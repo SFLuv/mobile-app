@@ -28,6 +28,7 @@ import {
   ReportReason,
   UserProfile,
 } from "../types/bulletin";
+import { t } from "../i18n";
 
 export const CATEGORY_ICONS: Record<BulletinCategory, keyof typeof Ionicons.glyphMap> = {
   free: "gift-outline",
@@ -43,7 +44,7 @@ export function formatPrice(post: Pick<BulletinPost, "category" | "price_sfluv">
 
 export function formatAgo(iso: string): string {
   const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-  if (seconds < 60) return "just now";
+  if (seconds < 60) return t("components.bulletinParts.justNow");
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
   return `${Math.floor(seconds / 86400)}d`;
@@ -227,7 +228,7 @@ export function ProfileSetupSheet({
       });
       onSaved(profile);
     } catch (e) {
-      setError(e instanceof BulletinRequestError ? e.message : "Couldn't save. Try again.");
+      setError(e instanceof BulletinRequestError ? e.message : t("components.bulletinParts.couldnTSaveTryAgain"));
     } finally {
       setSaving(false);
     }
@@ -241,16 +242,16 @@ export function ProfileSetupSheet({
           <View style={styles.card}>
             <View style={styles.header}>
               <Text style={styles.title}>How should neighbors see you?</Text>
-              <Pressable onPress={onClose} hitSlop={8} accessibilityLabel="Close">
+              <Pressable onPress={onClose} hitSlop={8} accessibilityLabel={t("components.bulletinParts.close")}>
                 <Ionicons name="close" size={20} color={palette.textMuted} />
               </Pressable>
             </View>
             <Text style={styles.body}>
-              This name shows on your posts and messages. You can change it anytime in Messages.
+              {t("components.bulletinParts.thisNameShowsOnYour")}
             </Text>
-            <Text style={styles.label}>Name</Text>
-            <TextInput style={styles.input} value={name} onChangeText={setName} maxLength={40} placeholder="Maria G." placeholderTextColor={palette.textMuted} />
-            <Text style={styles.label}>Handle (optional)</Text>
+            <Text style={styles.label}>{t("components.bulletinParts.name")}</Text>
+            <TextInput style={styles.input} value={name} onChangeText={setName} maxLength={40} placeholder={t("components.bulletinParts.mariaG")} placeholderTextColor={palette.textMuted} />
+            <Text style={styles.label}>{t("components.bulletinParts.handleOptional")}</Text>
             <TextInput
               style={styles.input}
               value={handle}
@@ -263,14 +264,14 @@ export function ProfileSetupSheet({
             />
             <View style={styles.row}>
               <View style={styles.rowText}>
-                <Text style={styles.rowTitle}>Let neighbors find me</Text>
-                <Text style={styles.rowHint}>Off: only people who know your handle can find you.</Text>
+                <Text style={styles.rowTitle}>{t("components.bulletinParts.letNeighborsFindMe")}</Text>
+                <Text style={styles.rowHint}>{t("components.bulletinParts.offOnlyPeopleWhoKnow")}</Text>
               </View>
               <Switch value={discoverable} onValueChange={setDiscoverable} trackColor={{ true: palette.primary }} />
             </View>
             {error ? <Text style={styles.error}>{error}</Text> : null}
             <Pressable style={[styles.primary, saving && { opacity: 0.6 }]} onPress={save} disabled={saving}>
-              <Text style={styles.primaryText}>{saving ? "Saving..." : "Save"}</Text>
+              <Text style={styles.primaryText}>{saving ? "Saving..." : t("components.bulletinParts.save")}</Text>
             </Pressable>
           </View>
         </View>
@@ -307,7 +308,7 @@ export function ReportSheet({
   const send = async () => {
     if (!client || !target) return;
     if (!reason) {
-      setError("Choose a reason first.");
+      setError(t("components.bulletinParts.chooseAReasonFirst"));
       return;
     }
     setSending(true);
@@ -316,7 +317,7 @@ export function ReportSheet({
       await client.reportContent({ target_type: target.type, target_id: target.id, reason, details: details.trim() || undefined });
       onReported();
     } catch (e) {
-      setError(e instanceof BulletinRequestError ? e.message : "Couldn't send the report. Try again.");
+      setError(e instanceof BulletinRequestError ? e.message : t("components.bulletinParts.couldnTSendTheReport"));
     } finally {
       setSending(false);
     }
@@ -330,11 +331,11 @@ export function ReportSheet({
           <View style={styles.card}>
             <View style={styles.header}>
               <Text style={styles.title}>Report {target?.label ?? ""}</Text>
-              <Pressable onPress={onClose} hitSlop={8} accessibilityLabel="Close">
+              <Pressable onPress={onClose} hitSlop={8} accessibilityLabel={t("components.bulletinParts.close")}>
                 <Ionicons name="close" size={20} color={palette.textMuted} />
               </Pressable>
             </View>
-            <Text style={styles.body}>An SFLuv admin will review this within 24 hours. The other person isn't told who reported them.</Text>
+            <Text style={styles.body}>{t("components.bulletinParts.anSfluvAdminWillReview")}</Text>
             <ScrollView keyboardShouldPersistTaps="handled">
               {REPORT_REASONS.map((option) => (
                 <Pressable
@@ -360,7 +361,7 @@ export function ReportSheet({
               />
               {error ? <Text style={styles.error}>{error}</Text> : null}
               <Pressable style={[styles.primary, sending && { opacity: 0.6 }]} onPress={send} disabled={sending}>
-                <Text style={styles.primaryText}>{sending ? "Sending..." : "Send report"}</Text>
+                <Text style={styles.primaryText}>{sending ? "Sending..." : t("components.bulletinParts.sendReport")}</Text>
               </Pressable>
             </ScrollView>
           </View>

@@ -8,6 +8,7 @@ import { Palette, radii, spacing, useAppTheme } from "../theme";
 import type { ChatTransactionRef } from "../utils/transactions";
 import type { AttachmentKind, MessageAttachment } from "../types/bulletin";
 import { displayFileName } from "../utils/attachmentFiles";
+import { t } from "../i18n";
 
 /**
  * One card under a message: a photo, a file, a link preview, or a reference to
@@ -84,21 +85,21 @@ const ICON_FOR_KIND: Record<AttachmentKind, keyof typeof Ionicons.glyphMap> = {
 export function attachmentKindLabel(kind?: AttachmentKind): string {
   switch (kind) {
     case "image":
-      return "Photo";
+      return t("components.messageAttachmentCard.photo");
     case "file":
-      return "File";
+      return t("components.messageAttachmentCard.file");
     case "link":
-      return "Link";
+      return t("components.messageAttachmentCard.link");
     case "transaction":
-      return "Transaction";
+      return t("components.messageAttachmentCard.transaction");
     case "merchant":
-      return "Merchant";
+      return t("components.messageAttachmentCard.merchant");
     case "event":
-      return "Event";
+      return t("components.messageAttachmentCard.event");
     case "support":
-      return "Support request";
+      return t("components.messageAttachmentCard.supportRequest");
     default:
-      return "Attachment";
+      return t("components.messageAttachmentCard.attachment");
   }
 }
 
@@ -171,7 +172,7 @@ export function MessageAttachmentCard({
           onLongPress={onLongPress}
           delayLongPress={280}
           accessibilityRole="link"
-          accessibilityLabel={attachment.link_title || attachment.link_url || "Link"}
+          accessibilityLabel={attachment.link_title || attachment.link_url || t("components.messageAttachmentCard.link")}
         >
           {attachment.link_image_url ? (
             <Image source={{ uri: attachment.link_image_url }} style={styles.linkImage} resizeMode="cover" />
@@ -223,11 +224,11 @@ export function MessageAttachmentCard({
           onLongPress={onLongPress}
           delayLongPress={280}
           accessibilityRole="button"
-          accessibilityLabel="Transaction record"
+          accessibilityLabel={t("components.messageAttachmentCard.transactionRecord")}
         >
           <View style={styles.referenceBanner}>
             <Ionicons name="receipt-outline" size={15} color={palette.primaryStrong} />
-            <Text style={styles.referenceKicker}>Transaction record</Text>
+            <Text style={styles.referenceKicker}>{t("components.messageAttachmentCard.transactionRecord")}</Text>
           </View>
           <View style={styles.referenceBody}>
             <Text style={styles.referenceTitle} numberOfLines={1}>
@@ -235,13 +236,13 @@ export function MessageAttachmentCard({
                   after it was made is simply not indexed yet, and the two are
                   indistinguishable from here. */}
               {attachment.unavailable
-                ? "Confirming on the network…"
+                ? t("components.messageAttachmentCard.confirmingOnTheNetwork")
                 : `${formatBaseAmount(attachment.tx_amount_sfluv_base)} ${tokenSymbol}`}
             </Text>
             {!attachment.unavailable && attachment.tx_at ? (
               <Text style={styles.referenceDetail}>{formatTxDate(attachment.tx_at)}</Text>
             ) : null}
-            <Text style={styles.referenceAction}>View transaction</Text>
+            <Text style={styles.referenceAction}>{t("components.messageAttachmentCard.viewTransaction")}</Text>
           </View>
         </Pressable>
       );
@@ -260,7 +261,7 @@ export function MessageAttachmentCard({
           <View style={styles.referenceBanner}>
             <Ionicons name="storefront" size={15} color={palette.primaryStrong} />
             <Text style={styles.referenceKicker} numberOfLines={1}>
-              SFLuv merchant
+              {t("components.messageAttachmentCard.sfluvMerchant")}
             </Text>
           </View>
           <View style={styles.referenceBody}>
@@ -273,7 +274,7 @@ export function MessageAttachmentCard({
               </Text>
             ) : null}
             {attachment.unavailable ? null : (
-              <Text style={styles.referenceAction}>View on the map</Text>
+              <Text style={styles.referenceAction}>{t("components.messageAttachmentCard.viewOnTheMap")}</Text>
             )}
           </View>
         </Pressable>
@@ -296,17 +297,17 @@ export function MessageAttachmentCard({
           onLongPress={onLongPress}
           delayLongPress={280}
           accessibilityRole="button"
-          accessibilityLabel={`Volunteer event: ${attachment.event_title ?? "unavailable"}`}
+          accessibilityLabel={t("components.messageAttachmentCard.volunteerEvent", { title: attachment.event_title ?? t("components.messageAttachmentCard.unavailable") })}
         >
           <View style={styles.referenceBanner}>
             <Ionicons name="calendar" size={15} color={palette.primaryStrong} />
             <Text style={styles.referenceKicker} numberOfLines={1}>
-              {attachment.unavailable ? "Past event" : "Volunteer event"}
+              {attachment.unavailable ? "Past event" : t("components.messageAttachmentCard.volunteerEvent")}
             </Text>
           </View>
           <View style={styles.referenceBody}>
             <Text style={styles.referenceTitle} numberOfLines={2}>
-              {attachment.event_title || "Volunteer event"}
+              {attachment.event_title || t("components.messageAttachmentCard.volunteerEvent")}
             </Text>
             {attachment.event_start_at ? (
               <Text style={styles.referenceDetail} numberOfLines={1}>
@@ -317,7 +318,7 @@ export function MessageAttachmentCard({
               {/* An event that has finished still shows its title and date — it
                   is marked past rather than hidden, because "we did this
                   together last week" is a thing people share. */}
-              {attachment.unavailable ? "This event has finished" : "View event and sign up"}
+              {attachment.unavailable ? "This event has finished" : t("components.messageAttachmentCard.viewEventAndSignUp")}
             </Text>
           </View>
         </Pressable>
@@ -333,19 +334,19 @@ export function MessageAttachmentCard({
           onLongPress={onLongPress}
           delayLongPress={280}
           accessibilityRole="button"
-          accessibilityLabel="Support request"
+          accessibilityLabel={t("components.messageAttachmentCard.supportRequest")}
         >
           <View style={styles.referenceBanner}>
             <Ionicons name="help-buoy" size={15} color={palette.primaryStrong} />
             <Text style={styles.referenceKicker} numberOfLines={1}>
               {attachment.support_reference
                 ? `Support · ${attachment.support_reference}`
-                : "Support request"}
+                : t("components.messageAttachmentCard.supportRequest")}
             </Text>
           </View>
           <View style={styles.referenceBody}>
             <Text style={styles.referenceTitle} numberOfLines={2}>
-              {attachment.support_subject || "Your message to SFLuv"}
+              {attachment.support_subject || t("components.messageAttachmentCard.yourMessageToSfluv")}
             </Text>
             <Text style={styles.referenceDetail}>
               {/* Never the body or the email — see resolveSupportCard. */}
@@ -369,8 +370,8 @@ export function MessageAttachmentCard({
             {/* A kind this build does not know: a newer server added one. Shown
                 as a neutral card rather than dropped, so the message is not
                 silently empty. */}
-            <Text style={styles.cardTitle}>Attachment</Text>
-            <Text style={styles.cardMeta}>Update SFLuv to see this.</Text>
+            <Text style={styles.cardTitle}>{t("components.messageAttachmentCard.attachment")}</Text>
+            <Text style={styles.cardMeta}>{t("components.messageAttachmentCard.updateSfluvToSeeThis")}</Text>
           </View>
         </View>
       );
@@ -406,7 +407,7 @@ function AttachmentFileCard({
   const onDevice = state.status === "cached";
   const meta =
     state.status === "downloading"
-      ? "Downloading…"
+      ? t("components.messageAttachmentCard.downloading")
       : [size, onDevice ? "On this device" : null].filter(Boolean).join(" · ");
 
   return (
@@ -417,7 +418,7 @@ function AttachmentFileCard({
       delayLongPress={280}
       accessibilityRole="button"
       accessibilityLabel={`File: ${displayFileName(attachment.file_name) || "attachment"}${size ? `, ${size}` : ""}${
-        onDevice ? ", on this device" : ", not downloaded"
+        onDevice ? ", on this device" : t("components.messageAttachmentCard.notDownloaded")
       }`}
     >
       <View style={styles.iconWrap}>
@@ -425,7 +426,7 @@ function AttachmentFileCard({
       </View>
       <View style={styles.cardBody}>
         <Text style={styles.cardTitle} numberOfLines={2}>
-          {displayFileName(attachment.file_name) || "Attachment"}
+          {displayFileName(attachment.file_name) || t("components.messageAttachmentCard.attachment")}
         </Text>
         {meta ? <Text style={styles.cardMeta}>{meta}</Text> : null}
       </View>
@@ -490,7 +491,7 @@ function AttachmentImage({
         onLongPress={onLongPress}
         delayLongPress={280}
         accessibilityRole="imagebutton"
-        accessibilityLabel={displayFileName(attachment.file_name) || "Photo"}
+        accessibilityLabel={displayFileName(attachment.file_name) || t("components.messageAttachmentCard.photo")}
       >
         {/* The placeholder stays underneath rather than being swapped out, so
             the bubble is the right size from the first frame and the photo
@@ -512,12 +513,12 @@ function AttachmentImage({
   const downloading = state.status === "downloading";
   const size = formatFileSize(attachment.size_bytes);
   const label = downloading
-    ? "Downloading…"
+    ? t("components.messageAttachmentCard.downloading")
     : state.status === "failed" || corrupt
-      ? "Couldn't load · Tap to retry"
+      ? t("components.messageAttachmentCard.couldnTLoadTapTo")
       : size
         ? `Photo · ${size}`
-        : "Tap to download";
+        : t("components.messageAttachmentCard.tapToDownload");
 
   return (
     <Pressable
@@ -533,7 +534,13 @@ function AttachmentImage({
       onLongPress={onLongPress}
       delayLongPress={280}
       accessibilityRole="button"
-      accessibilityLabel={downloading ? "Downloading photo" : `Download photo${size ? `, ${size}` : ""}`}
+      accessibilityLabel={
+        downloading
+          ? t("components.messageAttachmentCard.downloadingPhoto")
+          : size
+            ? t("components.messageAttachmentCard.downloadPhotoSize", { size })
+            : t("components.messageAttachmentCard.downloadPhoto")
+      }
     >
       <View style={styles.downloadPill}>
         {downloading ? (

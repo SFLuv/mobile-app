@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { TransactionDetailPayload } from "../utils/transactions";
+import { t } from "../i18n";
 
 type Props = {
   visible: boolean;
@@ -240,7 +241,7 @@ export function TransactionDetailsModal({
             <View style={styles.dragHandle} />
             <View style={styles.headerRow}>
               <View style={styles.headerCopy}>
-                <Text style={styles.title}>Transaction Details</Text>
+                <Text style={styles.title}>{t("components.transactionDetailsModal.transactionDetails")}</Text>
                 <View style={styles.badgeRow}>
                   <View style={styles.typeBadge}>
                     <Text style={styles.typeBadgeText}>{renderedDetails.typeLabel}</Text>
@@ -274,7 +275,7 @@ export function TransactionDetailsModal({
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>From</Text>
+              <Text style={styles.sectionLabel}>{t("components.transactionDetailsModal.from")}</Text>
               <Text style={styles.sectionTitle}>{renderedDetails.fromLabel}</Text>
               <View style={styles.codeRow}>
                 <Text style={styles.codeText}>{renderedDetails.transaction.from}</Text>
@@ -289,7 +290,7 @@ export function TransactionDetailsModal({
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>To</Text>
+              <Text style={styles.sectionLabel}>{t("components.transactionDetailsModal.to")}</Text>
               <Text style={styles.sectionTitle}>{renderedDetails.toLabel}</Text>
               <View style={styles.codeRow}>
                 <Text style={styles.codeText}>{renderedDetails.transaction.to}</Text>
@@ -305,7 +306,7 @@ export function TransactionDetailsModal({
 
             {renderedDetails.transaction.memo ? (
               <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Memo</Text>
+                <Text style={styles.sectionLabel}>{t("components.transactionDetailsModal.memo")}</Text>
                 <View style={styles.codeRow}>
                   <Text style={styles.memoText}>{renderedDetails.transaction.memo}</Text>
                   <Pressable style={styles.copyButton} onPress={() => void copyField(renderedDetails.transaction.memo || "", "memo")}>
@@ -320,7 +321,7 @@ export function TransactionDetailsModal({
             ) : null}
 
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>Transaction ID</Text>
+              <Text style={styles.sectionLabel}>{t("components.transactionDetailsModal.transactionId")}</Text>
               <View style={styles.codeRow}>
                 <Text style={styles.codeText}>{renderedDetails.transaction.hash}</Text>
                 <Pressable style={styles.copyButton} onPress={() => void copyField(renderedDetails.transaction.hash, "hash")}>
@@ -344,10 +345,10 @@ export function TransactionDetailsModal({
                     onClose();
                   }}
                   accessibilityRole="button"
-                  accessibilityLabel="Share this transaction"
+                  accessibilityLabel={t("components.transactionDetailsModal.shareThisTransaction")}
                 >
                   <Ionicons name="share-outline" size={16} color={palette.primaryStrong} />
-                  <Text style={styles.inlineExplorerButtonText}>Share</Text>
+                  <Text style={styles.inlineExplorerButtonText}>{t("components.transactionDetailsModal.share")}</Text>
                 </Pressable>
               ) : null}
               {explorerUrl(renderedDetails.transaction.hash, explorerURL) ? (
@@ -361,7 +362,7 @@ export function TransactionDetailsModal({
                   }}
                 >
                   <Ionicons name="open-outline" size={16} color={palette.primaryStrong} />
-                  <Text style={styles.inlineExplorerButtonText}>View on Explorer</Text>
+                  <Text style={styles.inlineExplorerButtonText}>{t("components.transactionDetailsModal.viewOnExplorer")}</Text>
                 </Pressable>
               ) : null}
             </View>

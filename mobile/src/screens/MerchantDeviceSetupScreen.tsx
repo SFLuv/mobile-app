@@ -6,6 +6,7 @@ import { MerchantPinDisplay, MerchantPinKeypad, MerchantPinSlider } from "../com
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import type { AppMerchantModeLocation } from "../types/app";
+import { t } from "../i18n";
 
 type Props = {
   /** Shops this device may be put to work at. Empty means none is approved yet. */
@@ -98,7 +99,7 @@ export function MerchantDeviceSetupScreen({
         // against on a first PIN. A typo at this point locks the owner out of
         // their own till until support resets it, which is why it is asked twice.
         if (pin !== pinConfirm) {
-          setError("Those PINs do not match.");
+          setError(t("merchantDeviceSetup.thosePinsDoNotMatch"));
           return;
         }
         await onCreatePin(pin);
@@ -107,7 +108,7 @@ export function MerchantDeviceSetupScreen({
       setPinConfirm("");
       setPinAccepted(true);
     } catch (submitError) {
-      setError((submitError as Error)?.message || "That PIN was not accepted.");
+      setError((submitError as Error)?.message || t("merchantDeviceSetup.thatPinWasNotAccepted"));
     }
   };
 
@@ -116,7 +117,7 @@ export function MerchantDeviceSetupScreen({
     try {
       await onSelectLocation(locationID);
     } catch (selectError) {
-      setError((selectError as Error)?.message || "Unable to sync this device to that location.");
+      setError((selectError as Error)?.message || t("merchantDeviceSetup.unableToSyncThisDevice"));
     }
   };
 
@@ -127,9 +128,9 @@ export function MerchantDeviceSetupScreen({
     return (
       <View style={styles.centre}>
         <ThemedActivityIndicator size="large" color={palette.primaryStrong} />
-        <Text style={styles.body}>Checking your locations...</Text>
+        <Text style={styles.body}>{t("merchantDeviceSetup.checkingYourLocations")}</Text>
         <Pressable onPress={onLogout}>
-          <Text style={styles.quietLink}>Sign out</Text>
+          <Text style={styles.quietLink}>{t("merchantDeviceSetup.signOut")}</Text>
         </Pressable>
       </View>
     );
@@ -145,18 +146,18 @@ export function MerchantDeviceSetupScreen({
             <Ionicons name="time-outline" size={26} color={palette.primaryStrong} />
           </View>
           <Text style={styles.title}>
-            {hasApprovedLocation ? "This location cannot take payments yet" : "Your location is being reviewed"}
+            {hasApprovedLocation ? "This location cannot take payments yet" : t("merchantDeviceSetup.yourLocationIsBeingReviewed")}
           </Text>
           <Text style={styles.body}>
             {hasApprovedLocation
-              ? "Your location is approved, but it has no payment wallet, so there is nowhere for a customer's SFLuv to land. SFLuv support has to set that up before this device can be a till."
-              : "This device becomes a till as soon as one of your locations is approved and has somewhere for payments to land. Nothing to do here until then."}
+              ? t("merchantDeviceSetup.yourLocationIsApprovedBut")
+              : t("merchantDeviceSetup.thisDeviceBecomesATill")}
           </Text>
           <Pressable style={styles.primaryButton} onPress={() => void onRefresh()}>
-            <Text style={styles.primaryButtonText}>Check again</Text>
+            <Text style={styles.primaryButtonText}>{t("merchantDeviceSetup.checkAgain")}</Text>
           </Pressable>
           <Pressable onPress={onLogout}>
-            <Text style={styles.quietLink}>Sign out</Text>
+            <Text style={styles.quietLink}>{t("merchantDeviceSetup.signOut")}</Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -170,11 +171,11 @@ export function MerchantDeviceSetupScreen({
           <View style={styles.iconWrap}>
             <Ionicons name="lock-closed-outline" size={26} color={palette.primaryStrong} />
           </View>
-          <Text style={styles.title}>{passcodeSet ? "Enter your Merchant PIN" : "Choose a Merchant PIN"}</Text>
+          <Text style={styles.title}>{passcodeSet ? "Enter your Merchant PIN" : t("merchantDeviceSetup.chooseAMerchantPin")}</Text>
           <Text style={styles.body}>
             {passcodeSet
-              ? "The 6 digit PIN for this business. It is asked for again whenever this device moves to another location."
-              : "6 digits, shared by everyone who sets up a device for this business. Keep it away from the counter."}
+              ? t("merchantDeviceSetup.the6DigitPinFor")
+              : t("merchantDeviceSetup.6DigitsSharedByEveryone")}
           </Text>
 
           {/* One accessibility element on purpose — it is a single control that
@@ -184,10 +185,10 @@ export function MerchantDeviceSetupScreen({
           <Pressable
             onPress={() => setField("pin")}
             accessibilityRole="button"
-            accessibilityLabel={passcodeSet ? "PIN" : "New PIN"}
+            accessibilityLabel={passcodeSet ? "PIN" : t("merchantDeviceSetup.newPin")}
             accessibilityState={{ selected: field === "pin" }}
           >
-            <Text style={styles.fieldLabel}>{passcodeSet ? "PIN" : "New PIN"}</Text>
+            <Text style={styles.fieldLabel}>{passcodeSet ? "PIN" : t("merchantDeviceSetup.newPin")}</Text>
             <View style={field === "pin" ? styles.fieldActive : undefined}>
               <MerchantPinDisplay
                 value={pin}
@@ -201,15 +202,15 @@ export function MerchantDeviceSetupScreen({
             <Pressable
               onPress={() => setField("confirm")}
               accessibilityRole="button"
-              accessibilityLabel="Confirm PIN"
+              accessibilityLabel={t("merchantDeviceSetup.confirmPin")}
               accessibilityState={{ selected: field === "confirm" }}
             >
-              <Text style={styles.fieldLabel}>Confirm PIN</Text>
+              <Text style={styles.fieldLabel}>{t("merchantDeviceSetup.confirmPin")}</Text>
               <View style={field === "confirm" ? styles.fieldActive : undefined}>
                 <MerchantPinDisplay
                   value={pinConfirm}
                   visible={pinVisible}
-                  placeholder="Enter it again"
+                  placeholder={t("merchantDeviceSetup.enterItAgain")}
                   onToggleVisible={() => setPinVisible((current) => !current)}
                 />
               </View>
@@ -221,14 +222,14 @@ export function MerchantDeviceSetupScreen({
           <MerchantPinSlider
             disabled={busy || !pinValid || (!passcodeSet && !confirmValid)}
             loading={Boolean(busy)}
-            label={passcodeSet ? "Slide to unlock" : "Slide to save PIN"}
-            loadingLabel={passcodeSet ? "Checking" : "Saving"}
+            label={passcodeSet ? "Slide to unlock" : t("merchantDeviceSetup.slideToSavePin")}
+            loadingLabel={passcodeSet ? "Checking" : t("merchantDeviceSetup.saving")}
             onComplete={() => {
               void submitPin();
             }}
           />
           <Pressable onPress={onLogout}>
-            <Text style={styles.quietLink}>Sign out</Text>
+            <Text style={styles.quietLink}>{t("merchantDeviceSetup.signOut")}</Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -254,7 +255,7 @@ export function MerchantDeviceSetupScreen({
               onPress={() => void selectLocation(location.id)}
             >
               <View style={styles.optionCopy}>
-                <Text style={styles.optionTitle}>{location.name || "Merchant location"}</Text>
+                <Text style={styles.optionTitle}>{location.name || t("merchantDeviceSetup.merchantLocation")}</Text>
                 {location.street ? <Text style={styles.optionMeta}>{location.street}</Text> : null}
               </View>
               <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
