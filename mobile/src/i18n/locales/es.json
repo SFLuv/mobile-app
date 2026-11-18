@@ -331,7 +331,8 @@
     "sendTip": "Enviar propina",
     "tryAgain": "Intentar de nuevo",
     "thisMerchant": "este comercio",
-    "custom": "Otro"
+    "custom": "Otro",
+    "balance": "Saldo: {{amount}} {{symbol}}"
   },
   "location": {
     "feetAway": "a {{count}} pies",
@@ -524,7 +525,8 @@
     "saving": "Guardando...",
     "revokeWorkflow": "¿Anular el flujo de trabajo?",
     "thisRecurringWorkflowClaim": "esta asignación recurrente de flujo de trabajo",
-    "hideDetails": "Ocultar detalles"
+    "hideDetails": "Ocultar detalles",
+    "stepTitle": "Paso {{step}}: {{title}}"
   },
   "bulletin": {
     "couldnTLoadTheBulletin": "No se pudo cargar el Tablón.",
@@ -1208,7 +1210,11 @@
       "pastEvent": "Evento pasado",
       "thisEventHasFinished": "Este evento ya terminó",
       "onThisDevice": "En este dispositivo",
-      "onThisDevice2": ", en este dispositivo"
+      "onThisDevice2": ", en este dispositivo",
+      "merchantLabel": "Comercio: {{name}}",
+      "fileLabel": "Archivo: {{name}}",
+      "attachmentName": "adjunto",
+      "sizeSuffix": ", {{size}}"
     },
     "paymentReceivedOverlay": {
       "paymentReceived": "Pago recibido"
@@ -1510,7 +1516,10 @@
       "memos_many": "{{count}} notas",
       "includes": " Esto incluye {{list}}.",
       "listSeparator": ", "
-    }
+    },
+    "pushActiveForWallets_one": "Las notificaciones están activas para {{count}} billetera en este dispositivo.",
+    "pushActiveForWallets_other": "Las notificaciones están activas para {{count}} billeteras en este dispositivo.",
+    "pushActiveForWallets_many": "Las notificaciones están activas para {{count}} billeteras en este dispositivo."
   },
   "walletHome": {},
   "utils": {
@@ -1564,5 +1573,20 @@
   "direction": {
     "reopenTitle": "Vuelva a abrir SFLuv",
     "reopenBody": "Cierre SFLuv y vuelva a abrirla para terminar de cambiar el diseño."
+  },
+  "notificationReplies": {
+    "notSentTo": "Su respuesta a {{name}} no se envió",
+    "notSent": "Su respuesta no se envió"
+  },
+  "ago": {
+    "minutes_one": "{{count}} min",
+    "minutes_many": "{{count}} min",
+    "minutes_other": "{{count}} min",
+    "hours_one": "{{count}} h",
+    "hours_many": "{{count}} h",
+    "hours_other": "{{count}} h",
+    "days_one": "{{count}} d",
+    "days_many": "{{count}} d",
+    "days_other": "{{count}} d"
   }
 }

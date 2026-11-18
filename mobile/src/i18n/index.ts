@@ -190,4 +190,9 @@ export function useAppLanguage(): string {
   return language;
 }
 
+/** The app's language as a locale for dates and numbers ("es", "zh-Hant", ...). */
+export function appLocale(): string {
+  return i18next.language || "en";
+}
+
 export default i18next;

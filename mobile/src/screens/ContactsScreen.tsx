@@ -72,7 +72,8 @@ type Props = {
  */
 type ContactMode = "contacts" | "profile";
 
-const CONTACT_TABS: Array<{ value: ContactMode; label: string }> = [
+/** Built per call so labels follow the current language. */
+const CONTACT_TABS = (): Array<{ value: ContactMode; label: string }> => [
   { value: "contacts", label: t("contacts.myContacts") },
   { value: "profile", label: t("contacts.myProfile") },
 ];
@@ -405,7 +406,7 @@ export function ContactsScreen({
         <View style={styles.tabHeaderRow}>
           <SegmentedTabs
             style={styles.tabHeaderFill}
-            segments={CONTACT_TABS}
+            segments={CONTACT_TABS()}
             value={contactMode}
             onChange={(next) => {
               setContactMode(next);

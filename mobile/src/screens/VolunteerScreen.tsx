@@ -40,6 +40,7 @@ import { triggerClickHaptic } from "../utils/haptics";
 import { ICON_FACE, ICON_TEXT_COLOR, ICON_TEXT_NUDGE_EM, merchantInitials } from "../utils/merchantIcon";
 import { t } from "../i18n";
 import { dirIcon } from "../i18n/direction";
+import { appLocale } from "../i18n";
 
 /**
  * SFLuv's own mark, bundled rather than fetched.
@@ -77,7 +78,8 @@ type FeedOption = {
   label: string;
 };
 
-const FEED_OPTIONS: FeedOption[] = [
+/** Built per call so labels follow the current language. */
+const FEED_OPTIONS = (): FeedOption[] => [
   { value: "upcoming", label: t("volunteer.upcoming") },
   { value: "past", label: t("volunteer.past") },
   { value: "mine", label: t("volunteer.myEvents") },
@@ -107,7 +109,7 @@ function parseDate(value?: string | null): Date | null {
  * different zone sees the hour their phone would show them.
  */
 function formatLocal(date: Date, options: Intl.DateTimeFormatOptions): string {
-  return date.toLocaleString("en-US", options);
+  return date.toLocaleString(appLocale(), options);
 }
 
 function formatEventDay(event: AppVolunteerEvent): string {
@@ -927,7 +929,7 @@ export function VolunteerScreen({
         <View style={styles.filterHeaderRow}>
           <SegmentedTabs
             style={styles.segmentRowFill}
-            segments={FEED_OPTIONS}
+            segments={FEED_OPTIONS()}
             value={feed}
             onChange={setFeed}
             hapticsEnabled={hapticsEnabled}

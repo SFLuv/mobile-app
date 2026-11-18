@@ -15,6 +15,7 @@ import {
 } from "../utils/transactions";
 import { t } from "../i18n";
 import { dirIcon } from "../i18n/direction";
+import { appLocale } from "../i18n";
 
 type Props = {
   transactions: AppTransaction[];
@@ -48,7 +49,7 @@ type Props = {
 };
 
 function formatDate(timestamp: number): string {
-  return new Date(timestamp * 1000).toLocaleString("en-US", {
+  return new Date(timestamp * 1000).toLocaleString(appLocale(), {
     month: "short",
     day: "numeric",
     year: "numeric",

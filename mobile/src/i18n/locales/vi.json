@@ -327,7 +327,8 @@
     "sendTip": "Gửi tip",
     "tryAgain": "Thử lại",
     "thisMerchant": "cửa hàng này",
-    "custom": "Tùy chọn"
+    "custom": "Tùy chọn",
+    "balance": "Số dư: {{amount}} {{symbol}}"
   },
   "location": {
     "feetAway": "Cách {{count}} ft",
@@ -512,7 +513,8 @@
     "saving": "Đang lưu...",
     "revokeWorkflow": "Thu hồi công việc?",
     "thisRecurringWorkflowClaim": "công việc định kỳ đã nhận này",
-    "hideDetails": "Ẩn chi tiết"
+    "hideDetails": "Ẩn chi tiết",
+    "stepTitle": "Bước {{step}}: {{title}}"
   },
   "bulletin": {
     "couldnTLoadTheBulletin": "Không thể tải Bảng tin.",
@@ -1192,7 +1194,11 @@
       "pastEvent": "Sự kiện đã qua",
       "thisEventHasFinished": "Sự kiện này đã kết thúc",
       "onThisDevice": "Trên thiết bị này",
-      "onThisDevice2": ", trên thiết bị này"
+      "onThisDevice2": ", trên thiết bị này",
+      "merchantLabel": "Cửa hàng: {{name}}",
+      "fileLabel": "Tệp: {{name}}",
+      "attachmentName": "tệp đính kèm",
+      "sizeSuffix": ", {{size}}"
     },
     "paymentReceivedOverlay": {
       "paymentReceived": "Đã nhận thanh toán"
@@ -1478,7 +1484,8 @@
       "memos_other": "{{count}} ghi chú",
       "includes": " Bao gồm {{list}}.",
       "listSeparator": ", "
-    }
+    },
+    "pushActiveForWallets_other": "Thông báo đẩy đang bật cho {{count}} ví trên thiết bị này."
   },
   "walletHome": {},
   "utils": {
@@ -1532,5 +1539,14 @@
   "direction": {
     "reopenTitle": "Mở lại SFLuv",
     "reopenBody": "Hãy đóng SFLuv rồi mở lại để hoàn tất việc đổi bố cục."
+  },
+  "notificationReplies": {
+    "notSentTo": "Tin trả lời của bạn gửi {{name}} chưa được gửi đi",
+    "notSent": "Tin trả lời của bạn chưa được gửi đi"
+  },
+  "ago": {
+    "minutes_other": "{{count}} phút",
+    "hours_other": "{{count}} giờ",
+    "days_other": "{{count}} ngày"
   }
 }

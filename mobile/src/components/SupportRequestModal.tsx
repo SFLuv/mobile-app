@@ -8,6 +8,7 @@ import { Palette, radii, spacing, useAppTheme } from "../theme";
 import type { AppAlertAction } from "../types/notifications";
 import { categoryLabel, type SupportRequestDetails } from "../utils/supportRequests";
 import { t } from "../i18n";
+import { appLocale } from "../i18n";
 
 type Props = {
   visible: boolean;
@@ -24,7 +25,7 @@ function formatReceived(at: number): string {
   if (!at) {
     return "";
   }
-  return new Date(at).toLocaleString("en-US", {
+  return new Date(at).toLocaleString(appLocale(), {
     month: "short",
     day: "numeric",
     year: "numeric",

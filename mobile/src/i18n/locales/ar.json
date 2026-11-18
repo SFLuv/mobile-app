@@ -337,7 +337,8 @@
     "sendTip": "إرسال إكرامية",
     "tryAgain": "حاول مرة أخرى",
     "thisMerchant": "هذا التاجر",
-    "custom": "مخصص"
+    "custom": "مخصص",
+    "balance": "الرصيد: {{amount}} {{symbol}}"
   },
   "location": {
     "feetAway": "على بُعد {{count}} قدم",
@@ -542,7 +543,8 @@
     "saving": "جارٍ الحفظ...",
     "revokeWorkflow": "إلغاء مسار العمل؟",
     "thisRecurringWorkflowClaim": "حجز مسار العمل المتكرر هذا",
-    "hideDetails": "إخفاء التفاصيل"
+    "hideDetails": "إخفاء التفاصيل",
+    "stepTitle": "الخطوة {{step}}: {{title}}"
   },
   "bulletin": {
     "couldnTLoadTheBulletin": "تعذّر تحميل لوحة الإعلانات.",
@@ -1232,7 +1234,11 @@
       "pastEvent": "فعالية سابقة",
       "thisEventHasFinished": "انتهت هذه الفعالية",
       "onThisDevice": "على هذا الجهاز",
-      "onThisDevice2": "، على هذا الجهاز"
+      "onThisDevice2": "، على هذا الجهاز",
+      "merchantLabel": "التاجر: {{name}}",
+      "fileLabel": "الملف: {{name}}",
+      "attachmentName": "مرفق",
+      "sizeSuffix": "، {{size}}"
     },
     "paymentReceivedOverlay": {
       "paymentReceived": "تم استلام الدفعة"
@@ -1558,7 +1564,13 @@
       "memos_other": "{{count}} ملاحظة",
       "includes": " يشمل ذلك {{list}}.",
       "listSeparator": "، "
-    }
+    },
+    "pushActiveForWallets_zero": "الإشعارات غير مفعّلة لأي محفظة على هذا الجهاز.",
+    "pushActiveForWallets_one": "الإشعارات مفعّلة لمحفظة واحدة على هذا الجهاز.",
+    "pushActiveForWallets_two": "الإشعارات مفعّلة لمحفظتين على هذا الجهاز.",
+    "pushActiveForWallets_few": "الإشعارات مفعّلة لـ {{count}} محافظ على هذا الجهاز.",
+    "pushActiveForWallets_many": "الإشعارات مفعّلة لـ {{count}} محفظة على هذا الجهاز.",
+    "pushActiveForWallets_other": "الإشعارات مفعّلة لـ {{count}} محفظة على هذا الجهاز."
   },
   "walletHome": {},
   "utils": {
@@ -1612,5 +1624,29 @@
   "direction": {
     "reopenTitle": "أعد فتح SFLuv",
     "reopenBody": "أغلق تطبيق SFLuv ثم افتحه مرة أخرى لإكمال تغيير اتجاه العرض."
+  },
+  "notificationReplies": {
+    "notSentTo": "لم يُرسَل ردك إلى {{name}}",
+    "notSent": "لم يُرسَل ردك"
+  },
+  "ago": {
+    "minutes_zero": "{{count}} د",
+    "minutes_one": "{{count}} د",
+    "minutes_two": "{{count}} د",
+    "minutes_few": "{{count}} د",
+    "minutes_many": "{{count}} د",
+    "minutes_other": "{{count}} د",
+    "hours_zero": "{{count}} س",
+    "hours_one": "{{count}} س",
+    "hours_two": "{{count}} س",
+    "hours_few": "{{count}} س",
+    "hours_many": "{{count}} س",
+    "hours_other": "{{count}} س",
+    "days_zero": "{{count}} ي",
+    "days_one": "{{count}} ي",
+    "days_two": "{{count}} ي",
+    "days_few": "{{count}} ي",
+    "days_many": "{{count}} ي",
+    "days_other": "{{count}} ي"
   }
 }

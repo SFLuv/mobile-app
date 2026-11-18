@@ -327,7 +327,8 @@
     "sendTip": "送出小費",
     "tryAgain": "再試一次",
     "thisMerchant": "這間商戶",
-    "custom": "自訂"
+    "custom": "自訂",
+    "balance": "餘額：{{amount}} {{symbol}}"
   },
   "location": {
     "feetAway": "距離 {{count}} 呎",
@@ -512,7 +513,8 @@
     "saving": "儲存中...",
     "revokeWorkflow": "撤銷工作流程？",
     "thisRecurringWorkflowClaim": "這項已認領的定期工作流程",
-    "hideDetails": "隱藏詳情"
+    "hideDetails": "隱藏詳情",
+    "stepTitle": "第 {{step}} 步：{{title}}"
   },
   "bulletin": {
     "couldnTLoadTheBulletin": "無法載入告示板。",
@@ -1192,7 +1194,11 @@
       "pastEvent": "過往活動",
       "thisEventHasFinished": "這個活動已結束",
       "onThisDevice": "在這部裝置上",
-      "onThisDevice2": "，在這部裝置上"
+      "onThisDevice2": "，在這部裝置上",
+      "merchantLabel": "商戶：{{name}}",
+      "fileLabel": "檔案：{{name}}",
+      "attachmentName": "附件",
+      "sizeSuffix": "，{{size}}"
     },
     "paymentReceivedOverlay": {
       "paymentReceived": "已收到付款"
@@ -1478,7 +1484,8 @@
       "memos_other": "{{count}} 則備註",
       "includes": "當中包括{{list}}。",
       "listSeparator": "、"
-    }
+    },
+    "pushActiveForWallets_other": "此裝置已為 {{count}} 個錢包啟用推送通知。"
   },
   "walletHome": {},
   "utils": {
@@ -1532,5 +1539,14 @@
   "direction": {
     "reopenTitle": "請重新開啟 SFLuv",
     "reopenBody": "請關閉 SFLuv 再重新開啟，以完成版面切換。"
+  },
+  "notificationReplies": {
+    "notSentTo": "您給 {{name}} 的回覆未能傳送",
+    "notSent": "您的回覆未能傳送"
+  },
+  "ago": {
+    "minutes_other": "{{count}}分鐘",
+    "hours_other": "{{count}}小時",
+    "days_other": "{{count}}天"
   }
 }

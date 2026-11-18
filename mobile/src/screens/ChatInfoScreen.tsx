@@ -35,6 +35,7 @@ import {
 } from "../types/bulletin";
 import { t } from "../i18n";
 import { dirIcon } from "../i18n/direction";
+import { appLocale } from "../i18n";
 
 /**
  * What the info button opens: everything about one conversation.
@@ -68,7 +69,8 @@ import { dirIcon } from "../i18n/direction";
 
 type Segment = "about" | "files";
 
-const SEGMENTS: Array<{ value: Segment; label: string }> = [
+/** Built per call so labels follow the current language. */
+const SEGMENTS = (): Array<{ value: Segment; label: string }> => [
   { value: "about", label: t("chatInfo.about") },
   { value: "files", label: t("chatInfo.files") },
 ];
@@ -226,7 +228,7 @@ export function ChatInfoScreen({
 
       <View style={styles.segments}>
         <SegmentedTabs
-          segments={SEGMENTS}
+          segments={SEGMENTS()}
           value={segment}
           onChange={setSegment}
           hapticsEnabled={hapticsEnabled}
@@ -666,7 +668,7 @@ function ConversationFiles({
 
 function formatDate(seconds: number): string {
   if (!seconds) return "";
-  return new Date(seconds * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return new Date(seconds * 1000).toLocaleDateString(appLocale(), { month: "short", day: "numeric" });
 }
 
 function createStyles(palette: Palette) {

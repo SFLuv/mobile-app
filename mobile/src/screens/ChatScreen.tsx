@@ -70,6 +70,7 @@ import {
 } from "../types/bulletin";
 import { t } from "../i18n";
 import { dirIcon } from "../i18n/direction";
+import { appLocale } from "../i18n";
 
 /**
  * One conversation, as a screen.
@@ -2457,7 +2458,7 @@ function sessionSeparator(previous: ChatMessage | undefined, current: ChatMessag
 
 /** "Today 14:32", "Yesterday 09:10", "Mon 3 Mar 18:45". */
 function formatSessionStamp(at: Date): string {
-  const time = at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const time = at.toLocaleTimeString(appLocale(), { hour: "numeric", minute: "2-digit" });
   const now = new Date();
   const sameDay = at.toDateString() === now.toDateString();
   if (sameDay) {
@@ -2469,7 +2470,7 @@ function formatSessionStamp(at: Date): string {
     return `Yesterday ${time}`;
   }
   const sameYear = at.getFullYear() === now.getFullYear();
-  const day = at.toLocaleDateString(undefined, {
+  const day = at.toLocaleDateString(appLocale(), {
     weekday: "short",
     day: "numeric",
     month: "short",
@@ -2575,7 +2576,7 @@ function seedThread(conversationId: number, expectMessageId?: number) {
 }
 
 function formatMessageStamp(at: string): string {
-  return new Date(at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return new Date(at).toLocaleTimeString(appLocale(), { hour: "numeric", minute: "2-digit" });
 }
 
 

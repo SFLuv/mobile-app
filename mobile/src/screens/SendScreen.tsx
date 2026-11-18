@@ -183,12 +183,15 @@ function formatTokenAmount(value: ethers.BigNumberish, tokenDecimals: number, ma
 function formatBalanceText(rawBalance: string, tokenDecimals: number, tokenSymbol: string): string {
   const normalized = rawBalance.trim();
   if (!normalized || normalized === "...") {
-    return `Balance: ... ${tokenSymbol}`;
+    return t("send.balance", { amount: "...", symbol: tokenSymbol });
   }
   try {
-    return `Balance: ${sanitizeTokenInput(formatTokenAmount(ethers.utils.parseUnits(normalized, tokenDecimals), tokenDecimals, 2), tokenDecimals) || "0"} ${tokenSymbol}`;
+    return t("send.balance", {
+      amount: sanitizeTokenInput(formatTokenAmount(ethers.utils.parseUnits(normalized, tokenDecimals), tokenDecimals, 2), tokenDecimals) || "0",
+      symbol: tokenSymbol,
+    });
   } catch {
-    return `Balance: ${normalized} ${tokenSymbol}`;
+    return t("send.balance", { amount: normalized, symbol: tokenSymbol });
   }
 }
 
@@ -1969,7 +1972,9 @@ function createStyles(
       minHeight: focusedNoteGap,
     },
     keypadRow: {
+      // Number pads read 1-2-3 left to right in every language, Arabic too.
       flexDirection: "row",
+      direction: "ltr",
       gap: keypadGap,
     },
     keypadKey: {

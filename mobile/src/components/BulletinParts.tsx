@@ -45,9 +45,9 @@ export function formatPrice(post: Pick<BulletinPost, "category" | "price_sfluv">
 export function formatAgo(iso: string): string {
   const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
   if (seconds < 60) return t("components.bulletinParts.justNow");
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
-  return `${Math.floor(seconds / 86400)}d`;
+  if (seconds < 3600) return t("ago.minutes", { count: Math.floor(seconds / 60) });
+  if (seconds < 86400) return t("ago.hours", { count: Math.floor(seconds / 3600) });
+  return t("ago.days", { count: Math.floor(seconds / 86400) });
 }
 
 export function formatDistance(miles?: number | null): string {

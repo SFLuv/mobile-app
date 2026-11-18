@@ -10,6 +10,7 @@ import type { ChatTransactionRef } from "../utils/transactions";
 import type { AttachmentKind, MessageAttachment } from "../types/bulletin";
 import { displayFileName } from "../utils/attachmentFiles";
 import { t } from "../i18n";
+import { appLocale } from "../i18n";
 
 /**
  * One card under a message: a photo, a file, a link preview, or a reference to
@@ -257,7 +258,7 @@ export function MessageAttachmentCard({
           onLongPress={onLongPress}
           delayLongPress={280}
           accessibilityRole="button"
-          accessibilityLabel={`Merchant: ${attachment.location_name ?? "unavailable"}`}
+          accessibilityLabel={t("components.messageAttachmentCard.merchantLabel", { name: attachment.location_name ?? t("components.messageAttachmentCard.unavailable") })}
         >
           <View style={styles.referenceBanner}>
             <Ionicons name="storefront" size={15} color={palette.primaryStrong} />
@@ -418,9 +419,13 @@ function AttachmentFileCard({
       onLongPress={onLongPress}
       delayLongPress={280}
       accessibilityRole="button"
-      accessibilityLabel={`File: ${displayFileName(attachment.file_name) || "attachment"}${size ? `, ${size}` : ""}${
-        onDevice ? t("components.messageAttachmentCard.onThisDevice2") : t("components.messageAttachmentCard.notDownloaded")
-      }`}
+      accessibilityLabel={
+        t("components.messageAttachmentCard.fileLabel", {
+          name: displayFileName(attachment.file_name) || t("components.messageAttachmentCard.attachmentName"),
+        }) +
+        (size ? t("components.messageAttachmentCard.sizeSuffix", { size }) : "") +
+        (onDevice ? t("components.messageAttachmentCard.onThisDevice2") : t("components.messageAttachmentCard.notDownloaded"))
+      }
     >
       <View style={styles.iconWrap}>
         <Ionicons name={fileIcon(attachment.content_type)} size={20} color={palette.primaryStrong} />
@@ -561,7 +566,7 @@ function AttachmentImage({
 
 /** The date a shared transaction happened, for the record card's subtitle. */
 function formatTxDate(seconds: number): string {
-  return new Date(seconds * 1000).toLocaleDateString(undefined, {
+  return new Date(seconds * 1000).toLocaleDateString(appLocale(), {
     day: "numeric",
     month: "short",
     year: new Date(seconds * 1000).getFullYear() === new Date().getFullYear() ? undefined : "numeric",
@@ -578,12 +583,12 @@ function formatBaseAmount(base?: string): string {
 /** "Sat 2 Nov · 9:00 – 12:00", or just the day when there is no end. */
 function formatEventWhen(startSeconds: number, endSeconds?: number): string {
   const start = new Date(startSeconds * 1000);
-  const day = start.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
-  const from = start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const day = start.toLocaleDateString(appLocale(), { weekday: "short", day: "numeric", month: "short" });
+  const from = start.toLocaleTimeString(appLocale(), { hour: "numeric", minute: "2-digit" });
   if (!endSeconds) {
     return `${day} · ${from}`;
   }
-  const to = new Date(endSeconds * 1000).toLocaleTimeString(undefined, {
+  const to = new Date(endSeconds * 1000).toLocaleTimeString(appLocale(), {
     hour: "numeric",
     minute: "2-digit",
   });

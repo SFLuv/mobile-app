@@ -43,6 +43,7 @@ import {
 } from "../types/bulletin";
 import { t } from "../i18n";
 import { dirIcon } from "../i18n/direction";
+import { appLocale } from "../i18n";
 
 const OPTIONAL_IMAGE_PICKER: any = (() => {
   try {
@@ -59,7 +60,8 @@ const RADIUS_OPTIONS = [0.5, 1, 2, 5];
 
 type Filter = BulletinCategory | "all" | "mine";
 
-const FILTERS: Array<{ value: Filter; label: string }> = [
+/** Built per call so labels follow the current language. */
+const FILTERS = (): Array<{ value: Filter; label: string }> => [
   { value: "all", label: t("bulletin.all") },
   { value: "free", label: t("bulletin.free") },
   { value: "for_sale", label: t("bulletin.forSale") },
@@ -272,7 +274,7 @@ export function BulletinScreen({
         </Pressable>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-        {FILTERS.map((f) => (
+        {FILTERS().map((f) => (
           <Pressable
             key={f.value}
             style={[styles.chip, filter === f.value && styles.chipActive]}
@@ -646,7 +648,7 @@ function PostDetailModal({
 
 function formatEventTime(unixSeconds: number): string {
   const date = new Date(unixSeconds * 1000);
-  return date.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return date.toLocaleString(appLocale(), { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 // ── Compose (three steps) ─────────────────────────────────────────────────────
@@ -1055,7 +1057,7 @@ function ComposeModal({
                     }}
                   >
                     <Text style={styles.listRowTitle}>{item.title}</Text>
-                    <Text style={styles.listRowMeta}>{new Date(item.startAt).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</Text>
+                    <Text style={styles.listRowMeta}>{new Date(item.startAt).toLocaleString(appLocale(), { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</Text>
                   </Pressable>
                 )}
               />

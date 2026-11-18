@@ -48,7 +48,8 @@ import { t } from "../i18n";
 
 type Segment = "chats" | "contacts";
 
-const SEGMENTS: Array<{ value: Segment; label: string }> = [
+/** Built per call so labels follow the current language. */
+const SEGMENTS = (): Array<{ value: Segment; label: string }> => [
   { value: "chats", label: t("messages.chats") },
   { value: "contacts", label: t("messages.contacts") },
 ];
@@ -519,7 +520,7 @@ export function MessagesScreen({
     <View ref={screenRef} style={styles.screen} onLayout={onLayout}>
       <View style={styles.top}>
         <SegmentedTabs
-          segments={SEGMENTS}
+          segments={SEGMENTS()}
           value={segment}
           onChange={setSegment}
           hapticsEnabled={hapticsEnabled}

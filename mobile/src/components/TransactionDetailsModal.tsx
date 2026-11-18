@@ -17,6 +17,7 @@ import { Text } from "./AppText";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { TransactionDetailPayload } from "../utils/transactions";
 import { t } from "../i18n";
+import { appLocale } from "../i18n";
 
 type Props = {
   visible: boolean;
@@ -40,7 +41,7 @@ type Props = {
 };
 
 function formatDate(timestamp: number): string {
-  return new Date(timestamp * 1000).toLocaleString("en-US", {
+  return new Date(timestamp * 1000).toLocaleString(appLocale(), {
     year: "numeric",
     month: "long",
     day: "numeric",

@@ -189,6 +189,7 @@ import {
   useAppTheme,
   chromeLabel,
 } from "./src/theme";
+import { appLocale } from "./src/i18n";
 
 /*
  * At module scope, before anything renders, so a crash during startup is still
@@ -1230,7 +1231,7 @@ function formatDeletionDateLabel(value?: string | null): string | null {
     return null;
   }
 
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(appLocale(), {
     month: "long",
     day: "numeric",
     year: "numeric",
@@ -1593,6 +1594,10 @@ function BottomDock({
       <View pointerEvents="none" style={styles.bottomDockGlassLayer} />
       <View pointerEvents="none" style={styles.bottomDockGlassSheen} />
       {measured ? (
+        // Slot positions are measured from the left edge in every language, so
+        // the bubble lives in a left-to-right layer; otherwise in Arabic its
+        // left: 0 becomes right: 0 and it slides off the end of the bar.
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { direction: "ltr" }]}>
         <Animated.View
           pointerEvents="none"
           style={[
@@ -1607,6 +1612,7 @@ function BottomDock({
             },
           ]}
         />
+        </View>
       ) : null}
 
       {tabs.map((tab, index) => {
@@ -5736,7 +5742,7 @@ function WalletAppShellContent({
           token: registration.token,
           message:
             subscribedCount > 0
-              ? `Push notifications are active for ${subscribedCount} wallet${subscribedCount === 1 ? "" : "s"} on this device.`
+              ? t("app.pushActiveForWallets", { count: subscribedCount })
               : t("app.thisDeviceHasPermissionTo"),
           lastSyncedAt: Date.now(),
         }));

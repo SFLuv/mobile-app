@@ -66,7 +66,8 @@ type Props = {
 
 type ImproverSection = "workflows" | "credentials";
 
-const IMPROVER_SECTION_TABS: Array<{ value: ImproverSection; label: string }> = [
+/** Built per call so labels follow the current language. */
+const IMPROVER_SECTION_TABS = (): Array<{ value: ImproverSection; label: string }> => [
   { value: "workflows", label: t("improver.workflows") },
   { value: "credentials", label: t("improver.credentials") },
 ];
@@ -2514,7 +2515,7 @@ export function ImproverScreen({
             <Text style={styles.meta}>
               {group.primaryStepOrder === null
                 ? group.primaryStepTitle || t("improver.assignedStep")
-                : `Step ${group.primaryStepOrder}: ${group.primaryStepTitle}`}
+                : t("improver.stepTitle", { step: group.primaryStepOrder, title: group.primaryStepTitle })}
             </Text>
             <Text style={styles.meta}>Next: {formatWorkflowDate(focusWorkflow.startAt)}</Text>
           </View>
@@ -3336,7 +3337,7 @@ export function ImproverScreen({
         {renderBannerStack()}
 
         <SegmentedTabs
-          segments={IMPROVER_SECTION_TABS}
+          segments={IMPROVER_SECTION_TABS()}
           value={section}
           onChange={setSection}
           hapticsEnabled={hapticsEnabled}
@@ -3442,7 +3443,7 @@ export function ImproverScreen({
                       <Text style={styles.absenceGroupMeta} numberOfLines={1}>
                         {group.primaryStepOrder === null
                           ? group.primaryStepTitle || t("improver.assignedStep")
-                          : `Step ${group.primaryStepOrder}: ${group.primaryStepTitle}`}
+                          : t("improver.stepTitle", { step: group.primaryStepOrder, title: group.primaryStepTitle })}
                       </Text>
                     </View>
                   ))}

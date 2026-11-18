@@ -212,7 +212,9 @@ function createStyles(palette: Palette) {
       gap: spacing.xs,
     },
     keypadRow: {
+      // Number pads read 1-2-3 left to right in every language.
       flexDirection: "row",
+      direction: "ltr",
       gap: spacing.xs,
     },
     keypadKey: {

@@ -329,7 +329,8 @@
     "sendTip": "Send tip",
     "tryAgain": "Try again",
     "thisMerchant": "this merchant",
-    "custom": "Custom"
+    "custom": "Custom",
+    "balance": "Balance: {{amount}} {{symbol}}"
   },
   "location": {
     "feetAway": "{{count}} ft away",
@@ -518,7 +519,8 @@
     "saving": "Saving...",
     "revokeWorkflow": "Revoke workflow?",
     "thisRecurringWorkflowClaim": "this recurring workflow claim",
-    "hideDetails": "Hide details"
+    "hideDetails": "Hide details",
+    "stepTitle": "Step {{step}}: {{title}}"
   },
   "bulletin": {
     "couldnTLoadTheBulletin": "Couldn't load the Bulletin.",
@@ -1200,7 +1202,11 @@
       "pastEvent": "Past event",
       "thisEventHasFinished": "This event has finished",
       "onThisDevice": "On this device",
-      "onThisDevice2": ", on this device"
+      "onThisDevice2": ", on this device",
+      "merchantLabel": "Merchant: {{name}}",
+      "fileLabel": "File: {{name}}",
+      "attachmentName": "attachment",
+      "sizeSuffix": ", {{size}}"
     },
     "paymentReceivedOverlay": {
       "paymentReceived": "Payment received"
@@ -1494,7 +1500,9 @@
       "memos_other": "{{count}} memos",
       "includes": " This includes {{list}}.",
       "listSeparator": ", "
-    }
+    },
+    "pushActiveForWallets_one": "Push notifications are active for {{count}} wallet on this device.",
+    "pushActiveForWallets_other": "Push notifications are active for {{count}} wallets on this device."
   },
   "walletHome": {},
   "utils": {
@@ -1548,5 +1556,17 @@
   "direction": {
     "reopenTitle": "Reopen SFLuv",
     "reopenBody": "Close SFLuv and open it again to finish switching the layout."
+  },
+  "notificationReplies": {
+    "notSentTo": "Your reply to {{name}} wasn't sent",
+    "notSent": "Your reply wasn't sent"
+  },
+  "ago": {
+    "minutes_one": "{{count}}m",
+    "minutes_other": "{{count}}m",
+    "hours_one": "{{count}}h",
+    "hours_other": "{{count}}h",
+    "days_one": "{{count}}d",
+    "days_other": "{{count}}d"
   }
 }
