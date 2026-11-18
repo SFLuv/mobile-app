@@ -1453,8 +1453,6 @@
     "checkingAppCompatibility": "Checking app compatibility...",
     "requestingYourRewardFromThe": "Requesting your {{tokenSymbol}} reward from the event faucet.",
     "timedOutWhileTryingTo": "Timed out while trying to {{label}}. Please try again.",
-    "verifiedEmails": "{{verifiedEmails}} verified emails",
-    "notificationSubscriptions": "{{ponderSubscriptions}} notification subscriptions",
     "yourAccountWillBeMarked": "Your account will be marked inactive immediately and scheduled for permanent deletion on {{scheduledDate}}.{{summary}} You can reactivate it any time during the 30-day window by signing in again.",
     "inOpensTheConversation": "In {{title}}. Opens the conversation.",
     "yourPerkWasSentTo": "Your {{tokenSymbol}} perk was sent to this wallet.",
@@ -1480,7 +1478,23 @@
     "returning": "Returning...",
     "saving": "Saving...",
     "loggingOut": "Logging out...",
-    "unsupportedApp": "Unsupported App"
+    "unsupportedApp": "Unsupported App",
+    "deletion": {
+      "wallets_one": "{{count}} wallet",
+      "wallets_other": "{{count}} wallets",
+      "contacts_one": "{{count}} contact",
+      "contacts_other": "{{count}} contacts",
+      "locations_one": "{{count}} location",
+      "locations_other": "{{count}} locations",
+      "verifiedEmails_one": "{{count}} verified email",
+      "verifiedEmails_other": "{{count}} verified emails",
+      "notificationSubscriptions_one": "{{count}} notification subscription",
+      "notificationSubscriptions_other": "{{count}} notification subscriptions",
+      "memos_one": "{{count}} memo",
+      "memos_other": "{{count}} memos",
+      "includes": " This includes {{list}}.",
+      "listSeparator": ", "
+    }
   },
   "walletHome": {},
   "utils": {

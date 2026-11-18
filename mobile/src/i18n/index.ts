@@ -5,7 +5,10 @@ import { I18nManager, NativeModules, Platform } from "react-native";
 
 import { ensureDirection } from "./direction";
 import en from "./locales/en.json";
+import ar from "./locales/ar.json";
 import es from "./locales/es.json";
+import vi from "./locales/vi.json";
+import zhHant from "./locales/zh-Hant.json";
 
 /**
  * Translations for the app's own text.
@@ -36,6 +39,9 @@ export type LanguageOption = {
 export const SUPPORTED_LANGUAGES: LanguageOption[] = [
   { code: "en", nativeName: "English" },
   { code: "es", nativeName: "Español" },
+  { code: "zh-Hant", nativeName: "繁體中文" },
+  { code: "vi", nativeName: "Tiếng Việt" },
+  { code: "ar", nativeName: "العربية", rtl: true },
 ];
 
 /** "system" follows the phone's language; anything else is a code above. */
@@ -44,6 +50,9 @@ export type LanguagePreference = "system" | string;
 const resources = {
   en: { translation: en },
   es: { translation: es },
+  "zh-Hant": { translation: zhHant },
+  vi: { translation: vi },
+  ar: { translation: ar },
 };
 
 /** The phone's preferred locale, e.g. "es-US", read without a native add-on. */
@@ -93,7 +102,30 @@ export function resolveLanguage(preference: LanguagePreference | undefined): str
   return matchSupportedLanguage(deviceLocale());
 }
 
-void i18next.use(initReactI18next).init({
+/**
+ * iOS lays out each piece of text by its first strong character, not by the
+ * app's direction, so an Arabic string that starts with "SFLUV" or a number
+ * would sit on the left and order its words left to right. A right-to-left
+ * mark (U+200F) at the start of every string in a right-to-left language makes
+ * iOS treat the text as Arabic. Added here rather than in the translation
+ * files so translators never have to handle invisible characters. Text sent
+ * out of the app (e.g. the support subject) is requested in English, so it
+ * never carries the mark.
+ */
+const RTL_MARK = "\u200F";
+const rtlMarkPostProcessor = {
+  type: "postProcessor" as const,
+  name: "rtlMark",
+  process(value: string, _key: string | string[], options: { lng?: string } | undefined, translator: { language?: string }) {
+    // An explicit lng (the English support subject) wins over the app's language.
+    const language = options?.lng ?? translator?.language;
+    const rtl = Boolean(SUPPORTED_LANGUAGES.find((option) => option.code === language)?.rtl);
+    return rtl && typeof value === "string" && value && !value.startsWith(RTL_MARK) ? RTL_MARK + value : value;
+  },
+};
+
+void i18next.use(initReactI18next).use(rtlMarkPostProcessor).init({
+  postProcess: ["rtlMark"],
   resources,
   lng: resolveLanguage("system"),
   fallbackLng: "en",

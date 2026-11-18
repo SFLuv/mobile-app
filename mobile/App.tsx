@@ -1249,16 +1249,24 @@ function getDeletionFallbackDateLabel(): string {
 function buildDeleteAccountPreviewMessage(preview: AppAccountDeletionPreview): string {
   const scheduledDate =
     formatDeletionDateLabel(preview.deleteDate) || getDeletionFallbackDateLabel();
-  const summaryParts = [
-    preview.counts.wallets > 0 ? `${preview.counts.wallets} wallets` : null,
-    preview.counts.contacts > 0 ? `${preview.counts.contacts} contacts` : null,
-    preview.counts.locations > 0 ? `${preview.counts.locations} locations` : null,
-    preview.counts.verifiedEmails > 0 ? t("app.verifiedEmails", { verifiedEmails: preview.counts.verifiedEmails }) : null,
-    preview.counts.ponderSubscriptions > 0 ? t("app.notificationSubscriptions", { ponderSubscriptions: preview.counts.ponderSubscriptions }) : null,
-    preview.counts.memos > 0 ? `${preview.counts.memos} memos` : null,
-  ].filter((value): value is string => Boolean(value));
+  // Each count is its own plural phrase, joined with the language's list
+  // separator, so no English pieces end up inside a translated sentence.
+  const counts: Array<[string, number]> = [
+    ["wallets", preview.counts.wallets],
+    ["contacts", preview.counts.contacts],
+    ["locations", preview.counts.locations],
+    ["verifiedEmails", preview.counts.verifiedEmails],
+    ["notificationSubscriptions", preview.counts.ponderSubscriptions],
+    ["memos", preview.counts.memos],
+  ];
+  const summaryParts = counts
+    .filter(([, count]) => count > 0)
+    .map(([kind, count]) => t(`app.deletion.${kind}`, { count }));
 
-  const summary = summaryParts.length > 0 ? ` This includes ${summaryParts.join(", ")}.` : "";
+  const summary =
+    summaryParts.length > 0
+      ? t("app.deletion.includes", { list: summaryParts.join(t("app.deletion.listSeparator")) })
+      : "";
 
   return t("app.yourAccountWillBeMarked", { scheduledDate, summary });
 }
