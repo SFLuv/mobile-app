@@ -2462,12 +2462,12 @@ function formatSessionStamp(at: Date): string {
   const now = new Date();
   const sameDay = at.toDateString() === now.toDateString();
   if (sameDay) {
-    return `Today ${time}`;
+    return t("chat.todayAt", { time });
   }
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
   if (at.toDateString() === yesterday.toDateString()) {
-    return `Yesterday ${time}`;
+    return t("chat.yesterdayAt", { time });
   }
   const sameYear = at.getFullYear() === now.getFullYear();
   const day = at.toLocaleDateString(appLocale(), {

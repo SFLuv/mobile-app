@@ -800,7 +800,9 @@
     "groupInfo": "群組資料",
     "editYourMessage": "編輯您的訊息",
     "deleteMessages_other": "刪除 {{count}} 則訊息",
-    "isTyping": "{{name}} 正在輸入"
+    "isTyping": "{{name}} 正在輸入",
+    "todayAt": "今天 {{time}}",
+    "yesterdayAt": "昨天 {{time}}"
   },
   "map": {
     "searchMerchants": "搜尋商戶",

@@ -813,7 +813,9 @@
     "editYourMessage": "Edit your message",
     "deleteMessages_one": "Delete {{count}} message",
     "deleteMessages_other": "Delete {{count}} messages",
-    "isTyping": "{{name}} is typing"
+    "isTyping": "{{name}} is typing",
+    "todayAt": "Today {{time}}",
+    "yesterdayAt": "Yesterday {{time}}"
   },
   "map": {
     "searchMerchants": "Search merchants",

@@ -800,7 +800,9 @@
     "groupInfo": "Thông tin nhóm",
     "editYourMessage": "Sửa tin nhắn của bạn",
     "deleteMessages_other": "Xóa {{count}} tin nhắn",
-    "isTyping": "{{name}} đang nhập"
+    "isTyping": "{{name}} đang nhập",
+    "todayAt": "Hôm nay {{time}}",
+    "yesterdayAt": "Hôm qua {{time}}"
   },
   "map": {
     "searchMerchants": "Tìm cửa hàng",

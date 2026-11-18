@@ -865,7 +865,9 @@
     "deleteMessages_few": "حذف {{count}} رسالة",
     "deleteMessages_many": "حذف {{count}} رسالة",
     "deleteMessages_other": "حذف {{count}} رسالة",
-    "isTyping": "{{name}} يكتب الآن"
+    "isTyping": "{{name}} يكتب الآن",
+    "todayAt": "اليوم {{time}}",
+    "yesterdayAt": "أمس {{time}}"
   },
   "map": {
     "searchMerchants": "ابحث عن التجار",
