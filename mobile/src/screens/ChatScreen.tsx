@@ -54,13 +54,7 @@ import type { RealtimeEvent } from "../services/realtime";
 import { useTypingIndicators, useTypingReporter } from "../hooks/useRealtime";
 import { useKeyboardLift } from "../hooks/useKeyboardLift";
 import Reanimated from "react-native-reanimated";
-import {
-  CAMERA_BLOCKED_MESSAGE,
-  CAMERA_BLOCKED_TITLE,
-  PHOTOS_BLOCKED_MESSAGE,
-  PHOTOS_BLOCKED_TITLE,
-  promptOpenSettings,
-} from "../utils/phonePermissions";
+import { promptCameraBlocked, promptPhotosBlocked } from "../utils/phonePermissions";
 
 /**
  * SFLuv's own mark, bundled rather than fetched.
@@ -1047,7 +1041,7 @@ export function ChatScreen({
             const current = await ImagePicker.getCameraPermissionsAsync();
             if (!current.granted && !current.canAskAgain) {
               // Asking again would show nothing: explain, and offer Settings.
-              promptOpenSettings(CAMERA_BLOCKED_TITLE, CAMERA_BLOCKED_MESSAGE);
+              promptCameraBlocked();
               return;
             }
             const permission = current.granted ? current : await ImagePicker.requestCameraPermissionsAsync();
@@ -2156,7 +2150,7 @@ export function ChatScreen({
                     if (outcome.status === "saved-to-photos") {
                       onToast("Saved to your photos.", "success");
                     } else if (outcome.status === "blocked") {
-                      promptOpenSettings(PHOTOS_BLOCKED_TITLE, PHOTOS_BLOCKED_MESSAGE);
+                      promptPhotosBlocked();
                     } else if (outcome.status === "denied" || outcome.status === "failed") {
                       onToast(outcome.message, "error");
                     }

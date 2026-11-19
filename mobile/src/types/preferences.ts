@@ -8,6 +8,8 @@ export type AppPreferences = {
   defaultSendEntryMode: SendFlowEntryMode;
   showImproverPanel: boolean;
   showVolunteerPanel: boolean;
+  /** "system" follows the phone's language; otherwise a code from src/i18n. */
+  languagePreference: string;
 };
 
 export const defaultAppPreferences: AppPreferences = {
@@ -17,4 +19,5 @@ export const defaultAppPreferences: AppPreferences = {
   defaultSendEntryMode: "manual",
   showImproverPanel: true,
   showVolunteerPanel: true,
+  languagePreference: "system",
 };

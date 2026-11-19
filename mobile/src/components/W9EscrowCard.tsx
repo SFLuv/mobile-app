@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import { useAppTheme } from "../theme";
 import type { AppW9Status } from "../types/app";
 
@@ -20,6 +21,7 @@ type Props = {
 export function W9EscrowCard({ status, busy, onStart }: Props) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
+  const { t } = useTranslation();
 
   if (!status || !status.required || status.cleared) {
     return null;
@@ -31,7 +33,7 @@ export function W9EscrowCard({ status, busy, onStart }: Props) {
     <View style={styles.card}>
       <View style={styles.header}>
         <Ionicons name="document-text-outline" size={18} color={palette.primaryStrong} />
-        <Text style={styles.title}>Complete your W-9 to get paid</Text>
+        <Text style={styles.title}>{t("w9.cardTitle")}</Text>
       </View>
 
       {hasEscrow ? (
@@ -47,16 +49,13 @@ export function W9EscrowCard({ status, busy, onStart }: Props) {
         </>
       ) : null}
 
-      <Text style={styles.body}>
-        You've earned over {status.thresholdSfluv} SFLUV this year, so we need a W-9 on file before we
-        can send it. It takes a couple of minutes.
-      </Text>
+      <Text style={styles.body}>{t("w9.cardBody", { threshold: status.thresholdSfluv })}</Text>
 
       <Pressable style={styles.button} onPress={onStart} disabled={busy}>
         {busy ? (
           <ActivityIndicator color={palette.white} />
         ) : (
-          <Text style={styles.buttonText}>Complete tax form</Text>
+          <Text style={styles.buttonText}>{t("w9.cardButton")}</Text>
         )}
       </Pressable>
     </View>

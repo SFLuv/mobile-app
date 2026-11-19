@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 
 type Props = {
@@ -42,6 +43,7 @@ type Props = {
 export function W9CompleteModal({ visible, releasedSfluv, tokenSymbol, onDismiss }: Props) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
+  const { t } = useTranslation();
 
   const released = releasedSfluv.trim();
   const hadEscrow = released !== "" && released !== "0";
@@ -58,32 +60,28 @@ export function W9CompleteModal({ visible, releasedSfluv, tokenSymbol, onDismiss
             <Ionicons name="checkmark-circle" size={44} color={palette.success} />
           </View>
 
-          <Text style={styles.title}>We've received your W-9</Text>
+          <Text style={styles.title}>{t("w9.completeTitle")}</Text>
 
           {hadEscrow ? (
             <>
               <Text style={styles.amount}>
                 {released} {tokenSymbol}
               </Text>
-              <Text style={styles.body}>
-                has been released from hold and sent to your wallet.
-              </Text>
+              <Text style={styles.body}>{t("w9.completeReleased")}</Text>
             </>
           ) : null}
 
           <Text style={styles.body}>
-            {hadEscrow
-              ? "Nothing is being held any more, and future rewards will arrive as normal. We'll let you know if the IRS check finds anything to fix."
-              : "Nothing is being held, and your rewards will arrive as normal. We'll let you know if the IRS check finds anything to fix."}
+            {hadEscrow ? t("w9.completeBodyReleased") : t("w9.completeBody")}
           </Text>
 
           <Pressable
             style={styles.primaryButton}
             onPress={onDismiss}
             accessibilityRole="button"
-            accessibilityLabel="Done"
+            accessibilityLabel={t("common.done")}
           >
-            <Text style={styles.primaryButtonText}>Done</Text>
+            <Text style={styles.primaryButtonText}>{t("common.done")}</Text>
           </Pressable>
         </Pressable>
       </Pressable>

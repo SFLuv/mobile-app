@@ -39,6 +39,12 @@ export type AppInternalNotification = {
   id: number;
   set: string;
   setLabel: string;
+  /**
+   * What it is about: the unit the backend's notification hub routes to
+   * teams. Empty from a backend older than the hub.
+   */
+  topic: string;
+  topicLabel: string;
   alertKey: string;
   fields: AppNotificationField[];
   urgent: boolean;
@@ -73,8 +79,10 @@ export type AppNotificationFeed = {
   nextCursor: string | null;
   /** Everything outstanding, which is not the same as everything unread. */
   unseenCount: number;
-  /** Which alert sets this user receives, for the screen's empty state. */
+  /** Which alert groups this user receives through their teams. */
   sets: string[];
+  /** The notification teams this user is on. */
+  teams: string[];
 };
 
 export type AppAlertActionResult = {

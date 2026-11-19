@@ -32,6 +32,13 @@ type Props = {
   onSelectLocation: (locationID: number) => Promise<void>;
   onRefresh: () => void | Promise<void>;
   onLogout: () => void;
+  /**
+   * Opens Contact SFLuv. The "no payment wallet" state names support as the
+   * fix, and until this existed it gave the merchant no way to reach them.
+   */
+  onContactSupport?: () => void;
+  /** Asks SFLuv to reset a forgotten PIN. */
+  onRequestPinHelp?: () => Promise<void>;
 };
 
 /**
@@ -55,6 +62,8 @@ export function MerchantDeviceSetupScreen({
   onSelectLocation,
   onRefresh,
   onLogout,
+  onContactSupport,
+  onRequestPinHelp,
 }: Props) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
@@ -65,6 +74,7 @@ export function MerchantDeviceSetupScreen({
   const [field, setField] = useState<"pin" | "confirm">("pin");
   const [pinAccepted, setPinAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pinHelp, setPinHelp] = useState<"idle" | "sending" | "sent">("idle");
 
   // A merchant who sets their PIN on a second device arrives here with
   // passcodeSet already true, so which question this screen asks can change
@@ -155,6 +165,13 @@ export function MerchantDeviceSetupScreen({
           <Pressable style={styles.primaryButton} onPress={() => void onRefresh()}>
             <Text style={styles.primaryButtonText}>Check again</Text>
           </Pressable>
+          {onContactSupport ? (
+            <Pressable onPress={onContactSupport} accessibilityRole="button">
+              <Text style={styles.quietLink}>
+                {hasApprovedLocation ? "Ask SFLuv support to set it up" : "Contact SFLuv support"}
+              </Text>
+            </Pressable>
+          ) : null}
           <Pressable onPress={onLogout}>
             <Text style={styles.quietLink}>Sign out</Text>
           </Pressable>
@@ -227,6 +244,29 @@ export function MerchantDeviceSetupScreen({
               void submitPin();
             }}
           />
+          {passcodeSet && onRequestPinHelp ? (
+            pinHelp === "sent" ? (
+              <Text style={styles.body}>
+                SFLuv support has been asked to reset this business&apos;s PIN and will get back to you.
+              </Text>
+            ) : (
+              <Pressable
+                disabled={pinHelp === "sending"}
+                accessibilityRole="button"
+                onPress={() => {
+                  setPinHelp("sending");
+                  onRequestPinHelp()
+                    .then(() => setPinHelp("sent"))
+                    .catch((err: unknown) => {
+                      setPinHelp("idle");
+                      setError(err instanceof Error ? err.message : "Could not reach SFLuv support. Try again.");
+                    });
+                }}
+              >
+                <Text style={styles.quietLink}>{pinHelp === "sending" ? "Asking SFLuv..." : "Forgot your PIN?"}</Text>
+              </Pressable>
+            )
+          ) : null}
           <Pressable onPress={onLogout}>
             <Text style={styles.quietLink}>Sign out</Text>
           </Pressable>
