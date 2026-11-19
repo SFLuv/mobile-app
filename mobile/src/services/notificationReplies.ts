@@ -3,6 +3,7 @@ import * as Notifications from "expo-notifications";
 import type { ChatMessage } from "../types/bulletin";
 import { mergeIntoCachedThread, noteThreadNewest } from "./chatCache";
 import { dismissConversationFromTray } from "./notificationInbox";
+import { t } from "../i18n";
 
 /**
  * Answering a chat push without opening the app: pull the banner down, type or
@@ -116,7 +117,7 @@ export async function sendNotificationReply(
   try {
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: who ? `Your reply to ${who} wasn't sent` : "Your reply wasn't sent",
+        title: who ? t("notificationReplies.notSentTo", { name: who }) : t("notificationReplies.notSent"),
         body,
         // Routed like the chat's own pushes, so tapping it opens the chat.
         data: { type: "bulletin_message", conversation_id: String(conversationId), reply_failed: "1" },

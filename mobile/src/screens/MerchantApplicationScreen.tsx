@@ -3,10 +3,10 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from "react-native";
+import { Text } from "../components/AppText";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import {
   MerchantApplicationDraft,
@@ -16,6 +16,7 @@ import {
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { autocompleteMerchantPlaces, resolveMerchantPlace } from "../services/googlePlaces";
 import { formatPhone, isValidEmail, isValidPhone, normalizeEmail } from "../lib/contactFormat";
+import { t } from "../i18n";
 
 /**
  * The Location Approval Form, on a phone.
@@ -40,37 +41,59 @@ import { formatPhone, isValidEmail, isValidPhone, normalizeEmail } from "../lib/
  */
 
 const STEPS = [
-  { key: "public", title: "Public Information" },
-  { key: "contact", title: "Contact" },
-  { key: "payment", title: "Payment System" },
+  { key: "public", titleKey: "merchantApplication.publicInformation" },
+  { key: "contact", titleKey: "merchantApplication.contact" },
+  { key: "payment", titleKey: "merchantApplication.paymentSystem" },
 ] as const;
 
 type StepKey = (typeof STEPS)[number]["key"];
 
 const OTHER = "Other";
 
+/**
+ * Display text for an answer. The answer itself is saved and sent in English,
+ * so the backend and admin panel read the same values whatever the app's
+ * language; brand names (Square, Clover…) are not translated at all.
+ */
+const OPTION_LABEL_KEYS: Record<string, string> = {
+  "Cash only": "merchantApplication.cashOnly",
+  "No point of sale system": "merchantApplication.noPointOfSaleSystem",
+  "A friend or another business": "merchantApplication.aFriendOrAnotherBusiness",
+  "An SFLuv team member": "merchantApplication.anSfluvTeamMember",
+  "A community or neighbourhood event": "merchantApplication.aCommunityOrNeighbourhoodEvent",
+  "Social media": "merchantApplication.socialMedia",
+  "A search engine": "merchantApplication.aSearchEngine",
+  "Press or a newsletter": "merchantApplication.pressOrANewsletter",
+  "Other": "merchantApplication.other",
+};
+
+function optionLabel(option: string): string {
+  const key = OPTION_LABEL_KEYS[option];
+  return key ? t(key) : option;
+}
+
 /** Matches the web finder: a request per keystroke is both slow and billable. */
 const SEARCH_DEBOUNCE_MS = 220;
 
 const POS_OPTIONS = [
-  "Square",
-  "Clover",
-  "Toast",
-  "Shopify",
-  "SumUp",
-  "Lightspeed",
-  "Cash only",
-  "No point of sale system",
+  "Square",  // i18n-skip: saved and sent in English; shown via optionLabel()
+  "Clover",  // i18n-skip: saved and sent in English; shown via optionLabel()
+  "Toast",  // i18n-skip: saved and sent in English; shown via optionLabel()
+  "Shopify",  // i18n-skip: saved and sent in English; shown via optionLabel()
+  "SumUp",  // i18n-skip: saved and sent in English; shown via optionLabel()
+  "Lightspeed",  // i18n-skip: saved and sent in English; shown via optionLabel()
+  "Cash only",  // i18n-skip: saved and sent in English; shown via optionLabel()
+  "No point of sale system",  // i18n-skip: saved and sent in English; shown via optionLabel()
   OTHER,
 ];
 
 const REFERRAL_OPTIONS = [
-  "A friend or another business",
-  "An SFLuv team member",
-  "A community or neighbourhood event",
-  "Social media",
-  "A search engine",
-  "Press or a newsletter",
+  "A friend or another business",  // i18n-skip: saved and sent in English; shown via optionLabel()
+  "An SFLuv team member",  // i18n-skip: saved and sent in English; shown via optionLabel()
+  "A community or neighbourhood event",  // i18n-skip: saved and sent in English; shown via optionLabel()
+  "Social media",  // i18n-skip: saved and sent in English; shown via optionLabel()
+  "A search engine",  // i18n-skip: saved and sent in English; shown via optionLabel()
+  "Press or a newsletter",  // i18n-skip: saved and sent in English; shown via optionLabel()
   OTHER,
 ];
 
@@ -254,13 +277,13 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
   /** The first thing wrong with a step, or null. */
   const stepProblem = (key: StepKey): string | null => {
     if (key === "public") {
-      if (!selection) return "Find your location and confirm the match before continuing.";
+      if (!selection) return t("merchantApplication.findYourLocationAndConfirm");
       // Only the manual path is asked for these, so only it is checked. On the
       // Google path they are not on screen, and complaining about a field the
       // merchant cannot see is the worst kind of dead end.
       if (showManualFields) {
-        if (!draft.locationName.trim()) return "Location name is required.";
-        if (!draft.businessType.trim()) return "Business type is required.";
+        if (!draft.locationName.trim()) return t("merchantApplication.locationNameIsRequired");
+        if (!draft.businessType.trim()) return t("merchantApplication.businessTypeIsRequired");
         // The Shiba failure mode: a listing on the map named "1234 Main St".
         const typed = draft.locationName.trim().toLowerCase();
         const street = addressOnlySelection ? selection.address.street.toLowerCase() : "";
@@ -268,35 +291,35 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
           ? (selection.address.formattedAddress || "").toLowerCase()
           : "";
         if (typed && (typed === street || typed === line)) {
-          return "That is your street address. Enter the name your customers know you by.";
+          return t("merchantApplication.thatIsYourStreetAddress");
         }
       }
       // The description is optional, as on the web — a shop with nothing to add
       // still belongs on the map.
       if (draft.publicPhone.trim() && !isValidPhone(draft.publicPhone)) {
-        return "Enter a valid public phone number.";
+        return t("merchantApplication.enterAValidPublicPhone");
       }
       return null;
     }
     if (key === "contact") {
-      if (!draft.contactName.trim()) return "Contact name is required.";
-      if (!draft.contactPhone.trim()) return "Contact phone is required.";
-      if (!isValidPhone(draft.contactPhone)) return "Enter a valid phone number.";
-      if (!draft.contactEmail.trim()) return "Contact email is required.";
-      if (!isValidEmail(draft.contactEmail)) return "Enter a valid email address.";
-      if (!draft.referralSource) return "Tell us how you heard about SFLuv.";
+      if (!draft.contactName.trim()) return t("merchantApplication.contactNameIsRequired");
+      if (!draft.contactPhone.trim()) return t("merchantApplication.contactPhoneIsRequired");
+      if (!isValidPhone(draft.contactPhone)) return t("merchantApplication.enterAValidPhoneNumber");
+      if (!draft.contactEmail.trim()) return t("merchantApplication.contactEmailIsRequired");
+      if (!isValidEmail(draft.contactEmail)) return t("merchantApplication.enterAValidEmailAddress");
+      if (!draft.referralSource) return t("merchantApplication.tellUsHowYouHeard");
       if (draft.referralSource === OTHER && !referralOther.trim()) {
-        return "Tell us how you heard about SFLuv.";
+        return t("merchantApplication.tellUsHowYouHeard");
       }
       return null;
     }
-    if (!draft.posSystem) return "POS type is required.";
+    if (!draft.posSystem) return t("merchantApplication.posTypeIsRequired");
     if (draft.posSystem === OTHER && !posOther.trim()) {
-      return "Tell us which point of sale system you use.";
+      return t("merchantApplication.tellUsWhichPointOf");
     }
-    if (draft.acceptsTips === null) return "Tell us whether this location accepts tips.";
+    if (draft.acceptsTips === null) return t("merchantApplication.tellUsWhetherThisLocation");
     if (draft.hasStaffTablet === null) {
-      return "Tell us whether staff have a tablet or phone available.";
+      return t("merchantApplication.tellUsWhetherStaffHave");
     }
     return null;
   };
@@ -350,10 +373,10 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.confirmation}>
           <Text style={styles.confirmationTitle}>
-            Your application has been submitted successfully
+            {t("merchantApplication.yourApplicationHasBeenSubmitted")}
           </Text>
           <Pressable style={styles.primaryButton} onPress={onClose}>
-            <Text style={styles.primaryButtonText}>Done</Text>
+            <Text style={styles.primaryButtonText}>{t("merchantApplication.done")}</Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -365,7 +388,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
   const locationChooser = (
     <View style={styles.chooser}>
       <Text style={styles.label}>
-        {showManualFields ? "Location Address" : "Find your location"}
+        {showManualFields ? t("merchantApplication.locationAddress") : t("merchantApplication.findYourLocation")}
       </Text>
       <View style={styles.searchWrap}>
         <TextInput
@@ -381,7 +404,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
             }
           }}
           placeholder={
-            manualEntry ? "Start typing your street address" : "Search for your business or address"
+            manualEntry ? t("merchantApplication.startTypingYourStreetAddress") : t("merchantApplication.searchForYourBusinessOr")
           }
           placeholderTextColor={palette.textMuted}
           autoCorrect={false}
@@ -397,7 +420,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
             onPress={clearSelection}
             hitSlop={10}
             accessibilityRole="button"
-            accessibilityLabel="Clear location"
+            accessibilityLabel={t("merchantApplication.clearLocation")}
           >
             <Text style={styles.clearGlyph}>✕</Text>
           </Pressable>
@@ -434,10 +457,10 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
   // between the form filling itself in and the merchant filling it in.
   const selectionStatus = selection ? (
     selection.source === "google_place" ? (
-      <Text style={styles.statusFound}>✓ Location found</Text>
+      <Text style={styles.statusFound}>{t("merchantApplication.locationFound")}</Text>
     ) : (
       <View style={styles.statusBlock}>
-        <Text style={styles.statusAddress}>✓ Address found</Text>
+        <Text style={styles.statusAddress}>{t("merchantApplication.addressFound")}</Text>
         {/* Amber rather than green, and this sentence, because an address is the
             weaker of the two answers: a business listing would carry the name,
             the category, the hours and the phone. */}
@@ -468,9 +491,9 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <View style={styles.header}>
         <Pressable onPress={onClose} hitSlop={12}>
-          <Text style={styles.back}>Cancel</Text>
+          <Text style={styles.back}>{t("merchantApplication.cancel")}</Text>
         </Pressable>
-        <Text style={styles.title}>Location Approval Form</Text>
+        <Text style={styles.title}>{t("merchantApplication.locationApprovalForm")}</Text>
         <View style={styles.backSpacer} />
       </View>
 
@@ -495,7 +518,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
           );
         })}
       </View>
-      <Text style={styles.stepTitle}>{step.title}</Text>
+      <Text style={styles.stepTitle}>{t(step.titleKey)}</Text>
 
       {step.key === "public" && (
         <View style={styles.card}>
@@ -508,21 +531,21 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
 
           {showManualFields && (
             <>
-              <Text style={styles.label}>Location Name</Text>
+              <Text style={styles.label}>{t("merchantApplication.locationName")}</Text>
               <TextInput
                 style={styles.input}
                 value={draft.locationName}
                 onChangeText={(value) => updateDraft({ locationName: value })}
-                placeholder="Your business name"
+                placeholder={t("merchantApplication.yourBusinessName")}
                 placeholderTextColor={palette.textMuted}
               />
 
-              <Text style={styles.label}>Business Type</Text>
+              <Text style={styles.label}>{t("merchantApplication.businessType")}</Text>
               <TextInput
                 style={styles.input}
                 value={draft.businessType}
                 onChangeText={(value) => updateDraft({ businessType: value })}
-                placeholder="Cafe, bookshop, barber"
+                placeholder={t("merchantApplication.cafeBookshopBarber")}
                 placeholderTextColor={palette.textMuted}
               />
 
@@ -532,18 +555,18 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
 
           {selection && (
             <>
-              <Text style={styles.label}>Location Description (optional)</Text>
+              <Text style={styles.label}>{t("merchantApplication.locationDescriptionOptional")}</Text>
               <TextInput
                 style={[styles.input, styles.multiline]}
                 value={draft.description}
                 onChangeText={(value) => updateDraft({ description: value })}
-                placeholder="What you sell"
+                placeholder={t("merchantApplication.whatYouSell")}
                 placeholderTextColor={palette.textMuted}
                 multiline
               />
 
-              <Text style={styles.label}>Public Phone (optional)</Text>
-              <Text style={styles.hint}>Shown on the map. Need not match your contact phone.</Text>
+              <Text style={styles.label}>{t("merchantApplication.publicPhoneOptional")}</Text>
+              <Text style={styles.hint}>{t("merchantApplication.shownOnTheMapNeed")}</Text>
               <TextInput
                 style={styles.input}
                 value={draft.publicPhone}
@@ -562,18 +585,18 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
 
       {step.key === "contact" && (
         <View style={styles.card}>
-          <Text style={styles.hint}>Internal only. Never shown publicly.</Text>
+          <Text style={styles.hint}>{t("merchantApplication.internalOnlyNeverShownPublicly")}</Text>
 
-          <Text style={styles.label}>Contact Name</Text>
+          <Text style={styles.label}>{t("merchantApplication.contactName")}</Text>
           <TextInput
             style={styles.input}
             value={draft.contactName}
             onChangeText={(value) => updateDraft({ contactName: value })}
-            placeholder="Who to ask for"
+            placeholder={t("merchantApplication.whoToAskFor")}
             placeholderTextColor={palette.textMuted}
           />
 
-          <Text style={styles.label}>Contact Phone</Text>
+          <Text style={styles.label}>{t("merchantApplication.contactPhone")}</Text>
           <TextInput
             style={styles.input}
             value={draft.contactPhone}
@@ -584,7 +607,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
             keyboardType="phone-pad"
           />
 
-          <Text style={styles.label}>Contact Email</Text>
+          <Text style={styles.label}>{t("merchantApplication.contactEmail")}</Text>
           <TextInput
             style={styles.input}
             value={draft.contactEmail}
@@ -597,7 +620,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
             autoCorrect={false}
           />
 
-          <Text style={styles.label}>How did you hear about SFLuv?</Text>
+          <Text style={styles.label}>{t("merchantApplication.howHeardQ")}</Text>
           <OptionRow
             options={REFERRAL_OPTIONS}
             value={draft.referralSource}
@@ -612,7 +635,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
                 setReferralOther(value);
                 setError(null);
               }}
-              placeholder="How you heard about SFLuv"
+              placeholder={t("merchantApplication.howYouHeardAboutSfluv")}
               placeholderTextColor={palette.textMuted}
             />
           )}
@@ -621,7 +644,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
 
       {step.key === "payment" && (
         <View style={styles.card}>
-          <Text style={styles.label}>POS Type</Text>
+          <Text style={styles.label}>{t("merchantApplication.posType")}</Text>
           <OptionRow
             options={POS_OPTIONS}
             value={draft.posSystem}
@@ -636,14 +659,14 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
                 setPosOther(value);
                 setError(null);
               }}
-              placeholder="Your point of sale system"
+              placeholder={t("merchantApplication.yourPointOfSaleSystem")}
               placeholderTextColor={palette.textMuted}
             />
           )}
 
-          <Text style={styles.label}>Do you accept tips?</Text>
+          <Text style={styles.label}>{t("merchantApplication.acceptTipsQ")}</Text>
           <Text style={styles.hint}>
-            Yes gives this location its own tipping wallet at approval.
+            {t("merchantApplication.yesGivesThisLocationIts")}
           </Text>
           <YesNoRow
             value={draft.acceptsTips}
@@ -651,7 +674,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
             styles={styles}
           />
 
-          <Text style={styles.label}>Tablet or phone available to staff?</Text>
+          <Text style={styles.label}>{t("merchantApplication.deviceForStaffQ")}</Text>
           <YesNoRow
             value={draft.hasStaffTablet}
             onSelect={(value) => updateDraft({ hasStaffTablet: value })}
@@ -671,11 +694,11 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
             setStepIndex((current) => Math.max(current - 1, 0));
           }}
         >
-          <Text style={styles.secondaryButtonText}>Back</Text>
+          <Text style={styles.secondaryButtonText}>{t("merchantApplication.back")}</Text>
         </Pressable>
         {stepIndex < STEPS.length - 1 ? (
           <Pressable style={styles.primaryButton} onPress={goNext}>
-            <Text style={styles.primaryButtonText}>Continue</Text>
+            <Text style={styles.primaryButtonText}>{t("merchantApplication.continue")}</Text>
           </Pressable>
         ) : (
           <Pressable
@@ -684,7 +707,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
             onPress={() => void submit()}
           >
             <Text style={styles.primaryButtonText}>
-              {submitting ? "Submitting..." : "Submit application"}
+              {submitting ? t("merchantApplication.submitting") : t("merchantApplication.submitApplication")}
             </Text>
           </Pressable>
         )}
@@ -713,7 +736,7 @@ function OptionRow({
           onPress={() => onSelect(option)}
         >
           <Text style={[styles.optionText, value === option && styles.optionTextActive]}>
-            {option}
+            {optionLabel(option)}
           </Text>
         </Pressable>
       ))}
@@ -733,8 +756,8 @@ function YesNoRow({
   return (
     <View style={styles.optionWrap}>
       {[
-        { label: "Yes", answer: true },
-        { label: "No", answer: false },
+        { label: t("merchantApplication.yes"), answer: true },
+        { label: t("merchantApplication.no"), answer: false },
       ].map((entry) => (
         <Pressable
           key={entry.label}

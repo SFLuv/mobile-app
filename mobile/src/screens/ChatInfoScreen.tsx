@@ -7,10 +7,10 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from "react-native";
+import { Text } from "../components/AppText";
 import { Ionicons } from "@expo/vector-icons";
 
 import { AppBackendClient } from "../services/appBackend";
@@ -33,6 +33,9 @@ import {
   ConversationMember,
   ConversationRole,
 } from "../types/bulletin";
+import { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
+import { appLocale } from "../i18n";
 
 /**
  * What the info button opens: everything about one conversation.
@@ -66,9 +69,10 @@ import {
 
 type Segment = "about" | "files";
 
-const SEGMENTS: Array<{ value: Segment; label: string }> = [
-  { value: "about", label: "About" },
-  { value: "files", label: "Files" },
+/** Built per call so labels follow the current language. */
+const SEGMENTS = (): Array<{ value: Segment; label: string }> => [
+  { value: "about", label: t("chatInfo.about") },
+  { value: "files", label: t("chatInfo.files") },
 ];
 
 export function ChatInfoScreen({
@@ -168,7 +172,7 @@ export function ChatInfoScreen({
       }
       await backendClient?.updateGroupConversation(conversation.id, { title: next });
       setRenaming(false);
-    }, "Couldn't rename the group.");
+    }, t("chatInfo.couldnTRenameTheGroup"));
 
   const changePicture = () =>
     run(async () => {
@@ -182,23 +186,23 @@ export function ChatInfoScreen({
       } finally {
         setPictureBusy(false);
       }
-    }, "Couldn't set the group picture.");
+    }, t("chatInfo.couldnTSetTheGroup"));
 
   const confirmLeave = () => {
     if (isOwner) {
       // The server refuses this, and saying why is more use than letting them
       // press it and read an error.
       Alert.alert(
-        "You own this group",
-        "Make somebody else the owner first, then you can leave.",
+        t("chatInfo.youOwnThisGroup"),
+        t("chatInfo.makeSomebodyElseTheOwner"),
         [{ text: "OK" }],
       );
       return;
     }
-    Alert.alert("Leave this group?", "You'll stop receiving its messages.", [
-      { text: "Cancel", style: "cancel" },
+    Alert.alert(t("chatInfo.leaveThisGroup"), t("chatInfo.youLlStopReceivingIts"), [
+      { text: t("chatInfo.cancel"), style: "cancel" },
       {
-        text: "Leave",
+        text: t("chatInfo.leave"),
         style: "destructive",
         onPress: () =>
           void run(async () => {
@@ -207,7 +211,7 @@ export function ChatInfoScreen({
             // actor == target as the thing any member may do.
             await backendClient?.removeGroupMember(conversation.id, myUserId);
             onLeft();
-          }, "Couldn't leave the group."),
+          }, t("chatInfo.couldnTLeaveTheGroup")),
       },
     ]);
   };
@@ -215,16 +219,16 @@ export function ChatInfoScreen({
   return (
     <SwipeBack onBack={onBack} style={styles.screen}>
       <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-          <Ionicons name="chevron-back" size={26} color={palette.text} />
+        <Pressable onPress={onBack} hitSlop={10} accessibilityRole="button" accessibilityLabel={t("chatInfo.back")}>
+          <Ionicons name={dirIcon("chevron-back")} size={26} color={palette.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>{isGroup ? "Group info" : "Info"}</Text>
+        <Text style={styles.headerTitle}>{isGroup ? t("chatInfo.groupInfo") : t("chatInfo.info")}</Text>
         <View style={{ width: 26 }} />
       </View>
 
       <View style={styles.segments}>
         <SegmentedTabs
-          segments={SEGMENTS}
+          segments={SEGMENTS()}
           value={segment}
           onChange={setSegment}
           hapticsEnabled={hapticsEnabled}
@@ -244,14 +248,14 @@ export function ChatInfoScreen({
               onPress={isGroup && canAdminister ? () => void changePicture() : undefined}
               disabled={!isGroup || !canAdminister}
               accessibilityRole={isGroup && canAdminister ? "button" : undefined}
-              accessibilityLabel={isGroup && canAdminister ? "Change the group picture" : undefined}
+              accessibilityLabel={isGroup && canAdminister ? t("chatInfo.changeTheGroupPicture") : undefined}
             >
               {iconUri ? (
                 <Image source={{ uri: iconUri }} style={styles.icon} />
               ) : (
                 <ChatAvatar
                   client={backendClient}
-                  name={isGroup ? conversation.title || "Group" : otherName}
+                  name={isGroup ? conversation.title || t("chatInfo.group") : otherName}
                   size={76}
                   userId={isGroup ? null : conversation.other_user.user_id}
                 />
@@ -276,10 +280,10 @@ export function ChatInfoScreen({
                   onChangeText={setTitle}
                   maxLength={60}
                   autoFocus
-                  placeholder="Group name"
+                  placeholder={t("chatInfo.groupName")}
                   placeholderTextColor={palette.textMuted}
                 />
-                <Pressable onPress={() => void saveTitle()} hitSlop={8} accessibilityLabel="Save name">
+                <Pressable onPress={() => void saveTitle()} hitSlop={8} accessibilityLabel={t("chatInfo.saveName")}>
                   <Ionicons name="checkmark" size={22} color={palette.primaryStrong} />
                 </Pressable>
               </View>
@@ -290,7 +294,7 @@ export function ChatInfoScreen({
                 disabled={!isGroup || !canAdminister}
               >
                 <Text style={styles.name}>
-                  {isGroup ? conversation.title || "Group" : otherName}
+                  {isGroup ? conversation.title || t("chatInfo.group") : otherName}
                 </Text>
                 {isGroup && canAdminister ? (
                   <Ionicons name="pencil" size={14} color={palette.textMuted} />
@@ -311,7 +315,7 @@ export function ChatInfoScreen({
           {isGroup ? (
             <>
               <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Members</Text>
+                <Text style={styles.sectionTitle}>{t("chatInfo.members")}</Text>
                 {canAdminister ? (
                   <Pressable
                     onPress={() => {
@@ -319,9 +323,9 @@ export function ChatInfoScreen({
                       onAddMembers(conversation.id);
                     }}
                     accessibilityRole="button"
-                    accessibilityLabel="Add people"
+                    accessibilityLabel={t("chatInfo.addPeople")}
                   >
-                    <Text style={styles.sectionAction}>Add</Text>
+                    <Text style={styles.sectionAction}>{t("chatInfo.add")}</Text>
                   </Pressable>
                 ) : null}
               </View>
@@ -339,7 +343,7 @@ export function ChatInfoScreen({
                       () =>
                         backendClient?.removeGroupMember(conversation.id, member.user.user_id) ??
                         Promise.resolve(),
-                      "Couldn't remove them.",
+                      t("chatInfo.couldnTRemoveThem"),
                     )
                   }
                   onSetRole={(role) =>
@@ -347,7 +351,7 @@ export function ChatInfoScreen({
                       () =>
                         backendClient?.setGroupMemberRole(conversation.id, member.user.user_id, role) ??
                         Promise.resolve(),
-                      "Couldn't change their role.",
+                      t("chatInfo.couldnTChangeTheirRole"),
                     )
                   }
                 />
@@ -355,7 +359,7 @@ export function ChatInfoScreen({
 
               <Pressable style={styles.dangerRow} onPress={confirmLeave} disabled={busy}>
                 <Ionicons name="exit-outline" size={19} color={palette.danger} />
-                <Text style={styles.dangerText}>Leave group</Text>
+                <Text style={styles.dangerText}>{t("chatInfo.leaveGroup")}</Text>
               </Pressable>
             </>
           ) : (
@@ -365,8 +369,8 @@ export function ChatInfoScreen({
                 onPress={() => onOpenMember(conversation.other_user.user_id)}
               >
                 <Ionicons name="person-outline" size={19} color={palette.text} />
-                <Text style={styles.actionText}>View profile</Text>
-                <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
+                <Text style={styles.actionText}>{t("chatInfo.viewProfile")}</Text>
+                <Ionicons name={dirIcon("chevron-forward")} size={16} color={palette.textMuted} />
               </Pressable>
 
               <Pressable
@@ -375,12 +379,12 @@ export function ChatInfoScreen({
                   void run(async () => {
                     if (conversation.blocked_by_me) {
                       await backendClient?.unblockUser(conversation.other_user.user_id);
-                      onToast("Unblocked.", "success");
+                      onToast(t("chatInfo.unblocked"), "success");
                     } else {
                       await backendClient?.blockUser(conversation.other_user.user_id);
-                      onToast("Blocked. They can't message you.", "success");
+                      onToast(t("chatInfo.blockedTheyCanTMessage"), "success");
                     }
-                  }, "Couldn't change that.")
+                  }, t("chatInfo.couldnTChangeThat"))
                 }
               >
                 <Ionicons
@@ -401,24 +405,24 @@ export function ChatInfoScreen({
                 style={styles.actionRow}
                 onPress={() =>
                   Alert.alert(
-                    "Archive this conversation?",
-                    "It comes back if either of you sends a message.",
+                    t("chatInfo.archiveThisConversation"),
+                    t("chatInfo.itComesBackIfEither"),
                     [
-                      { text: "Cancel", style: "cancel" },
+                      { text: t("chatInfo.cancel"), style: "cancel" },
                       {
-                        text: "Archive",
+                        text: t("chatInfo.archive"),
                         onPress: () =>
                           void run(async () => {
                             await backendClient?.archiveConversation(conversation.id);
                             onLeft();
-                          }, "Couldn't archive that."),
+                          }, t("chatInfo.couldnTArchiveThat")),
                       },
                     ],
                   )
                 }
               >
                 <Ionicons name="archive-outline" size={19} color={palette.text} />
-                <Text style={styles.actionText}>Archive conversation</Text>
+                <Text style={styles.actionText}>{t("chatInfo.archiveConversation")}</Text>
               </Pressable>
             </View>
           )}
@@ -466,23 +470,23 @@ function MemberRow({
 
   const openMenu = () => {
     const options: Array<{ text: string; style?: "destructive" | "cancel"; onPress?: () => void }> = [
-      { text: "View profile", onPress: onOpen },
+      { text: t("chatInfo.viewProfile"), onPress: onOpen },
     ];
     if (canChangeRole) {
       options.push(
         member.role === "admin"
-          ? { text: "Remove as admin", onPress: () => onSetRole("member") }
-          : { text: "Make admin", onPress: () => onSetRole("admin") },
+          ? { text: t("chatInfo.removeAsAdmin"), onPress: () => onSetRole("member") }
+          : { text: t("chatInfo.makeAdmin"), onPress: () => onSetRole("admin") },
       );
       options.push({
-        text: "Make owner",
+        text: t("chatInfo.makeOwner"),
         onPress: () =>
           Alert.alert(
-            "Hand the group over?",
-            `${memberName} will own this group and you'll become an admin. This can't be undone by you.`,
+            t("chatInfo.handTheGroupOver"),
+            t("chatInfo.willOwnThisGroupAnd", { memberName }),
             [
-              { text: "Cancel", style: "cancel" },
-              { text: "Hand over", style: "destructive", onPress: () => onSetRole("owner") },
+              { text: t("chatInfo.cancel"), style: "cancel" },
+              { text: t("chatInfo.handOver"), style: "destructive", onPress: () => onSetRole("owner") },
             ],
           ),
       });
@@ -494,7 +498,7 @@ function MemberRow({
         onPress: onRemove,
       });
     }
-    options.push({ text: "Cancel", style: "cancel" });
+    options.push({ text: t("chatInfo.cancel"), style: "cancel" });
     Alert.alert(memberName, undefined, options);
   };
 
@@ -507,15 +511,15 @@ function MemberRow({
         </Text>
         <Text style={styles.memberMeta} numberOfLines={1}>
           {member.left
-            ? "Left the group"
+            ? t("chatInfo.leftTheGroup")
             : member.inactive
-              ? "Can't receive messages right now"
+              ? t("chatInfo.canTReceiveMessagesRight")
               : [
-                  member.role === "owner" ? "Owner" : member.role === "admin" ? "Admin" : "",
-                  isMe ? "You" : member.user.handle ? `@${member.user.handle}` : "",
+                  member.role === "owner" ? t("chatInfo.owner") : member.role === "admin" ? t("chatInfo.admin") : "",
+                  isMe ? t("chatInfo.you") : member.user.handle ? `@${member.user.handle}` : "",
                 ]
                   .filter(Boolean)
-                  .join(" · ") || "Member"}
+                  .join(" · ") || t("chatInfo.member")}
         </Text>
       </View>
       {member.role === "owner" ? (
@@ -559,7 +563,7 @@ function ConversationFiles({
         setFiles(await backendClient.searchConversationFiles(conversationId, search));
       } catch {
         setFiles((current) => current ?? []);
-        onToast("Couldn't load this conversation's files.", "error");
+        onToast(t("chatInfo.couldnTLoadThisConversation"), "error");
       }
     },
     [backendClient, conversationId, onToast],
@@ -578,13 +582,13 @@ function ConversationFiles({
           style={styles.searchInput}
           value={query}
           onChangeText={setQuery}
-          placeholder="Search files"
+          placeholder={t("chatInfo.searchFiles")}
           placeholderTextColor={palette.textMuted}
           autoCapitalize="none"
           autoCorrect={false}
         />
         {query ? (
-          <Pressable onPress={() => setQuery("")} hitSlop={8} accessibilityLabel="Clear search">
+          <Pressable onPress={() => setQuery("")} hitSlop={8} accessibilityLabel={t("chatInfo.clearSearch")}>
             <Ionicons name="close-circle" size={17} color={palette.textMuted} />
           </Pressable>
         ) : null}
@@ -603,7 +607,7 @@ function ConversationFiles({
             <View style={styles.filesEmpty}>
               <Ionicons name="folder-open-outline" size={28} color={palette.textMuted} />
               <Text style={styles.filesEmptyText}>
-                {query ? "Nothing matches that." : "No photos or files shared yet."}
+                {query ? t("chatInfo.nothingMatchesThat") : t("chatInfo.noPhotosOrFilesShared")}
               </Text>
             </View>
           )
@@ -642,7 +646,7 @@ function ConversationFiles({
                     .join(" · ")}
                 </Text>
               </View>
-              <Ionicons name="chevron-forward" size={15} color={palette.textMuted} />
+              <Ionicons name={dirIcon("chevron-forward")} size={15} color={palette.textMuted} />
             </Pressable>
           );
         }}
@@ -664,7 +668,7 @@ function ConversationFiles({
 
 function formatDate(seconds: number): string {
   if (!seconds) return "";
-  return new Date(seconds * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return new Date(seconds * 1000).toLocaleDateString(appLocale(), { month: "short", day: "numeric" });
 }
 
 function createStyles(palette: Palette) {

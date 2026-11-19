@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
-import { Linking, StyleProp, Text, TextStyle } from "react-native";
+import { Linking, StyleProp, TextStyle } from "react-native";
+import { Text } from "./AppText";
 
 import type { AppBackendClient } from "../services/appBackend";
 import { useLinkPreview } from "../services/linkPreviews";

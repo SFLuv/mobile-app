@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Text } from "./AppText";
 import { Ionicons } from "@expo/vector-icons";
 import { Paths } from "expo-file-system";
 import { WebView } from "react-native-webview";
@@ -12,6 +13,7 @@ import { cacheAttachment, displayFileName, fileTypeIcon, saveAttachment } from "
 import { promptPhotosBlocked } from "../utils/phonePermissions";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import type { MessageAttachment } from "../types/bulletin";
+import { t } from "../i18n";
 
 /**
  * An attachment, full screen, with a way to keep it.
@@ -134,7 +136,7 @@ export function AttachmentPreview({
       const outcome = await saveAttachment(client, conversationId, attachment);
       switch (outcome.status) {
         case "saved-to-photos":
-          onToast("Saved to your photos.", "success");
+          onToast(t("components.attachmentPreview.savedToYourPhotos"), "success");
           break;
         case "shared":
           // No toast: the share sheet is its own confirmation, and one behind
@@ -163,16 +165,16 @@ export function AttachmentPreview({
       <View style={styles.backdrop}>
         {/* The backdrop closes; the content does not, so a tap on the document
             itself is not a dismissal. */}
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close" />
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel={t("components.attachmentPreview.close")} />
 
         <View style={styles.header}>
-          <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close">
+          <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel={t("components.attachmentPreview.close")}>
             <Ionicons name="close" size={26} color={palette.white} />
           </Pressable>
           {showTitle ? (
             <View style={styles.headerTitleWrap}>
               <Text style={styles.headerTitle} numberOfLines={1}>
-                {displayFileName(attachment?.file_name) || "File"}
+                {displayFileName(attachment?.file_name) || t("components.attachmentPreview.file")}
               </Text>
               <Text style={styles.headerMeta} numberOfLines={1}>
                 {[typeInfo?.label, formatFileSize(attachment?.size_bytes)].filter(Boolean).join(" · ")}
@@ -187,7 +189,7 @@ export function AttachmentPreview({
             accessibilityLabel={kind === "image" ? "Save to photos" : "Save file"}
           >
             <Ionicons name="download-outline" size={17} color={palette.white} />
-            <Text style={styles.saveText}>{saving ? "Saving…" : "Save"}</Text>
+            <Text style={styles.saveText}>{saving ? t("components.attachmentPreview.saving") : t("components.attachmentPreview.save")}</Text>
           </Pressable>
         </View>
 
@@ -199,7 +201,7 @@ export function AttachmentPreview({
               attachment={attachment}
               typeInfo={typeInfo}
               senderName={senderName}
-              hint="That file couldn't be downloaded. Try again, or save it to open elsewhere."
+              hint={t("components.attachmentPreview.thatFileCouldnTBe")}
               styles={styles}
               palette={palette}
             />
@@ -245,7 +247,7 @@ export function AttachmentPreview({
               attachment={attachment}
               typeInfo={typeInfo}
               senderName={senderName}
-              hint="Save it to open in another app."
+              hint={t("components.attachmentPreview.saveItToOpenIn")}
               styles={styles}
               palette={palette}
             />
@@ -305,7 +307,7 @@ function FileCard({
         />
       </View>
       <Text style={styles.fileName} numberOfLines={3}>
-        {displayFileName(attachment.file_name) || "File"}
+        {displayFileName(attachment.file_name) || t("components.attachmentPreview.file")}
       </Text>
       <Text style={styles.fileMeta}>
         {[typeInfo?.label, formatFileSize(attachment.size_bytes), senderName].filter(Boolean).join(" · ")}

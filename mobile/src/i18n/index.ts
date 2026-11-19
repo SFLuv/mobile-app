@@ -1,8 +1,14 @@
-import i18next from "i18next";
+import i18next, { type TOptions } from "i18next";
+import { useEffect, useState } from "react";
 import { initReactI18next } from "react-i18next";
 import { I18nManager, NativeModules, Platform } from "react-native";
 
+import { ensureDirection } from "./direction";
 import en from "./locales/en.json";
+import ar from "./locales/ar.json";
+import es from "./locales/es.json";
+import vi from "./locales/vi.json";
+import zhHant from "./locales/zh-Hant.json";
 
 /**
  * Translations for the app's own text.
@@ -30,13 +36,40 @@ export type LanguageOption = {
  * Languages the app ships. A language is listed here only once its file
  * exists; the Settings picker stays hidden while English is the only one.
  */
-export const SUPPORTED_LANGUAGES: LanguageOption[] = [{ code: "en", nativeName: "English" }];
+const RELEASED_LANGUAGES: LanguageOption[] = [
+  { code: "en", nativeName: "English" },
+  { code: "es", nativeName: "Español" },
+  { code: "zh-Hant", nativeName: "繁體中文" },
+  { code: "vi", nativeName: "Tiếng Việt" },
+];
+
+/**
+ * Languages that are translated and wired up but not offered yet. Arabic waits
+ * for its own release: full right-to-left mirroring (src/i18n/direction.ts)
+ * needs a reliable restart and a real-device pass first. Listed here so its
+ * strings stay loaded and the direction code stays in use; move an entry into
+ * SUPPORTED_LANGUAGES to offer it.
+ */
+export const UPCOMING_LANGUAGES: LanguageOption[] = [{ code: "ar", nativeName: "العربية", rtl: true }];
+
+/**
+ * What the app offers and matches the phone's language against. Development
+ * builds include the upcoming languages so they can be worked on and tested;
+ * release builds (OTA updates and store builds) only offer released ones.
+ */
+export const SUPPORTED_LANGUAGES: LanguageOption[] = __DEV__
+  ? [...RELEASED_LANGUAGES, ...UPCOMING_LANGUAGES]
+  : RELEASED_LANGUAGES;
 
 /** "system" follows the phone's language; anything else is a code above. */
 export type LanguagePreference = "system" | string;
 
 const resources = {
   en: { translation: en },
+  es: { translation: es },
+  "zh-Hant": { translation: zhHant },
+  vi: { translation: vi },
+  ar: { translation: ar },
 };
 
 /** The phone's preferred locale, e.g. "es-US", read without a native add-on. */
@@ -86,7 +119,30 @@ export function resolveLanguage(preference: LanguagePreference | undefined): str
   return matchSupportedLanguage(deviceLocale());
 }
 
-void i18next.use(initReactI18next).init({
+/**
+ * iOS lays out each piece of text by its first strong character, not by the
+ * app's direction, so an Arabic string that starts with "SFLUV" or a number
+ * would sit on the left and order its words left to right. A right-to-left
+ * mark (U+200F) at the start of every string in a right-to-left language makes
+ * iOS treat the text as Arabic. Added here rather than in the translation
+ * files so translators never have to handle invisible characters. Text sent
+ * out of the app (e.g. the support subject) is requested in English, so it
+ * never carries the mark.
+ */
+const RTL_MARK = "\u200F";
+const rtlMarkPostProcessor = {
+  type: "postProcessor" as const,
+  name: "rtlMark",
+  process(value: string, _key: string | string[], options: { lng?: string } | undefined, translator: { language?: string }) {
+    // An explicit lng (the English support subject) wins over the app's language.
+    const language = options?.lng ?? translator?.language;
+    const rtl = Boolean(SUPPORTED_LANGUAGES.find((option) => option.code === language)?.rtl);
+    return rtl && typeof value === "string" && value && !value.startsWith(RTL_MARK) ? RTL_MARK + value : value;
+  },
+};
+
+void i18next.use(initReactI18next).use(rtlMarkPostProcessor).init({
+  postProcess: ["rtlMark"],
   resources,
   lng: resolveLanguage("system"),
   fallbackLng: "en",
@@ -107,6 +163,36 @@ export function applyLanguagePreference(preference: LanguagePreference | undefin
   if (i18next.language !== next) {
     void i18next.changeLanguage(next);
   }
+  ensureDirection(Boolean(SUPPORTED_LANGUAGES.find((language) => language.code === next)?.rtl));
+}
+
+/**
+ * Translate outside a component: helpers, alerts, toasts, error messages. The
+ * app remounts its screens when the language changes (useAppLanguage below),
+ * so text produced this way is never left in the old language on screen.
+ * Never call it at module load: a constant built from it would freeze the
+ * language the app happened to start in.
+ */
+export function t(key: string, options?: TOptions): string {
+  return i18next.t(key, options) as string;
+}
+
+/** The current language, re-rendering on change. App keys its screens on it. */
+export function useAppLanguage(): string {
+  const [language, setLanguage] = useState(i18next.language);
+  useEffect(() => {
+    const onChange = (next: string) => setLanguage(next);
+    i18next.on("languageChanged", onChange);
+    return () => {
+      i18next.off("languageChanged", onChange);
+    };
+  }, []);
+  return language;
+}
+
+/** The app's language as a locale for dates and numbers ("es", "zh-Hant", ...). */
+export function appLocale(): string {
+  return i18next.language || "en";
 }
 
 export default i18next;

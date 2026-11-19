@@ -5,6 +5,7 @@ import * as Sharing from "expo-sharing";
 import { downloadAttachment } from "../services/attachmentCache";
 import type { AppBackendClient } from "../services/appBackend";
 import type { MessageAttachment } from "../types/bulletin";
+import { t } from "../i18n";
 
 /**
  * Getting an attachment off the server and onto the device.
@@ -105,7 +106,7 @@ export async function saveAttachment(
   try {
     localUri = await cacheAttachment(client, conversationId, attachment);
   } catch (error) {
-    return { status: "failed", message: (error as Error)?.message || "That file could not be downloaded." };
+    return { status: "failed", message: (error as Error)?.message || t("utils.attachmentFiles.thatFileCouldNotBe") };
   }
 
   if (attachment.kind === "image") {
@@ -122,28 +123,28 @@ export async function saveAttachment(
       // thing that would look like the save had worked.
       return {
         status: "denied",
-        message: "SFLuv needs permission to add photos to your library.",
+        message: t("utils.attachmentFiles.sfluvNeedsPermissionToAdd"),
       };
     }
     try {
       await MediaLibrary.saveToLibraryAsync(localUri);
       return { status: "saved-to-photos" };
     } catch (error) {
-      return { status: "failed", message: (error as Error)?.message || "Couldn't save that photo." };
+      return { status: "failed", message: (error as Error)?.message || t("utils.attachmentFiles.couldnTSaveThatPhoto") };
     }
   }
 
   if (!(await Sharing.isAvailableAsync())) {
-    return { status: "failed", message: "This device has nowhere to save that file." };
+    return { status: "failed", message: t("utils.attachmentFiles.thisDeviceHasNowhereTo") };
   }
   try {
     await Sharing.shareAsync(localUri, {
       mimeType: attachment.content_type || undefined,
-      dialogTitle: displayFileName(attachment.file_name) || "Save file",
+      dialogTitle: displayFileName(attachment.file_name) || t("utils.attachmentFiles.saveFile"),
     });
     return { status: "shared" };
   } catch (error) {
-    return { status: "failed", message: (error as Error)?.message || "Couldn't save that file." };
+    return { status: "failed", message: (error as Error)?.message || t("utils.attachmentFiles.couldnTSaveThatFile") };
   }
 }
 
@@ -186,28 +187,28 @@ export function fileTypeIconFor({
   const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : "";
 
   if (isImage || type.startsWith("image/")) {
-    return { icon: "image", label: "Photo" };
+    return { icon: "image", label: t("utils.attachmentFiles.photo") };
   }
   if (type === "application/pdf" || ext === "pdf") {
     return { icon: "document-text", label: "PDF" };
   }
   if (type.includes("sheet") || type.includes("excel") || ext === "csv" || ext === "xlsx" || ext === "xls") {
-    return { icon: "grid", label: ext === "csv" ? "CSV" : "Spreadsheet" };
+    return { icon: "grid", label: ext === "csv" ? "CSV" : t("utils.attachmentFiles.spreadsheet") };
   }
   if (type.includes("word") || ext === "doc" || ext === "docx" || ext === "rtf") {
-    return { icon: "document", label: "Document" };
+    return { icon: "document", label: t("utils.attachmentFiles.document") };
   }
   if (type.includes("presentation") || type.includes("powerpoint") || ext === "ppt" || ext === "pptx") {
-    return { icon: "easel", label: "Slides" };
+    return { icon: "easel", label: t("utils.attachmentFiles.slides") };
   }
   if (type === "application/zip" || ext === "zip") {
-    return { icon: "archive", label: "Archive" };
+    return { icon: "archive", label: t("utils.attachmentFiles.archive") };
   }
   if (type === "text/calendar" || ext === "ics") {
-    return { icon: "calendar", label: "Calendar" };
+    return { icon: "calendar", label: t("utils.attachmentFiles.calendar") };
   }
   if (type.startsWith("text/") || ext === "txt") {
-    return { icon: "document-outline", label: "Text" };
+    return { icon: "document-outline", label: t("utils.attachmentFiles.text") };
   }
-  return { icon: "document-outline", label: ext ? ext.toUpperCase() : "File" };
+  return { icon: "document-outline", label: ext ? ext.toUpperCase() : t("utils.attachmentFiles.file") };
 }

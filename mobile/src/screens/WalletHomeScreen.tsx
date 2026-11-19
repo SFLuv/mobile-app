@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { Text } from "../components/AppText";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import i18next from "../i18n";

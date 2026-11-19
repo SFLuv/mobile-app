@@ -7,10 +7,10 @@ import {
   ScrollView,
   Share,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from "react-native";
+import { Text } from "../components/AppText";
 import { Ionicons } from "@expo/vector-icons";
 
 import { AppBackendClient } from "../services/appBackend";
@@ -24,6 +24,8 @@ import { buildUniversalAddContactLink } from "../utils/universalLinks";
 import { pickAvatarPhoto } from "../utils/avatarPicker";
 import { useCopyFeedback } from "../hooks/useCopyFeedback";
 import { contactPictureChanged } from "../services/contactOverrides";
+import { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
 
 /**
  * One person: what you saved about them, and what they published about
@@ -179,7 +181,7 @@ export function ContactDetailScreen({
       await backendClient.patchContact(contact.id, patch);
       onChanged();
     } catch {
-      onToast("Couldn't save that.", "error");
+      onToast(t("contactDetail.couldnTSaveThat"), "error");
     } finally {
       setSaving(false);
     }
@@ -200,7 +202,7 @@ export function ContactDetailScreen({
       contactPictureChanged();
       onChanged();
     } catch {
-      onToast("Couldn't save that picture.", "error");
+      onToast(t("contactDetail.couldnTSaveThatPicture"), "error");
     } finally {
       setPictureBusy(false);
     }
@@ -217,16 +219,16 @@ export function ContactDetailScreen({
       contactPictureChanged();
       onChanged();
     } catch {
-      onToast("Couldn't remove that picture.", "error");
+      onToast(t("contactDetail.couldnTRemoveThatPicture"), "error");
     } finally {
       setPictureBusy(false);
     }
   };
 
   const confirmDelete = () => {
-    Alert.alert(`Delete ${contact.name}?`, "This removes them from your contacts.", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Delete", style: "destructive", onPress: onDeleted },
+    Alert.alert(`Delete ${contact.name}?`, t("contactDetail.thisRemovesThemFromYour"), [
+      { text: t("contactDetail.cancel"), style: "cancel" },
+      { text: t("contactDetail.delete"), style: "destructive", onPress: onDeleted },
     ]);
   };
 
@@ -256,10 +258,10 @@ export function ContactDetailScreen({
   return (
     <SwipeBack onBack={leave} style={styles.screen}>
       <View style={styles.header}>
-        <Pressable onPress={leave} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-          <Ionicons name="chevron-back" size={26} color={palette.text} />
+        <Pressable onPress={leave} hitSlop={10} accessibilityRole="button" accessibilityLabel={t("contactDetail.back")}>
+          <Ionicons name={dirIcon("chevron-back")} size={26} color={palette.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>Contact</Text>
+        <Text style={styles.headerTitle}>{t("contactDetail.contact")}</Text>
         <Pressable
           onPress={confirmDelete}
           hitSlop={10}
@@ -275,16 +277,16 @@ export function ContactDetailScreen({
           <Pressable
             onPress={() =>
               avatarUri
-                ? Alert.alert("Contact picture", undefined, [
-                    { text: "Change", onPress: () => void changePicture() },
-                    { text: "Remove", style: "destructive", onPress: () => void removePicture() },
-                    { text: "Cancel", style: "cancel" },
+                ? Alert.alert(t("contactDetail.contactPicture"), undefined, [
+                    { text: t("contactDetail.change"), onPress: () => void changePicture() },
+                    { text: t("contactDetail.remove"), style: "destructive", onPress: () => void removePicture() },
+                    { text: t("contactDetail.cancel"), style: "cancel" },
                   ])
                 : void changePicture()
             }
             disabled={pictureBusy}
             accessibilityRole="button"
-            accessibilityLabel="Contact picture"
+            accessibilityLabel={t("contactDetail.contactPicture")}
             accessibilityState={{ busy: pictureBusy }}
           >
             {avatarUri ? (
@@ -317,7 +319,7 @@ export function ContactDetailScreen({
               }
             }}
             maxLength={60}
-            placeholder="Name"
+            placeholder={t("contactDetail.name")}
             placeholderTextColor={palette.textMuted}
             textAlign="center"
           />
@@ -326,7 +328,7 @@ export function ContactDetailScreen({
         <View style={styles.quickActions}>
           <QuickAction
             icon="arrow-up-circle-outline"
-            label="Send"
+            label={t("contactDetail.send")}
             onPress={() => onSend(contact)}
           />
           {/* Present only when the address belongs to an account. The app never
@@ -335,7 +337,7 @@ export function ContactDetailScreen({
           {contact.userId && onMessage ? (
             <QuickAction
               icon="chatbubble-outline"
-              label="Message"
+              label={t("contactDetail.message")}
               onPress={() => onMessage(contact)}
             />
           ) : null}
@@ -346,7 +348,7 @@ export function ContactDetailScreen({
           />
           <QuickAction
             icon="share-outline"
-            label="Share"
+            label={t("contactDetail.share")}
             onPress={() => {
               void Share.share({
                 message: `${contact.name} on SFLuv: ${shareLink}`,
@@ -362,12 +364,12 @@ export function ContactDetailScreen({
           </View>
         ) : null}
 
-        <Text style={styles.label}>Wallet address</Text>
+        <Text style={styles.label}>{t("contactDetail.walletAddress")}</Text>
         <Pressable
           style={styles.addressRow}
-          onPress={() => void copy(contact.address, "Address copied")}
+          onPress={() => void copy(contact.address, t("contactDetail.addressCopied"))}
           accessibilityRole="button"
-          accessibilityLabel="Copy wallet address"
+          accessibilityLabel={t("contactDetail.copyWalletAddress")}
         >
           <Text style={styles.address} numberOfLines={2}>
             {contact.address}
@@ -385,7 +387,7 @@ export function ContactDetailScreen({
             published. */}
         {profile ? (
           <>
-            <Text style={styles.label}>Their SFLuv profile</Text>
+            <Text style={styles.label}>{t("contactDetail.theirSfluvProfile")}</Text>
             <View style={styles.profileCard}>
               {profileAvatarUri ? (
                 <Image source={{ uri: profileAvatarUri }} style={styles.profileAvatar} />
@@ -405,7 +407,7 @@ export function ContactDetailScreen({
           </>
         ) : null}
 
-        <Text style={styles.label}>Notes</Text>
+        <Text style={styles.label}>{t("contactDetail.notes")}</Text>
         <TextInput
           style={styles.notes}
           value={notes}
@@ -415,14 +417,14 @@ export function ContactDetailScreen({
               void persist({ notes });
             }
           }}
-          placeholder="Anything you want to remember about them."
+          placeholder={t("contactDetail.anythingYouWantToRemember")}
           placeholderTextColor={palette.textMuted}
           multiline
           maxLength={2000}
           textAlignVertical="top"
         />
         <Text style={styles.privateHint}>
-          Only you can see this name, picture and note.
+          {t("contactDetail.onlyYouCanSeeThis")}
         </Text>
 
         {/* An explicit Save, shown only when something has changed.
@@ -436,9 +438,9 @@ export function ContactDetailScreen({
             onPress={() => void persist({ name: name.trim(), notes })}
             disabled={saving}
             accessibilityRole="button"
-            accessibilityLabel="Save changes"
+            accessibilityLabel={t("contactDetail.saveChanges")}
           >
-            <Text style={styles.saveButtonText}>{saving ? "Saving…" : "Save changes"}</Text>
+            <Text style={styles.saveButtonText}>{saving ? t("contactDetail.saving") : t("contactDetail.saveChanges")}</Text>
           </Pressable>
         ) : null}
       </ScrollView>

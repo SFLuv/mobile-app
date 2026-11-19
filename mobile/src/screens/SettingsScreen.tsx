@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { ethers } from "ethers";
-import { Animated, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { Animated, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from "react-native";
+import { Text } from "../components/AppText";
 import {
   AppCredentialRequest,
   AppGlobalCredentialType,
@@ -24,6 +25,7 @@ import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import * as MediaLibrary from "expo-media-library";
 import { useTranslation } from "react-i18next";
 import i18next, { LanguagePreference, SUPPORTED_LANGUAGES } from "../i18n";
+import { clearReturnPoint, loadReturnPoint, peekReturnPoint, rememberReturnPoint } from "../i18n/returnPoint";
 import * as Notifications from "expo-notifications";
 import {
   PhoneAccess,
@@ -32,6 +34,8 @@ import {
   useCameraAccess,
   useOnForeground,
 } from "../utils/phonePermissions";
+import { t } from "../i18n";
+import { directionRestartPending, dirIcon, dirSign } from "../i18n/direction";
 
 type Props = {
   user: AppUser | null;
@@ -245,10 +249,10 @@ function MerchantPinSwipe({
         onMoveShouldSetPanResponder: (_, gesture) =>
           !disabled && !loading && swipeDistance > 0 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
         onPanResponderMove: (_, gesture) => {
-          translateX.setValue(Math.max(0, Math.min(gesture.dx, swipeDistance)));
+          translateX.setValue(Math.max(0, Math.min(gesture.dx * dirSign(), swipeDistance)));
         },
         onPanResponderRelease: (_, gesture) => {
-          if (gesture.dx >= swipeDistance * 0.72) {
+          if (gesture.dx * dirSign() >= swipeDistance * 0.72) {
             Animated.timing(translateX, {
               toValue: swipeDistance,
               duration: 120,
@@ -274,10 +278,10 @@ function MerchantPinSwipe({
         {loading ? loadingLabel : label}
       </Text>
       <Animated.View
-        style={[styles.pinSwipeThumb, disabled ? styles.pinSwipeThumbDisabled : undefined, { transform: [{ translateX }] }]}
+        style={[styles.pinSwipeThumb, disabled ? styles.pinSwipeThumbDisabled : undefined, { transform: [{ translateX: Animated.multiply(translateX, dirSign()) }] }]}
         {...panResponder.panHandlers}
       >
-        <Ionicons name={loading ? "hourglass-outline" : "arrow-forward"} size={18} color={palette.primaryStrong} />
+        <Ionicons name={loading ? "hourglass-outline" : dirIcon("arrow-forward")} size={18} color={palette.primaryStrong} />
       </Animated.View>
     </View>
   );
@@ -324,16 +328,19 @@ function ThemeOption({
   label,
   active,
   onPress,
+  fitContent = false,
 }: {
   label: string;
   active: boolean;
+  /** Size to the label rather than share the row equally, for longer translations. */
+  fitContent?: boolean;
   onPress: () => void;
 }) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
 
   return (
-    <Pressable style={[styles.themeOption, active ? styles.themeOptionActive : undefined]} onPress={onPress}>
+    <Pressable style={[styles.themeOption, fitContent ? styles.themeOptionFit : undefined, active ? styles.themeOptionActive : undefined]} onPress={onPress}>
       <Text style={[styles.themeOptionText, active ? styles.themeOptionTextActive : undefined]}>{label}</Text>
     </Pressable>
   );
@@ -513,6 +520,7 @@ function LanguageCard({
           <ThemeOption
             key={option.code}
             label={option.label}
+            fitContent
             active={value === option.code}
             onPress={() => onChange(option.code)}
           />
@@ -568,10 +576,9 @@ function reminderHourOptions(current: number): number[] {
 
 function formatReminderHours(hours: number): string {
   if (hours % 24 === 0) {
-    const days = hours / 24;
-    return days === 1 ? "1 day" : `${days} days`;
+    return i18next.t("settings.notifications.reminderDays", { count: hours / 24 });
   }
-  return hours === 1 ? "1 hour" : `${hours} hours`;
+  return i18next.t("settings.notifications.reminderHours", { count: hours });
 }
 
 function SocialAccountRow({
@@ -1089,7 +1096,22 @@ export function SettingsScreen({
   const { palette, shadows } = useAppTheme();
   const { t } = useTranslation();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
-  const [section, setSection] = useState<SettingsSection>("general");
+  const [section, setSection] = useState<SettingsSection>(
+    () => (peekReturnPoint()?.section as SettingsSection | undefined) ?? "general",
+  );
+  useEffect(() => {
+    // Applied: a language change brought them back here. Clear it so it is
+    // not reused, after picking up a point saved before a restart.
+    void loadReturnPoint().then((point) => {
+      if (point?.section) {
+        setSection(point.section as SettingsSection);
+      }
+      // Keep it through a right-to-left restart, which comes back here too.
+      if (!directionRestartPending()) {
+        clearReturnPoint();
+      }
+    });
+  }, []);
   const [showPushDetails, setShowPushDetails] = useState(false);
   const [rewardsWalletDraft, setRewardsWalletDraft] = useState(
     improver?.primaryRewardsAccount?.trim() || primaryWalletAddress || "",
@@ -1220,7 +1242,11 @@ export function SettingsScreen({
 
           <LanguageCard
             value={preferences.languagePreference}
-            onChange={(languagePreference) => onUpdatePreferences({ ...preferences, languagePreference })}
+            onChange={(languagePreference) => {
+              // Come back to this screen after the redraw (or restart).
+              rememberReturnPoint({ tab: "settings", section: "general" });
+              onUpdatePreferences({ ...preferences, languagePreference });
+            }}
           />
 
           <PhonePermissionsCard onNotificationsAllowed={onSyncNotifications} />
@@ -1310,14 +1336,6 @@ export function SettingsScreen({
               value={preferences.hapticsEnabled}
               onValueChange={(hapticsEnabled) => onUpdatePreferences({ ...preferences, hapticsEnabled })}
             />
-            {volunteerPanelAvailable ? (
-              <PreferenceRow
-                title={t("settings.behavior.showVolunteer")}
-                body={t("settings.behavior.showVolunteerBody")}
-                value={preferences.showVolunteerPanel}
-                onValueChange={(showVolunteerPanel) => onUpdatePreferences({ ...preferences, showVolunteerPanel })}
-              />
-            ) : null}
             <View style={styles.preferenceStack}>
               <View style={styles.preferenceCopy}>
                 <Text style={styles.preferenceTitle}>{t("settings.behavior.sendOpensOn")}</Text>
@@ -1436,10 +1454,10 @@ export function SettingsScreen({
               <View style={{ flex: 1 }}>
                 <Text style={styles.supportButtonText}>{t("settings.account.contact")}</Text>
                 <Text style={styles.supportButtonHint}>
-                  Questions, problems, or anything else.
+                  {t("settings.questionsProblemsOrAnythingElse")}
                 </Text>
               </View>
-              <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
+              <Ionicons name={dirIcon("chevron-forward")} size={16} color={palette.textMuted} />
             </Pressable>
           ) : null}
 
@@ -1622,7 +1640,7 @@ export function SettingsScreen({
       ) : null}
         {/* Which build this is, for support. */}
         <Text style={styles.versionFooter}>
-          Version {getClientMetadata().version} (build {getClientMetadata().buildLabel})
+          {t("settings.version", { version: getClientMetadata().version, build: getClientMetadata().buildLabel })}
         </Text>
       </ScrollView>
       <Modal
@@ -1817,6 +1835,11 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       backgroundColor: palette.surfaceStrong,
       paddingVertical: 12,
       alignItems: "center",
+    },
+    themeOptionFit: {
+      flex: 0,
+      flexGrow: 1,
+      paddingHorizontal: 16,
     },
     themeOptionActive: {
       borderColor: palette.primary,

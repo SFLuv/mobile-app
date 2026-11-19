@@ -1,11 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Text } from "./AppText";
 
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import type { AppAlertAction } from "../types/notifications";
 import { categoryLabel, type SupportRequestDetails } from "../utils/supportRequests";
+import { t } from "../i18n";
+import { appLocale } from "../i18n";
 
 type Props = {
   visible: boolean;
@@ -22,7 +25,7 @@ function formatReceived(at: number): string {
   if (!at) {
     return "";
   }
-  return new Date(at).toLocaleString("en-US", {
+  return new Date(at).toLocaleString(appLocale(), {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -82,7 +85,7 @@ export function SupportRequestModal({ visible, request, actions, busyActionId, o
         color={copied === id ? palette.success : palette.primaryStrong}
       />
       <Text style={[styles.copyLabel, copied === id ? { color: palette.success } : null]}>
-        {copied === id ? "Copied" : "Copy"}
+        {copied === id ? t("components.supportRequestModal.copied") : t("components.supportRequestModal.copy")}
       </Text>
     </Pressable>
   );
@@ -91,8 +94,8 @@ export function SupportRequestModal({ visible, request, actions, busyActionId, o
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={styles.root}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Support request</Text>
-          <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" hitSlop={8}>
+          <Text style={styles.headerTitle}>{t("components.supportRequestModal.supportRequest")}</Text>
+          <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel={t("components.supportRequestModal.close")} hitSlop={8}>
             <Ionicons name="close" size={22} color={palette.text} />
           </Pressable>
         </View>
@@ -101,12 +104,12 @@ export function SupportRequestModal({ visible, request, actions, busyActionId, o
           {request.reference ? (
             <View style={styles.referenceCard}>
               <View>
-                <Text style={styles.label}>Ticket</Text>
+                <Text style={styles.label}>{t("components.supportRequestModal.ticket")}</Text>
                 <Text style={styles.reference} selectable>
                   {request.reference}
                 </Text>
               </View>
-              <CopyButton value={request.reference} id="reference" label="ticket number" />
+              <CopyButton value={request.reference} id="reference" label={t("components.supportRequestModal.ticketNumber")} />
             </View>
           ) : null}
 
@@ -121,24 +124,24 @@ export function SupportRequestModal({ visible, request, actions, busyActionId, o
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.label}>From</Text>
+            <Text style={styles.label}>{t("components.supportRequestModal.from")}</Text>
             {request.name ? <Text style={styles.senderName}>{request.name}</Text> : null}
             {request.email ? (
               <View style={styles.emailRow}>
                 <Text style={styles.email} selectable numberOfLines={1}>
                   {request.email}
                 </Text>
-                <CopyButton value={request.email} id="email" label="email address" />
+                <CopyButton value={request.email} id="email" label={t("components.supportRequestModal.emailAddress")} />
               </View>
             ) : (
-              <Text style={styles.meta}>No email address was given.</Text>
+              <Text style={styles.meta}>{t("components.supportRequestModal.noEmailAddressWasGiven")}</Text>
             )}
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.label}>Message</Text>
+            <Text style={styles.label}>{t("components.supportRequestModal.message")}</Text>
             <Text style={styles.message} selectable>
-              {request.message || "(No message)"}
+              {request.message || t("components.supportRequestModal.noMessage")}
             </Text>
           </View>
         </ScrollView>

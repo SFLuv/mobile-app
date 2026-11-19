@@ -8,12 +8,12 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   TouchableWithoutFeedback,
   View,
   useWindowDimensions,
 } from "react-native";
+import { Text } from "../components/AppText";
 import Constants from "expo-constants";
 import { CameraView } from "expo-camera";
 import { useTranslation } from "react-i18next";
@@ -32,6 +32,8 @@ import { formatDistanceLabel, locationDistanceMeters, sortLocationsByProximity }
 import { parseSendTarget, parseSfluvUniversalLink, SendTarget, SfluvUniversalLink } from "../utils/universalLinks";
 import { triggerClickHaptic } from "../utils/haptics";
 import { openPhoneSettings, useCameraAccess } from "../utils/phonePermissions";
+import { t } from "../i18n";
+import { dirIcon, dirSign } from "../i18n/direction";
 
 // How close someone must be to a merchant in setup for the payment screen to
 // offer it. Wide enough for indoor GPS drift, narrow enough that it is only
@@ -181,12 +183,15 @@ function formatTokenAmount(value: ethers.BigNumberish, tokenDecimals: number, ma
 function formatBalanceText(rawBalance: string, tokenDecimals: number, tokenSymbol: string): string {
   const normalized = rawBalance.trim();
   if (!normalized || normalized === "...") {
-    return `Balance: ... ${tokenSymbol}`;
+    return t("send.balance", { amount: "...", symbol: tokenSymbol });
   }
   try {
-    return `Balance: ${sanitizeTokenInput(formatTokenAmount(ethers.utils.parseUnits(normalized, tokenDecimals), tokenDecimals, 2), tokenDecimals) || "0"} ${tokenSymbol}`;
+    return t("send.balance", {
+      amount: sanitizeTokenInput(formatTokenAmount(ethers.utils.parseUnits(normalized, tokenDecimals), tokenDecimals, 2), tokenDecimals) || "0",
+      symbol: tokenSymbol,
+    });
   } catch {
-    return `Balance: ${normalized} ${tokenSymbol}`;
+    return t("send.balance", { amount: normalized, symbol: tokenSymbol });
   }
 }
 
@@ -252,10 +257,10 @@ function SwipeToSend({
         onMoveShouldSetPanResponder: (_, gesture) =>
           !disabled && !loading && swipeDistance > 0 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
         onPanResponderMove: (_, gesture) => {
-          translateX.setValue(Math.max(0, Math.min(gesture.dx, swipeDistance)));
+          translateX.setValue(Math.max(0, Math.min(gesture.dx * dirSign(), swipeDistance)));
         },
         onPanResponderRelease: (_, gesture) => {
-          if (gesture.dx >= swipeDistance * 0.72) {
+          if (gesture.dx * dirSign() >= swipeDistance * 0.72) {
             Animated.timing(translateX, {
               toValue: swipeDistance,
               duration: 120,
@@ -288,7 +293,7 @@ function SwipeToSend({
         style={[
           styles.swipeThumb,
           {
-            transform: [{ translateX }],
+            transform: [{ translateX: Animated.multiply(translateX, dirSign()) }],
           },
           disabled ? styles.swipeThumbDisabled : undefined,
         ]}
@@ -297,7 +302,7 @@ function SwipeToSend({
         {loading ? (
           <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
         ) : (
-          <Ionicons name="arrow-forward" size={18} color={palette.primaryStrong} />
+          <Ionicons name={dirIcon("arrow-forward")} size={18} color={palette.primaryStrong} />
         )}
       </Animated.View>
     </View>
@@ -611,8 +616,8 @@ export function SendScreen({
       return {
         merchantName:
           resolvedRecipient?.kind === "payment-link"
-            ? "this merchant"
-            : resolvedRecipient?.label || "this merchant",
+            ? t("send.thisMerchant")
+            : resolvedRecipient?.label || t("send.thisMerchant"),
         tipToAddress: target.tipToAddress,
       };
     }
@@ -1124,7 +1129,7 @@ export function SendScreen({
 
         <View style={styles.entryModeHeaderRow}>
           <Pressable style={styles.iconButton} onPress={handleBack}>
-            <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
+            <Ionicons name={dirIcon("arrow-back")} size={18} color={palette.primaryStrong} />
           </Pressable>
           <SegmentedTabs
             style={styles.entryModeRowFill}
@@ -1254,7 +1259,7 @@ export function SendScreen({
             <View style={styles.amountHero}>
               <View style={styles.amountHeroTop}>
                 <Pressable style={styles.iconButton} onPress={handleBack}>
-                  <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
+                  <Ionicons name={dirIcon("arrow-back")} size={18} color={palette.primaryStrong} />
                 </Pressable>
                 <Text style={[styles.recipientLine, styles.recipientLineInline]} numberOfLines={1}>
                   {t("send.to", { name: primaryRecipientLabel || t("send.recipient") })}
@@ -1482,7 +1487,7 @@ export function SendScreen({
                             tipSelectionLocked ? styles.tipChoiceTextDisabled : undefined,
                           ]}
                         >
-                          Custom
+                          {t("send.custom")}
                         </Text>
                       </Pressable>
                     ) : null}
@@ -1967,7 +1972,9 @@ function createStyles(
       minHeight: focusedNoteGap,
     },
     keypadRow: {
+      // Number pads read 1-2-3 left to right in every language, Arabic too.
       flexDirection: "row",
+      direction: "ltr",
       gap: keypadGap,
     },
     keypadKey: {

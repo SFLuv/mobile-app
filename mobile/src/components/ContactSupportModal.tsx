@@ -6,15 +6,16 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from "react-native";
+import { Text } from "./AppText";
 import { Ionicons } from "@expo/vector-icons";
 
 import { AppBackendClient } from "../services/appBackend";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { BulletinRequestError } from "../types/bulletin";
+import i18next, { t } from "../i18n";
 
 /**
  * Writing to SFLuv from inside the app.
@@ -39,16 +40,16 @@ import { BulletinRequestError } from "../types/bulletin";
  * no category and reaches everybody, so the failure mode of drift is "more
  * people see it", not "it is lost".
  */
-const CATEGORIES: Array<{ id: string; label: string }> = [
-  { id: "technical-support", label: "Something isn't working" },
-  { id: "general", label: "A general question" },
-  { id: "merchant-onboarding", label: "Becoming a merchant" },
-  { id: "become-an-improver", label: "Becoming an improver" },
-  { id: "events", label: "Events and volunteering" },
+const CATEGORIES: Array<{ id: string; labelKey: string }> = [
+  { id: "technical-support", labelKey: "components.contactSupportModal.somethingIsnTWorking" },
+  { id: "general", labelKey: "components.contactSupportModal.aGeneralQuestion" },
+  { id: "merchant-onboarding", labelKey: "components.contactSupportModal.becomingAMerchant" },
+  { id: "become-an-improver", labelKey: "components.contactSupportModal.becomingAnImprover" },
+  { id: "events", labelKey: "components.contactSupportModal.eventsAndVolunteering" },
   // The W-9 card and pop-ups send people here, and until this was added they
   // had to pick something that was not what they were writing about.
-  { id: "w9", label: "My W-9 or taxes" },
-  { id: "other", label: "Something else" },
+  { id: "w9", labelKey: "components.contactSupportModal.myW9OrTaxes" },
+  { id: "other", labelKey: "components.contactSupportModal.somethingElse" },
 ];
 
 export function ContactSupportModal({
@@ -99,14 +100,15 @@ export function ContactSupportModal({
       const result = await backendClient.submitSupportRequest({
         email: email.trim(),
         name: defaultName?.trim() || "",
-        subject: chosen.label,
+        // Staff read the inbox in English, whatever language the app is in.
+        subject: i18next.t(chosen.labelKey, { lng: "en" }),
         subject_slug: chosen.id,
         message: message.trim(),
       });
       setReference(result.reference);
     } catch (e) {
       setError(
-        e instanceof BulletinRequestError ? e.message : "Couldn't send that. Try again in a moment.",
+        e instanceof BulletinRequestError ? e.message : t("components.contactSupportModal.couldnTSendThatTry"),
       );
     } finally {
       setSending(false);
@@ -127,20 +129,20 @@ export function ContactSupportModal({
               <View style={styles.sentIcon}>
                 <Ionicons name="checkmark" size={26} color={palette.white} />
               </View>
-              <Text style={styles.title}>Message sent</Text>
+              <Text style={styles.title}>{t("components.contactSupportModal.messageSent")}</Text>
               <Text style={styles.body}>
                 We&apos;ll get back to you at {email.trim()}. Your reference is:
               </Text>
               <Text style={styles.reference}>{reference}</Text>
               <Pressable style={styles.primary} onPress={onClose}>
-                <Text style={styles.primaryText}>Done</Text>
+                <Text style={styles.primaryText}>{t("components.contactSupportModal.done")}</Text>
               </Pressable>
             </View>
           ) : (
             <>
               <View style={styles.header}>
-                <Text style={styles.title}>Contact SFLuv</Text>
-                <Pressable onPress={onClose} hitSlop={10} accessibilityLabel="Close">
+                <Text style={styles.title}>{t("components.contactSupportModal.contactSfluv")}</Text>
+                <Pressable onPress={onClose} hitSlop={10} accessibilityLabel={t("components.contactSupportModal.close")}>
                   <Ionicons name="close" size={20} color={palette.textMuted} />
                 </Pressable>
               </View>
@@ -154,7 +156,7 @@ export function ContactSupportModal({
                       style={[styles.category, category === entry.id && styles.categoryActive]}
                       onPress={() => setCategory(entry.id)}
                       accessibilityRole="button"
-                      accessibilityLabel={entry.label}
+                      accessibilityLabel={t(entry.labelKey)}
                     >
                       <Text
                         style={[
@@ -162,25 +164,25 @@ export function ContactSupportModal({
                           category === entry.id && styles.categoryTextActive,
                         ]}
                       >
-                        {entry.label}
+                        {t(entry.labelKey)}
                       </Text>
                     </Pressable>
                   ))}
                 </View>
 
-                <Text style={styles.label}>Your message</Text>
+                <Text style={styles.label}>{t("components.contactSupportModal.yourMessage")}</Text>
                 <TextInput
                   style={styles.message}
                   value={message}
                   onChangeText={setMessage}
-                  placeholder="Tell us what you need. The more detail the better."
+                  placeholder={t("components.contactSupportModal.tellUsWhatYouNeed")}
                   placeholderTextColor={palette.textMuted}
                   multiline
                   maxLength={8000}
                   textAlignVertical="top"
                 />
 
-                <Text style={styles.label}>Where should we reply?</Text>
+                <Text style={styles.label}>{t("components.contactSupportModal.whereReplyQ")}</Text>
                 <TextInput
                   style={styles.input}
                   value={email}
@@ -201,7 +203,7 @@ export function ContactSupportModal({
                 disabled={!ready || sending}
                 accessibilityRole="button"
               >
-                <Text style={styles.primaryText}>{sending ? "Sending…" : "Send message"}</Text>
+                <Text style={styles.primaryText}>{sending ? t("components.contactSupportModal.sending") : t("components.contactSupportModal.sendMessage")}</Text>
               </Pressable>
             </>
           )}

@@ -7,9 +7,9 @@ import {
   Pressable,
   RefreshControl,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
+import { Text } from "../components/AppText";
 import { Ionicons } from "@expo/vector-icons";
 
 import { SupportRequestModal } from "../components/SupportRequestModal";
@@ -18,6 +18,8 @@ import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { SwipeBack } from "../components/SwipeBack";
 import type { AppAlertAction, AppNotificationFeed, AppNotificationItem } from "../types/notifications";
 import { supportRequestDetails } from "../utils/supportRequests";
+import { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
 
 /**
  * The notification screen.
@@ -88,7 +90,7 @@ function relativeTime(at: number): string {
     return "";
   }
   const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
-  if (seconds < 60) return "just now";
+  if (seconds < 60) return t("notifications.justNow");
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.round(minutes / 60);
@@ -181,7 +183,7 @@ export function NotificationsScreen({
         }
         // An instruction this build does not know: a newer server added one.
         // Saying so beats a button that silently does nothing.
-        RNAlert.alert("Update SFLuv", "This needs a newer version of the app.");
+        RNAlert.alert(t("notifications.updateSfluv"), t("notifications.thisNeedsANewerVersion"));
         return;
       }
 
@@ -192,7 +194,7 @@ export function NotificationsScreen({
         try {
           await Linking.openURL(action.url);
         } catch {
-          RNAlert.alert("Nothing to open that with", "This device has no app set up for that link.");
+          RNAlert.alert(t("notifications.nothingToOpenThatWith"), t("notifications.thisDeviceHasNoApp"));
         }
         return;
       }
@@ -212,7 +214,7 @@ export function NotificationsScreen({
 
       if (action.confirm) {
         RNAlert.alert(action.label, action.confirm, [
-          { text: "Cancel", style: "cancel" },
+          { text: t("notifications.cancel"), style: "cancel" },
           { text: action.label, style: action.style === "danger" ? "destructive" : "default", onPress: () => void run() },
         ]);
         return;
@@ -258,7 +260,7 @@ export function NotificationsScreen({
     // of.
     if (activeTab === "new") {
       if (active.length === 0) {
-        out.push({ kind: "empty", key: "empty:active", message: "You are all caught up." });
+        out.push({ kind: "empty", key: "empty:active", message: t("notifications.youAreAllCaughtUp") });
       }
       for (const item of active) {
         out.push({ kind: "item", key: `active:${item.id}`, item, fresh: true });
@@ -270,7 +272,7 @@ export function NotificationsScreen({
       out.push({
         kind: "empty",
         key: "empty:history",
-        message: "Notifications move here once they have been read or handled.",
+        message: t("notifications.notificationsMoveHereOnceThey"),
       });
     }
     for (const item of history) {
@@ -389,8 +391,8 @@ export function NotificationsScreen({
 
             {routable || opensDetail ? (
               <View style={styles.openHint}>
-                <Text style={styles.openHintText}>{opensDetail ? "Tap for details" : "Tap to open"}</Text>
-                <Ionicons name="chevron-forward" size={13} color={palette.textMuted} />
+                <Text style={styles.openHintText}>{opensDetail ? t("notifications.tapForDetails") : t("notifications.tapToOpen")}</Text>
+                <Ionicons name={dirIcon("chevron-forward")} size={13} color={palette.textMuted} />
               </View>
             ) : null}
           </Pressable>
@@ -452,8 +454,8 @@ export function NotificationsScreen({
           place you can already see. The tabs take that space instead, inline
           with the back button. */}
       <View style={styles.topBar}>
-        <Pressable style={styles.backButton} onPress={onClose} accessibilityRole="button" accessibilityLabel="Back">
-          <Ionicons name="chevron-back" size={22} color={palette.primaryStrong} />
+        <Pressable style={styles.backButton} onPress={onClose} accessibilityRole="button" accessibilityLabel={t("notifications.back")}>
+          <Ionicons name={dirIcon("chevron-back")} size={22} color={palette.primaryStrong} />
         </Pressable>
         <View style={styles.tabRow}>
           {(["new", "history"] as const).map((key) => {
@@ -466,7 +468,7 @@ export function NotificationsScreen({
                 onPress={() => setActiveTab(key)}
                 accessibilityRole="button"
                 accessibilityState={{ selected }}
-                accessibilityLabel={key === "new" ? "New notifications" : "Notification history"}
+                accessibilityLabel={key === "new" ? t("notifications.newNotifications") : t("notifications.notificationHistory")}
               >
                 <Text
                   style={[styles.tabLabel, selected && styles.tabLabelActive]}
@@ -475,7 +477,7 @@ export function NotificationsScreen({
                   minimumFontScale={0.8}
                   maxFontSizeMultiplier={1.2}
                 >
-                  {key === "new" ? "New" : "History"}
+                  {key === "new" ? t("notifications.new") : t("notifications.history")}
                 </Text>
                 {count > 0 ? (
                   <View style={styles.tabCount}>
@@ -496,7 +498,7 @@ export function NotificationsScreen({
           <Ionicons name="cloud-offline-outline" size={14} color={palette.danger} />
           <Text style={styles.errorText}>{error}</Text>
           <Pressable onPress={() => void refresh()} accessibilityRole="button">
-            <Text style={styles.errorRetry}>Retry</Text>
+            <Text style={styles.errorRetry}>{t("notifications.retry")}</Text>
           </Pressable>
         </View>
       ) : null}

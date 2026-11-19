@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Animated, PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, PanResponder, Pressable, StyleSheet, View } from "react-native";
+import { Text } from "./AppText";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Palette, radii, spacing, useAppTheme } from "../theme";
+import { dirIcon } from "../i18n/direction";
 
 /**
  * The merchant PIN pad, in one place because a till now asks for the PIN in
@@ -168,7 +170,7 @@ export function MerchantPinSlider({
         style={[styles.swipeThumb, disabled ? styles.swipeThumbDisabled : undefined, { transform: [{ translateX }] }]}
         {...panResponder.panHandlers}
       >
-        <Ionicons name={loading ? "hourglass-outline" : "arrow-forward"} size={18} color={palette.primaryStrong} />
+        <Ionicons name={loading ? "hourglass-outline" : dirIcon("arrow-forward")} size={18} color={palette.primaryStrong} />
       </Animated.View>
     </View>
   );
@@ -210,7 +212,9 @@ function createStyles(palette: Palette) {
       gap: spacing.xs,
     },
     keypadRow: {
+      // Number pads read 1-2-3 left to right in every language.
       flexDirection: "row",
+      direction: "ltr",
       gap: spacing.xs,
     },
     keypadKey: {

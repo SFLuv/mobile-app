@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from "react-native";
+import { FlatList, Pressable, RefreshControl, StyleSheet, TextInput, View } from "react-native";
+import { Text } from "../components/AppText";
 import { SwipeBack } from "../components/SwipeBack";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { TransactionDetailsModal } from "../components/TransactionDetailsModal";
@@ -12,6 +13,9 @@ import {
   isRewardTransaction,
   TransactionDetailPayload,
 } from "../utils/transactions";
+import { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
+import { appLocale } from "../i18n";
 
 type Props = {
   transactions: AppTransaction[];
@@ -45,7 +49,7 @@ type Props = {
 };
 
 function formatDate(timestamp: number): string {
-  return new Date(timestamp * 1000).toLocaleString("en-US", {
+  return new Date(timestamp * 1000).toLocaleString(appLocale(), {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -109,7 +113,7 @@ export function ActivityScreen({
         details.fromLabel,
         details.toLabel,
         details.typeLabel,
-        details.received ? "received in" : "sent out",
+        details.received ? t("activity.receivedIn") : t("activity.sentOut"),
         details.transaction.from,
         details.transaction.to,
         details.transaction.hash,
@@ -162,10 +166,10 @@ export function ActivityScreen({
       const incoming = details.received;
       const reward = incoming && isRewardTransaction(details.transaction, faucetAddress);
       const title = reward
-        ? "Received Reward"
+        ? t("activity.receivedReward")
         : incoming
-          ? `Received from ${details.fromLabel}`
-          : `Sent to ${details.toLabel}`;
+          ? t("activity.receivedFrom", { fromLabel: details.fromLabel })
+          : t("activity.sentTo", { toLabel: details.toLabel });
 
       return (
         <Pressable
@@ -213,9 +217,9 @@ export function ActivityScreen({
           onPress={onBack}
           hitSlop={10}
           accessibilityRole="button"
-          accessibilityLabel="Back to wallet"
+          accessibilityLabel={t("activity.backToWallet")}
         >
-          <Ionicons name="chevron-back" size={22} color={palette.primaryStrong} />
+          <Ionicons name={dirIcon("chevron-back")} size={22} color={palette.primaryStrong} />
         </Pressable>
         <View style={styles.searchField}>
           <Ionicons name="search" size={15} color={palette.textMuted} />
@@ -223,15 +227,15 @@ export function ActivityScreen({
             style={styles.searchInput}
             value={query}
             onChangeText={setQuery}
-            placeholder="Address, tx id, merchant, type, contact"
+            placeholder={t("activity.addressTxIdMerchantType")}
             placeholderTextColor={palette.textMuted}
             autoCapitalize="none"
             autoCorrect={false}
             returnKeyType="search"
-            accessibilityLabel="Search transactions"
+            accessibilityLabel={t("activity.searchTransactions")}
           />
           {query.length > 0 ? (
-            <Pressable onPress={() => setQuery("")} hitSlop={8} accessibilityLabel="Clear search">
+            <Pressable onPress={() => setQuery("")} hitSlop={8} accessibilityLabel={t("activity.clearSearch")}>
               <Ionicons name="close-circle" size={16} color={palette.textMuted} />
             </Pressable>
           ) : null}
@@ -262,20 +266,20 @@ export function ActivityScreen({
           !transactionsLoaded ? (
             <View style={styles.emptyCardInline}>
               <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
-              <Text style={styles.emptyTitle}>Loading transactions</Text>
+              <Text style={styles.emptyTitle}>{t("activity.loadingTransactions")}</Text>
             </View>
           ) : query.trim() ? (
             <View style={styles.emptyCardInline}>
-              <Text style={styles.emptyTitle}>Nothing matches that</Text>
+              <Text style={styles.emptyTitle}>{t("activity.nothingMatchesThat")}</Text>
               <Text style={styles.emptyBody}>
-                Try part of an address, a transaction id, or the name you know them by.
+                {t("activity.tryPartOfAnAddress")}
               </Text>
             </View>
           ) : (
             <View style={styles.emptyCardInline}>
-              <Text style={styles.emptyTitle}>No transactions yet</Text>
+              <Text style={styles.emptyTitle}>{t("activity.noTransactionsYet")}</Text>
               <Text style={styles.emptyBody}>
-                Your sends and receives will show up here after the first payment.
+                {t("activity.yourSendsAndReceivesWill")}
               </Text>
             </View>
           )
