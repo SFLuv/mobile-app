@@ -21,8 +21,11 @@ case "$channel" in
   *) echo "Usage: $0 <preview|production|check> \"message\"" >&2; exit 1 ;;
 esac
 
-eval "$(node -e '
-  const env = require("./eas.json").build.production.env;
+# The preview channel serves preview builds, so it also takes the preview
+# profile's overrides (its Sentry environment is "preview", not "production").
+eval "$(CHANNEL="$channel" node -e '
+  const { build } = require("./eas.json");
+  const env = { ...build.production.env, ...(process.env.CHANNEL === "preview" ? build.preview.env : {}) };
   for (const [k, v] of Object.entries(env)) console.log(`export ${k}=${JSON.stringify(v)}`);
 ')"
 
