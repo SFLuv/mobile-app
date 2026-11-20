@@ -78,6 +78,7 @@ import {
   initSentry,
   recordStep,
   reportHandledError,
+  reportSignInFailure,
   syncSentryUser,
   useStuckWatch,
   watchForStuck,
@@ -203,6 +204,9 @@ type RuntimeState = {
   service: SmartWalletService | null;
   discovery: RouteDiscovery | null;
   error: string | null;
+  /** The error was a timeout or no network, decided from the error itself:
+   * `error` is translated text and can't be matched in every language. */
+  offline?: boolean;
   loadingMessage?: string | null;
 };
 
@@ -468,6 +472,15 @@ async function getOrCreateAppInstallationID(): Promise<string> {
   return nextID;
 }
 
+/** A step that ran out of time. Its message is translated, so callers test
+ * the type, never the text. */
+class StepTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StepTimeoutError";
+  }
+}
+
 async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -476,7 +489,7 @@ async function withTimeout<T>(
   let timeoutID: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timeoutID = setTimeout(() => {
-      reject(new Error(t("app.timedOutWhileTryingTo", { label })));
+      reject(new StepTimeoutError(t("app.timedOutWhileTryingTo", { label })));
     }, timeoutMs);
   });
 
@@ -1178,6 +1191,19 @@ function describeLoginIssue(error: unknown, fallback = "Unable to sign in right 
   }
   const message = (error as Error)?.message?.trim();
   return message || fallback;
+}
+
+/**
+ * Whether a failure looks like no connection: one of our own timeouts, an
+ * aborted request, or the platform's untranslated network errors ("Network
+ * request failed"). Decided from the error, before it becomes display text.
+ */
+function isConnectivityError(error: unknown): boolean {
+  const name = (error as Error)?.name;
+  if (name === "StepTimeoutError" || name === "AbortError") {
+    return true;
+  }
+  return isConnectivityErrorMessage((error as Error)?.message);
 }
 
 function isConnectivityErrorMessage(message: string | null | undefined): boolean {
@@ -2225,7 +2251,7 @@ function WalletAppShellContent({
   const walletPaneGestureMaxXRef = useRef(0);
   const walletPaneGestureActiveRef = useRef(false);
   const walletOverlayPane: OverlayWalletPane | null = walletPane === "home" ? null : walletPane;
-  const runtimeOffline = isConnectivityErrorMessage(runtime.error);
+  const runtimeOffline = Boolean(runtime.offline) || isConnectivityErrorMessage(runtime.error);
   const runtimeNodeIssue = isRetryableNodeErrorMessage(runtime.error);
 
   const setWalletPaneTranslateX = React.useCallback(
@@ -8400,13 +8426,19 @@ function PrivyWalletApp({
     },
   });
 
-  const presentLoginError = (error: unknown) => {
+  const presentLoginError = (error: unknown, failure?: { step: string; startedAt: number }) => {
     const message = describeLoginIssue(error);
+    const offline = isConnectivityError(error);
+    // An expired session (401) is handled by signing in again, as elsewhere.
+    if (failure && !(error instanceof AppBackendAuthError)) {
+      reportSignInFailure(error, { step: failure.step, offline, elapsedMs: Date.now() - failure.startedAt });
+    }
     setRuntime({
       loading: false,
       service: null,
       discovery: null,
       error: message,
+      offline,
       loadingMessage: null,
     });
   };
@@ -8599,6 +8631,7 @@ function PrivyWalletApp({
         return false;
       };
 
+      const failure = { step: "new account: profile", startedAt: Date.now() };
       try {
         // ensureUser's combined fetch also brings back the delete status, so
         // profile load and account-status check now share one round trip.
@@ -8616,6 +8649,7 @@ function PrivyWalletApp({
         if (cancelled || wallets.length > 0) {
           return;
         }
+        failure.step = "new account: create Privy wallet";
         await withTimeout(
           create({ createAdditional: false }),
           WALLET_CREATE_TIMEOUT_MS,
@@ -8636,7 +8670,7 @@ function PrivyWalletApp({
           showPolicyGate(error.policyStatus);
           return;
         }
-        presentLoginError(error);
+        presentLoginError(error, failure);
       } finally {
         creatingWalletRef.current = false;
       }
@@ -8786,6 +8820,7 @@ function PrivyWalletApp({
 
     let cancelled = false;
     const bootstrap = async () => {
+      const failure = { step: "profile and Privy wallet", startedAt: Date.now() };
       setRuntime((state) => ({
         ...state,
         loading: true,
@@ -8822,6 +8857,7 @@ function PrivyWalletApp({
           error: null,
           loadingMessage: t("app.findingYourSmartWallet"),
         }));
+        failure.step = "find smart wallet";
         let { service, discovery } = await withTimeout(
           createSmartWalletServiceFromSigner(
             signer,
@@ -8840,6 +8876,7 @@ function PrivyWalletApp({
           hiddenWalletAddresses: walletPreferences.hiddenWalletAddresses,
         });
         if (initialPreferredCandidateKey && initialPreferredCandidateKey !== discovery.selectedCandidateKey) {
+          failure.step = "load selected smart wallet";
           ({ service, discovery } = await withTimeout(
             createSmartWalletServiceFromSigner(
               signer,
@@ -8863,6 +8900,7 @@ function PrivyWalletApp({
               loadingMessage: t("app.syncingYourWalletProfile"),
             }));
           }
+          failure.step = "sync wallet profile";
           const { latestWallets, deployedPrimarySmartWallet } = await withTimeout(
             ensureManagedEmbeddedWallets({
               backendClient,
@@ -8897,6 +8935,7 @@ function PrivyWalletApp({
             clearCachedRouteDiscovery(discovery.ownerAddress, clientConfig);
           }
           if (deployedPrimarySmartWallet || (syncedPreferredCandidateKey && syncedPreferredCandidateKey !== discovery.selectedCandidateKey)) {
+            failure.step = "refresh smart wallet";
             ({ service, discovery } = await withTimeout(
               createSmartWalletServiceFromSigner(
                 signer,
@@ -8942,7 +8981,7 @@ function PrivyWalletApp({
             console.warn("Unable to load deleted-account status", statusError);
           }
         }
-        presentLoginError(error);
+        presentLoginError(error, failure);
       }
     };
 
@@ -9341,7 +9380,7 @@ function PrivyWalletApp({
     );
   }
 
-  const runtimeOffline = isConnectivityErrorMessage(runtime.error);
+  const runtimeOffline = Boolean(runtime.offline) || isConnectivityErrorMessage(runtime.error);
 
   if (!user) {
     return (
