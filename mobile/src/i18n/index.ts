@@ -41,16 +41,17 @@ const RELEASED_LANGUAGES: LanguageOption[] = [
   { code: "es", nativeName: "Español" },
   { code: "zh-Hant", nativeName: "繁體中文" },
   { code: "vi", nativeName: "Tiếng Việt" },
+  // Right to left: switching to or from it restarts the app once
+  // (src/i18n/direction.ts). Offered from 2.5 (Sanchez, 2026-11-20).
+  { code: "ar", nativeName: "العربية", rtl: true },
 ];
 
 /**
- * Languages that are translated and wired up but not offered yet. Arabic waits
- * for its own release: full right-to-left mirroring (src/i18n/direction.ts)
- * needs a reliable restart and a real-device pass first. Listed here so its
- * strings stay loaded and the direction code stays in use; move an entry into
- * SUPPORTED_LANGUAGES to offer it.
+ * Languages that are translated and wired up but not offered yet. Development
+ * builds include them so they can be worked on; move an entry into
+ * RELEASED_LANGUAGES to offer it.
  */
-export const UPCOMING_LANGUAGES: LanguageOption[] = [{ code: "ar", nativeName: "العربية", rtl: true }];
+export const UPCOMING_LANGUAGES: LanguageOption[] = [];
 
 /**
  * What the app offers and matches the phone's language against. Development
