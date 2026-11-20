@@ -1,5 +1,6 @@
 import "./src/polyfills";
 import { applyLanguagePreference, t, useAppLanguage } from "./src/i18n";
+import { useDirectionSwitching } from "./src/i18n/direction";
 import { loadReturnPoint, peekReturnPoint } from "./src/i18n/returnPoint";
 import { useTranslation } from "react-i18next";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -10067,6 +10068,27 @@ function blockedCompatibilityState(
   return null;
 }
 
+/**
+ * Covers the app while it restarts to switch between left-to-right and
+ * right-to-left (Arabic), so the moment before the restart shows a calm screen
+ * instead of a layout in the middle of changing.
+ */
+function DirectionSwitchCover() {
+  const switching = useDirectionSwitching();
+  const { palette } = useAppTheme();
+  if (!switching) {
+    return null;
+  }
+  return (
+    <View
+      pointerEvents="auto"
+      style={[StyleSheet.absoluteFill, { backgroundColor: palette.background, alignItems: "center", justifyContent: "center" }]}
+    >
+      <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
+    </View>
+  );
+}
+
 function App() {
   const [preferences, setPreferences, preferencesLoaded] = useStoredPreferences();
   const appLanguage = useAppLanguage();
@@ -10282,6 +10304,7 @@ function App() {
         ) : null}
         </View>
       ) : null}
+      <DirectionSwitchCover />
     </AppThemeProvider>
     </KeyboardProvider>
   );

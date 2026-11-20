@@ -161,10 +161,19 @@ void i18next.use(initReactI18next).use(rtlMarkPostProcessor).init({
 /** Applies a saved preference. Safe to call with the same value repeatedly. */
 export function applyLanguagePreference(preference: LanguagePreference | undefined): void {
   const next = resolveLanguage(preference);
+  const rtl = Boolean(SUPPORTED_LANGUAGES.find((language) => language.code === next)?.rtl);
+  if (I18nManager.isRTL !== rtl) {
+    // The layout can only flip on a restart. Changing the words now would
+    // redraw every screen in the new language but the old direction for the
+    // moment before it, which looks broken. The saved preference applies the
+    // language when the app comes back, already in the right direction.
+    ensureDirection(rtl);
+    return;
+  }
   if (i18next.language !== next) {
     void i18next.changeLanguage(next);
   }
-  ensureDirection(Boolean(SUPPORTED_LANGUAGES.find((language) => language.code === next)?.rtl));
+  ensureDirection(rtl);
 }
 
 /**

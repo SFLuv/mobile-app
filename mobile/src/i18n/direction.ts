@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useEffect, useState } from "react";
 import { Alert, DevSettings, I18nManager } from "react-native";
 import * as Updates from "expo-updates";
 import i18next from "i18next";
@@ -7,6 +8,31 @@ const t = (key: string) => i18next.t(key) as string;
 
 const PENDING_KEY = "sfluv-wallet:rtl-pending-switch";
 let reloadScheduled = false;
+
+// Whether a direction restart is under way. The app covers the screen while it
+// is, so nobody sees the half-switched layout in the moment before the restart.
+let switching = false;
+const switchingListeners = new Set<(value: boolean) => void>();
+function setSwitching(value: boolean): void {
+  if (switching === value) {
+    return;
+  }
+  switching = value;
+  switchingListeners.forEach((listener) => listener(value));
+}
+
+/** True from the moment a direction switch is scheduled until the restart. */
+export function useDirectionSwitching(): boolean {
+  const [value, setValue] = useState(switching);
+  useEffect(() => {
+    switchingListeners.add(setValue);
+    setValue(switching);
+    return () => {
+      switchingListeners.delete(setValue);
+    };
+  }, []);
+  return value;
+}
 
 /**
  * Right-to-left layout for Arabic.
@@ -37,6 +63,7 @@ export function ensureDirection(rtl: boolean): void {
     return;
   }
   reloadScheduled = true;
+  setSwitching(true);
   void (async () => {
     let pending: boolean | null = null;
     try {
@@ -47,12 +74,14 @@ export function ensureDirection(rtl: boolean): void {
     }
     if (pending === rtl) {
       // Already restarted for exactly this switch and it didn't take.
+      setSwitching(false);
       Alert.alert(t("direction.reopenTitle"), t("direction.reopenBody"));
       return;
     }
     try {
       await AsyncStorage.setItem(PENDING_KEY, rtl ? "rtl" : "ltr");
     } catch {
+      setSwitching(false);
       return; // Can't record the attempt, so don't risk a loop.
     }
     setTimeout(() => {
