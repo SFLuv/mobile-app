@@ -4274,6 +4274,21 @@ function WalletAppShellContent({
     }
     void Notifications.setBadgeCountAsync(iconBadge).catch(() => {});
   }, [iconBadge, iconBadgeKnown]);
+  // And again every time the app comes back to the front. A push that landed
+  // while it was in the background put its own number on the icon, and the
+  // effect above runs only when the app's count moves — so with the count
+  // already right (0, say) the push's 1 stayed however often the app was
+  // opened, until something else changed.
+  const iconBadgeRef = useRef<number | null>(null);
+  iconBadgeRef.current = iconBadgeKnown ? iconBadge : null;
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active" && iconBadgeRef.current !== null) {
+        void Notifications.setBadgeCountAsync(iconBadgeRef.current).catch(() => {});
+      }
+    });
+    return () => subscription.remove();
+  }, []);
 
   // Reaching a screen under your own steam handles the notification for it just
   // as tapping it would, so it clears from our list and the OS tray together.
