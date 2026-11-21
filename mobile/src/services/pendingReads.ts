@@ -311,9 +311,17 @@ export function countUnread(items: UnreadItem[]): number {
 }
 
 /**
- * Forgets confirmed reads a server answer now agrees with — read there, or
- * overtaken by a newer message. Unconfirmed ones are kept: the server still
+ * Forgets confirmed reads the inbox's own answer now agrees with — read there,
+ * or overtaken by a newer message. Unconfirmed ones are kept: the server still
  * has to be told.
+ *
+ * Only the inbox retires a read. The unread summary used to as well, but the
+ * inbox holds its own copy of the server's answer, often from before the read
+ * landed (leaving a chat fetches it at the same moment the read is sent). With
+ * the read dropped on the summary's word, that stale copy showed the row bold
+ * again while the dock said 0, and stayed that way if the app was put away
+ * before the next poll. A read nobody retires ages out (CONFIRMED_KEEP_MS),
+ * and keeping it hides nothing new: a newer message is past its watermark.
  */
 export function reconcileWithInbox(conversations: Conversation[]) {
   let changed = false;
@@ -333,22 +341,3 @@ export function reconcileWithInbox(conversations: Conversation[]) {
   }
 }
 
-/** The summary's version of the same: a conversation it does not list is read. */
-export function reconcileWithSummary(items: UnreadItem[]) {
-  const unread = new Map(items.map((item) => [item.conversation_id, item.last_message_id]));
-  let changed = false;
-  for (const [conversationId, entry] of entries) {
-    if (!caughtUp(entry)) {
-      continue;
-    }
-    const newest = unread.get(conversationId);
-    if (newest === undefined || newest > entry.upTo) {
-      entries.delete(conversationId);
-      changed = true;
-    }
-  }
-  if (changed) {
-    emit();
-    persist();
-  }
-}

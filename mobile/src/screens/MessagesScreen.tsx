@@ -26,7 +26,7 @@ import { SwipeableRow } from "../components/SwipeableRow";
 import { useDockLift } from "../hooks/useDockLift";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { useContactNames } from "../services/contactOverrides";
-import { applyPendingReads, reconcileWithInbox, usePendingReadsVersion } from "../services/pendingReads";
+import { applyPendingReads, onReadConfirmed, reconcileWithInbox, usePendingReadsVersion } from "../services/pendingReads";
 import { triggerClickHaptic } from "../utils/haptics";
 import type { RealtimeEvent } from "../services/realtime";
 import { BulletinRequestError, Conversation, MessageAttachment, PublicUser, type UnreadItem } from "../types/bulletin";
@@ -259,6 +259,22 @@ export function MessagesScreen({
       }
     });
   };
+  // Also when the server confirms a read — the moment its inbox answer stops
+  // matching the copy held here, which was often fetched before the read
+  // landed — and when the app comes back to the front, rather than leaving a
+  // stale row up until the next poll.
+  useEffect(() => {
+    const stopConfirmed = onReadConfirmed(() => requestInboxRef.current());
+    const foreground = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        requestInboxRef.current();
+      }
+    });
+    return () => {
+      stopConfirmed();
+      foreground.remove();
+    };
+  }, []);
   useEffect(() => {
     return subscribe((event) => {
       if (

@@ -148,7 +148,6 @@ import {
   countUnread,
   onReadConfirmed,
   primePendingReads,
-  reconcileWithSummary,
   setPendingReadsUser,
   usePendingReadsVersion,
 } from "./src/services/pendingReads";
@@ -4476,9 +4475,6 @@ function WalletAppShellContent({
       const summary = await backendClient.getMessagingSummary();
       if (seq !== messagesUnreadSeq.current) {
         return;
-      }
-      if (summary.unread) {
-        reconcileWithSummary(summary.unread);
       }
       messagesUnreadKnown.current = true;
       setMessagesUnreadSource({ count: summary.unread_conversations, items: summary.unread ?? null });
