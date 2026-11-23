@@ -2558,6 +2558,10 @@ function WalletAppShellContent({
   const { subscribe: subscribeRealtime, sendTyping, connected: socketConnected } = useRealtime({
     baseURL: mobileConfig.appBackendURL,
     getToken: getAccessToken,
+    // The id this phone's push subscription is registered under, so the server
+    // skips the push only here while the app is open, not on the person's
+    // other devices.
+    getInstallationId: getOrCreateAppInstallationID,
     enabled: Boolean(appUser) && Boolean(backendClient),
   });
 
