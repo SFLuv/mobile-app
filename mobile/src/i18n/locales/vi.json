@@ -824,7 +824,7 @@
   "messages": {
     "couldnTDoThatTry": "Không thực hiện được. Hãy thử lại.",
     "someone": "Một người",
-    "you": "Bạn:",
+    "you": "Bạn: ",
     "mute": "Tắt tiếng",
     "delete": "Xóa",
     "canTReceiveMessagesRight": "Hiện không thể nhận tin nhắn",

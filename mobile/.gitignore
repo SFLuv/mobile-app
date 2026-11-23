@@ -7,3 +7,8 @@
 # dev-up.sh stashes the previous .env here when it rewrites one for local
 # testing. It carries real API keys.
 .env.dev-up-backup
+
+# Written by @bacons/apple-targets at prebuild when a target has none checked
+# in. The content extension's is checked in on purpose (its category); this
+# one is the plugin's default.
+/targets/notification-service/Info.plist

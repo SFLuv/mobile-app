@@ -37,6 +37,9 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
   }
 
   private let scrollView = UIScrollView()
+  private let openButton = UIButton(type: .system)
+  /// Height of the "Open chat" bar above the thread.
+  private static let barHeight: CGFloat = 44
   private let stack = UIStackView()
   private var threadURL: URL?
   private var isGroup = false
@@ -54,14 +57,34 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
     stack.axis = .vertical
     stack.spacing = 4
     stack.translatesAutoresizingMaskIntoConstraints = false
+    // A plain way into the app. While the Reply keyboard is up a tap on the
+    // thread is taken by the keyboard, so without this a person who replied
+    // was left on the sheet with no way into the chat.
+    var buttonConfig = UIButton.Configuration.plain()
+    buttonConfig.title = Strings.text("openChat")
+    buttonConfig.image = UIImage(systemName: "arrow.up.forward.app")
+    buttonConfig.imagePlacement = .trailing
+    buttonConfig.imagePadding = 6
+    buttonConfig.baseForegroundColor = Self.mineColor
+    openButton.configuration = buttonConfig
+    openButton.contentHorizontalAlignment = .trailing
+    openButton.translatesAutoresizingMaskIntoConstraints = false
+    openButton.addTarget(self, action: #selector(openChat), for: .touchUpInside)
+    openButton.accessibilityIdentifier = "openChat"
+
     view.addSubview(scrollView)
+    view.addSubview(openButton)
     scrollView.addSubview(stack)
     NSLayoutConstraint.activate([
-      scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+      openButton.topAnchor.constraint(equalTo: view.topAnchor),
+      openButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+      openButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+      openButton.heightAnchor.constraint(equalToConstant: Self.barHeight),
+      scrollView.topAnchor.constraint(equalTo: openButton.bottomAnchor),
       scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
       scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      stack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 12),
+      stack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 4),
       stack.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -12),
       stack.leadingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.leadingAnchor, constant: 12),
       stack.trailingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.trailingAnchor, constant: -12),
@@ -206,7 +229,7 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
       stack.addArrangedSubview(Self.bubbleRow(bubble))
     }
     view.layoutIfNeeded()
-    let height = min(Self.maxHeight, max(120, stack.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).height + 24))
+    let height = min(Self.maxHeight, max(120, stack.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).height + 16 + Self.barHeight))
     preferredContentSize = CGSize(width: view.bounds.width, height: height)
     // The newest at the bottom, in view, as in the chat.
     DispatchQueue.main.async {
@@ -322,14 +345,14 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
     let body = ((message["body"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 
     if (message["deleted"] as? Bool) == true {
-      return Bubble(id: id, mine: mine, sender: sender, text: "Message deleted", system: false, pending: false)
+      return Bubble(id: id, mine: mine, sender: sender, text: Strings.text("messageDeleted"), system: false, pending: false)
     }
     if kind == "system" {
       return Bubble(id: id, mine: false, sender: nil, text: body, system: true, pending: false)
     }
     if kind == "payment" {
       let amount = formatAmount(message["amount_sfluv_base"] as? String)
-      let sent = mine ? "You sent \(amount) SFLUV" : "Sent you \(amount) SFLUV"
+      let sent = Strings.text(mine ? "youSent" : "sentYou").replacingOccurrences(of: "{amount}", with: "\(amount) SFLUV")
       return Bubble(id: id, mine: mine, sender: sender, text: body.isEmpty ? sent : "\(sent) · \(body)", system: false, pending: false)
     }
     let attachments = (message["attachments"] as? [[String: Any]]) ?? []
@@ -349,19 +372,23 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
       let images = kinds.filter { $0 == "image" }.count
       let videos = attachments.filter(isVideo).count
       let files = kinds.count - images - videos
-      if files == 0 && videos == 0 { return images > 1 ? "📷 \(images) photos" : "📷 Photo" }
-      if files == 0 && images == 0 { return videos > 1 ? "🎥 \(videos) videos" : "🎥 Video" }
-      if files == 0 { return "📷 \(images + videos) photos and videos" }
-      if images + videos == 0 { return files > 1 ? "📎 \(files) files" : "📎 File" }
-      return "📎 \(kinds.count) attachments"
+      if files == 0 && videos == 0 { return images > 1 ? Strings.count("photosCount", images) : Strings.text("photo") }
+      if files == 0 && images == 0 { return videos > 1 ? Strings.count("videosCount", videos) : Strings.text("video") }
+      if files == 0 { return Strings.count("photosAndVideos", images + videos) }
+      if images + videos == 0 { return files > 1 ? Strings.count("filesCount", files) : "📎 " + Strings.text("file") }
+      return Strings.count("attachmentsCount", kinds.count)
     }
     let first = attachments[0]
     switch kinds[0] {
-    case "link": return "🔗 " + ((first["link_title"] as? String) ?? (first["link_site_name"] as? String) ?? "Link")
-    case "transaction": return "🧾 Shared a transaction"
-    case "merchant": return "📍 Shared " + ((first["location_name"] as? String) ?? "a merchant")
-    case "event": return "📅 Shared " + ((first["event_title"] as? String) ?? "an event")
-    default: return "Attachment"
+    case "link": return "🔗 " + ((first["link_title"] as? String) ?? (first["link_site_name"] as? String) ?? Strings.text("link"))
+    case "transaction": return Strings.text("sharedTransaction")
+    case "merchant":
+      return Strings.text("sharedPlace").replacingOccurrences(
+        of: "{name}", with: (first["location_name"] as? String) ?? Strings.text("aMerchant"))
+    case "event":
+      return Strings.text("sharedEvent").replacingOccurrences(
+        of: "{name}", with: (first["event_title"] as? String) ?? Strings.text("anEvent"))
+    default: return Strings.text("attachment")
     }
   }
 
