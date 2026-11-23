@@ -863,7 +863,9 @@
     "deletedSomeOf": "已刪除 {{total}} 則中的 {{done}} 則。",
     "deleteNMessages_other": "要刪除 {{count}} 則訊息嗎？",
     "reactWith": "以 {{emoji}} 回應",
-    "removeAttachment": "移除{{name}}"
+    "removeAttachment": "移除{{name}}",
+    "couldntFindThatMessage": "在聊天中找不到該訊息。",
+    "mentionName": "標記{{name}}"
   },
   "map": {
     "searchMerchants": "搜尋商戶",
@@ -1060,7 +1062,11 @@
     "you": "您",
     "nothingMatchesThat": "沒有符合的結果。",
     "blockName": "封鎖{{name}}",
-    "unblockName": "解除封鎖{{name}}"
+    "unblockName": "解除封鎖{{name}}",
+    "searchMessages": "搜尋訊息",
+    "searchNotAvailableYet": "訊息搜尋功能暫時未能使用。",
+    "typeTwoLetters": "請輸入至少兩個字。",
+    "noMessagesMatch": "沒有相符的訊息。"
   },
   "notifications": {
     "cancel": "取消",

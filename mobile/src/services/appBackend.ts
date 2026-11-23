@@ -73,6 +73,7 @@ import {
   BulletinPostPatch,
   BulletinRequestError,
   ChatMessage,
+  MessageMention,
   AttachmentKind,
   Conversation,
   ConversationFile,
@@ -4226,11 +4227,39 @@ export class AppBackendClient {
     return this.bulletinRequest(`/conversations/${conversationId}/messages${query}`, {}, "Unable to load messages");
   }
 
-  sendConversationMessage(conversationId: number, body: string, replyToId?: number | null): Promise<ChatMessage> {
+  sendConversationMessage(
+    conversationId: number,
+    body: string,
+    replyToId?: number | null,
+    mentions?: MessageMention[],
+  ): Promise<ChatMessage> {
     return this.bulletinRequest(
       `/conversations/${conversationId}/messages`,
-      this.jsonInit("POST", { body, reply_to_id: replyToId ?? null }),
+      this.jsonInit("POST", {
+        body,
+        reply_to_id: replyToId ?? null,
+        // Left out when empty. A server too old to know mentions ignores them,
+        // and the body still reads "@Name".
+        ...(mentions && mentions.length > 0 ? { mentions } : {}),
+      }),
       "Unable to send your message",
+    );
+  }
+
+  /**
+   * Messages in one conversation whose text contains `query`, newest first.
+   * Pages with `beforeId` like the thread does. Throws a BulletinRequestError
+   * with status 404 on a server that has no search yet.
+   */
+  searchConversationMessages(conversationId: number, query: string, beforeId?: number | null): Promise<MessagesPage> {
+    const params = new URLSearchParams({ q: query });
+    if (beforeId) {
+      params.set("before", String(beforeId));
+    }
+    return this.bulletinRequest(
+      `/conversations/${conversationId}/messages/search?${params.toString()}`,
+      {},
+      "Unable to search this conversation",
     );
   }
 
@@ -4284,10 +4313,16 @@ export class AppBackendClient {
    * `edit_window_closed` once it has passed, which is what the client shows
    * rather than hiding the option based on its own clock.
    */
-  editConversationMessage(conversationId: number, messageId: number, body: string): Promise<ChatMessage> {
+  editConversationMessage(
+    conversationId: number,
+    messageId: number,
+    body: string,
+    mentions: MessageMention[] = [],
+  ): Promise<ChatMessage> {
     return this.bulletinRequest(
       `/conversations/${conversationId}/messages/${messageId}`,
-      this.jsonInit("PATCH", { body }),
+      // The tags go with the new text; an empty list clears the old ones.
+      this.jsonInit("PATCH", { body, mentions }),
       "Unable to edit that message",
     );
   }

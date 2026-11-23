@@ -938,7 +938,9 @@
     "deleteNMessages_many": "حذف {{count}} رسالة؟",
     "deleteNMessages_other": "حذف {{count}} رسالة؟",
     "reactWith": "التفاعل بـ {{emoji}}",
-    "removeAttachment": "إزالة {{name}}"
+    "removeAttachment": "إزالة {{name}}",
+    "couldntFindThatMessage": "تعذّر العثور على تلك الرسالة في المحادثة.",
+    "mentionName": "الإشارة إلى {{name}}"
   },
   "map": {
     "searchMerchants": "ابحث عن التجار",
@@ -1165,7 +1167,11 @@
     "you": "أنت",
     "nothingMatchesThat": "لا يوجد ما يطابق ذلك.",
     "blockName": "حظر {{name}}",
-    "unblockName": "إلغاء حظر {{name}}"
+    "unblockName": "إلغاء حظر {{name}}",
+    "searchMessages": "البحث في الرسائل",
+    "searchNotAvailableYet": "البحث في الرسائل غير متاح بعد.",
+    "typeTwoLetters": "اكتب حرفين على الأقل.",
+    "noMessagesMatch": "لا توجد رسائل مطابقة."
   },
   "notifications": {
     "cancel": "إلغاء",

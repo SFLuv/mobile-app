@@ -2042,6 +2042,8 @@ function WalletAppShellContent({
     null,
   );
   const [chatInfoRoute, setChatInfoRoute] = useState<Conversation | null>(null);
+  // A message to scroll the open thread to, from a search result in Chat Info.
+  const [chatJump, setChatJump] = useState<{ conversationId: number; messageId: number; nonce: number } | null>(null);
   const [newMessageRoute, setNewMessageRoute] = useState<{
     mode: "choose" | "group" | "add";
     conversationId?: number;
@@ -7459,6 +7461,8 @@ function WalletAppShellContent({
                 onInitialDraftApplied={() => setSupportReplyDraft(null)}
                 onBack={closeChatRoute}
                 onOpenInfo={setChatInfoRoute}
+                myUserId={appUser?.id ?? ""}
+                jumpTo={chatJump?.conversationId === chatRoute.conversationId ? chatJump : null}
                 onSendPayment={handleSendInChat}
                 onOpenTransaction={(ref) => {
                   // The wallet and Activity already have this sheet; the shell
@@ -7576,6 +7580,13 @@ function WalletAppShellContent({
                   onAddMembers={(conversationId) =>
                     setNewMessageRoute({ mode: "add", conversationId })
                   }
+                  onJumpToMessage={(messageId) => {
+                    // Back to the thread, which loads back to the message and
+                    // scrolls to it.
+                    const conversationId = chatInfoRoute.id;
+                    setChatInfoRoute(null);
+                    setChatJump({ conversationId, messageId, nonce: Date.now() });
+                  }}
                   onToast={showToast}
                 />
               </View>

@@ -863,7 +863,9 @@
     "deletedSomeOf": "Đã xóa {{done}}/{{total}}.",
     "deleteNMessages_other": "Xóa {{count}} tin nhắn?",
     "reactWith": "Bày tỏ cảm xúc {{emoji}}",
-    "removeAttachment": "Xóa {{name}}"
+    "removeAttachment": "Xóa {{name}}",
+    "couldntFindThatMessage": "Không tìm thấy tin nhắn đó trong cuộc trò chuyện.",
+    "mentionName": "Gắn thẻ {{name}}"
   },
   "map": {
     "searchMerchants": "Tìm cửa hàng",
@@ -1060,7 +1062,11 @@
     "you": "Bạn",
     "nothingMatchesThat": "Không có kết quả phù hợp.",
     "blockName": "Chặn {{name}}",
-    "unblockName": "Bỏ chặn {{name}}"
+    "unblockName": "Bỏ chặn {{name}}",
+    "searchMessages": "Tìm tin nhắn",
+    "searchNotAvailableYet": "Tính năng tìm tin nhắn chưa có sẵn.",
+    "typeTwoLetters": "Hãy nhập ít nhất hai ký tự.",
+    "noMessagesMatch": "Không có tin nhắn nào khớp."
   },
   "notifications": {
     "cancel": "Hủy",

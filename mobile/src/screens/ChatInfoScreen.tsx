@@ -28,6 +28,7 @@ import { useContactNames } from "../services/contactOverrides";
 import { triggerClickHaptic } from "../utils/haptics";
 import {
   BulletinRequestError,
+  ChatMessage,
   Conversation,
   ConversationFile,
   ConversationMember,
@@ -36,6 +37,7 @@ import {
 import { t } from "../i18n";
 import { dirIcon } from "../i18n/direction";
 import { appLocale } from "../i18n";
+import { bodyWithMentionNames } from "../utils/mentions";
 
 /**
  * What the info button opens: everything about one conversation.
@@ -86,6 +88,7 @@ export function ChatInfoScreen({
   onOpenMember,
   onAddMembers,
   onToast,
+  onJumpToMessage,
 }: {
   conversation: Conversation;
   /**
@@ -104,9 +107,14 @@ export function ChatInfoScreen({
   /** Opens the picker, which reports back which people were chosen. */
   onAddMembers: (conversationId: number) => void;
   onToast: (message: string, tone?: "info" | "success" | "error") => void;
+  /** A search result was picked: close this and show it in the thread. */
+  onJumpToMessage?: (messageId: number) => void;
 }) {
   const { palette } = useAppTheme();
   const nameFor = useContactNames();
+  // Searching the conversation's messages. While there is a query, its results
+  // stand in for the rest of the screen.
+  const [messageQuery, setMessageQuery] = useState("");
   const otherName = conversation.other_user
     ? nameFor(conversation.other_user.user_id, conversation.other_user.public_name)
     : "";
@@ -195,7 +203,7 @@ export function ChatInfoScreen({
       Alert.alert(
         t("chatInfo.youOwnThisGroup"),
         t("chatInfo.makeSomebodyElseTheOwner"),
-        [{ text: "OK" }],
+        [{ text: t("common.ok") }],
       );
       return;
     }
@@ -226,6 +234,34 @@ export function ChatInfoScreen({
         <View style={{ width: 26 }} />
       </View>
 
+      <View style={styles.searchRow}>
+        <Ionicons name="search" size={16} color={palette.textMuted} />
+        <TextInput
+          style={styles.searchInput}
+          value={messageQuery}
+          onChangeText={setMessageQuery}
+          placeholder={t("chatInfo.searchMessages")}
+          placeholderTextColor={palette.textMuted}
+          autoCorrect={false}
+          returnKeyType="search"
+        />
+        {messageQuery ? (
+          <Pressable onPress={() => setMessageQuery("")} hitSlop={8} accessibilityLabel={t("chatInfo.clearSearch")}>
+            <Ionicons name="close-circle" size={17} color={palette.textMuted} />
+          </Pressable>
+        ) : null}
+      </View>
+
+      {messageQuery.trim() ? (
+        <MessageSearch
+          conversationId={conversation.id}
+          backendClient={backendClient}
+          query={messageQuery.trim()}
+          otherName={otherName}
+          onOpen={(messageId) => onJumpToMessage?.(messageId)}
+        />
+      ) : (
+      <>
       <View style={styles.segments}>
         <SegmentedTabs
           segments={SEGMENTS()}
@@ -304,8 +340,7 @@ export function ChatInfoScreen({
 
             {isGroup ? (
               <Text style={styles.subtitle}>
-                {conversation.member_count ?? 0}{" "}
-                {conversation.member_count === 1 ? "person" : "people"}
+                {t("components.shareSheet.peopleCount", { count: conversation.member_count ?? 0 })}
               </Text>
             ) : (
               <BadgeLine user={conversation.other_user} />
@@ -428,6 +463,8 @@ export function ChatInfoScreen({
           )}
         </ScrollView>
       )}
+      </>
+      )}
     </SwipeBack>
   );
 }
@@ -538,6 +575,156 @@ function MemberRow({
  * group can have hundreds, and "find the PDF Maria sent in March" is the thing
  * this tab exists for.
  */
+/**
+ * Messages in this conversation containing the query, newest first, each with
+ * who said it and when. Tapping one closes the info screen and scrolls the
+ * thread to it. Tags read in this reader's names, as in the thread.
+ */
+function MessageSearch({
+  conversationId,
+  backendClient,
+  query,
+  otherName,
+  onOpen,
+}: {
+  conversationId: number;
+  backendClient: AppBackendClient | null;
+  query: string;
+  otherName: string;
+  onOpen: (messageId: number) => void;
+}) {
+  const { palette } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette), [palette]);
+  const nameFor = useContactNames();
+  const [results, setResults] = useState<ChatMessage[] | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // The server has no search yet (an older backend): say so instead of "no results".
+  const [unavailable, setUnavailable] = useState(false);
+
+  useEffect(() => {
+    if (!backendClient || query.length < 2) {
+      setResults(query.length < 2 ? [] : null);
+      setHasMore(false);
+      return;
+    }
+    let cancelled = false;
+    setResults(null);
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const page = await backendClient.searchConversationMessages(conversationId, query);
+          if (!cancelled) {
+            setResults(page.messages);
+            setHasMore(page.has_more);
+            setUnavailable(false);
+          }
+        } catch (error) {
+          if (cancelled) {
+            return;
+          }
+          setResults([]);
+          setHasMore(false);
+          setUnavailable(error instanceof BulletinRequestError && (error.status === 404 || error.status === 405));
+        }
+      })();
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [backendClient, conversationId, query]);
+
+  const loadMore = async () => {
+    const last = results?.[results.length - 1];
+    if (!backendClient || !hasMore || loadingMore || !last) {
+      return;
+    }
+    setLoadingMore(true);
+    try {
+      const page = await backendClient.searchConversationMessages(conversationId, query, last.id);
+      setResults((current) => {
+        const known = new Set((current ?? []).map((m) => m.id));
+        return [...(current ?? []), ...page.messages.filter((m) => !known.has(m.id))];
+      });
+      setHasMore(page.has_more);
+    } catch {
+      setHasMore(false);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  return (
+    <FlatList
+      data={results ?? []}
+      keyExtractor={(item) => String(item.id)}
+      contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
+      onEndReachedThreshold={0.4}
+      onEndReached={() => void loadMore()}
+      ListEmptyComponent={
+        results === null ? (
+          <View style={styles.filesEmpty}>
+            <ThemedActivityIndicator />
+          </View>
+        ) : (
+          <View style={styles.filesEmpty}>
+            <Ionicons name="search-outline" size={28} color={palette.textMuted} />
+            <Text style={styles.filesEmptyText}>
+              {unavailable
+                ? t("chatInfo.searchNotAvailableYet")
+                : query.length < 2
+                  ? t("chatInfo.typeTwoLetters")
+                  : t("chatInfo.noMessagesMatch")}
+            </Text>
+          </View>
+        )
+      }
+      ListFooterComponent={loadingMore ? <ThemedActivityIndicator /> : null}
+      renderItem={({ item }) => {
+        const text = bodyWithMentionNames(item.body ?? "", item.mentions, nameFor);
+        const at = text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
+        // A window around the match, so it is on screen even in a long message.
+        const start = at > 40 ? at - 30 : 0;
+        const prefix = start > 0 ? "…" : "";
+        const before = text.slice(start, Math.max(at, start));
+        const match = at >= 0 ? text.slice(at, at + query.length) : "";
+        const after = at >= 0 ? text.slice(at + query.length) : text.slice(start);
+        const who = item.is_mine
+          ? t("chat.you")
+          : nameFor(item.sender_id, item.sender_name || otherName || t("chat.message"));
+        const when = new Date(item.created_at).toLocaleDateString(appLocale(), {
+          month: "short",
+          day: "numeric",
+          year: new Date(item.created_at).getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+        });
+        return (
+          <Pressable
+            style={styles.searchResult}
+            onPress={() => onOpen(item.id)}
+            accessibilityRole="button"
+            accessibilityLabel={`${who}, ${when}: ${text}`}
+          >
+            <View style={styles.searchResultHead}>
+              <Text style={styles.memberName} numberOfLines={1}>
+                {who}
+              </Text>
+              <Text style={styles.memberMeta}>{when}</Text>
+            </View>
+            <Text style={styles.searchResultBody} numberOfLines={2}>
+              {prefix}
+              {before}
+              <Text style={styles.searchResultMatch}>{match}</Text>
+              {after}
+            </Text>
+          </Pressable>
+        );
+      }}
+    />
+  );
+}
+
 function ConversationFiles({
   conversationId,
   backendClient,
@@ -802,6 +989,15 @@ function createStyles(palette: Palette) {
       justifyContent: "center",
     },
     filesEmpty: { alignItems: "center", paddingVertical: spacing.xxl, gap: spacing.sm },
+    searchResult: {
+      paddingVertical: spacing.sm,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: palette.border,
+      gap: 3,
+    },
+    searchResultHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", gap: spacing.sm },
+    searchResultBody: { fontSize: 14, color: palette.text, lineHeight: 19 },
+    searchResultMatch: { fontWeight: "700", color: palette.primaryStrong },
     filesEmptyText: { fontSize: 14, color: palette.textMuted, textAlign: "center" },
   });
 }

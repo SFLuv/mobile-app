@@ -6,6 +6,7 @@ import type { AppBackendClient } from "../services/appBackend";
 import { useLinkPreview } from "../services/linkPreviews";
 import type { MessageAttachment } from "../types/bulletin";
 import { linkSegments } from "../utils/links";
+import type { MentionSegment } from "../utils/mentions";
 import { AttachmentHandlers, MessageAttachmentCard } from "./MessageAttachmentCard";
 
 /**
@@ -17,12 +18,19 @@ import { AttachmentHandlers, MessageAttachmentCard } from "./MessageAttachmentCa
  * press, so pressing and holding a link menus the message like any other part
  * of it rather than doing nothing.
  */
+type DrawnSegment =
+  | { kind: "text"; text: string; key: string }
+  | { kind: "link"; text: string; href: string; key: string }
+  | { kind: "mention"; text: string; key: string };
+
 export function LinkifiedText({
   text,
   style,
   linkStyle,
   onLongPress,
   onPressLink,
+  mentions,
+  mentionStyle,
 }: {
   text: string;
   style: StyleProp<TextStyle>;
@@ -34,17 +42,37 @@ export function LinkifiedText({
    * without one the link simply opens.
    */
   onPressLink?: (href: string) => void;
+  /**
+   * The text already cut into plain runs and @-tags (utils/mentions), each tag
+   * written in this reader's name for the person. When given, it is drawn
+   * instead of `text`, with links still found inside the plain runs.
+   */
+  mentions?: MentionSegment[];
+  mentionStyle?: StyleProp<TextStyle>;
 }) {
-  const segments = useMemo(() => linkSegments(text), [text]);
-  if (!segments.some((segment) => segment.kind === "link")) {
-    return <Text style={style}>{text}</Text>;
+  const runs = useMemo<MentionSegment[]>(() => mentions ?? [{ kind: "text", text }], [mentions, text]);
+  const segments = useMemo(
+    () =>
+      runs.flatMap<DrawnSegment>((run, runIndex) =>
+        run.kind === "mention"
+          ? [{ kind: "mention" as const, text: run.text, key: `m${runIndex}` }]
+          : linkSegments(run.text).map((segment, index) => ({ ...segment, key: `${runIndex}-${index}` })),
+      ),
+    [runs],
+  );
+  if (!segments.some((segment) => segment.kind !== "text")) {
+    return <Text style={style}>{runs.map((run) => run.text).join("")}</Text>;
   }
   return (
     <Text style={style}>
-      {segments.map((segment, index) =>
-        segment.kind === "link" ? (
+      {segments.map((segment) =>
+        segment.kind === "mention" ? (
+          <Text key={segment.key} style={mentionStyle ?? linkStyle}>
+            {segment.text}
+          </Text>
+        ) : segment.kind === "link" ? (
           <Text
-            key={index}
+            key={segment.key}
             style={linkStyle}
             onPress={() =>
               onPressLink ? onPressLink(segment.href) : void Linking.openURL(segment.href).catch(() => {})
@@ -56,7 +84,7 @@ export function LinkifiedText({
             {segment.text}
           </Text>
         ) : (
-          <Text key={index}>{segment.text}</Text>
+          <Text key={segment.key}>{segment.text}</Text>
         ),
       )}
     </Text>

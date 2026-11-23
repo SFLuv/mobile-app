@@ -32,6 +32,7 @@ import type { RealtimeEvent } from "../services/realtime";
 import { BulletinRequestError, Conversation, MessageAttachment, PublicUser, type UnreadItem } from "../types/bulletin";
 import { displayFileName } from "../utils/attachmentFiles";
 import { t } from "../i18n";
+import { bodyWithMentionNames } from "../utils/mentions";
 
 /**
  * The inbox.
@@ -427,7 +428,7 @@ export function MessagesScreen({
       return who + (caption ? `${label} · ${caption}` : label);
     }
 
-    return who + textPreview(last.body?.trim() ?? "");
+    return who + textPreview(bodyWithMentionNames(last.body ?? "", last.mentions, nameFor).trim());
   };
 
   const renderConversation = ({ item }: { item: Conversation }) => {

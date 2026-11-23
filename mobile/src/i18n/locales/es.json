@@ -893,7 +893,9 @@
     "deleteNMessages_many": "¿Eliminar {{count}} mensajes?",
     "deleteNMessages_other": "¿Eliminar {{count}} mensajes?",
     "reactWith": "Reaccionar con {{emoji}}",
-    "removeAttachment": "Quitar {{name}}"
+    "removeAttachment": "Quitar {{name}}",
+    "couldntFindThatMessage": "No se encontró ese mensaje en el chat.",
+    "mentionName": "Etiquetar a {{name}}"
   },
   "map": {
     "searchMerchants": "Buscar comercios",
@@ -1102,7 +1104,11 @@
     "you": "Usted",
     "nothingMatchesThat": "Nada coincide con eso.",
     "blockName": "Bloquear a {{name}}",
-    "unblockName": "Desbloquear a {{name}}"
+    "unblockName": "Desbloquear a {{name}}",
+    "searchMessages": "Buscar mensajes",
+    "searchNotAvailableYet": "La búsqueda de mensajes aún no está disponible.",
+    "typeTwoLetters": "Escriba al menos dos letras.",
+    "noMessagesMatch": "Ningún mensaje coincide."
   },
   "notifications": {
     "cancel": "Cancelar",

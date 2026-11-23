@@ -878,7 +878,9 @@
     "deleteNMessages_one": "Delete {{count}} message?",
     "deleteNMessages_other": "Delete {{count}} messages?",
     "reactWith": "React {{emoji}}",
-    "removeAttachment": "Remove {{name}}"
+    "removeAttachment": "Remove {{name}}",
+    "couldntFindThatMessage": "Couldn't find that message in the chat.",
+    "mentionName": "Tag {{name}}"
   },
   "map": {
     "searchMerchants": "Search merchants",
@@ -1081,7 +1083,11 @@
     "you": "You",
     "nothingMatchesThat": "Nothing matches that.",
     "blockName": "Block {{name}}",
-    "unblockName": "Unblock {{name}}"
+    "unblockName": "Unblock {{name}}",
+    "searchMessages": "Search messages",
+    "searchNotAvailableYet": "Message search isn't available yet.",
+    "typeTwoLetters": "Type at least two letters.",
+    "noMessagesMatch": "No messages match that."
   },
   "notifications": {
     "cancel": "Cancel",

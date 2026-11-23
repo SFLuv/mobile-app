@@ -215,6 +215,22 @@ export interface ChatMessage {
   reply_to?: MessageQuote;
   attachments?: MessageAttachment[];
   reactions?: MessageReaction[];
+  /**
+   * People tagged with @, Telegram style. The body keeps the plain "@Name" the
+   * sender saw, for older apps, the web and the push; these say who each one
+   * is, so every reader's app can show the name they saved that person as.
+   */
+  mentions?: MessageMention[];
+}
+
+/**
+ * One @-tag in a message: a span of the body, in UTF-16 code units (which is
+ * how JavaScript indexes a string), and who it tags.
+ */
+export interface MessageMention {
+  user_id: string;
+  offset: number;
+  length: number;
 }
 
 /** One person in a group, as the other members see them. */

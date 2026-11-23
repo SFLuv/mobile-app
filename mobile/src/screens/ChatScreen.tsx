@@ -48,6 +48,14 @@ import { AttachmentPreview } from "../components/AttachmentPreview";
 import { displayFileName, saveAttachment } from "../utils/attachmentFiles";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { useContactNames } from "../services/contactOverrides";
+import {
+  activeMention,
+  collectMentions,
+  insertMention,
+  mentionSegments,
+  picksFromMessage,
+  type MentionPick,
+} from "../utils/mentions";
 import { noteRead } from "../services/pendingReads";
 import { triggerClickHaptic } from "../utils/haptics";
 import type { RealtimeEvent } from "../services/realtime";
@@ -208,6 +216,14 @@ type Props = {
    * notifications for the thread.
    */
   onRead?: (conversationId: number) => void;
+  /** Who is signed in, so a group's @-suggestions leave them out. */
+  myUserId?: string;
+  /**
+   * Scroll to this message and flash it, loading older pages until it is in
+   * the thread. From a search result in Chat Info; the nonce makes picking the
+   * same result twice jump twice.
+   */
+  jumpTo?: { messageId: number; nonce: number } | null;
 };
 
 export function ChatScreen({
@@ -231,6 +247,8 @@ export function ChatScreen({
   sendTyping,
   onToast,
   onRead,
+  myUserId,
+  jumpTo,
 }: Props) {
   const { palette } = useAppTheme();
   // What you saved people as in Contacts wins over their own name, here and in
@@ -340,6 +358,11 @@ export function ChatScreen({
     splitAt: number;
   } | null>(null);
   const caretRef = useRef(0);
+  // The caret as state too, for the @-suggestions, which redraw as it moves.
+  const [caret, setCaret] = useState(0);
+  // People picked from the @-suggestions while writing this draft. Found again
+  // in the text at send time (utils/mentions), so edits cannot misplace them.
+  const mentionPicksRef = useRef<MentionPick[]>([]);
 
   const inputRef = useRef<TextInput | null>(null);
   const swipeRef = useRef<SwipeBackHandle>(null);
@@ -800,6 +823,127 @@ export function ChatScreen({
     return () => clearTimeout(timer);
   }, [autoFocus, conversationId]);
 
+  // ── Jumping to a message (from search) ────────────────────────────────────
+
+  const listRef = useRef<FlatList<ChatRow>>(null);
+  const [highlightedId, setHighlightedId] = useState<number | null>(null);
+  // The message to scroll to once it is in the rows.
+  const [pendingJump, setPendingJump] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!jumpTo || !backendClient) {
+      return;
+    }
+    const target = jumpTo.messageId;
+    const forThread = conversationId;
+    let cancelled = false;
+    void (async () => {
+      if (!messages.some((m) => m.id === target)) {
+        // Older pages until it is in, contiguous with what is shown, so the
+        // thread never has a gap. Capped: a search result years back is
+        // reached in a few dozen pages at most.
+        let oldest = messages[0]?.id ?? null;
+        let more = hasMore;
+        const loaded: ChatMessage[] = [];
+        for (let page = 0; page < 40 && more && oldest !== null; page += 1) {
+          try {
+            const result = await backendClient.getConversationMessages(conversationId, oldest);
+            if (cancelled || stateThread.current !== forThread) {
+              return;
+            }
+            loaded.unshift(...result.messages);
+            more = result.has_more;
+            oldest = result.messages[0]?.id ?? null;
+            if (result.messages.some((m) => m.id === target)) {
+              break;
+            }
+          } catch {
+            break;
+          }
+        }
+        setMessages((current) => {
+          const known = new Set(current.map((m) => m.id));
+          return [...loaded.filter((m) => !known.has(m.id)), ...current];
+        });
+        setHasMore(more);
+        if (!loaded.some((m) => m.id === target)) {
+          onToast(t("chat.couldntFindThatMessage"), "info");
+          return;
+        }
+      }
+      setPendingJump(target);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Only a new jump starts this; the thread's own updates must not re-run it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpTo?.nonce]);
+
+  useEffect(() => {
+    if (pendingJump === null) {
+      return;
+    }
+    const index = rows.findIndex((row) => row.kind === "message" && row.message.id === pendingJump);
+    if (index < 0) {
+      return;
+    }
+    setPendingJump(null);
+    setHighlightedId(pendingJump);
+    requestAnimationFrame(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true }));
+    const timer = setTimeout(() => setHighlightedId(null), 2200);
+    return () => clearTimeout(timer);
+  }, [pendingJump, rows]);
+
+  // ── @-suggestions ─────────────────────────────────────────────────────────
+
+  // Groups only: in a two-person chat there is nobody else to tag.
+  const mentionable = useMemo(
+    () =>
+      isGroup
+        ? (conversation?.members ?? []).filter(
+            (member) => !member.left && member.user.user_id !== myUserId,
+          )
+        : [],
+    [conversation?.members, isGroup, myUserId],
+  );
+  const typingMention =
+    mentionable.length > 0 && mode === "text" && !staged ? activeMention(draft, caret) : null;
+  const mentionSuggestions = useMemo(() => {
+    if (!typingMention) {
+      return [];
+    }
+    const query = typingMention.query.toLocaleLowerCase();
+    return mentionable
+      .map((member) => {
+        const name = nameFor(member.user.user_id, member.user.public_name);
+        const haystack = [name, member.user.public_name, member.user.handle ?? ""].map((v) => v.toLocaleLowerCase());
+        const rank = haystack.some((v) => v.startsWith(query)) ? 0 : haystack.some((v) => v.includes(query)) ? 1 : 2;
+        return { member, name, rank };
+      })
+      .filter((entry) => entry.rank < 2)
+      .sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name))
+      .slice(0, 6);
+  }, [mentionable, nameFor, typingMention?.query, typingMention !== null]);
+
+  const pickMention = (member: (typeof mentionable)[number]) => {
+    if (!typingMention) {
+      return;
+    }
+    // The name everyone else will read in older apps and the push: the one the
+    // person chose. Each reader's app then shows its own saved name for them.
+    const label = member.user.public_name.trim() || member.user.handle || "";
+    if (!label) {
+      return;
+    }
+    const next = insertMention(draft, typingMention, label);
+    mentionPicksRef.current = [...mentionPicksRef.current, { userId: member.user.user_id, label }];
+    setDraft(next.text);
+    caretRef.current = next.caret;
+    setCaret(next.caret);
+    void triggerClickHaptic(hapticsEnabled);
+  };
+
   const loadOlder = async () => {
     if (!backendClient || !hasMore || loadingOlder || messages.length === 0) {
       return;
@@ -839,8 +983,10 @@ export function ChatScreen({
       // being turned into a link attachment here. What was typed is what is
       // stored, what a notification shows, and what an edit edits; and nobody
       // is asked whether they meant to send a link.
-      const message = await backendClient.sendConversationMessage(conversationId, body, replyTo);
+      const mentions = collectMentions(body, mentionPicksRef.current);
+      const message = await backendClient.sendConversationMessage(conversationId, body, replyTo, mentions);
       setMessages((current) => mergeMessage(current, message));
+      mentionPicksRef.current = [];
       setDraft("");
       setReplyingTo(null);
       reportTyping(false);
@@ -1242,9 +1388,15 @@ export function ChatScreen({
     }
     setSending(true);
     try {
-      const updated = await backendClient.editConversationMessage(conversationId, target.id, body);
+      const updated = await backendClient.editConversationMessage(
+        conversationId,
+        target.id,
+        body,
+        collectMentions(body, mentionPicksRef.current),
+      );
       setMessages((current) => current.map((m) => (m.id === updated.id ? updated : m)));
       setEditing(null);
+      mentionPicksRef.current = [];
       setDraft("");
     } catch (e) {
       onToast(
@@ -1456,6 +1608,7 @@ export function ChatScreen({
         style={[
           styles.messageRow,
           item.is_mine ? styles.messageRowMine : undefined,
+          item.id === highlightedId ? styles.messageRowFound : undefined,
           { transform: [{ translateX: stampReveal }] },
         ]}
       >
@@ -1670,6 +1823,10 @@ export function ChatScreen({
                           >
                             <LinkifiedText
                               text={item.body}
+                              mentions={
+                                item.mentions?.length ? mentionSegments(item.body, item.mentions, nameFor) : undefined
+                              }
+                              mentionStyle={item.is_mine ? styles.mentionMine : styles.mention}
                               style={item.is_mine ? styles.bubbleTextMine : styles.bubbleText}
                               linkStyle={item.is_mine ? styles.bubbleLinkMine : styles.bubbleLink}
                               onLongPress={menuMessage}
@@ -1770,7 +1927,7 @@ export function ChatScreen({
       ? conversation.title || t("chat.group")
       : otherName;
   const headerSubtitle = isGroup
-    ? `${conversation?.member_count ?? 0} ${conversation?.member_count === 1 ? "person" : "people"}`
+    ? t("components.shareSheet.peopleCount", { count: conversation?.member_count ?? 0 })
     : null;
 
   const composerDisabledReason = conversation?.blocked_by_me
@@ -1872,6 +2029,14 @@ export function ChatScreen({
           useKeyboardLift. */}
       <Reanimated.View ref={keyboardRef} onLayout={measureKeyboardGap} style={[styles.body, liftStyle]}>
         <FlatList
+          ref={listRef}
+          onScrollToIndexFailed={(info) => {
+            // Rows not measured yet: get close, then try again once they are.
+            listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
+            setTimeout(() => {
+              listRef.current?.scrollToIndex({ index: info.index, viewPosition: 0.5, animated: true });
+            }, 250);
+          }}
           {...stampResponder.panHandlers}
           // Inverted: index 0 is the newest message, so the resting position is
           // the bottom and the keyboard cannot fight a scroll-to-end. See the
@@ -1975,6 +2140,7 @@ export function ChatScreen({
               <Pressable
                 onPress={() => {
                   setEditing(null);
+                  mentionPicksRef.current = [];
                   setDraft("");
                 }}
                 hitSlop={10}
@@ -1983,6 +2149,31 @@ export function ChatScreen({
               >
                 <Ionicons name="close" size={16} color={palette.textMuted} />
               </Pressable>
+            </View>
+          ) : null}
+          {mentionSuggestions.length > 0 ? (
+            <View style={styles.mentionList}>
+              {mentionSuggestions.map(({ member, name }) => (
+                <Pressable
+                  key={member.user.user_id}
+                  style={styles.mentionRow}
+                  onPress={() => pickMention(member)}
+                  accessibilityRole="button"
+                  accessibilityLabel={t("chat.mentionName", { name })}
+                >
+                  <ChatAvatar client={backendClient} name={name} size={28} userId={member.user.user_id} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.mentionName} numberOfLines={1}>
+                      {name}
+                    </Text>
+                    {member.user.handle ? (
+                      <Text style={styles.mentionHandle} numberOfLines={1}>
+                        @{member.user.handle}
+                      </Text>
+                    ) : null}
+                  </View>
+                </Pressable>
+              ))}
             </View>
           ) : null}
           <ChatComposer
@@ -2040,6 +2231,7 @@ export function ChatScreen({
             }
             onCaretChange={(position) => {
               caretRef.current = position;
+              setCaret(position);
             }}
             hapticsEnabled={hapticsEnabled}
             inputRef={inputRef}
@@ -2125,6 +2317,7 @@ export function ChatScreen({
                   const target = actionTarget;
                   setActionTarget(null);
                   setEditing(target);
+                  mentionPicksRef.current = picksFromMessage(target.body ?? "", target.mentions);
                   setDraft(target.body ?? "");
                   setReplyingTo(null);
                   setMode("text");
@@ -2646,6 +2839,22 @@ function createStyles(palette: Palette) {
     // accent, so an accent-coloured link would vanish into it.
     bubbleLink: { color: palette.primaryStrong, textDecorationLine: "underline" },
     bubbleLinkMine: { color: palette.white, textDecorationLine: "underline" },
+    mention: { color: palette.primaryStrong, fontWeight: "700" },
+    mentionMine: { color: palette.white, fontWeight: "700" },
+    // A message reached from search, flashed for a moment.
+    messageRowFound: { backgroundColor: palette.primarySoft, borderRadius: 12 },
+    mentionList: {
+      marginHorizontal: 10,
+      marginBottom: 6,
+      borderRadius: 14,
+      backgroundColor: palette.surface,
+      borderWidth: 1,
+      borderColor: palette.border,
+      overflow: "hidden",
+    },
+    mentionRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 8 },
+    mentionName: { color: palette.text, fontSize: 15, fontWeight: "600" },
+    mentionHandle: { color: palette.textMuted, fontSize: 13 },
     caption: { marginTop: 6, color: palette.text },
     attachments: { gap: 6 },
 
