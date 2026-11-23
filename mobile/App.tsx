@@ -1,6 +1,11 @@
 import "./src/polyfills";
 import { applyLanguagePreference, t, useAppLanguage } from "./src/i18n";
-import { holdDirectionCoverIfRestarted, useDirectionSwitching } from "./src/i18n/direction";
+import {
+  directionSwitchLanguages,
+  holdDirectionCoverIfRestarted,
+  setReloadScreenColors,
+  useDirectionSwitching,
+} from "./src/i18n/direction";
 import { loadReturnPoint, peekReturnPoint } from "./src/i18n/returnPoint";
 import { useTranslation } from "react-i18next";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -10101,15 +10106,35 @@ function blockedCompatibilityState(
 function DirectionSwitchCover() {
   const switching = useDirectionSwitching();
   const { palette } = useAppTheme();
+  // The native screen shown during the restart itself, in these same colours,
+  // so the cover, that screen and the cover again read as one.
+  useEffect(() => {
+    setReloadScreenColors({ background: palette.background, spinner: palette.primaryStrong });
+  }, [palette.background, palette.primaryStrong]);
   if (!switching) {
     return null;
   }
+  // Said in the language being left and the one being switched to, so it reads
+  // whichever one the person knows.
+  const lines = directionSwitchLanguages().map((language) =>
+    t("direction.translating", { lng: language }),
+  );
   return (
     <View
       pointerEvents="auto"
-      style={[StyleSheet.absoluteFill, { backgroundColor: palette.background, alignItems: "center", justifyContent: "center" }]}
+      style={[
+        StyleSheet.absoluteFill,
+        { backgroundColor: palette.background, alignItems: "center", justifyContent: "center", gap: 14 },
+      ]}
     >
       <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
+      <View style={{ alignItems: "center", gap: 4 }}>
+        {[...new Set(lines)].map((line) => (
+          <Text key={line} style={{ color: palette.textMuted, fontSize: 15, fontWeight: "600" }}>
+            {line}
+          </Text>
+        ))}
+      </View>
     </View>
   );
 }

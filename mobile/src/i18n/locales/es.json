@@ -1752,7 +1752,8 @@
   },
   "direction": {
     "reopenTitle": "Vuelva a abrir SFLuv",
-    "reopenBody": "Cierre SFLuv y vuelva a abrirla para terminar de cambiar el diseño."
+    "reopenBody": "Cierre SFLuv y vuelva a abrirla para terminar de cambiar el diseño.",
+    "translating": "Traduciendo…"
   },
   "notificationReplies": {
     "notSentTo": "Su respuesta a {{name}} no se envió",

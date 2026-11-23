@@ -14,6 +14,25 @@ let reloadScheduled = false;
 // Whether a direction restart is under way. The app covers the screen while it
 // is, so nobody sees the half-switched layout in the moment before the restart.
 let switching = false;
+// The two languages of the switch in progress, for the cover's "Translating…".
+let switchLanguages: { from: string; to: string } | null = null;
+
+/** The languages the cover should say "Translating…" in: from and to, once each. */
+export function directionSwitchLanguages(): string[] {
+  const pair = switchLanguages ?? peekReturnPoint()?.languages ?? null;
+  if (!pair) {
+    return [i18next.language];
+  }
+  return pair.from === pair.to ? [pair.to] : [pair.from, pair.to];
+}
+
+// What the native screen shown during the restart itself looks like (expo-
+// updates draws it; white with a blue spinner by default, which flashed between
+// the app's cover and the app). Set to the cover's own colours by App.
+let reloadColors = { background: "#fef4ee", spinner: "#eb6c6c" };
+export function setReloadScreenColors(colors: { background: string; spinner: string }): void {
+  reloadColors = colors;
+}
 const switchingListeners = new Set<(value: boolean) => void>();
 function setSwitching(value: boolean): void {
   if (switching === value) {
@@ -83,7 +102,7 @@ export function useDirectionSwitching(): boolean {
  * The restart is deferred a moment: reloading in the middle of the redraw a
  * language change causes crashes React Native's renderer.
  */
-export function ensureDirection(rtl: boolean): void {
+export function ensureDirection(rtl: boolean, languages?: { from: string; to: string }): void {
   if (I18nManager.isRTL === rtl) {
     void AsyncStorage.removeItem(PENDING_KEY).catch(() => undefined);
     return;
@@ -94,6 +113,7 @@ export function ensureDirection(rtl: boolean): void {
     return;
   }
   reloadScheduled = true;
+  switchLanguages = languages ?? null;
   setSwitching(true);
   void (async () => {
     let pending: boolean | null = null;
@@ -111,13 +131,19 @@ export function ensureDirection(rtl: boolean): void {
     }
     try {
       await AsyncStorage.setItem(PENDING_KEY, rtl ? "rtl" : "ltr");
-      markReturnPointForRestart();
+      markReturnPointForRestart(switchLanguages ?? undefined);
     } catch {
       setSwitching(false);
       return; // Can't record the attempt, so don't risk a loop.
     }
     setTimeout(() => {
-      void Updates.reloadAsync().catch(() => {
+      void Updates.reloadAsync({
+        reloadScreenOptions: {
+          backgroundColor: reloadColors.background,
+          spinner: { color: reloadColors.spinner, size: "small" },
+          fade: true,
+        },
+      }).catch(() => {
         DevSettings.reload();
       });
     }, 700);

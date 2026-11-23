@@ -1684,7 +1684,8 @@
   },
   "direction": {
     "reopenTitle": "Mở lại SFLuv",
-    "reopenBody": "Hãy đóng SFLuv rồi mở lại để hoàn tất việc đổi bố cục."
+    "reopenBody": "Hãy đóng SFLuv rồi mở lại để hoàn tất việc đổi bố cục.",
+    "translating": "Đang dịch…"
   },
   "notificationReplies": {
     "notSentTo": "Tin trả lời của bạn gửi {{name}} chưa được gửi đi",

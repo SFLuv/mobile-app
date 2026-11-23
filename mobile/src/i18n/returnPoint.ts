@@ -16,6 +16,8 @@ export type ReturnPoint = {
   scrollY?: number;
   /** Saved for a direction restart: the app stays covered until it is back here. */
   restart?: boolean;
+  /** The languages switched from and to, which the cover names as it translates. */
+  languages?: { from: string; to: string };
   at: number;
 };
 
@@ -32,11 +34,11 @@ export function rememberReturnPoint(point: Omit<ReturnPoint, "at">): void {
 }
 
 /** The restart about to happen comes back to this point (see direction.ts). */
-export function markReturnPointForRestart(): void {
+export function markReturnPointForRestart(languages?: { from: string; to: string }): void {
   if (!fresh(memory)) {
     return;
   }
-  memory = { ...memory!, restart: true };
+  memory = { ...memory!, restart: true, ...(languages ? { languages } : {}) };
   void AsyncStorage.setItem(KEY, JSON.stringify(memory)).catch(() => undefined);
 }
 

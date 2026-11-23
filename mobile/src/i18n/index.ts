@@ -167,7 +167,7 @@ export function applyLanguagePreference(preference: LanguagePreference | undefin
     // redraw every screen in the new language but the old direction for the
     // moment before it, which looks broken. The saved preference applies the
     // language when the app comes back, already in the right direction.
-    ensureDirection(rtl);
+    ensureDirection(rtl, { from: i18next.language, to: next });
     return;
   }
   if (i18next.language !== next) {

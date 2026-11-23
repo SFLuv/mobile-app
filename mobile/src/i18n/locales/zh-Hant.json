@@ -1684,7 +1684,8 @@
   },
   "direction": {
     "reopenTitle": "請重新開啟 SFLuv",
-    "reopenBody": "請關閉 SFLuv 再重新開啟，以完成版面切換。"
+    "reopenBody": "請關閉 SFLuv 再重新開啟，以完成版面切換。",
+    "translating": "正在翻譯…"
   },
   "notificationReplies": {
     "notSentTo": "您給 {{name}} 的回覆未能傳送",

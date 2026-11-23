@@ -1718,7 +1718,8 @@
   },
   "direction": {
     "reopenTitle": "Reopen SFLuv",
-    "reopenBody": "Close SFLuv and open it again to finish switching the layout."
+    "reopenBody": "Close SFLuv and open it again to finish switching the layout.",
+    "translating": "Translating…"
   },
   "notificationReplies": {
     "notSentTo": "Your reply to {{name}} wasn't sent",
