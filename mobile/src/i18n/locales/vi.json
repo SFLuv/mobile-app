@@ -865,7 +865,9 @@
     "reactWith": "Bày tỏ cảm xúc {{emoji}}",
     "removeAttachment": "Xóa {{name}}",
     "couldntFindThatMessage": "Không tìm thấy tin nhắn đó trong cuộc trò chuyện.",
-    "mentionName": "Gắn thẻ {{name}}"
+    "mentionName": "Gắn thẻ {{name}}",
+    "send": "Gửi",
+    "openChat": "Mở cuộc trò chuyện"
   },
   "map": {
     "searchMerchants": "Tìm cửa hàng",

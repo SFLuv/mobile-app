@@ -940,7 +940,9 @@
     "reactWith": "التفاعل بـ {{emoji}}",
     "removeAttachment": "إزالة {{name}}",
     "couldntFindThatMessage": "تعذّر العثور على تلك الرسالة في المحادثة.",
-    "mentionName": "الإشارة إلى {{name}}"
+    "mentionName": "الإشارة إلى {{name}}",
+    "send": "إرسال",
+    "openChat": "فتح المحادثة"
   },
   "map": {
     "searchMerchants": "ابحث عن التجار",

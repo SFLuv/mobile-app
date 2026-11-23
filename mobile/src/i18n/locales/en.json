@@ -880,7 +880,9 @@
     "reactWith": "React {{emoji}}",
     "removeAttachment": "Remove {{name}}",
     "couldntFindThatMessage": "Couldn't find that message in the chat.",
-    "mentionName": "Tag {{name}}"
+    "mentionName": "Tag {{name}}",
+    "send": "Send",
+    "openChat": "Open chat"
   },
   "map": {
     "searchMerchants": "Search merchants",

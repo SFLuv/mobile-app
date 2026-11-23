@@ -865,7 +865,9 @@
     "reactWith": "以 {{emoji}} 回應",
     "removeAttachment": "移除{{name}}",
     "couldntFindThatMessage": "在聊天中找不到該訊息。",
-    "mentionName": "標記{{name}}"
+    "mentionName": "標記{{name}}",
+    "send": "傳送",
+    "openChat": "開啟聊天"
   },
   "map": {
     "searchMerchants": "搜尋商戶",

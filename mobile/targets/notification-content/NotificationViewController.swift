@@ -68,10 +68,11 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
     ])
 
     // Interaction is on so the history scrolls, which turns off the system's
-    // own tap-to-open. A tap anywhere on the conversation still opens the chat,
-    // as it does on any push, including after a reply with the keyboard up.
-    // On the scroll view itself, recognised alongside its own gestures: on the
-    // view behind it the scroll view could swallow the tap.
+    // own tap-to-open. Where the system delivers touches here, a tap on the
+    // conversation opens the chat. Current iOS delivers none to the expanded
+    // push (checked on iOS 26: not even touchesBegan), so the way in is the
+    // category's "Open chat" action, which the system draws itself
+    // (src/services/notificationReplies.ts).
     let tap = UITapGestureRecognizer(target: self, action: #selector(openChat))
     tap.cancelsTouchesInView = false
     tap.delegate = self

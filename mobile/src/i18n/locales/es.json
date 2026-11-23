@@ -895,7 +895,9 @@
     "reactWith": "Reaccionar con {{emoji}}",
     "removeAttachment": "Quitar {{name}}",
     "couldntFindThatMessage": "No se encontró ese mensaje en el chat.",
-    "mentionName": "Etiquetar a {{name}}"
+    "mentionName": "Etiquetar a {{name}}",
+    "send": "Enviar",
+    "openChat": "Abrir chat"
   },
   "map": {
     "searchMerchants": "Buscar comercios",

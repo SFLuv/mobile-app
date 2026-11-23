@@ -10142,6 +10142,11 @@ function DirectionSwitchCover() {
 function App() {
   const [preferences, setPreferences, preferencesLoaded] = useStoredPreferences();
   const appLanguage = useAppLanguage();
+  // The push's Reply / Open chat labels are the system's, set when the actions
+  // are registered: again on every language change, so they follow it.
+  useEffect(() => {
+    void registerChatNotificationActions();
+  }, [appLanguage]);
   const [compatibility, setCompatibility] = useState<CompatibilityState>({ status: "loading" });
   const compatibilityClientRef = useRef<AppBackendClient | null>(null);
   if (compatibilityClientRef.current === null) {
