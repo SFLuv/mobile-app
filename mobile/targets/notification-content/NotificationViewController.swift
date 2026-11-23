@@ -67,21 +67,11 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
       stack.trailingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.trailingAnchor, constant: -12),
     ])
 
-    // Interaction is on so the history scrolls, which turns off the system's
-    // own tap-to-open. Where the system delivers touches here, a tap on the
-    // conversation opens the chat. Current iOS delivers none to the expanded
-    // push (checked on iOS 26: not even touchesBegan), so the way in is the
-    // category's "Open chat" action, which the system draws itself
-    // (src/services/notificationReplies.ts).
-    let tap = UITapGestureRecognizer(target: self, action: #selector(openChat))
-    tap.cancelsTouchesInView = false
-    tap.delegate = self
-    scrollView.addGestureRecognizer(tap)
-    view.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(openChat)))
-  }
-
-  @objc private func openChat() {
-    extensionContext?.performNotificationDefaultAction()
+    // UNNotificationExtensionUserInteractionEnabled is false (Info.plist):
+    // the system takes every tap on this view and opens the app on the chat,
+    // as a tap on any push does. With it on, current iOS delivered no touches
+    // here at all, so neither a tap nor scrolling worked; the history is laid
+    // out with the newest message in view instead.
   }
 
   // MARK: - Content
@@ -386,16 +376,5 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
     formatter.numberStyle = .decimal
     formatter.maximumFractionDigits = 2
     return formatter.string(from: NSNumber(value: value / 1_000_000)) ?? ""
-  }
-}
-
-extension NotificationViewController: UIGestureRecognizerDelegate {
-  /// The open-chat tap fires alongside the scroll view's own recognisers, so a
-  /// tap opens the chat and a drag still scrolls the history.
-  func gestureRecognizer(
-    _ gestureRecognizer: UIGestureRecognizer,
-    shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-  ) -> Bool {
-    true
   }
 }

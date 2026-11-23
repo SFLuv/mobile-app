@@ -941,8 +941,7 @@
     "removeAttachment": "إزالة {{name}}",
     "couldntFindThatMessage": "تعذّر العثور على تلك الرسالة في المحادثة.",
     "mentionName": "الإشارة إلى {{name}}",
-    "send": "إرسال",
-    "openChat": "فتح المحادثة"
+    "send": "إرسال"
   },
   "map": {
     "searchMerchants": "ابحث عن التجار",

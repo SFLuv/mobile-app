@@ -896,8 +896,7 @@
     "removeAttachment": "Quitar {{name}}",
     "couldntFindThatMessage": "No se encontró ese mensaje en el chat.",
     "mentionName": "Etiquetar a {{name}}",
-    "send": "Enviar",
-    "openChat": "Abrir chat"
+    "send": "Enviar"
   },
   "map": {
     "searchMerchants": "Buscar comercios",

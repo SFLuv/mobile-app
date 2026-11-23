@@ -881,8 +881,7 @@
     "removeAttachment": "Remove {{name}}",
     "couldntFindThatMessage": "Couldn't find that message in the chat.",
     "mentionName": "Tag {{name}}",
-    "send": "Send",
-    "openChat": "Open chat"
+    "send": "Send"
   },
   "map": {
     "searchMerchants": "Search merchants",

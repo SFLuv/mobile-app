@@ -13,7 +13,7 @@
 			<key>UNNotificationExtensionDefaultContentHidden</key>
 			<true/>
 			<key>UNNotificationExtensionUserInteractionEnabled</key>
-			<true/>
+			<false/>
 		</dict>
 		<key>NSExtensionPrincipalClass</key>
 		<string>$(PRODUCT_MODULE_NAME).NotificationViewController</string>

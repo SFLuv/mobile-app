@@ -866,8 +866,7 @@
     "removeAttachment": "移除{{name}}",
     "couldntFindThatMessage": "在聊天中找不到該訊息。",
     "mentionName": "標記{{name}}",
-    "send": "傳送",
-    "openChat": "開啟聊天"
+    "send": "傳送"
   },
   "map": {
     "searchMerchants": "搜尋商戶",

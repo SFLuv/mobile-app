@@ -40,7 +40,6 @@ import { t } from "../i18n";
 
 export const CHAT_CATEGORY = "chat_message";
 export const REPLY_ACTION = "reply";
-export const OPEN_ACTION = "open";
 
 /** Registers the Reply action. Every launch: iOS keeps categories per process. */
 export async function registerChatNotificationActions(): Promise<void> {
@@ -51,16 +50,6 @@ export async function registerChatNotificationActions(): Promise<void> {
         buttonTitle: t("chat.reply"),
         textInput: { submitButtonTitle: t("chat.send"), placeholder: t("chat.message") },
         options: { opensAppToForeground: false },
-      },
-      // Into the chat from the expanded push. A system button rather than a
-      // tap on the conversation: while the Reply field is up iOS delivers no
-      // touches to the content extension at all, so a tap there could never
-      // open anything. Any action that is not the reply is routed as a tap
-      // on the push (App.tsx, routeFromResponse).
-      {
-        identifier: OPEN_ACTION,
-        buttonTitle: t("chat.openChat"),
-        options: { opensAppToForeground: true },
       },
     ]);
   } catch {
