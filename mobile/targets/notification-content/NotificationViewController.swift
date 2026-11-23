@@ -37,9 +37,6 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
   }
 
   private let scrollView = UIScrollView()
-  private let openButton = UIButton(type: .system)
-  /// Height of the "Open chat" bar above the thread.
-  private static let barHeight: CGFloat = 44
   private let stack = UIStackView()
   private var threadURL: URL?
   private var isGroup = false
@@ -57,41 +54,28 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
     stack.axis = .vertical
     stack.spacing = 4
     stack.translatesAutoresizingMaskIntoConstraints = false
-    // A plain way into the app. While the Reply keyboard is up a tap on the
-    // thread is taken by the keyboard, so without this a person who replied
-    // was left on the sheet with no way into the chat.
-    var buttonConfig = UIButton.Configuration.plain()
-    buttonConfig.title = Strings.text("openChat")
-    buttonConfig.image = UIImage(systemName: "arrow.up.forward.app")
-    buttonConfig.imagePlacement = .trailing
-    buttonConfig.imagePadding = 6
-    buttonConfig.baseForegroundColor = Self.mineColor
-    openButton.configuration = buttonConfig
-    openButton.contentHorizontalAlignment = .trailing
-    openButton.translatesAutoresizingMaskIntoConstraints = false
-    openButton.addTarget(self, action: #selector(openChat), for: .touchUpInside)
-    openButton.accessibilityIdentifier = "openChat"
-
     view.addSubview(scrollView)
-    view.addSubview(openButton)
     scrollView.addSubview(stack)
     NSLayoutConstraint.activate([
-      openButton.topAnchor.constraint(equalTo: view.topAnchor),
-      openButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-      openButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-      openButton.heightAnchor.constraint(equalToConstant: Self.barHeight),
-      scrollView.topAnchor.constraint(equalTo: openButton.bottomAnchor),
+      scrollView.topAnchor.constraint(equalTo: view.topAnchor),
       scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
       scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      stack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 4),
+      stack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 12),
       stack.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -12),
       stack.leadingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.leadingAnchor, constant: 12),
       stack.trailingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.trailingAnchor, constant: -12),
     ])
 
     // Interaction is on so the history scrolls, which turns off the system's
-    // own tap-to-open. A tap still opens the chat, as it does on any push.
+    // own tap-to-open. A tap anywhere on the conversation still opens the chat,
+    // as it does on any push, including after a reply with the keyboard up.
+    // On the scroll view itself, recognised alongside its own gestures: on the
+    // view behind it the scroll view could swallow the tap.
+    let tap = UITapGestureRecognizer(target: self, action: #selector(openChat))
+    tap.cancelsTouchesInView = false
+    tap.delegate = self
+    scrollView.addGestureRecognizer(tap)
     view.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(openChat)))
   }
 
@@ -229,7 +213,7 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
       stack.addArrangedSubview(Self.bubbleRow(bubble))
     }
     view.layoutIfNeeded()
-    let height = min(Self.maxHeight, max(120, stack.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).height + 16 + Self.barHeight))
+    let height = min(Self.maxHeight, max(120, stack.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).height + 24))
     preferredContentSize = CGSize(width: view.bounds.width, height: height)
     // The newest at the bottom, in view, as in the chat.
     DispatchQueue.main.async {
@@ -401,5 +385,16 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
     formatter.numberStyle = .decimal
     formatter.maximumFractionDigits = 2
     return formatter.string(from: NSNumber(value: value / 1_000_000)) ?? ""
+  }
+}
+
+extension NotificationViewController: UIGestureRecognizerDelegate {
+  /// The open-chat tap fires alongside the scroll view's own recognisers, so a
+  /// tap opens the chat and a drag still scrolls the history.
+  func gestureRecognizer(
+    _ gestureRecognizer: UIGestureRecognizer,
+    shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+  ) -> Bool {
+    true
   }
 }

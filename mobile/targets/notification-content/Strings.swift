@@ -54,7 +54,6 @@ enum Strings {
 
   private static let table: [String: [String: String]] = [
     "en": [
-      "openChat": "Open chat",
       "messageDeleted": "Message was deleted",
       "youSent": "You sent {amount}",
       "sentYou": "Sent you {amount}",
@@ -80,7 +79,6 @@ enum Strings {
       "attachmentsCount_other": "📎 {count} attachments",
     ],
     "es": [
-      "openChat": "Abrir chat",
       "messageDeleted": "Se eliminó el mensaje",
       "youSent": "Usted envió {amount}",
       "sentYou": "Le envió {amount}",
@@ -106,7 +104,6 @@ enum Strings {
       "attachmentsCount_other": "📎 {count} adjuntos",
     ],
     "zh-Hant": [
-      "openChat": "開啟聊天",
       "messageDeleted": "訊息已被刪除",
       "youSent": "您已傳送 {amount}",
       "sentYou": "向您傳送了 {amount}",
@@ -127,7 +124,6 @@ enum Strings {
       "attachmentsCount_other": "📎 {count} 個附件",
     ],
     "vi": [
-      "openChat": "Mở cuộc trò chuyện",
       "messageDeleted": "Tin nhắn đã bị xóa",
       "youSent": "Bạn đã gửi {amount}",
       "sentYou": "Đã gửi cho bạn {amount}",
@@ -148,7 +144,6 @@ enum Strings {
       "attachmentsCount_other": "📎 {count} tệp đính kèm",
     ],
     "ar": [
-      "openChat": "فتح المحادثة",
       "messageDeleted": "حُذفت الرسالة",
       "youSent": "أرسلت {amount}",
       "sentYou": "أرسل إليك {amount}",
