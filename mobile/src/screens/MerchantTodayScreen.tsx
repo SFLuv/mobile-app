@@ -45,8 +45,8 @@ function Row({ row, decimals }: { row: MerchantDayRow; decimals: number }) {
         <Text style={[styles.rowPayment, row.refund ? styles.rowRefund : undefined]}>
           {formatBase(row.paymentBase, decimals)}
         </Text>
-        {tip ? <Text style={styles.rowTip}>+{tip} tip</Text> : null}
-        {row.refund ? <Text style={styles.rowRefundLabel}>refund</Text> : null}
+        {tip ? <Text style={styles.rowTip}>{t("merchantToday.tipAmount", { amount: tip })}</Text> : null}
+        {row.refund ? <Text style={styles.rowRefundLabel}>{t("merchantToday.refund")}</Text> : null}
       </View>
     </View>
   );
@@ -84,7 +84,7 @@ export function MerchantTodayScreen({
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primaryStrong} />}
     >
       <View style={styles.paymentsCard}>
-        <Text style={styles.paymentsLabel}>TODAY'S PAYMENTS</Text>
+        <Text style={styles.paymentsLabel}>{t("merchantToday.todaysPayments")}</Text>
         <Text style={styles.paymentsValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.4}>
           {formatBase(today?.paymentsBase ?? "0", decimals)}
         </Text>

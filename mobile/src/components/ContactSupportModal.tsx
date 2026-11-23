@@ -131,7 +131,7 @@ export function ContactSupportModal({
               </View>
               <Text style={styles.title}>{t("components.contactSupportModal.messageSent")}</Text>
               <Text style={styles.body}>
-                We&apos;ll get back to you at {email.trim()}. Your reference is:
+                {t("components.contactSupportModal.wellGetBackTo", { email: email.trim() })}
               </Text>
               <Text style={styles.reference}>{reference}</Text>
               <Pressable style={styles.primary} onPress={onClose}>
@@ -148,7 +148,7 @@ export function ContactSupportModal({
               </View>
 
               <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-                <Text style={styles.label}>What&apos;s this about?</Text>
+                <Text style={styles.label}>{t("components.contactSupportModal.whatsThisAbout")}</Text>
                 <View style={styles.categories}>
                   {CATEGORIES.map((entry) => (
                     <Pressable

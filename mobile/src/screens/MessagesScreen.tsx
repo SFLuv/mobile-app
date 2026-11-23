@@ -391,8 +391,8 @@ export function MessagesScreen({
       const who = reaction.is_mine ? t("messages.you2") : reaction.user_name || t("messages.someone");
       const what = reaction.message_excerpt?.trim();
       return what
-        ? `${who} reacted ${reaction.emoji} to "${what}"`
-        : `${who} reacted ${reaction.emoji} to a message`;
+        ? t("messages.reactedTo", { who, emoji: reaction.emoji, what })
+        : t("messages.reactedToAMessage", { who, emoji: reaction.emoji });
     }
 
     // A system line is already a complete sentence about the thread —
@@ -560,8 +560,7 @@ export function MessagesScreen({
               <>
                 <Text style={styles.sheetTitle}>{t("messages.muteNotifications")}</Text>
                 <Text style={styles.sheetBody}>
-                  Messages still arrive and still show as unread — your phone just
-                  won&apos;t buzz.
+                  {t("messages.muteBody")}
                 </Text>
                 {[
                   { label: t("messages.forOneHour"), minutes: 60 },
@@ -585,8 +584,7 @@ export function MessagesScreen({
               <>
                 <Text style={styles.sheetTitle}>{t("messages.leaveGroupQ")}</Text>
                 <Text style={styles.sheetBody}>
-                  You&apos;ll stop receiving its messages. The group carries on without
-                  you.
+                  {t("messages.leaveGroupBody")}
                 </Text>
                 <Pressable
                   style={styles.sheetOption}
@@ -624,8 +622,7 @@ export function MessagesScreen({
                   <View style={{ flex: 1 }}>
                     <Text style={styles.sheetOptionText}>{t("messages.deleteForMe")}</Text>
                     <Text style={styles.sheetOptionHint}>
-                      Hides it from your inbox. It comes back, with its history, if
-                      either of you sends a message.
+                      {t("messages.deleteForMeHint")}
                     </Text>
                   </View>
                 </Pressable>
@@ -640,7 +637,7 @@ export function MessagesScreen({
                       {t("messages.deleteForBothOfUs")}
                     </Text>
                     <Text style={styles.sheetOptionHint}>
-                      Removes it from their inbox too. This can&apos;t be undone.
+                      {t("messages.deleteForEveryoneHint")}
                     </Text>
                   </View>
                 </Pressable>
@@ -706,9 +703,7 @@ export function MessagesScreen({
                   </View>
                 ) : (
                   <Text style={styles.emptyBody}>
-                    No one found. People only show up here if they&apos;ve chosen to be findable, if
-                    you search their exact @username, or if they&apos;re already one of your
-                    contacts.
+                    {t("messages.noOneFound")}
                   </Text>
                 )
               }
@@ -819,10 +814,10 @@ function attachmentPreviewLabel(attachments: MessageAttachment[]): string {
     const videos = media.filter(isVideo).length;
     const files = media.length - images - videos;
     if (files === 0 && videos === 0) {
-      return images > 1 ? `📷 ${images} photos` : t("messages.photo");
+      return images > 1 ? t("messages.photosCount", { count: images }) : t("messages.photo");
     }
     if (files === 0 && images === 0) {
-      return videos > 1 ? `🎥 ${videos} videos` : t("messages.video");
+      return videos > 1 ? t("messages.videosCount", { count: videos }) : t("messages.video");
     }
     if (files === 0) {
       return t("messages.photosAndVideos", { count: images + videos });
@@ -838,9 +833,9 @@ function attachmentPreviewLabel(attachments: MessageAttachment[]): string {
     case "transaction":
       return t("messages.sharedATransaction");
     case "merchant":
-      return `📍 Shared ${attachment.location_name || t("messages.aMerchant")}`;
+      return t("messages.sharedPlace", { name: attachment.location_name || t("messages.aMerchant") });
     case "event":
-      return `📅 Shared ${attachment.event_title || t("messages.anEvent")}`;
+      return t("messages.sharedEvent", { name: attachment.event_title || t("messages.anEvent") });
     case "support":
       return t("messages.aboutYourMessageToSfluv");
     default:

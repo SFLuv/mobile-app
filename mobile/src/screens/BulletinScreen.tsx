@@ -257,7 +257,7 @@ export function BulletinScreen({
           disabled={filter === "mine"}
         >
           <Ionicons name="location-outline" size={16} color={palette.textMuted} />
-          <Text style={styles.radiusText}>{filter === "mine" ? t("bulletin.yourPosts") : `Within ${radius} mi`}</Text>
+          <Text style={styles.radiusText}>{filter === "mine" ? t("bulletin.yourPosts") : t("bulletin.withinMiles", { radius })}</Text>
           {filter !== "mine" ? <Ionicons name="chevron-down" size={14} color={palette.textMuted} /> : null}
         </Pressable>
         <Pressable
@@ -476,9 +476,9 @@ function PostDetailModal({
     }
     Alert.alert(post.author.public_name, undefined, [
       { text: t("bulletin.reportPost"), onPress: () => setReport({ type: "post", id: String(post.id), label: t("bulletin.thisPost") }) },
-      { text: `Report ${post.author.public_name}`, onPress: () => setReport({ type: "user", id: post.author.user_id, label: post.author.public_name }) },
+      { text: t("bulletin.reportTarget", { target: post.author.public_name }), onPress: () => setReport({ type: "user", id: post.author.user_id, label: post.author.public_name }) },
       {
-        text: `Block ${post.author.public_name}`,
+        text: t("bulletin.blockName", { name: post.author.public_name }),
         style: "destructive",
         onPress: () =>
           void act(async () => {
@@ -537,7 +537,7 @@ function PostDetailModal({
               {price ? <Text style={[styles.detailPrice, post.category === "free" && { color: palette.success }]}>{price}</Text> : null}
               {post.category === "for_sale" ? (
                 <View style={styles.pillRow}>
-                  {post.accepts_sfluv ? <Pill label={`${tokenSymbol} accepted`} tone="primary" /> : null}
+                  {post.accepts_sfluv ? <Pill label={t("bulletin.tokenAccepted", { tokenSymbol })} tone="primary" /> : null}
                   {post.accepts_cash ? <Pill label={t("bulletin.cashOk")} /> : null}
                 </View>
               ) : null}
@@ -550,7 +550,7 @@ function PostDetailModal({
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.eventTitle}>{post.linked_event.title}</Text>
-                    <Text style={styles.eventMeta}>{formatEventTime(post.linked_event.start_at)} · Open in Participate</Text>
+                    <Text style={styles.eventMeta}>{t("bulletin.eventTimeOpenInParticipate", { time: formatEventTime(post.linked_event.start_at) })}</Text>
                   </View>
                   <Ionicons name={dirIcon("chevron-forward")} size={18} color={palette.textMuted} />
                 </Pressable>
@@ -566,7 +566,7 @@ function PostDetailModal({
               <View style={styles.metaLine}>
                 <Ionicons name="location-outline" size={14} color={palette.textMuted} />
                 <Text style={styles.metaText}>
-                  {[post.distance_miles != null ? `About ${formatDistance(post.distance_miles)} away` : "", post.area_label]
+                  {[post.distance_miles != null ? t("bulletin.aboutDistanceAway", { distance: formatDistance(post.distance_miles) }) : "", post.area_label]
                     .filter(Boolean)
                     .join(" · ") || t("bulletin.locationHidden")}
                 </Text>
@@ -574,7 +574,7 @@ function PostDetailModal({
               {post.meetup_location ? (
                 <View style={styles.hintCard}>
                   <Ionicons name="storefront-outline" size={16} color={palette.textMuted} />
-                  <Text style={styles.hintText}>Meet at {post.meetup_location.name}</Text>
+                  <Text style={styles.hintText}>{t("bulletin.meetAt", { place: post.meetup_location.name })}</Text>
                 </View>
               ) : post.category !== "notice" && !post.is_mine ? (
                 <View style={styles.hintCard}>
@@ -737,7 +737,7 @@ function ComposeModal({
       const price = Number(draft.price);
       if (!draft.price.trim() || !Number.isFinite(price) || price <= 0) return t("bulletin.addAPrice");
       if (!/^\d+(\.\d{1,2})?$/.test(draft.price.trim())) return t("bulletin.pricesCanHaveAtMost");
-      if (!draft.acceptsSfluv && !draft.acceptsCash) return `Choose ${tokenSymbol}, cash, or both.`;
+      if (!draft.acceptsSfluv && !draft.acceptsCash) return t("bulletin.chooseTokenCashOrBoth", { tokenSymbol });
     }
     return null;
   };
@@ -808,7 +808,7 @@ function ComposeModal({
               <Ionicons name={step === 1 ? "close" : "arrow-back"} size={22} color={palette.text} />
             </Pressable>
             <Text style={styles.modalTitle}>{headerTitle}</Text>
-            <Text style={styles.stepText}>{step} of 3</Text>
+            <Text style={styles.stepText}>{t("bulletin.stepOfThree", { step })}</Text>
           </View>
 
           <ScrollView contentContainerStyle={styles.composeContent} keyboardShouldPersistTaps="handled">
@@ -833,8 +833,7 @@ function ComposeModal({
                   </Pressable>
                 ))}
                 <Text style={styles.rulesText}>
-                  Not allowed: weapons, drugs, alcohol, animals for sale, housing, jobs, or paid services. Volunteer events
-                  are welcome as notices; link them so neighbors can sign up in Participate.
+                  {t("bulletin.notAllowedRules")}
                 </Text>
               </>
             ) : null}
@@ -884,7 +883,7 @@ function ComposeModal({
 
                 {draft.category === "for_sale" ? (
                   <>
-                    <Text style={styles.fieldLabel}>Price ({tokenSymbol})</Text>
+                    <Text style={styles.fieldLabel}>{t("bulletin.priceLabel", { tokenSymbol })}</Text>
                     <TextInput
                       style={styles.input}
                       value={draft.price}
@@ -960,7 +959,7 @@ function ComposeModal({
                       {draft.price} {tokenSymbol}
                     </Text>
                     <View style={styles.pillRow}>
-                      {draft.acceptsSfluv ? <Pill label={`${tokenSymbol} accepted`} tone="primary" /> : null}
+                      {draft.acceptsSfluv ? <Pill label={t("bulletin.tokenAccepted", { tokenSymbol })} tone="primary" /> : null}
                       {draft.acceptsCash ? <Pill label={t("bulletin.cashOk")} /> : null}
                     </View>
                   </>
@@ -968,8 +967,8 @@ function ComposeModal({
                   <Text style={[styles.detailPrice, { color: palette.success }]}>{t("bulletin.free")}</Text>
                 ) : null}
                 {draft.body.trim() ? <Text style={styles.detailBody}>{draft.body.trim()}</Text> : null}
-                {draft.event ? <Text style={styles.fieldHint}>Linked event: {draft.event.title}</Text> : null}
-                {draft.meetup ? <Text style={styles.fieldHint}>Meet at {draft.meetup.name}</Text> : null}
+                {draft.event ? <Text style={styles.fieldHint}>{t("bulletin.linkedEvent", { title: draft.event.title })}</Text> : null}
+                {draft.meetup ? <Text style={styles.fieldHint}>{t("bulletin.meetAt", { place: draft.meetup.name })}</Text> : null}
                 <View style={styles.hintCard}>
                   <Ionicons name="location-outline" size={16} color={palette.textMuted} />
                   <Text style={styles.hintText}>{t("bulletin.neighborsSeeRoughlyHowFar")}</Text>

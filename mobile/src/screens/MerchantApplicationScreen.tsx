@@ -465,8 +465,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
             weaker of the two answers: a business listing would carry the name,
             the category, the hours and the phone. */}
         <Text style={styles.hint}>
-          If your business has its own Google listing, search for it by name instead — we can fill in
-          far more for you.
+          {t("merchantApplication.googleListingHint")}
         </Text>
       </View>
     )
@@ -483,7 +482,7 @@ export function MerchantApplicationScreen({ onClose, onSubmit }: Props) {
       <View style={[styles.checkbox, manualToggle && styles.checkboxChecked]}>
         {manualToggle ? <Text style={styles.checkboxGlyph}>✓</Text> : null}
       </View>
-      <Text style={styles.hint}>Can&apos;t find my location</Text>
+      <Text style={styles.hint}>{t("merchantApplication.cantFindLocation")}</Text>
     </Pressable>
   );
 

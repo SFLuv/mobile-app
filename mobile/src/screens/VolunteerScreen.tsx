@@ -1644,7 +1644,7 @@ function EventDetail({
                   style={styles.secondaryButton}
                   onPress={() => onShareEvent(event)}
                   accessibilityRole="button"
-                  accessibilityLabel={`Share ${event.title}`}
+                  accessibilityLabel={t("common.shareName", { name: event.title })}
                 >
                   <Ionicons name="share-outline" size={16} color={palette.primaryStrong} />
                   <Text style={styles.secondaryButtonText}>{t("volunteer.share")}</Text>
@@ -1672,8 +1672,8 @@ function EventDetail({
             </View>
 
             <Text style={styles.sheetBody}>
-              {event ? t("volunteer.youAreSigningUpFor2", { title: event.title }) : t("volunteer.youAreSigningUpFor")} We will use
-              the name and email on your SFLuv account.
+              {event ? t("volunteer.youAreSigningUpFor2", { title: event.title }) : t("volunteer.youAreSigningUpFor")}{" "}
+              {t("volunteer.weWillUseNameAndEmail")}
             </Text>
 
             <View style={styles.optInRow}>

@@ -330,7 +330,7 @@ export function ReportSheet({
           <Pressable style={{ flex: 1 }} onPress={onClose} />
           <View style={styles.card}>
             <View style={styles.header}>
-              <Text style={styles.title}>Report {target?.label ?? ""}</Text>
+              <Text style={styles.title}>{t("bulletin.reportTarget", { target: target?.label ?? "" })}</Text>
               <Pressable onPress={onClose} hitSlop={8} accessibilityLabel={t("components.bulletinParts.close")}>
                 <Ionicons name="close" size={20} color={palette.textMuted} />
               </Pressable>
@@ -351,7 +351,7 @@ export function ReportSheet({
                   <Text style={styles.optionText}>{option.label}</Text>
                 </Pressable>
               ))}
-              <Text style={styles.label}>Anything else we should know? (optional)</Text>
+              <Text style={styles.label}>{t("bulletin.anythingElseOptional")}</Text>
               <TextInput
                 style={[styles.input, { minHeight: 70, textAlignVertical: "top" }]}
                 value={details}

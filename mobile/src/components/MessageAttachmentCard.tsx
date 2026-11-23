@@ -342,7 +342,7 @@ export function MessageAttachmentCard({
             <Ionicons name="help-buoy" size={15} color={palette.primaryStrong} />
             <Text style={styles.referenceKicker} numberOfLines={1}>
               {attachment.support_reference
-                ? `Support · ${attachment.support_reference}`
+                ? t("components.messageAttachmentCard.supportReference", { reference: attachment.support_reference })
                 : t("components.messageAttachmentCard.supportRequest")}
             </Text>
           </View>
@@ -523,7 +523,7 @@ function AttachmentImage({
     : state.status === "failed" || corrupt
       ? t("components.messageAttachmentCard.couldnTLoadTapTo")
       : size
-        ? `Photo · ${size}`
+        ? t("components.messageAttachmentCard.photoSize", { size })
         : t("components.messageAttachmentCard.tapToDownload");
 
   return (

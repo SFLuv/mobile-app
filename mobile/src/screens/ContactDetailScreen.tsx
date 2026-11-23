@@ -226,7 +226,7 @@ export function ContactDetailScreen({
   };
 
   const confirmDelete = () => {
-    Alert.alert(`Delete ${contact.name}?`, t("contactDetail.thisRemovesThemFromYour"), [
+    Alert.alert(t("contactDetail.deleteNameQ", { name: contact.name }), t("contactDetail.thisRemovesThemFromYour"), [
       { text: t("contactDetail.cancel"), style: "cancel" },
       { text: t("contactDetail.delete"), style: "destructive", onPress: onDeleted },
     ]);
@@ -266,7 +266,7 @@ export function ContactDetailScreen({
           onPress={confirmDelete}
           hitSlop={10}
           accessibilityRole="button"
-          accessibilityLabel={`Delete ${contact.name}`}
+          accessibilityLabel={t("contactDetail.deleteName", { name: contact.name })}
         >
           <Ionicons name="trash-outline" size={21} color={palette.danger} />
         </Pressable>
@@ -360,7 +360,7 @@ export function ContactDetailScreen({
         {showQR ? (
           <View style={styles.qrCard}>
             <SfluvQRCode value={shareLink} size={190} />
-            <Text style={styles.qrHint}>Scan to add {contact.name} as a contact.</Text>
+            <Text style={styles.qrHint}>{t("contactDetail.scanToAdd", { name: contact.name })}</Text>
           </View>
         ) : null}
 

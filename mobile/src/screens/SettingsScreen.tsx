@@ -954,7 +954,7 @@ function MerchantModeSettingsCard({
           <View style={styles.preferenceCopy}>
             <Text style={styles.preferenceTitle}>{t("settings.merchant.active")}</Text>
             <Text style={styles.preferenceBody}>
-              {activeDevice.locationName} uses {shortAddress(activeDevice.walletAddress)} on this device.
+              {t("settings.merchant.usesWalletOnDevice", { location: activeDevice.locationName, address: shortAddress(activeDevice.walletAddress) })}
             </Text>
           </View>
         </View>
@@ -1444,7 +1444,7 @@ export function SettingsScreen({
             <Text style={styles.sectionTitle}>{user?.name || t("settings.account.defaultName")}</Text>
             <Text style={styles.meta}>{t("settings.account.userId", { id: user?.id || t("settings.account.notLoaded") })}</Text>
             {user?.contactEmail ? <Text style={styles.meta}>{t("settings.account.email", { email: user.contactEmail })}</Text> : null}
-            {user?.contactPhone ? <Text style={styles.meta}>Phone: {user.contactPhone}</Text> : null}
+            {user?.contactPhone ? <Text style={styles.meta}>{t("settings.account.phone", { phone: user.contactPhone })}</Text> : null}
           </View>
 
           <View style={styles.card}>
@@ -1686,7 +1686,7 @@ export function SettingsScreen({
                         {formatCredentialLabel(request.credentialType, credentialTypes)}
                       </Text>
                       <Text style={styles.selectOptionMeta}>
-                        Pending since {new Date(request.requestedAt).toLocaleString()}
+                        {t("settings.improver.pendingSince", { date: new Date(request.requestedAt).toLocaleString() })}
                       </Text>
                     </View>
                   ))}
@@ -1779,7 +1779,7 @@ export function SettingsScreen({
                   ? t("settings.social.googleLinkedBody")
                   : t("settings.social.googleLinkBody")}
               </Text>
-              {googleLinkedEmail ? <Text style={styles.socialProviderMeta}>Google email: {googleLinkedEmail}</Text> : null}
+              {googleLinkedEmail ? <Text style={styles.socialProviderMeta}>{t("settings.social.googleEmail", { email: googleLinkedEmail })}</Text> : null}
               {googleLinkedNow && googleDisconnectDisabledReason ? (
                 <Text style={styles.socialProviderMeta}>{googleDisconnectDisabledReason}</Text>
               ) : null}
@@ -1792,7 +1792,7 @@ export function SettingsScreen({
                   ? t("settings.social.appleLinkedBody")
                   : t("settings.social.appleLinkBody")}
               </Text>
-              {appleLinkedEmail ? <Text style={styles.socialProviderMeta}>Apple email: {appleLinkedEmail}</Text> : null}
+              {appleLinkedEmail ? <Text style={styles.socialProviderMeta}>{t("settings.social.appleEmail", { email: appleLinkedEmail })}</Text> : null}
               {appleLinkedNow && appleDisconnectDisabledReason ? (
                 <Text style={styles.socialProviderMeta}>{appleDisconnectDisabledReason}</Text>
               ) : null}

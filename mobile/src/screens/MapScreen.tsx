@@ -846,7 +846,7 @@ export function MapScreen({
                           closeMerchantSheet(() => onShareLocation(target));
                         }}
                         accessibilityRole="button"
-                        accessibilityLabel={`Share ${selectedLocation.name}`}
+                        accessibilityLabel={t("common.shareName", { name: selectedLocation.name })}
                       >
                         <Ionicons name="share-outline" size={17} color={palette.primaryStrong} />
                       </Pressable>

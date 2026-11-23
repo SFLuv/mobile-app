@@ -202,15 +202,14 @@ export function ProfileSetupModal({
                 />
               </View>
               <Text style={styles.hint}>
-                Letters, numbers and underscores. People can find you by this exactly, even if
-                you&apos;re not listed below.
+                {t("myProfile.usernameRulesHint")}
               </Text>
 
               <View style={styles.row}>
                 <View style={styles.rowText}>
                   <Text style={styles.rowTitle}>{t("components.profileSetupModal.letNeighborsFindMe")}</Text>
                   <Text style={styles.rowHint}>
-                    Off: only people who know your username can start a chat.
+                    {t("myProfile.findableOffHint")}
                   </Text>
                 </View>
                 <Switch

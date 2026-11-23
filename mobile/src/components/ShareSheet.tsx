@@ -420,10 +420,10 @@ export function ShareSheet({
                     </Text>
                     {item.kind === "group" ? (
                       <Text style={styles.rowMeta}>
-                        {item.member_count ?? 0} people
+                        {t("components.shareSheet.peopleCount", { count: item.member_count ?? 0 })}
                       </Text>
                     ) : unavailable ? (
-                      <Text style={styles.rowMeta}>Can&apos;t receive messages right now</Text>
+                      <Text style={styles.rowMeta}>{t("components.shareSheet.cantReceiveMessages")}</Text>
                     ) : null}
                   </View>
                   <Ionicons

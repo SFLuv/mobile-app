@@ -396,8 +396,8 @@ export function ChatInfoScreen({
                   style={[styles.actionText, !conversation.blocked_by_me && { color: palette.danger }]}
                 >
                   {conversation.blocked_by_me
-                    ? `Unblock ${otherName}`
-                    : `Block ${otherName}`}
+                    ? t("chatInfo.unblockName", { name: otherName })
+                    : t("chatInfo.blockName", { name: otherName })}
                 </Text>
               </Pressable>
 
@@ -493,7 +493,7 @@ function MemberRow({
     }
     if (canRemove) {
       options.push({
-        text: `Remove ${memberName}`,
+        text: t("common.removeName", { name: memberName }),
         style: "destructive",
         onPress: onRemove,
       });

@@ -1288,7 +1288,7 @@ export function SendScreen({
             <View style={styles.amountMetaBlock}>
               {exceedsBalance ? (
                 <Text style={[styles.balanceLabel, { color: palette.danger ?? "#c62828", fontWeight: "600" }]}>
-                  That's more than your available balance
+                  {t("send.moreThanAvailableBalance")}
                 </Text>
               ) : null}
               <Text style={styles.balanceLabel}>
@@ -1383,7 +1383,7 @@ export function SendScreen({
                 <View style={styles.tipCard}>
                   <Text style={styles.tipTitle}>{t("send.addTip")}</Text>
                   {resultAttempt?.tipTarget ? (
-                    <Text style={styles.tipBody}>For {resultAttempt.tipTarget.merchantName}</Text>
+                    <Text style={styles.tipBody}>{t("send.tipFor", { merchant: resultAttempt.tipTarget.merchantName })}</Text>
                   ) : null}
 
                   {customTipActive ? (

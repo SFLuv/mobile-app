@@ -250,7 +250,7 @@ export function W9TierModal({
                 {earnedSfluv} {tokenSymbol}
               </Text>
               <Text style={styles.meterLimit}>
-                of {thresholdSfluv} {tokenSymbol}
+                {t("components.w9TierModal.ofThreshold", { amount: thresholdSfluv, tokenSymbol })}
               </Text>
             </View>
             <View style={styles.meterTrack}>

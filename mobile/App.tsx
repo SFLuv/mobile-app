@@ -837,7 +837,7 @@ function walletLabel(smartIndex: number | undefined): string {
   if (typeof smartIndex !== "number" || smartIndex < 0) {
     return t("app.wallet");
   }
-  return `Wallet ${smartIndex + 1}`;
+  return t("app.walletN", { n: smartIndex + 1 });
 }
 
 function walletDisplayName(
@@ -7032,7 +7032,7 @@ function WalletAppShellContent({
                     </View>
                     <Text style={styles.connectionStateTitle}>{t("app.noConnection")}</Text>
                     <Text style={styles.connectionStateBody}>
-                      We couldn&apos;t load your account because the app appears to be offline. Reconnect and try again.
+                      {t("app.offlineAccountBody")}
                     </Text>
                     <Pressable style={styles.connectionStateButton} onPress={onRetryConnection}>
                       <Text style={styles.connectionStateButtonText}>{t("app.tryAgain")}</Text>
@@ -7742,7 +7742,7 @@ function WalletAppShellContent({
               <View style={styles.moreMenuHeaderCopy}>
                 <Text style={styles.moreMenuTitle}>{t("app.merchantMode")}</Text>
                 <Text style={styles.moreMenuSubtitle}>
-                  This device is locked to receiving SFLuv for {merchantModeDevice?.locationName || t("app.thisLocation")}.
+                  {t("app.deviceLockedTo", { location: merchantModeDevice?.locationName || t("app.thisLocation") })}
                 </Text>
               </View>
               <Pressable style={styles.walletChooserClose} onPress={() => setMerchantModeExitOpen(false)}>
@@ -7923,10 +7923,11 @@ function WalletAppShellContent({
               <View style={styles.moreMenuHeaderCopy}>
                 <Text style={styles.moreMenuTitle}>{t("app.merchantPin")}</Text>
                 <Text style={styles.moreMenuSubtitle}>
-                  Moving this device to{" "}
-                  {merchantModeLocations.find((location) => location.id === merchantSwitchLocationID)?.name ||
-                    t("app.anotherLocation")}
-                  .
+                  {t("app.movingDeviceTo", {
+                    location:
+                      merchantModeLocations.find((location) => location.id === merchantSwitchLocationID)?.name ||
+                      t("app.anotherLocation"),
+                  })}
                 </Text>
               </View>
               <Pressable style={styles.walletChooserClose} onPress={closeMerchantSwitchPrompt}>
@@ -7993,7 +7994,7 @@ function WalletAppShellContent({
               style={styles.connectionStateButton}
               onPress={() => setMerchantForcedExitNotice(null)}
             >
-              <Text style={styles.connectionStateButtonText}>OK</Text>
+              <Text style={styles.connectionStateButtonText}>{t("common.ok")}</Text>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -8163,11 +8164,10 @@ function WalletAppShellContent({
             <Ionicons name="information-circle" size={42} color={palette.primaryStrong} />
             <Text style={styles.sendingTitle}>{t("app.fundsRecovery")}</Text>
             <Text style={styles.sendingText}>
-              This account is active again, but any {clientConfig.tokenSymbol} transferred out during the deletion
-              request will not return automatically.
+              {t("app.fundsNotReturned", { tokenSymbol: clientConfig.tokenSymbol })}
             </Text>
             <Text style={styles.sendingText}>
-              Use {ACCOUNT_RECOVERY_CONTACT} to recover your funds.
+              {t("app.useContactToRecover", { contact: ACCOUNT_RECOVERY_CONTACT })}
             </Text>
             <Pressable style={styles.dismissButton} onPress={onDismissRecoveryFundsNotice}>
               <Text style={styles.dismissButtonText}>{t("app.understood")}</Text>
@@ -9710,15 +9710,12 @@ function DeletedAccountScreen({
           {t("app.thisAccountHasBeenRecently")}
         </Text>
         <Text style={styles.loginBody}>
-          The account is scheduled for permanent deletion on {deleteDateLabel}.
-          If you reactivate it now, your profile and wallets will become active
-          again.
+          {t("app.scheduledForDeletionOn", { date: deleteDateLabel })}
         </Text>
         {status.status === "ready_for_manual_purge" ? (
           <View style={styles.deletedAccountNotice}>
             <Text style={styles.deletedAccountNoticeText}>
-              This account is already at the end of its deletion window. If
-              reactivation fails, it may need manual recovery.
+              {t("app.endOfDeletionWindow")}
             </Text>
           </View>
         ) : null}
@@ -9778,8 +9775,7 @@ function PolicyAcceptanceScreen({
           <Text style={styles.loginBrand}>SFLUV</Text>
           <Text style={styles.loginTitle}>{t("app.acceptThePrivacyPolicyTo")}</Text>
           <Text style={styles.loginBody}>
-            Review the Privacy Policy and choose whether to receive SFLUV email updates. The
-            privacy-policy checkbox is required to continue.
+            {t("app.reviewPrivacyPolicyBody")}
           </Text>
 
           <View style={styles.policyCard}>
@@ -9979,7 +9975,7 @@ function StaleSettingsBanner({ onRetry }: { onRetry: () => void }) {
           {t("app.runningOnSavedSettingsWe")}
         </Text>
         <Pressable onPress={onRetry} accessibilityRole="button" hitSlop={8}>
-          <Text style={{ fontSize: 12, fontWeight: "700", color: palette.primaryStrong }}>Retry</Text>
+          <Text style={{ fontSize: 12, fontWeight: "700", color: palette.primaryStrong }}>{t("common.retry")}</Text>
         </Pressable>
       </View>
     </SafeAreaView>

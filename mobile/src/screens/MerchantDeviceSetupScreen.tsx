@@ -286,7 +286,7 @@ export function MerchantDeviceSetupScreen({
         </View>
         <Text style={styles.title}>{t("merchantDeviceSetup.whichLocationQ")}</Text>
         <Text style={styles.body}>
-          Payments taken here land in this location&apos;s wallet, and the day it shows is this location&apos;s day.
+          {t("merchantDeviceSetup.paymentsLandHere")}
         </Text>
         <View style={styles.optionList}>
           {locations.map((location) => (

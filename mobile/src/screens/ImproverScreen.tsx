@@ -298,12 +298,12 @@ function formatWorkItemRequirements(item: AppWorkflowWorkItem): string {
       : t("improver.photoCount", { count: Math.max(1, item.photoRequiredCount || 1) });
     const aspectLabel =
       item.photoAspectRatio === "vertical"
-        ? "vertical"
+        ? t("improver.aspectVertical")
         : item.photoAspectRatio === "horizontal"
-          ? "horizontal"
-          : "square";
+          ? t("improver.aspectHorizontal")
+          : t("improver.aspectSquare");
     const sourceLabel = item.cameraCaptureOnly ? t("improver.liveCameraOnly") : t("improver.cameraOrUpload");
-    requirements.push(`Photo (${countLabel}, ${aspectLabel}, ${sourceLabel})`);
+    requirements.push(t("improver.photoRequirement", { photos: countLabel, aspect: aspectLabel, source: sourceLabel }));
   }
   if (item.requiresWrittenResponse) {
     requirements.push(t("improver.writtenResponse"));
@@ -2035,7 +2035,7 @@ export function ImproverScreen({
       setActionKey(`credential:${credentialType}`);
       try {
         await backendClient.createImproverCredentialRequest(credentialType);
-        setNotice(`Requested ${formatCredentialLabel(credentialType, labelMap)}.`);
+        setNotice(t("improver.requestedCredential", { credential: formatCredentialLabel(credentialType, labelMap) }));
         setError(null);
         await loadCredentialData(true);
       } catch (nextError) {
@@ -2517,7 +2517,7 @@ export function ImproverScreen({
                 ? group.primaryStepTitle || t("improver.assignedStep")
                 : t("improver.stepTitle", { step: group.primaryStepOrder, title: group.primaryStepTitle })}
             </Text>
-            <Text style={styles.meta}>Next: {formatWorkflowDate(focusWorkflow.startAt)}</Text>
+            <Text style={styles.meta}>{t("improver.nextDate", { date: formatWorkflowDate(focusWorkflow.startAt) })}</Text>
           </View>
           <View style={styles.cardBadgeStack}>
             {renderStatusChip(formatWorkflowDisplayStatus(focusWorkflow), resolveWorkflowTone(focusWorkflow))}
@@ -2538,7 +2538,7 @@ export function ImproverScreen({
         </View>
         {group.workflows.length > 1 ? (
           <Text style={styles.meta}>
-            {group.workflows.length} upcoming assignments
+            {t("improver.upcomingAssignments", { count: group.workflows.length })}
           </Text>
         ) : null}
       </Pressable>
@@ -2556,11 +2556,11 @@ export function ImproverScreen({
             </Text>
             {claimableStep ? (
               <Text style={styles.meta}>
-                Claimable: Step {claimableStep.stepOrder}
+                {t("improver.claimableStep", { step: claimableStep.stepOrder })}
                 {claimableStep.title ? ` - ${claimableStep.title}` : ""}
               </Text>
             ) : null}
-            <Text style={styles.meta}>Starts: {formatWorkflowDate(workflow.startAt)}</Text>
+            <Text style={styles.meta}>{t("improver.startsDate", { date: formatWorkflowDate(workflow.startAt) })}</Text>
           </View>
           {renderStatusChip(formatWorkflowDisplayStatus(workflow), resolveWorkflowTone(workflow))}
         </View>
@@ -2593,7 +2593,7 @@ export function ImproverScreen({
             <Text style={styles.workflowTitle} numberOfLines={2}>
               {workflow.title}
             </Text>
-            <Text style={styles.meta}>Pending payouts: {unpaidSteps.length}</Text>
+            <Text style={styles.meta}>{t("improver.pendingPayouts", { count: unpaidSteps.length })}</Text>
             {failedSteps.length > 0 ? (
               <Text style={styles.inlineError}>
                 {failedSteps.length === 1 ? t("improver.1PayoutNeedsAttention") : t("improver.payoutsNeedAttention", { count: failedSteps.length })}
@@ -2820,7 +2820,7 @@ export function ImproverScreen({
                         {formatCredentialLabel(request.credentialType, labelMap)}
                       </Text>
                       <Text style={styles.choiceBody}>
-                        Requested {new Date(request.requestedAt).toLocaleString()}
+                        {t("improver.requestedOn", { date: new Date(request.requestedAt).toLocaleString() })}
                       </Text>
                     </View>
                     {renderStatusChip(
@@ -2834,7 +2834,7 @@ export function ImproverScreen({
                   </View>
                   {request.resolvedAt ? (
                     <Text style={styles.choiceBody}>
-                      Resolved {new Date(request.resolvedAt).toLocaleString()}
+                      {t("improver.resolvedOn", { date: new Date(request.resolvedAt).toLocaleString() })}
                     </Text>
                   ) : null}
                 </Pressable>
@@ -2861,7 +2861,7 @@ export function ImproverScreen({
           const previewUri = photoPreviewUris[photoId];
           const previewLoading = Boolean(photoPreviewLoading[photoId]);
           const fileName =
-            response.photos?.find((photo) => photo.id === photoId)?.fileName || `Photo ${photoIndex + 1}`;
+            response.photos?.find((photo) => photo.id === photoId)?.fileName || t("improver.photoN", { n: photoIndex + 1 });
           return (
             <Pressable
               key={photoId}
@@ -2893,11 +2893,11 @@ export function ImproverScreen({
           <Pressable
             key={`${photoUrl}-${photoIndex}`}
             style={styles.photoCard}
-            onPress={() => openImagePreview({ label: `Photo ${photoIndex + 1}`, imageUri: photoUrl }, "detail")}
+            onPress={() => openImagePreview({ label: t("improver.photoN", { n: photoIndex + 1 }), imageUri: photoUrl }, "detail")}
           >
             <Image source={{ uri: photoUrl }} style={styles.photoPreview} resizeMode="cover" />
             <Text style={styles.photoLabel} numberOfLines={1}>
-              Photo {photoIndex + 1}
+              {t("improver.photoN", { n: photoIndex + 1 })}
             </Text>
           </Pressable>
         ))}
@@ -2916,13 +2916,13 @@ export function ImproverScreen({
         <View style={styles.cardHeaderRow}>
           <View style={styles.cardHeaderCopy}>
             <Text style={styles.choiceTitle}>
-              Item {item.itemOrder}: {item.title}
+              {t("improver.itemTitle", { order: item.itemOrder, title: item.title })}
             </Text>
             {item.description ? <Text style={styles.choiceBody}>{item.description}</Text> : null}
           </View>
           {item.optional ? renderStatusChip(t("improver.optional"), "default") : null}
         </View>
-        <Text style={styles.meta}>Requirements: {formatWorkItemRequirements(item)}</Text>
+        <Text style={styles.meta}>{t("improver.requirementsList", { list: formatWorkItemRequirements(item) })}</Text>
 
                 {itemResponses.length > 0 ? (
           itemResponses.map((response, index) => {
@@ -2932,7 +2932,7 @@ export function ImproverScreen({
             return (
               <View key={`${item.id}-response-${index}`} style={styles.responseCard}>
                 {itemResponses.length > 1 ? (
-                  <Text style={styles.responseLabel}>Submitted response {index + 1}</Text>
+                  <Text style={styles.responseLabel}>{t("improver.submittedResponseN", { n: index + 1 })}</Text>
                 ) : null}
                 {dropdownLabel ? (
                   <View style={styles.responseRow}>
@@ -3080,10 +3080,10 @@ export function ImproverScreen({
                   return (
                     <View key={item.id} style={styles.subCard}>
                       <Text style={styles.choiceTitle}>
-                        Item {item.itemOrder}: {item.title}
+                        {t("improver.itemTitle", { order: item.itemOrder, title: item.title })}
                       </Text>
                       {item.description ? <Text style={styles.choiceBody}>{item.description}</Text> : null}
-                      <Text style={styles.meta}>Requirements: {formatWorkItemRequirements(item)}</Text>
+                      <Text style={styles.meta}>{t("improver.requirementsList", { list: formatWorkItemRequirements(item) })}</Text>
 
                       {item.requiresDropdown ? (
                         <View style={styles.choiceList}>
@@ -3354,7 +3354,7 @@ export function ImproverScreen({
           <Text style={styles.bulkActionTitle}>
             {selectedWorkflowGroups.length === 0
               ? t("improver.selectWorkflows")
-              : `${selectedWorkflowGroups.length} selected`}
+              : t("common.selectedCount", { count: selectedWorkflowGroups.length })}
           </Text>
           <View style={styles.bulkActionButtons}>
             <Pressable
@@ -3403,8 +3403,7 @@ export function ImproverScreen({
 
           <ScrollView contentContainerStyle={styles.absenceScreenContent} showsVerticalScrollIndicator={false}>
             <Text style={styles.absenceIntro}>
-              Choose the dates you'll be away. Any assignments in that window are released so another improver can
-              cover them.
+              {t("improver.absenceIntro")}
             </Text>
 
             <Pressable
@@ -3517,7 +3516,12 @@ export function ImproverScreen({
               {selectedWorkflowGroups.length === 1 ? t("improver.revokeWorkflow") : t("improver.revokeSelectedWorkflows")}
             </Text>
             <Text style={styles.confirmBody}>
-              This releases {selectedWorkflowGroups.length === 1 ? t("improver.thisRecurringWorkflowClaim") : t("improver.theseRecurringWorkflowClaims", { count: selectedWorkflowGroups.length })} to other improvers.
+              {t("improver.releasesToOthers", {
+                what:
+                  selectedWorkflowGroups.length === 1
+                    ? t("improver.thisRecurringWorkflowClaim")
+                    : t("improver.theseRecurringWorkflowClaims", { count: selectedWorkflowGroups.length }),
+              })}
             </Text>
             <View style={styles.bulkActionButtons}>
               <Pressable
@@ -3664,12 +3668,12 @@ export function ImproverScreen({
                 <>
                   <View style={styles.stepPagerRow}>
                     <Text style={styles.stepPagerTitle}>
-                      Step {currentDetailStepIndex + 1} of {sortedDetailSteps.length}
+                      {t("improver.stepOf", { step: currentDetailStepIndex + 1, total: sortedDetailSteps.length })}
                       {/* Which of these steps are theirs. "Step 2 of 4" alone
                           told an improver nothing about where their other
                           assigned step was. */}
                       {selectedWorkflow && myStepOrders.length > 1
-                        ? ` · yours: ${myStepOrders.join(", ")}`
+                        ? t("improver.yoursSteps", { steps: myStepOrders.join(", ") })
                         : ""}
                     </Text>
                     <View style={styles.inlineActions}>
@@ -3700,7 +3704,7 @@ export function ImproverScreen({
                       <View style={styles.cardHeaderRow}>
                         <View style={styles.cardHeaderCopy}>
                           <Text style={styles.sectionTitle}>
-                            Step {currentDetailStep.stepOrder}: {currentDetailStep.title}
+                            {t("improver.stepTitle", { step: currentDetailStep.stepOrder, title: currentDetailStep.title })}
                           </Text>
                         </View>
                         {renderStatusChip(
@@ -3715,9 +3719,9 @@ export function ImproverScreen({
 
                       {!currentDetailStepHasCompletionForm ? (
                         <>
-                          <Text style={styles.meta}>Bounty: {currentDetailStep.bounty} {tokenSymbol}</Text>
+                          <Text style={styles.meta}>{t("improver.bountyAmount", { amount: currentDetailStep.bounty, tokenSymbol })}</Text>
                           {currentDetailStep.assignedImproverName ? (
-                            <Text style={styles.meta}>Assigned: {currentDetailStep.assignedImproverName}</Text>
+                            <Text style={styles.meta}>{t("improver.assignedTo", { name: currentDetailStep.assignedImproverName })}</Text>
                           ) : null}
                           {currentDetailStep.payoutError ? <Text style={styles.inlineError}>{currentDetailStep.payoutError}</Text> : null}
 
@@ -3733,7 +3737,7 @@ export function ImproverScreen({
                               <View style={styles.submissionCard}>
                                 <View style={styles.sectionHeaderRow}>
                                   <Text style={styles.stackLabel}>
-                                    Submitted on {new Date(currentDetailStep.submission.submittedAt * 1000).toLocaleString()}
+                                    {t("improver.submittedOn", { date: new Date(currentDetailStep.submission.submittedAt * 1000).toLocaleString() })}
                                   </Text>
                                   <Pressable
                                     style={styles.compactActionButton}

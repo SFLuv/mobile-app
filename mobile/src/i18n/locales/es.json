@@ -11,7 +11,11 @@
     "later": "Más tarde",
     "done": "Listo",
     "saving": "Guardando...",
-    "cancel": "Cancelar"
+    "cancel": "Cancelar",
+    "retry": "Reintentar",
+    "selectedCount": "{{count}} seleccionados",
+    "shareName": "Compartir {{name}}",
+    "removeName": "Quitar a {{name}}"
   },
   "permissions": {
     "camera": {
@@ -83,7 +87,9 @@
       "appleLinkedBody": "Apple está vinculado a esta cuenta para futuros inicios de sesión.",
       "appleLinkBody": "Vincule Apple para que sus próximos inicios de sesión con Apple entren en esta cuenta.",
       "google": "Google",
-      "apple": "Apple"
+      "apple": "Apple",
+      "googleEmail": "Correo de Google: {{email}}",
+      "appleEmail": "Correo de Apple: {{email}}"
     },
     "wallets": {
       "owner": "Propietaria",
@@ -134,7 +140,8 @@
       "newPinPlaceholder": "Ingrese el PIN nuevo",
       "savingShort": "Guardando",
       "slideReset": "Deslice para restablecer el PIN",
-      "slideSave": "Deslice para guardar el PIN"
+      "slideSave": "Deslice para guardar el PIN",
+      "usesWalletOnDevice": "{{location}} usa {{address}} en este dispositivo."
     },
     "improver": {
       "enterRewardsWallet": "Ingrese una dirección de billetera para recompensas.",
@@ -162,7 +169,8 @@
       "email": "Correo de improver: {{email}}",
       "rewardsWallet": "Billetera de recompensas: {{address}}",
       "primaryAppWallet": "Billetera principal de la aplicación: {{address}}",
-      "notSet": "Sin configurar"
+      "notSet": "Sin configurar",
+      "pendingSince": "Pendiente desde el {{date}}"
     },
     "appSync": "Sincronización",
     "tabs": {
@@ -226,7 +234,8 @@
       "notLoaded": "No cargado",
       "email": "Correo: {{email}}",
       "deleteFlowBody": "Esto inicia el proceso de eliminación de la cuenta y puede transferir {{symbol}} fuera de las billeteras accesibles antes de enviar la solicitud de eliminación.",
-      "dangerBody": "Elimine su cuenta y cierre sesión. Su cuenta se podrá recuperar durante 30 días, pero todo el {{symbol}} de sus billeteras accesibles se transferirá fuera antes de enviar la solicitud de eliminación."
+      "dangerBody": "Elimine su cuenta y cierre sesión. Su cuenta se podrá recuperar durante 30 días, pero todo el {{symbol}} de sus billeteras accesibles se transferirá fuera antes de enviar la solicitud de eliminación.",
+      "phone": "Teléfono: {{phone}}"
     },
     "version": "Versión {{version}} (compilación {{build}})",
     "questionsProblemsOrAnythingElse": "Preguntas, problemas o cualquier otra cosa."
@@ -334,7 +343,9 @@
     "tryAgain": "Intentar de nuevo",
     "thisMerchant": "este comercio",
     "custom": "Otro",
-    "balance": "Saldo: {{amount}} {{symbol}}"
+    "balance": "Saldo: {{amount}} {{symbol}}",
+    "moreThanAvailableBalance": "Eso es más que su saldo disponible",
+    "tipFor": "Para {{merchant}}"
   },
   "location": {
     "feetAway": "a {{count}} pies",
@@ -537,7 +548,32 @@
     "allRecurringWorkflows_other": "Los {{count}} flujos de trabajo recurrentes",
     "resultCount_one": "{{count}} resultado",
     "resultCount_many": "{{count}} resultados",
-    "resultCount_other": "{{count}} resultados"
+    "resultCount_other": "{{count}} resultados",
+    "nextDate": "Próximo: {{date}}",
+    "upcomingAssignments_one": "{{count}} tarea próxima",
+    "upcomingAssignments_many": "{{count}} tareas próximas",
+    "upcomingAssignments_other": "{{count}} tareas próximas",
+    "claimableStep": "Disponible: paso {{step}}",
+    "startsDate": "Comienza: {{date}}",
+    "pendingPayouts": "Pagos pendientes: {{count}}",
+    "requestedOn": "Solicitado el {{date}}",
+    "resolvedOn": "Resuelto el {{date}}",
+    "requestedCredential": "Se solicitó {{credential}}.",
+    "photoN": "Foto {{n}}",
+    "photoRequirement": "Foto ({{photos}}, {{aspect}}, {{source}})",
+    "aspectVertical": "vertical",
+    "aspectHorizontal": "horizontal",
+    "aspectSquare": "cuadrada",
+    "itemTitle": "Elemento {{order}}: {{title}}",
+    "requirementsList": "Requisitos: {{list}}",
+    "submittedResponseN": "Respuesta enviada {{n}}",
+    "absenceIntro": "Elija las fechas en que estará ausente. Las tareas de ese período se liberarán para que otra persona pueda cubrirlas.",
+    "releasesToOthers": "Esto libera {{what}} para otras personas.",
+    "stepOf": "Paso {{step}} de {{total}}",
+    "yoursSteps": " · suyos: {{steps}}",
+    "bountyAmount": "Recompensa: {{amount}} {{tokenSymbol}}",
+    "assignedTo": "Asignado a: {{name}}",
+    "submittedOn": "Enviado el {{date}}"
   },
   "bulletin": {
     "couldnTLoadTheBulletin": "No se pudo cargar el Tablón.",
@@ -629,7 +665,20 @@
     "photosFailed_one": "No se subió {{count}} foto. Puede intentarlo de nuevo desde su publicación.",
     "photosFailed_many": "No se subieron {{count}} fotos. Puede intentarlo de nuevo desde su publicación.",
     "photosFailed_other": "No se subieron {{count}} fotos. Puede intentarlo de nuevo desde su publicación.",
-    "whatArePostingQ": "¿Qué va a publicar?"
+    "whatArePostingQ": "¿Qué va a publicar?",
+    "reportTarget": "Denunciar {{target}}",
+    "blockName": "Bloquear a {{name}}",
+    "anythingElseOptional": "¿Algo más que debamos saber? (opcional)",
+    "eventTimeOpenInParticipate": "{{time}} · Abrir en Participar",
+    "meetAt": "Punto de encuentro: {{place}}",
+    "stepOfThree": "{{step}} de 3",
+    "notAllowedRules": "No se permite: armas, drogas, alcohol, animales en venta, vivienda, empleos ni servicios pagados. Los eventos de voluntariado son bienvenidos como avisos; vincúlelos para que los vecinos puedan inscribirse en Participar.",
+    "priceLabel": "Precio ({{tokenSymbol}})",
+    "linkedEvent": "Evento vinculado: {{title}}",
+    "withinMiles": "A menos de {{radius}} mi",
+    "tokenAccepted": "Se acepta {{tokenSymbol}}",
+    "aboutDistanceAway": "A unos {{distance}}",
+    "chooseTokenCashOrBoth": "Elija {{tokenSymbol}}, efectivo o ambos."
   },
   "volunteer": {
     "volunteerEvent": "Evento de voluntariado",
@@ -705,7 +754,8 @@
     "spotsCount_many": "{{count}} lugares",
     "spotsCount_other": "{{count}} lugares",
     "remainingOf": "Quedan {{remaining}} / {{total}}",
-    "eventWasCancelled": "Este evento fue cancelado."
+    "eventWasCancelled": "Este evento fue cancelado.",
+    "weWillUseNameAndEmail": "Usaremos el nombre y el correo electrónico de su cuenta de SFLuv."
   },
   "merchantApplication": {
     "publicInformation": "Información pública",
@@ -771,7 +821,9 @@
     "submitting": "Enviando...",
     "howHeardQ": "¿Cómo se enteró de SFLuv?",
     "acceptTipsQ": "¿Acepta propinas?",
-    "deviceForStaffQ": "¿El personal tiene una tableta o un teléfono disponible?"
+    "deviceForStaffQ": "¿El personal tiene una tableta o un teléfono disponible?",
+    "googleListingHint": "Si su negocio tiene su propia ficha en Google, búsquelo por nombre; así podemos completar mucho más por usted.",
+    "cantFindLocation": "No encuentro mi ubicación"
   },
   "chat": {
     "couldnTSendTryAgain": "No se pudo enviar. Intente de nuevo.",
@@ -830,7 +882,18 @@
     "deleteMessages_other": "Eliminar {{count}} mensajes",
     "isTyping": "{{name}} está escribiendo",
     "todayAt": "Hoy {{time}}",
-    "yesterdayAt": "Ayer {{time}}"
+    "yesterdayAt": "Ayer {{time}}",
+    "sendToken": "Enviar {{tokenSymbol}}",
+    "moreThanYourBalance": "Eso es más que su saldo.",
+    "amountAvailable": "{{amount}} {{tokenSymbol}} disponibles",
+    "attachAmount": "Adjuntar {{amount}} {{tokenSymbol}}",
+    "edited": "editado",
+    "deletedSomeOf": "Se eliminaron {{done}} de {{total}}.",
+    "deleteNMessages_one": "¿Eliminar {{count}} mensaje?",
+    "deleteNMessages_many": "¿Eliminar {{count}} mensajes?",
+    "deleteNMessages_other": "¿Eliminar {{count}} mensajes?",
+    "reactWith": "Reaccionar con {{emoji}}",
+    "removeAttachment": "Quitar {{name}}"
   },
   "map": {
     "searchMerchants": "Buscar comercios",
@@ -901,7 +964,22 @@
     "attachmentsCount_many": "📎 {{count}} adjuntos",
     "attachmentsCount_other": "📎 {{count}} adjuntos",
     "leaveGroupQ": "¿Salir de este grupo?",
-    "deleteConversationQ": "¿Eliminar esta conversación?"
+    "deleteConversationQ": "¿Eliminar esta conversación?",
+    "muteBody": "Los mensajes siguen llegando y se muestran como no leídos; solo que su teléfono no vibrará.",
+    "leaveGroupBody": "Dejará de recibir sus mensajes. El grupo continuará sin usted.",
+    "deleteForMeHint": "La oculta de su bandeja de entrada. Volverá, con su historial, si alguno de los dos envía un mensaje.",
+    "deleteForEveryoneHint": "También la elimina de su bandeja de entrada. No se puede deshacer.",
+    "noOneFound": "No se encontró a nadie. Las personas solo aparecen aquí si eligieron que se les pueda encontrar, si busca su @usuario exacto o si ya son uno de sus contactos.",
+    "reactedTo": "{{who}} reaccionó con {{emoji}} a «{{what}}»",
+    "reactedToAMessage": "{{who}} reaccionó con {{emoji}} a un mensaje",
+    "photosCount_one": "📷 {{count}} foto",
+    "photosCount_many": "📷 {{count}} fotos",
+    "photosCount_other": "📷 {{count}} fotos",
+    "videosCount_one": "🎥 {{count}} video",
+    "videosCount_many": "🎥 {{count}} videos",
+    "videosCount_other": "🎥 {{count}} videos",
+    "sharedPlace": "📍 Compartió {{name}}",
+    "sharedEvent": "📅 Compartió {{name}}"
   },
   "myProfile": {
     "couldnTLoadYourProfile": "No se pudo cargar su perfil.",
@@ -934,7 +1012,11 @@
     "yourPicture": "Su foto",
     "everyoneWhoCanSeeYour": "Todos los que pueden ver su nombre pueden ver esto.",
     "copied": "Copiado",
-    "saving": "Guardando…"
+    "saving": "Guardando…",
+    "usernameRulesHint": "Letras, números y guiones bajos. Las personas pueden encontrarle con este nombre exacto, aunque no aparezca en la lista de abajo.",
+    "usernameExactHint": "Las personas pueden encontrarle con este nombre exacto, aunque no aparezca en la lista de abajo.",
+    "findableOffHint": "Desactivado: solo las personas que conocen su nombre de usuario pueden iniciar un chat.",
+    "walletLoadingQr": "Su billetera aún se está cargando. Cuando esté lista, su código QR de contacto aparecerá aquí."
   },
   "merchantDeviceSetup": {
     "thosePinsDoNotMatch": "Los PIN no coinciden.",
@@ -965,7 +1047,8 @@
     "pinHelpSent": "Se pidió al soporte de SFLuv que restablezca el PIN de este negocio. Le responderán pronto.",
     "couldNotReachSupport": "No se pudo contactar al soporte de SFLuv. Inténtelo de nuevo.",
     "askingSfluv": "Avisando a SFLuv…",
-    "forgotPin": "¿Olvidó su PIN?"
+    "forgotPin": "¿Olvidó su PIN?",
+    "paymentsLandHere": "Los pagos que reciba aquí van a la billetera de esta ubicación, y el día que se muestra es el de esta ubicación."
   },
   "chatInfo": {
     "couldnTRenameTheGroup": "No se pudo cambiar el nombre del grupo.",
@@ -1017,7 +1100,9 @@
     "owner": "Propietario",
     "admin": "Administrador",
     "you": "Usted",
-    "nothingMatchesThat": "Nada coincide con eso."
+    "nothingMatchesThat": "Nada coincide con eso.",
+    "blockName": "Bloquear a {{name}}",
+    "unblockName": "Desbloquear a {{name}}"
   },
   "notifications": {
     "cancel": "Cancelar",
@@ -1041,7 +1126,10 @@
     "moveThisDeviceToAnother": "Mover este dispositivo a otra ubicación",
     "tipsToday": "Propinas de hoy",
     "notSetUp": "Sin configurar",
-    "noPaymentsYetToday": "Todavía no hay pagos hoy."
+    "noPaymentsYetToday": "Todavía no hay pagos hoy.",
+    "tipAmount": "+{{amount}} de propina",
+    "refund": "reembolso",
+    "todaysPayments": "PAGOS DE HOY"
   },
   "contactDetail": {
     "thisRemovesThemFromYour": "Esto lo quita de sus contactos.",
@@ -1067,7 +1155,10 @@
     "couldnTSaveThatPicture": "No se pudo guardar esa foto.",
     "couldnTRemoveThatPicture": "No se pudo quitar esa foto.",
     "back": "Atrás",
-    "saving": "Guardando…"
+    "saving": "Guardando…",
+    "scanToAdd": "Escanee para agregar a {{name}} como contacto.",
+    "deleteNameQ": "¿Eliminar a {{name}}?",
+    "deleteName": "Eliminar a {{name}}"
   },
   "activity": {
     "sentOut": "enviado",
@@ -1103,7 +1194,8 @@
     "back": "Atrás",
     "addPeople": "Agregar personas",
     "newGroup": "Nuevo grupo",
-    "messageOnePersonInstead": "Mejor escribirle a una persona"
+    "messageOnePersonInstead": "Mejor escribirle a una persona",
+    "searchHint": "Busque a alguien por nombre o @usuario. Las personas que guardó como contactos también aparecen aquí."
   },
   "merchantOnboarding": {
     "setUpYourMerchantAccount": "Configure su cuenta de comercio",
@@ -1219,7 +1311,9 @@
       "tellUsWhatYouNeed": "Díganos qué necesita. Mientras más detalles, mejor.",
       "sendMessage": "Enviar mensaje",
       "sending": "Enviando…",
-      "whereReplyQ": "¿A dónde le respondemos?"
+      "whereReplyQ": "¿A dónde le respondemos?",
+      "wellGetBackTo": "Le responderemos a {{email}}. Su número de referencia es:",
+      "whatsThisAbout": "¿De qué se trata?"
     },
     "datePickerSheet": {
       "selectADate": "Seleccione una fecha"
@@ -1268,7 +1362,9 @@
       "fileLabel": "Archivo: {{name}}",
       "attachmentName": "adjunto",
       "sizeSuffix": ", {{size}}",
-      "requestReceived": "Recibimos su solicitud y alguien la está revisando."
+      "requestReceived": "Recibimos su solicitud y alguien la está revisando.",
+      "supportReference": "Soporte · {{reference}}",
+      "photoSize": "Foto · {{size}}"
     },
     "paymentReceivedOverlay": {
       "paymentReceived": "Pago recibido"
@@ -1305,7 +1401,11 @@
       "sentToChats_many": "Enviado a {{count}} chats.",
       "sendToChats_one": "Enviar a {{count}} chat",
       "sendToChats_other": "Enviar a {{count}} chats",
-      "sendToChats_many": "Enviar a {{count}} chats"
+      "sendToChats_many": "Enviar a {{count}} chats",
+      "peopleCount_one": "{{count}} persona",
+      "peopleCount_many": "{{count}} personas",
+      "peopleCount_other": "{{count}} personas",
+      "cantReceiveMessages": "No puede recibir mensajes en este momento"
     },
     "supportRequestModal": {
       "supportRequest": "Solicitud de soporte",
@@ -1318,7 +1418,9 @@
       "noMessage": "(Sin mensaje)",
       "copy": "Copiar",
       "close": "Cerrar",
-      "copied": "Copiado"
+      "copied": "Copiado",
+      "copyLabel": "Copiar {{label}}",
+      "labelCopied": "{{label}} copiado"
     },
     "swipeableRow": {},
     "transactionDetailsModal": {
@@ -1339,7 +1441,9 @@
     "themedActivityIndicator": {},
     "w9CompleteModal": {},
     "w9EscrowCard": {},
-    "w9TierModal": {}
+    "w9TierModal": {
+      "ofThreshold": "de {{amount}} {{tokenSymbol}}"
+    }
   },
   "app": {
     "theFaucetIsBusyAnd": "El sistema de recompensas está ocupado y su recompensa está en fila para enviarse. Mantenga esto abierto.",
@@ -1577,7 +1681,16 @@
     "notificationsOutstanding_one": "Notificaciones, {{count}} pendiente",
     "notificationsOutstanding_many": "Notificaciones, {{count}} pendientes",
     "notificationsOutstanding_other": "Notificaciones, {{count}} pendientes",
-    "whichLocationQ": "¿Qué ubicación?"
+    "whichLocationQ": "¿Qué ubicación?",
+    "offlineAccountBody": "No pudimos cargar su cuenta porque la aplicación parece estar sin conexión. Vuelva a conectarse e inténtelo de nuevo.",
+    "deviceLockedTo": "Este dispositivo solo puede recibir SFLuv para {{location}}.",
+    "movingDeviceTo": "Moviendo este dispositivo a {{location}}.",
+    "fundsNotReturned": "Esta cuenta vuelve a estar activa, pero los {{tokenSymbol}} transferidos durante la solicitud de eliminación no regresarán automáticamente.",
+    "useContactToRecover": "Use {{contact}} para recuperar sus fondos.",
+    "scheduledForDeletionOn": "La cuenta se eliminará de forma permanente el {{date}}. Si la reactiva ahora, su perfil y sus billeteras volverán a estar activos.",
+    "endOfDeletionWindow": "Esta cuenta ya está al final de su plazo de eliminación. Si la reactivación falla, puede que haya que recuperarla manualmente.",
+    "reviewPrivacyPolicyBody": "Revise la Política de privacidad y elija si desea recibir novedades de SFLUV por correo electrónico. Para continuar, debe marcar la casilla de la política de privacidad.",
+    "walletN": "Billetera {{n}}"
   },
   "walletHome": {},
   "utils": {
@@ -1600,7 +1713,10 @@
     "sharedIntent": {
       "file": "Archivo",
       "text": "Texto",
-      "photo": "Foto"
+      "photo": "Foto",
+      "filesCount_one": "{{count}} archivo",
+      "filesCount_many": "{{count}} archivos",
+      "filesCount_other": "{{count}} archivos"
     },
     "transactions": {
       "unknown": "Desconocido",

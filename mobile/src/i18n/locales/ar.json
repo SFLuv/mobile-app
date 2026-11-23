@@ -11,7 +11,11 @@
     "later": "لاحقًا",
     "done": "تم",
     "saving": "جارٍ الحفظ...",
-    "cancel": "إلغاء"
+    "cancel": "إلغاء",
+    "retry": "إعادة المحاولة",
+    "selectedCount": "تم تحديد {{count}}",
+    "shareName": "مشاركة {{name}}",
+    "removeName": "إزالة {{name}}"
   },
   "permissions": {
     "camera": {
@@ -83,7 +87,9 @@
       "appleLinkedBody": "Apple مرتبط بهذا الحساب لعمليات تسجيل الدخول المستقبلية.",
       "appleLinkBody": "اربط Apple حتى تصل عمليات تسجيل الدخول المستقبلية عبر Apple إلى هذا الحساب.",
       "google": "Google",
-      "apple": "Apple"
+      "apple": "Apple",
+      "googleEmail": "بريد Google الإلكتروني: {{email}}",
+      "appleEmail": "بريد Apple الإلكتروني: {{email}}"
     },
     "wallets": {
       "owner": "المالك",
@@ -134,7 +140,8 @@
       "newPinPlaceholder": "أدخل رمز PIN الجديد",
       "savingShort": "جارٍ الحفظ",
       "slideReset": "اسحب لإعادة تعيين PIN",
-      "slideSave": "اسحب لحفظ PIN"
+      "slideSave": "اسحب لحفظ PIN",
+      "usesWalletOnDevice": "يستخدم {{location}} العنوان {{address}} على هذا الجهاز."
     },
     "improver": {
       "enterRewardsWallet": "أدخل عنوان محفظة المكافآت.",
@@ -162,7 +169,8 @@
       "email": "بريد المُحسِّن: {{email}}",
       "rewardsWallet": "محفظة المكافآت: {{address}}",
       "primaryAppWallet": "المحفظة الرئيسية في التطبيق: {{address}}",
-      "notSet": "غير محدد"
+      "notSet": "غير محدد",
+      "pendingSince": "معلّق منذ {{date}}"
     },
     "appSync": "مزامنة التطبيق",
     "tabs": {
@@ -232,7 +240,8 @@
       "notLoaded": "لم يُحمَّل",
       "email": "البريد الإلكتروني: {{email}}",
       "deleteFlowBody": "يبدأ هذا إجراءات حذف الحساب، وقد يُحوِّل {{symbol}} من المحافظ التي يمكن الوصول إليها قبل تقديم طلب الحذف.",
-      "dangerBody": "احذف حسابك وسجّل الخروج. يبقى حسابك قابلًا للاستعادة لمدة 30 يومًا، لكن أي {{symbol}} في محافظك التي يمكن الوصول إليها سيُحوَّل منها قبل تقديم طلب الحذف."
+      "dangerBody": "احذف حسابك وسجّل الخروج. يبقى حسابك قابلًا للاستعادة لمدة 30 يومًا، لكن أي {{symbol}} في محافظك التي يمكن الوصول إليها سيُحوَّل منها قبل تقديم طلب الحذف.",
+      "phone": "الهاتف: {{phone}}"
     },
     "version": "الإصدار {{version}} (البناء {{build}})",
     "questionsProblemsOrAnythingElse": "أسئلة أو مشكلات أو أي شيء آخر."
@@ -340,7 +349,9 @@
     "tryAgain": "حاول مرة أخرى",
     "thisMerchant": "هذا التاجر",
     "custom": "مخصص",
-    "balance": "الرصيد: {{amount}} {{symbol}}"
+    "balance": "الرصيد: {{amount}} {{symbol}}",
+    "moreThanAvailableBalance": "هذا أكثر من رصيدك المتاح",
+    "tipFor": "لـ {{merchant}}"
   },
   "location": {
     "feetAway": "على بُعد {{count}} قدم",
@@ -564,7 +575,35 @@
     "resultCount_two": "{{count}} نتيجة",
     "resultCount_few": "{{count}} نتيجة",
     "resultCount_many": "{{count}} نتيجة",
-    "resultCount_other": "{{count}} نتيجة"
+    "resultCount_other": "{{count}} نتيجة",
+    "nextDate": "التالي: {{date}}",
+    "upcomingAssignments_zero": "لا مهام قادمة",
+    "upcomingAssignments_one": "مهمة قادمة واحدة",
+    "upcomingAssignments_two": "مهمتان قادمتان",
+    "upcomingAssignments_few": "{{count}} مهام قادمة",
+    "upcomingAssignments_many": "{{count}} مهمة قادمة",
+    "upcomingAssignments_other": "{{count}} مهمة قادمة",
+    "claimableStep": "متاح للحجز: الخطوة {{step}}",
+    "startsDate": "يبدأ: {{date}}",
+    "pendingPayouts": "المدفوعات المعلّقة: {{count}}",
+    "requestedOn": "طُلب في {{date}}",
+    "resolvedOn": "حُلّ في {{date}}",
+    "requestedCredential": "تم طلب {{credential}}.",
+    "photoN": "الصورة {{n}}",
+    "photoRequirement": "صورة ({{photos}}، {{aspect}}، {{source}})",
+    "aspectVertical": "عمودية",
+    "aspectHorizontal": "أفقية",
+    "aspectSquare": "مربعة",
+    "itemTitle": "العنصر {{order}}: {{title}}",
+    "requirementsList": "المتطلبات: {{list}}",
+    "submittedResponseN": "الرد المُرسل {{n}}",
+    "absenceIntro": "اختر التواريخ التي ستكون فيها غائبًا. ستُترك أي مهام في تلك الفترة ليتولاها شخص آخر.",
+    "releasesToOthers": "سيؤدي هذا إلى ترك {{what}} لآخرين.",
+    "stepOf": "الخطوة {{step}} من {{total}}",
+    "yoursSteps": " · خطواتك: {{steps}}",
+    "bountyAmount": "المكافأة: {{amount}} {{tokenSymbol}}",
+    "assignedTo": "مُسند إلى: {{name}}",
+    "submittedOn": "أُرسل في {{date}}"
   },
   "bulletin": {
     "couldnTLoadTheBulletin": "تعذّر تحميل لوحة الإعلانات.",
@@ -659,7 +698,20 @@
     "photosFailed_few": "لم تُرفع {{count}} صورة. يمكنك المحاولة مرة أخرى من منشورك.",
     "photosFailed_many": "لم تُرفع {{count}} صورة. يمكنك المحاولة مرة أخرى من منشورك.",
     "photosFailed_other": "لم تُرفع {{count}} صورة. يمكنك المحاولة مرة أخرى من منشورك.",
-    "whatArePostingQ": "ماذا تريد أن تنشر؟"
+    "whatArePostingQ": "ماذا تريد أن تنشر؟",
+    "reportTarget": "الإبلاغ عن {{target}}",
+    "blockName": "حظر {{name}}",
+    "anythingElseOptional": "هل هناك شيء آخر يجب أن نعرفه؟ (اختياري)",
+    "eventTimeOpenInParticipate": "{{time}} · افتح في شارك",
+    "meetAt": "اللقاء في {{place}}",
+    "stepOfThree": "{{step}} من 3",
+    "notAllowedRules": "غير مسموح: الأسلحة، والمخدرات، والكحول، وبيع الحيوانات، والسكن، والوظائف، والخدمات المدفوعة. فعاليات التطوع مرحّب بها كإعلانات؛ اربطها حتى يتمكن الجيران من التسجيل في شارك.",
+    "priceLabel": "السعر ({{tokenSymbol}})",
+    "linkedEvent": "الفعالية المرتبطة: {{title}}",
+    "withinMiles": "ضمن {{radius}} ميل",
+    "tokenAccepted": "يُقبل {{tokenSymbol}}",
+    "aboutDistanceAway": "على بعد {{distance}} تقريبًا",
+    "chooseTokenCashOrBoth": "اختر {{tokenSymbol}} أو النقد أو كليهما."
   },
   "volunteer": {
     "volunteerEvent": "فعالية تطوعية",
@@ -738,7 +790,8 @@
     "spotsCount_many": "{{count}} مكانًا",
     "spotsCount_other": "{{count}} مكان",
     "remainingOf": "متبقٍ {{remaining}} / {{total}}",
-    "eventWasCancelled": "أُلغيت هذه الفعالية."
+    "eventWasCancelled": "أُلغيت هذه الفعالية.",
+    "weWillUseNameAndEmail": "سنستخدم الاسم والبريد الإلكتروني المسجّلين في حساب SFLuv الخاص بك."
   },
   "merchantApplication": {
     "publicInformation": "المعلومات العامة",
@@ -804,7 +857,9 @@
     "submitting": "جارٍ التقديم...",
     "howHeardQ": "كيف سمعت عن SFLuv؟",
     "acceptTipsQ": "هل تقبل الإكراميات؟",
-    "deviceForStaffQ": "هل يتوفر جهاز لوحي أو هاتف للموظفين؟"
+    "deviceForStaffQ": "هل يتوفر جهاز لوحي أو هاتف للموظفين؟",
+    "googleListingHint": "إذا كان لنشاطك التجاري صفحة خاصة على Google، فابحث عنه بالاسم بدلًا من ذلك، وسنملأ لك معلومات أكثر بكثير.",
+    "cantFindLocation": "لا أجد موقعي"
   },
   "chat": {
     "couldnTSendTryAgain": "تعذّر الإرسال. حاول مرة أخرى.",
@@ -869,7 +924,21 @@
     "deleteMessages_other": "حذف {{count}} رسالة",
     "isTyping": "{{name}} يكتب الآن",
     "todayAt": "اليوم {{time}}",
-    "yesterdayAt": "أمس {{time}}"
+    "yesterdayAt": "أمس {{time}}",
+    "sendToken": "إرسال {{tokenSymbol}}",
+    "moreThanYourBalance": "هذا أكثر من رصيدك.",
+    "amountAvailable": "{{amount}} {{tokenSymbol}} متاح",
+    "attachAmount": "إرفاق {{amount}} {{tokenSymbol}}",
+    "edited": "معدّلة",
+    "deletedSomeOf": "تم حذف {{done}} من {{total}}.",
+    "deleteNMessages_zero": "حذف {{count}} رسالة؟",
+    "deleteNMessages_one": "حذف رسالة واحدة؟",
+    "deleteNMessages_two": "حذف رسالتين؟",
+    "deleteNMessages_few": "حذف {{count}} رسائل؟",
+    "deleteNMessages_many": "حذف {{count}} رسالة؟",
+    "deleteNMessages_other": "حذف {{count}} رسالة؟",
+    "reactWith": "التفاعل بـ {{emoji}}",
+    "removeAttachment": "إزالة {{name}}"
   },
   "map": {
     "searchMerchants": "ابحث عن التجار",
@@ -952,7 +1021,28 @@
     "attachmentsCount_many": "📎 {{count}} مرفق",
     "attachmentsCount_other": "📎 {{count}} مرفق",
     "leaveGroupQ": "هل تريد مغادرة هذه المجموعة؟",
-    "deleteConversationQ": "هل تريد حذف هذه المحادثة؟"
+    "deleteConversationQ": "هل تريد حذف هذه المحادثة؟",
+    "muteBody": "ستظل الرسائل تصل وتظهر كغير مقروءة، لكن هاتفك لن يهتز.",
+    "leaveGroupBody": "ستتوقف عن تلقي رسائلها. ستستمر المجموعة من دونك.",
+    "deleteForMeHint": "يخفيها من صندوق الوارد. ستعود بسجلها إذا أرسل أيٌّ منكما رسالة.",
+    "deleteForEveryoneHint": "يزيلها من صندوق الوارد لديه أيضًا. لا يمكن التراجع عن ذلك.",
+    "noOneFound": "لم يُعثر على أحد. لا يظهر الأشخاص هنا إلا إذا اختاروا أن يكونوا قابلين للعثور عليهم، أو إذا بحثت عن @اسم المستخدم الخاص بهم تمامًا، أو إذا كانوا من جهات اتصالك بالفعل.",
+    "reactedTo": "{{who}} تفاعل بـ {{emoji}} على «{{what}}»",
+    "reactedToAMessage": "{{who}} تفاعل بـ {{emoji}} على رسالة",
+    "photosCount_zero": "📷 {{count}} صورة",
+    "photosCount_one": "📷 صورة واحدة",
+    "photosCount_two": "📷 صورتان",
+    "photosCount_few": "📷 {{count}} صور",
+    "photosCount_many": "📷 {{count}} صورة",
+    "photosCount_other": "📷 {{count}} صورة",
+    "videosCount_zero": "🎥 {{count}} فيديو",
+    "videosCount_one": "🎥 فيديو واحد",
+    "videosCount_two": "🎥 فيديوهان",
+    "videosCount_few": "🎥 {{count}} فيديوهات",
+    "videosCount_many": "🎥 {{count}} فيديو",
+    "videosCount_other": "🎥 {{count}} فيديو",
+    "sharedPlace": "📍 شارك {{name}}",
+    "sharedEvent": "📅 شارك {{name}}"
   },
   "myProfile": {
     "couldnTLoadYourProfile": "تعذّر تحميل ملفك الشخصي.",
@@ -985,7 +1075,11 @@
     "yourPicture": "صورتك",
     "everyoneWhoCanSeeYour": "يمكن لكل من يرى اسمك أن يرى هذه.",
     "copied": "تم النسخ",
-    "saving": "جارٍ الحفظ…"
+    "saving": "جارٍ الحفظ…",
+    "usernameRulesHint": "أحرف وأرقام وشرطات سفلية. يمكن للآخرين العثور عليك بهذا الاسم تمامًا، حتى إن لم تكن مدرجًا أدناه.",
+    "usernameExactHint": "يمكن للآخرين العثور عليك بهذا الاسم تمامًا، حتى إن لم تكن مدرجًا أدناه.",
+    "findableOffHint": "إيقاف: فقط من يعرف اسم المستخدم الخاص بك يمكنه بدء محادثة.",
+    "walletLoadingQr": "لا تزال محفظتك قيد التحميل. عندما تصبح جاهزة، سيظهر رمز QR الخاص بجهة الاتصال هنا."
   },
   "merchantDeviceSetup": {
     "thosePinsDoNotMatch": "رمزا PIN غير متطابقين.",
@@ -1016,7 +1110,8 @@
     "pinHelpSent": "طلبنا من دعم SFLuv إعادة تعيين رمز PIN لهذا النشاط التجاري، وسيتواصلون معك.",
     "couldNotReachSupport": "تعذّر الوصول إلى دعم SFLuv. حاول مرة أخرى.",
     "askingSfluv": "جارٍ إبلاغ SFLuv…",
-    "forgotPin": "هل نسيت رمز PIN؟"
+    "forgotPin": "هل نسيت رمز PIN؟",
+    "paymentsLandHere": "تذهب المدفوعات المستلمة هنا إلى محفظة هذا الموقع، واليوم المعروض هو يوم هذا الموقع."
   },
   "chatInfo": {
     "couldnTRenameTheGroup": "تعذّرت إعادة تسمية المجموعة.",
@@ -1068,7 +1163,9 @@
     "owner": "المالك",
     "admin": "مشرف",
     "you": "أنت",
-    "nothingMatchesThat": "لا يوجد ما يطابق ذلك."
+    "nothingMatchesThat": "لا يوجد ما يطابق ذلك.",
+    "blockName": "حظر {{name}}",
+    "unblockName": "إلغاء حظر {{name}}"
   },
   "notifications": {
     "cancel": "إلغاء",
@@ -1092,7 +1189,10 @@
     "moveThisDeviceToAnother": "نقل هذا الجهاز إلى موقع آخر",
     "tipsToday": "إكراميات اليوم",
     "notSetUp": "غير مُعدّ",
-    "noPaymentsYetToday": "لا توجد مدفوعات اليوم بعد."
+    "noPaymentsYetToday": "لا توجد مدفوعات اليوم بعد.",
+    "tipAmount": "+{{amount}} إكرامية",
+    "refund": "استرداد",
+    "todaysPayments": "مدفوعات اليوم"
   },
   "contactDetail": {
     "thisRemovesThemFromYour": "سيؤدي هذا إلى حذفه من جهات اتصالك.",
@@ -1118,7 +1218,10 @@
     "couldnTSaveThatPicture": "تعذّر حفظ هذه الصورة.",
     "couldnTRemoveThatPicture": "تعذّرت إزالة هذه الصورة.",
     "back": "رجوع",
-    "saving": "جارٍ الحفظ…"
+    "saving": "جارٍ الحفظ…",
+    "scanToAdd": "امسح الرمز لإضافة {{name}} كجهة اتصال.",
+    "deleteNameQ": "حذف {{name}}؟",
+    "deleteName": "حذف {{name}}"
   },
   "activity": {
     "sentOut": "مُرسَل",
@@ -1154,7 +1257,8 @@
     "back": "رجوع",
     "addPeople": "إضافة أشخاص",
     "newGroup": "مجموعة جديدة",
-    "messageOnePersonInstead": "مراسلة شخص واحد بدلًا من ذلك"
+    "messageOnePersonInstead": "مراسلة شخص واحد بدلًا من ذلك",
+    "searchHint": "ابحث عن شخص بالاسم أو @اسم المستخدم. يظهر هنا أيضًا الأشخاص الذين حفظتهم كجهات اتصال."
   },
   "merchantOnboarding": {
     "setUpYourMerchantAccount": "أعدّ حسابك التجاري",
@@ -1273,7 +1377,9 @@
       "tellUsWhatYouNeed": "أخبرنا بما تحتاجه. كلما زادت التفاصيل كان أفضل.",
       "sendMessage": "إرسال الرسالة",
       "sending": "جارٍ الإرسال…",
-      "whereReplyQ": "أين نرسل الرد؟"
+      "whereReplyQ": "أين نرسل الرد؟",
+      "wellGetBackTo": "سنتواصل معك على {{email}}. رقمك المرجعي هو:",
+      "whatsThisAbout": "ما موضوع رسالتك؟"
     },
     "datePickerSheet": {
       "selectADate": "اختر تاريخًا"
@@ -1322,7 +1428,9 @@
       "fileLabel": "الملف: {{name}}",
       "attachmentName": "مرفق",
       "sizeSuffix": "، {{size}}",
-      "requestReceived": "استلمنا طلبك ويتولى أحد مراجعته."
+      "requestReceived": "استلمنا طلبك ويتولى أحد مراجعته.",
+      "supportReference": "الدعم · {{reference}}",
+      "photoSize": "صورة · {{size}}"
     },
     "paymentReceivedOverlay": {
       "paymentReceived": "تم استلام الدفعة"
@@ -1365,7 +1473,14 @@
       "sendToChats_two": "إرسال إلى محادثتين",
       "sendToChats_few": "إرسال إلى {{count}} محادثات",
       "sendToChats_many": "إرسال إلى {{count}} محادثة",
-      "sendToChats_other": "إرسال إلى {{count}} محادثة"
+      "sendToChats_other": "إرسال إلى {{count}} محادثة",
+      "peopleCount_zero": "لا أحد",
+      "peopleCount_one": "شخص واحد",
+      "peopleCount_two": "شخصان",
+      "peopleCount_few": "{{count}} أشخاص",
+      "peopleCount_many": "{{count}} شخصًا",
+      "peopleCount_other": "{{count}} شخص",
+      "cantReceiveMessages": "لا يمكنه تلقي الرسائل الآن"
     },
     "supportRequestModal": {
       "supportRequest": "طلب دعم",
@@ -1378,7 +1493,9 @@
       "noMessage": "(لا توجد رسالة)",
       "copy": "نسخ",
       "close": "إغلاق",
-      "copied": "تم النسخ"
+      "copied": "تم النسخ",
+      "copyLabel": "نسخ {{label}}",
+      "labelCopied": "تم نسخ {{label}}"
     },
     "swipeableRow": {},
     "transactionDetailsModal": {
@@ -1399,7 +1516,9 @@
     "themedActivityIndicator": {},
     "w9CompleteModal": {},
     "w9EscrowCard": {},
-    "w9TierModal": {}
+    "w9TierModal": {
+      "ofThreshold": "من {{amount}} {{tokenSymbol}}"
+    }
   },
   "app": {
     "theFaucetIsBusyAnd": "نظام المكافآت مشغول، ومكافأتك في قائمة الانتظار للإرسال. أبقِ هذه الشاشة مفتوحة.",
@@ -1661,7 +1780,16 @@
     "notificationsOutstanding_few": "الإشعارات، {{count}} معلّقة",
     "notificationsOutstanding_many": "الإشعارات، {{count}} معلّقة",
     "notificationsOutstanding_other": "الإشعارات، {{count}} معلّقة",
-    "whichLocationQ": "أي موقع؟"
+    "whichLocationQ": "أي موقع؟",
+    "offlineAccountBody": "تعذّر تحميل حسابك لأن التطبيق يبدو غير متصل بالإنترنت. أعد الاتصال وحاول مرة أخرى.",
+    "deviceLockedTo": "هذا الجهاز مقفل لاستلام SFLuv لصالح {{location}}.",
+    "movingDeviceTo": "جارٍ نقل هذا الجهاز إلى {{location}}.",
+    "fundsNotReturned": "أصبح هذا الحساب نشطًا من جديد، لكن أي {{tokenSymbol}} حُوِّل خلال طلب الحذف لن يعود تلقائيًا.",
+    "useContactToRecover": "استخدم {{contact}} لاسترداد أموالك.",
+    "scheduledForDeletionOn": "من المقرر حذف الحساب نهائيًا في {{date}}. إذا أعدت تفعيله الآن، فسيعود ملفك الشخصي ومحافظك إلى العمل.",
+    "endOfDeletionWindow": "وصل هذا الحساب إلى نهاية مهلة الحذف. إذا فشلت إعادة التفعيل، فقد يحتاج إلى استرداد يدوي.",
+    "reviewPrivacyPolicyBody": "راجع سياسة الخصوصية واختر ما إذا كنت تريد تلقي تحديثات SFLUV عبر البريد الإلكتروني. يلزم تحديد خانة سياسة الخصوصية للمتابعة.",
+    "walletN": "المحفظة {{n}}"
   },
   "walletHome": {},
   "utils": {
@@ -1684,7 +1812,13 @@
     "sharedIntent": {
       "file": "ملف",
       "text": "نص",
-      "photo": "صورة"
+      "photo": "صورة",
+      "filesCount_zero": "لا ملفات",
+      "filesCount_one": "ملف واحد",
+      "filesCount_two": "ملفان",
+      "filesCount_few": "{{count}} ملفات",
+      "filesCount_many": "{{count}} ملفًا",
+      "filesCount_other": "{{count}} ملف"
     },
     "transactions": {
       "unknown": "غير معروف",

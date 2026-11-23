@@ -11,7 +11,11 @@
     "later": "稍後",
     "done": "完成",
     "saving": "儲存中...",
-    "cancel": "取消"
+    "cancel": "取消",
+    "retry": "重試",
+    "selectedCount": "已選取 {{count}} 項",
+    "shareName": "分享{{name}}",
+    "removeName": "移除{{name}}"
   },
   "permissions": {
     "camera": {
@@ -83,7 +87,9 @@
       "appleLinkedBody": "Apple 已連結到這個帳戶，日後可用來登入。",
       "appleLinkBody": "連結 Apple 後，日後用 Apple 登入便會進入這個帳戶。",
       "google": "Google",
-      "apple": "Apple"
+      "apple": "Apple",
+      "googleEmail": "Google 電郵：{{email}}",
+      "appleEmail": "Apple 電郵：{{email}}"
     },
     "wallets": {
       "owner": "擁有者",
@@ -134,7 +140,8 @@
       "newPinPlaceholder": "輸入新 PIN",
       "savingShort": "儲存中",
       "slideReset": "滑動以重設 PIN",
-      "slideSave": "滑動以儲存 PIN"
+      "slideSave": "滑動以儲存 PIN",
+      "usesWalletOnDevice": "{{location}}在此裝置上使用 {{address}}。"
     },
     "improver": {
       "enterRewardsWallet": "請輸入獎勵錢包地址。",
@@ -162,7 +169,8 @@
       "email": "改善者電郵：{{email}}",
       "rewardsWallet": "獎勵錢包：{{address}}",
       "primaryAppWallet": "應用程式主要錢包：{{address}}",
-      "notSet": "未設定"
+      "notSet": "未設定",
+      "pendingSince": "自 {{date}} 起待處理"
     },
     "appSync": "應用程式同步",
     "tabs": {
@@ -222,7 +230,8 @@
       "notLoaded": "未載入",
       "email": "電郵：{{email}}",
       "deleteFlowBody": "這會開始刪除帳戶的程序，並可能在提交刪除申請前，將 {{symbol}} 從可存取的錢包轉出。",
-      "dangerBody": "刪除您的帳戶並登出。您的帳戶在 30 日內仍可復原，但在提交刪除申請前，您可存取的錢包內所有 {{symbol}} 都會被轉出。"
+      "dangerBody": "刪除您的帳戶並登出。您的帳戶在 30 日內仍可復原，但在提交刪除申請前，您可存取的錢包內所有 {{symbol}} 都會被轉出。",
+      "phone": "電話：{{phone}}"
     },
     "version": "版本 {{version}}（組建 {{build}}）",
     "questionsProblemsOrAnythingElse": "有疑問、遇到問題或任何其他事情。"
@@ -330,7 +339,9 @@
     "tryAgain": "再試一次",
     "thisMerchant": "這間商戶",
     "custom": "自訂",
-    "balance": "餘額：{{amount}} {{symbol}}"
+    "balance": "餘額：{{amount}} {{symbol}}",
+    "moreThanAvailableBalance": "這超過了您的可用餘額",
+    "tipFor": "給{{merchant}}"
   },
   "location": {
     "feetAway": "距離 {{count}} 呎",
@@ -519,7 +530,30 @@
     "stepTitle": "第 {{step}} 步：{{title}}",
     "photoCount_other": "{{count}} 張相片",
     "allRecurringWorkflows_other": "全部 {{count}} 個定期工作流程",
-    "resultCount_other": "{{count}} 個結果"
+    "resultCount_other": "{{count}} 個結果",
+    "nextDate": "下一次：{{date}}",
+    "upcomingAssignments_other": "{{count}} 項即將進行的任務",
+    "claimableStep": "可認領：第 {{step}} 步",
+    "startsDate": "開始：{{date}}",
+    "pendingPayouts": "待發放款項：{{count}}",
+    "requestedOn": "於 {{date}} 申請",
+    "resolvedOn": "於 {{date}} 處理完畢",
+    "requestedCredential": "已申請{{credential}}。",
+    "photoN": "相片 {{n}}",
+    "photoRequirement": "相片（{{photos}}，{{aspect}}，{{source}}）",
+    "aspectVertical": "直向",
+    "aspectHorizontal": "橫向",
+    "aspectSquare": "正方形",
+    "itemTitle": "項目 {{order}}：{{title}}",
+    "requirementsList": "要求：{{list}}",
+    "submittedResponseN": "已提交的回應 {{n}}",
+    "absenceIntro": "請選擇您不在的日期。該期間內的任務會被釋出，讓其他改善者接手。",
+    "releasesToOthers": "這會將{{what}}釋出給其他改善者。",
+    "stepOf": "第 {{step}} 步，共 {{total}} 步",
+    "yoursSteps": " · 您的：{{steps}}",
+    "bountyAmount": "獎勵：{{amount}} {{tokenSymbol}}",
+    "assignedTo": "已指派：{{name}}",
+    "submittedOn": "於 {{date}} 提交"
   },
   "bulletin": {
     "couldnTLoadTheBulletin": "無法載入告示板。",
@@ -609,7 +643,20 @@
     "posting": "發佈中...",
     "meetupSpot": "見面地點",
     "photosFailed_other": "有 {{count}} 張相片未能上載。您可以在帖子中再試一次。",
-    "whatArePostingQ": "您想發佈甚麼？"
+    "whatArePostingQ": "您想發佈甚麼？",
+    "reportTarget": "檢舉{{target}}",
+    "blockName": "封鎖{{name}}",
+    "anythingElseOptional": "還有其他需要告訴我們的嗎？（選填）",
+    "eventTimeOpenInParticipate": "{{time}} · 在「參與」中開啟",
+    "meetAt": "在{{place}}見面",
+    "stepOfThree": "第 {{step}} 步，共 3 步",
+    "notAllowedRules": "不允許：武器、毒品、酒類、出售動物、房屋、工作或付費服務。歡迎以通告形式發佈義工活動；請連結活動，讓鄰居可以在「參與」中報名。",
+    "priceLabel": "價格（{{tokenSymbol}}）",
+    "linkedEvent": "已連結活動：{{title}}",
+    "withinMiles": "{{radius}} 英里內",
+    "tokenAccepted": "接受 {{tokenSymbol}}",
+    "aboutDistanceAway": "約 {{distance}} 遠",
+    "chooseTokenCashOrBoth": "請選擇 {{tokenSymbol}}、現金或兩者皆可。"
   },
   "volunteer": {
     "volunteerEvent": "義工活動",
@@ -683,7 +730,8 @@
     "signingUp": "報名中...",
     "spotsCount_other": "{{count}} 個名額",
     "remainingOf": "尚餘 {{remaining}} / {{total}}",
-    "eventWasCancelled": "此活動已取消。"
+    "eventWasCancelled": "此活動已取消。",
+    "weWillUseNameAndEmail": "我們會使用您 SFLuv 帳戶上的姓名和電郵。"
   },
   "merchantApplication": {
     "publicInformation": "公開資料",
@@ -749,7 +797,9 @@
     "submitting": "提交中...",
     "howHeardQ": "您是如何得知 SFLuv 的？",
     "acceptTipsQ": "您接受小費嗎？",
-    "deviceForStaffQ": "員工有平板電腦或手機可用嗎？"
+    "deviceForStaffQ": "員工有平板電腦或手機可用嗎？",
+    "googleListingHint": "如果您的商戶在 Google 上有自己的資料，請改用名稱搜尋，我們可以為您填寫更多資料。",
+    "cantFindLocation": "找不到我的地點"
   },
   "chat": {
     "couldnTSendTryAgain": "無法傳送，請再試一次。",
@@ -804,7 +854,16 @@
     "deleteMessages_other": "刪除 {{count}} 則訊息",
     "isTyping": "{{name}} 正在輸入",
     "todayAt": "今天 {{time}}",
-    "yesterdayAt": "昨天 {{time}}"
+    "yesterdayAt": "昨天 {{time}}",
+    "sendToken": "傳送 {{tokenSymbol}}",
+    "moreThanYourBalance": "這超過了您的餘額。",
+    "amountAvailable": "可用 {{amount}} {{tokenSymbol}}",
+    "attachAmount": "附上 {{amount}} {{tokenSymbol}}",
+    "edited": "已編輯",
+    "deletedSomeOf": "已刪除 {{total}} 則中的 {{done}} 則。",
+    "deleteNMessages_other": "要刪除 {{count}} 則訊息嗎？",
+    "reactWith": "以 {{emoji}} 回應",
+    "removeAttachment": "移除{{name}}"
   },
   "map": {
     "searchMerchants": "搜尋商戶",
@@ -867,7 +926,18 @@
     "filesCount_other": "📎 {{count}} 個檔案",
     "attachmentsCount_other": "📎 {{count}} 個附件",
     "leaveGroupQ": "要離開這個群組嗎？",
-    "deleteConversationQ": "要刪除這段對話嗎？"
+    "deleteConversationQ": "要刪除這段對話嗎？",
+    "muteBody": "訊息仍會送達並顯示為未讀，只是手機不會震動或響鈴。",
+    "leaveGroupBody": "您將不再收到此群組的訊息。群組會在沒有您的情況下繼續。",
+    "deleteForMeHint": "從您的收件匣隱藏。如果任何一方傳送訊息，對話會連同記錄一起重新出現。",
+    "deleteForEveryoneHint": "亦會從對方的收件匣移除。此操作無法復原。",
+    "noOneFound": "找不到任何人。只有選擇可被搜尋的人、您輸入完全相同 @用戶名稱的人，或已是您聯絡人的人，才會在這裡顯示。",
+    "reactedTo": "{{who}}以 {{emoji}} 回應了「{{what}}」",
+    "reactedToAMessage": "{{who}}以 {{emoji}} 回應了一則訊息",
+    "photosCount_other": "📷 {{count}} 張相片",
+    "videosCount_other": "🎥 {{count}} 段影片",
+    "sharedPlace": "📍 分享了{{name}}",
+    "sharedEvent": "📅 分享了{{name}}"
   },
   "myProfile": {
     "couldnTLoadYourProfile": "無法載入您的個人資料。",
@@ -900,7 +970,11 @@
     "yourPicture": "您的頭像",
     "everyoneWhoCanSeeYour": "所有看到您名稱的人都可以看到。",
     "copied": "已複製",
-    "saving": "儲存中…"
+    "saving": "儲存中…",
+    "usernameRulesHint": "只可使用字母、數字和底線。即使您沒有在下方列出，其他人仍可透過完全相同的用戶名稱找到您。",
+    "usernameExactHint": "即使您沒有在下方列出，其他人仍可透過完全相同的用戶名稱找到您。",
+    "findableOffHint": "關閉：只有知道您用戶名稱的人才能開始聊天。",
+    "walletLoadingQr": "您的錢包仍在載入中。準備好後，您的聯絡人 QR 碼會在這裡顯示。"
   },
   "merchantDeviceSetup": {
     "thosePinsDoNotMatch": "兩個 PIN 不相符。",
@@ -931,7 +1005,8 @@
     "pinHelpSent": "已請 SFLuv 客服重設這家店的 PIN，他們會再與你聯絡。",
     "couldNotReachSupport": "無法聯絡 SFLuv 客服，請再試一次。",
     "askingSfluv": "正在通知 SFLuv…",
-    "forgotPin": "忘記 PIN？"
+    "forgotPin": "忘記 PIN？",
+    "paymentsLandHere": "在這裡收取的款項會存入此地點的錢包，顯示的日期亦以此地點為準。"
   },
   "chatInfo": {
     "couldnTRenameTheGroup": "無法重新命名群組。",
@@ -983,7 +1058,9 @@
     "owner": "擁有者",
     "admin": "管理員",
     "you": "您",
-    "nothingMatchesThat": "沒有符合的結果。"
+    "nothingMatchesThat": "沒有符合的結果。",
+    "blockName": "封鎖{{name}}",
+    "unblockName": "解除封鎖{{name}}"
   },
   "notifications": {
     "cancel": "取消",
@@ -1007,7 +1084,10 @@
     "moveThisDeviceToAnother": "將這部裝置轉到另一個地點",
     "tipsToday": "今日小費",
     "notSetUp": "未設定",
-    "noPaymentsYetToday": "今日暫時未有付款。"
+    "noPaymentsYetToday": "今日暫時未有付款。",
+    "tipAmount": "+{{amount}} 小費",
+    "refund": "退款",
+    "todaysPayments": "今日收款"
   },
   "contactDetail": {
     "thisRemovesThemFromYour": "這會將對方從您的聯絡人中移除。",
@@ -1033,7 +1113,10 @@
     "couldnTSaveThatPicture": "無法儲存該圖片。",
     "couldnTRemoveThatPicture": "無法移除該圖片。",
     "back": "返回",
-    "saving": "儲存中…"
+    "saving": "儲存中…",
+    "scanToAdd": "掃描即可將{{name}}加為聯絡人。",
+    "deleteNameQ": "要刪除{{name}}嗎？",
+    "deleteName": "刪除{{name}}"
   },
   "activity": {
     "sentOut": "轉出 已傳送",
@@ -1069,7 +1152,8 @@
     "back": "返回",
     "addPeople": "加入成員",
     "newGroup": "新群組",
-    "messageOnePersonInstead": "改為傳訊息給一個人"
+    "messageOnePersonInstead": "改為傳訊息給一個人",
+    "searchHint": "以名稱或 @用戶名稱搜尋。您已儲存的聯絡人也會在這裡顯示。"
   },
   "merchantOnboarding": {
     "setUpYourMerchantAccount": "設定您的商戶帳戶",
@@ -1183,7 +1267,9 @@
       "tellUsWhatYouNeed": "請告訴我們您需要甚麼協助，越詳細越好。",
       "sendMessage": "傳送訊息",
       "sending": "傳送中…",
-      "whereReplyQ": "我們應回覆到哪裏？"
+      "whereReplyQ": "我們應回覆到哪裏？",
+      "wellGetBackTo": "我們會透過 {{email}} 回覆您。您的參考編號是：",
+      "whatsThisAbout": "這是關於甚麼的？"
     },
     "datePickerSheet": {
       "selectADate": "選擇日期"
@@ -1232,7 +1318,9 @@
       "fileLabel": "檔案：{{name}}",
       "attachmentName": "附件",
       "sizeSuffix": "，{{size}}",
-      "requestReceived": "我們已收到您的請求，並有人正在處理。"
+      "requestReceived": "我們已收到您的請求，並有人正在處理。",
+      "supportReference": "支援 · {{reference}}",
+      "photoSize": "相片 · {{size}}"
     },
     "paymentReceivedOverlay": {
       "paymentReceived": "已收到付款"
@@ -1265,7 +1353,9 @@
       "couldnTShareThatTry": "無法分享，請再試一次。",
       "sentToOfChats": "已傳送到 {{count}} / {{count2}} 個聊天。",
       "sentToChats_other": "已傳送到 {{count}} 個聊天。",
-      "sendToChats_other": "傳送到 {{count}} 個聊天"
+      "sendToChats_other": "傳送到 {{count}} 個聊天",
+      "peopleCount_other": "{{count}} 人",
+      "cantReceiveMessages": "目前無法接收訊息"
     },
     "supportRequestModal": {
       "supportRequest": "支援請求",
@@ -1278,7 +1368,9 @@
       "noMessage": "（沒有訊息）",
       "copy": "複製",
       "close": "關閉",
-      "copied": "已複製"
+      "copied": "已複製",
+      "copyLabel": "複製{{label}}",
+      "labelCopied": "已複製{{label}}"
     },
     "swipeableRow": {},
     "transactionDetailsModal": {
@@ -1299,7 +1391,9 @@
     "themedActivityIndicator": {},
     "w9CompleteModal": {},
     "w9EscrowCard": {},
-    "w9TierModal": {}
+    "w9TierModal": {
+      "ofThreshold": "／{{amount}} {{tokenSymbol}}"
+    }
   },
   "app": {
     "theFaucetIsBusyAnd": "獎勵發放系統正忙，您的獎勵正在排隊等候發放。請保持此畫面開啟。",
@@ -1521,7 +1615,16 @@
     },
     "pushActiveForWallets_other": "此裝置已為 {{count}} 個錢包啟用推送通知。",
     "notificationsOutstanding_other": "通知，{{count}} 則未處理",
-    "whichLocationQ": "哪個地點？"
+    "whichLocationQ": "哪個地點？",
+    "offlineAccountBody": "應用程式似乎已離線，因此無法載入您的帳戶。請重新連線後再試一次。",
+    "deviceLockedTo": "此裝置已鎖定，只能為{{location}}收取 SFLuv。",
+    "movingDeviceTo": "正在將此裝置移至{{location}}。",
+    "fundsNotReturned": "此帳戶已重新啟用，但在刪除申請期間轉出的 {{tokenSymbol}} 不會自動退回。",
+    "useContactToRecover": "請透過 {{contact}} 取回您的資金。",
+    "scheduledForDeletionOn": "此帳戶將於 {{date}} 永久刪除。如果您現在重新啟用，您的個人檔案和錢包將會恢復使用。",
+    "endOfDeletionWindow": "此帳戶的刪除期限即將結束。如果重新啟用失敗，可能需要人工復原。",
+    "reviewPrivacyPolicyBody": "請查看私隱政策，並選擇是否接收 SFLUV 的電郵更新。必須勾選私隱政策方塊才能繼續。",
+    "walletN": "錢包 {{n}}"
   },
   "walletHome": {},
   "utils": {
@@ -1544,7 +1647,8 @@
     "sharedIntent": {
       "file": "檔案",
       "text": "文字",
-      "photo": "相片"
+      "photo": "相片",
+      "filesCount_other": "{{count}} 個檔案"
     },
     "transactions": {
       "unknown": "不明",

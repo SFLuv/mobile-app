@@ -11,7 +11,11 @@
     "later": "Để sau",
     "done": "Xong",
     "saving": "Đang lưu...",
-    "cancel": "Hủy"
+    "cancel": "Hủy",
+    "retry": "Thử lại",
+    "selectedCount": "Đã chọn {{count}}",
+    "shareName": "Chia sẻ {{name}}",
+    "removeName": "Xóa {{name}}"
   },
   "permissions": {
     "camera": {
@@ -83,7 +87,9 @@
       "appleLinkedBody": "Apple đã được liên kết với tài khoản này cho các lần đăng nhập sau.",
       "appleLinkBody": "Liên kết Apple để các lần đăng nhập bằng Apple sau này vào tài khoản này.",
       "google": "Google",
-      "apple": "Apple"
+      "apple": "Apple",
+      "googleEmail": "Email Google: {{email}}",
+      "appleEmail": "Email Apple: {{email}}"
     },
     "wallets": {
       "owner": "Chủ sở hữu",
@@ -134,7 +140,8 @@
       "newPinPlaceholder": "Nhập mã PIN mới",
       "savingShort": "Đang lưu",
       "slideReset": "Trượt để đặt lại PIN",
-      "slideSave": "Trượt để lưu PIN"
+      "slideSave": "Trượt để lưu PIN",
+      "usesWalletOnDevice": "{{location}} dùng {{address}} trên thiết bị này."
     },
     "improver": {
       "enterRewardsWallet": "Nhập địa chỉ ví nhận thưởng.",
@@ -162,7 +169,8 @@
       "email": "Email Improver: {{email}}",
       "rewardsWallet": "Ví nhận thưởng: {{address}}",
       "primaryAppWallet": "Ví chính của ứng dụng: {{address}}",
-      "notSet": "Chưa đặt"
+      "notSet": "Chưa đặt",
+      "pendingSince": "Đang chờ từ {{date}}"
     },
     "appSync": "Đồng bộ ứng dụng",
     "tabs": {
@@ -222,7 +230,8 @@
       "notLoaded": "Chưa tải",
       "email": "Địa chỉ email: {{email}}",
       "deleteFlowBody": "Thao tác này bắt đầu quy trình xóa tài khoản và có thể chuyển {{symbol}} ra khỏi các ví có thể truy cập trước khi gửi yêu cầu xóa.",
-      "dangerBody": "Xóa tài khoản và đăng xuất. Tài khoản của bạn vẫn có thể khôi phục trong 30 ngày, nhưng mọi {{symbol}} trong các ví có thể truy cập sẽ được chuyển ra ngoài trước khi gửi yêu cầu xóa."
+      "dangerBody": "Xóa tài khoản và đăng xuất. Tài khoản của bạn vẫn có thể khôi phục trong 30 ngày, nhưng mọi {{symbol}} trong các ví có thể truy cập sẽ được chuyển ra ngoài trước khi gửi yêu cầu xóa.",
+      "phone": "Điện thoại: {{phone}}"
     },
     "version": "Phiên bản {{version}} (bản dựng {{build}})",
     "questionsProblemsOrAnythingElse": "Câu hỏi, sự cố hoặc bất cứ điều gì khác."
@@ -330,7 +339,9 @@
     "tryAgain": "Thử lại",
     "thisMerchant": "cửa hàng này",
     "custom": "Tùy chọn",
-    "balance": "Số dư: {{amount}} {{symbol}}"
+    "balance": "Số dư: {{amount}} {{symbol}}",
+    "moreThanAvailableBalance": "Số tiền này vượt quá số dư khả dụng của bạn",
+    "tipFor": "Cho {{merchant}}"
   },
   "location": {
     "feetAway": "Cách {{count}} ft",
@@ -519,7 +530,30 @@
     "stepTitle": "Bước {{step}}: {{title}}",
     "photoCount_other": "{{count}} ảnh",
     "allRecurringWorkflows_other": "Tất cả {{count}} công việc định kỳ",
-    "resultCount_other": "{{count}} kết quả"
+    "resultCount_other": "{{count}} kết quả",
+    "nextDate": "Tiếp theo: {{date}}",
+    "upcomingAssignments_other": "{{count}} nhiệm vụ sắp tới",
+    "claimableStep": "Có thể nhận: Bước {{step}}",
+    "startsDate": "Bắt đầu: {{date}}",
+    "pendingPayouts": "Khoản chi trả đang chờ: {{count}}",
+    "requestedOn": "Đã yêu cầu lúc {{date}}",
+    "resolvedOn": "Đã xử lý lúc {{date}}",
+    "requestedCredential": "Đã yêu cầu {{credential}}.",
+    "photoN": "Ảnh {{n}}",
+    "photoRequirement": "Ảnh ({{photos}}, {{aspect}}, {{source}})",
+    "aspectVertical": "dọc",
+    "aspectHorizontal": "ngang",
+    "aspectSquare": "vuông",
+    "itemTitle": "Mục {{order}}: {{title}}",
+    "requirementsList": "Yêu cầu: {{list}}",
+    "submittedResponseN": "Câu trả lời đã gửi {{n}}",
+    "absenceIntro": "Chọn những ngày bạn vắng mặt. Mọi nhiệm vụ trong khoảng thời gian đó sẽ được nhả ra để người khác có thể đảm nhận.",
+    "releasesToOthers": "Thao tác này sẽ nhả {{what}} cho người khác.",
+    "stepOf": "Bước {{step}}/{{total}}",
+    "yoursSteps": " · của bạn: {{steps}}",
+    "bountyAmount": "Tiền thưởng: {{amount}} {{tokenSymbol}}",
+    "assignedTo": "Được giao cho: {{name}}",
+    "submittedOn": "Đã gửi lúc {{date}}"
   },
   "bulletin": {
     "couldnTLoadTheBulletin": "Không thể tải Bảng tin.",
@@ -609,7 +643,20 @@
     "posting": "Đang đăng...",
     "meetupSpot": "Điểm hẹn",
     "photosFailed_other": "{{count}} ảnh chưa tải lên được. Bạn có thể thử lại từ bài đăng.",
-    "whatArePostingQ": "Bạn muốn đăng gì?"
+    "whatArePostingQ": "Bạn muốn đăng gì?",
+    "reportTarget": "Báo cáo {{target}}",
+    "blockName": "Chặn {{name}}",
+    "anythingElseOptional": "Còn điều gì khác chúng tôi nên biết không? (không bắt buộc)",
+    "eventTimeOpenInParticipate": "{{time}} · Mở trong Tham gia",
+    "meetAt": "Gặp tại {{place}}",
+    "stepOfThree": "{{step}}/3",
+    "notAllowedRules": "Không được phép: vũ khí, ma túy, rượu bia, bán động vật, nhà ở, việc làm hoặc dịch vụ có trả phí. Sự kiện tình nguyện được chào đón dưới dạng thông báo; hãy liên kết sự kiện để hàng xóm có thể đăng ký trong Tham gia.",
+    "priceLabel": "Giá ({{tokenSymbol}})",
+    "linkedEvent": "Sự kiện đã liên kết: {{title}}",
+    "withinMiles": "Trong vòng {{radius}} dặm",
+    "tokenAccepted": "Nhận {{tokenSymbol}}",
+    "aboutDistanceAway": "Cách khoảng {{distance}}",
+    "chooseTokenCashOrBoth": "Hãy chọn {{tokenSymbol}}, tiền mặt hoặc cả hai."
   },
   "volunteer": {
     "volunteerEvent": "Sự kiện tình nguyện",
@@ -683,7 +730,8 @@
     "signingUp": "Đang đăng ký...",
     "spotsCount_other": "{{count}} chỗ",
     "remainingOf": "Còn {{remaining}} / {{total}}",
-    "eventWasCancelled": "Sự kiện này đã bị hủy."
+    "eventWasCancelled": "Sự kiện này đã bị hủy.",
+    "weWillUseNameAndEmail": "Chúng tôi sẽ dùng tên và email trong tài khoản SFLuv của bạn."
   },
   "merchantApplication": {
     "publicInformation": "Thông tin công khai",
@@ -749,7 +797,9 @@
     "submitting": "Đang gửi...",
     "howHeardQ": "Bạn biết đến SFLuv qua đâu?",
     "acceptTipsQ": "Bạn có nhận tiền boa không?",
-    "deviceForStaffQ": "Nhân viên có máy tính bảng hoặc điện thoại để dùng không?"
+    "deviceForStaffQ": "Nhân viên có máy tính bảng hoặc điện thoại để dùng không?",
+    "googleListingHint": "Nếu doanh nghiệp của bạn có trang riêng trên Google, hãy tìm theo tên để chúng tôi điền giúp bạn nhiều thông tin hơn.",
+    "cantFindLocation": "Không tìm thấy địa điểm của tôi"
   },
   "chat": {
     "couldnTSendTryAgain": "Không gửi được. Hãy thử lại.",
@@ -804,7 +854,16 @@
     "deleteMessages_other": "Xóa {{count}} tin nhắn",
     "isTyping": "{{name}} đang nhập",
     "todayAt": "Hôm nay {{time}}",
-    "yesterdayAt": "Hôm qua {{time}}"
+    "yesterdayAt": "Hôm qua {{time}}",
+    "sendToken": "Gửi {{tokenSymbol}}",
+    "moreThanYourBalance": "Số tiền này vượt quá số dư của bạn.",
+    "amountAvailable": "Có sẵn {{amount}} {{tokenSymbol}}",
+    "attachAmount": "Đính kèm {{amount}} {{tokenSymbol}}",
+    "edited": "đã sửa",
+    "deletedSomeOf": "Đã xóa {{done}}/{{total}}.",
+    "deleteNMessages_other": "Xóa {{count}} tin nhắn?",
+    "reactWith": "Bày tỏ cảm xúc {{emoji}}",
+    "removeAttachment": "Xóa {{name}}"
   },
   "map": {
     "searchMerchants": "Tìm cửa hàng",
@@ -867,7 +926,18 @@
     "filesCount_other": "📎 {{count}} tệp",
     "attachmentsCount_other": "📎 {{count}} tệp đính kèm",
     "leaveGroupQ": "Rời khỏi nhóm này?",
-    "deleteConversationQ": "Xóa cuộc trò chuyện này?"
+    "deleteConversationQ": "Xóa cuộc trò chuyện này?",
+    "muteBody": "Tin nhắn vẫn đến và vẫn hiện là chưa đọc — chỉ là điện thoại sẽ không rung.",
+    "leaveGroupBody": "Bạn sẽ không nhận tin nhắn của nhóm nữa. Nhóm vẫn tiếp tục mà không có bạn.",
+    "deleteForMeHint": "Ẩn khỏi hộp thư của bạn. Cuộc trò chuyện sẽ hiện lại, cùng lịch sử, nếu một trong hai người gửi tin nhắn.",
+    "deleteForEveryoneHint": "Cũng xóa khỏi hộp thư của người kia. Không thể hoàn tác.",
+    "noOneFound": "Không tìm thấy ai. Mọi người chỉ hiện ở đây nếu họ chọn cho phép được tìm thấy, nếu bạn tìm đúng @tên người dùng của họ, hoặc nếu họ đã là liên hệ của bạn.",
+    "reactedTo": "{{who}} đã bày tỏ {{emoji}} với \"{{what}}\"",
+    "reactedToAMessage": "{{who}} đã bày tỏ {{emoji}} với một tin nhắn",
+    "photosCount_other": "📷 {{count}} ảnh",
+    "videosCount_other": "🎥 {{count}} video",
+    "sharedPlace": "📍 Đã chia sẻ {{name}}",
+    "sharedEvent": "📅 Đã chia sẻ {{name}}"
   },
   "myProfile": {
     "couldnTLoadYourProfile": "Không thể tải hồ sơ của bạn.",
@@ -900,7 +970,11 @@
     "yourPicture": "Ảnh của bạn",
     "everyoneWhoCanSeeYour": "Ai thấy được tên bạn cũng thấy được ảnh này.",
     "copied": "Đã sao chép",
-    "saving": "Đang lưu…"
+    "saving": "Đang lưu…",
+    "usernameRulesHint": "Chữ cái, chữ số và dấu gạch dưới. Mọi người có thể tìm bạn bằng chính xác tên này, kể cả khi bạn không có trong danh sách bên dưới.",
+    "usernameExactHint": "Mọi người có thể tìm bạn bằng chính xác tên này, kể cả khi bạn không có trong danh sách bên dưới.",
+    "findableOffHint": "Tắt: chỉ những người biết tên người dùng của bạn mới có thể bắt đầu trò chuyện.",
+    "walletLoadingQr": "Ví của bạn vẫn đang tải. Khi sẵn sàng, mã QR liên hệ của bạn sẽ xuất hiện ở đây."
   },
   "merchantDeviceSetup": {
     "thosePinsDoNotMatch": "Hai mã PIN không khớp.",
@@ -931,7 +1005,8 @@
     "pinHelpSent": "Đã nhờ bộ phận hỗ trợ SFLuv đặt lại mã PIN của cửa hàng này. Họ sẽ liên hệ lại với bạn.",
     "couldNotReachSupport": "Không liên lạc được với bộ phận hỗ trợ SFLuv. Hãy thử lại.",
     "askingSfluv": "Đang báo cho SFLuv…",
-    "forgotPin": "Quên mã PIN?"
+    "forgotPin": "Quên mã PIN?",
+    "paymentsLandHere": "Các khoản thanh toán nhận ở đây sẽ vào ví của địa điểm này, và ngày hiển thị là ngày của địa điểm này."
   },
   "chatInfo": {
     "couldnTRenameTheGroup": "Không thể đổi tên nhóm.",
@@ -983,7 +1058,9 @@
     "owner": "Chủ nhóm",
     "admin": "Quản trị viên",
     "you": "Bạn",
-    "nothingMatchesThat": "Không có kết quả phù hợp."
+    "nothingMatchesThat": "Không có kết quả phù hợp.",
+    "blockName": "Chặn {{name}}",
+    "unblockName": "Bỏ chặn {{name}}"
   },
   "notifications": {
     "cancel": "Hủy",
@@ -1007,7 +1084,10 @@
     "moveThisDeviceToAnother": "Chuyển thiết bị này sang địa điểm khác",
     "tipsToday": "Tiền tip hôm nay",
     "notSetUp": "Chưa thiết lập",
-    "noPaymentsYetToday": "Hôm nay chưa có khoản thanh toán nào."
+    "noPaymentsYetToday": "Hôm nay chưa có khoản thanh toán nào.",
+    "tipAmount": "+{{amount}} tiền boa",
+    "refund": "hoàn tiền",
+    "todaysPayments": "THANH TOÁN HÔM NAY"
   },
   "contactDetail": {
     "thisRemovesThemFromYour": "Thao tác này sẽ xóa người này khỏi danh bạ của bạn.",
@@ -1033,7 +1113,10 @@
     "couldnTSaveThatPicture": "Không lưu được ảnh đó.",
     "couldnTRemoveThatPicture": "Không xóa được ảnh đó.",
     "back": "Quay lại",
-    "saving": "Đang lưu…"
+    "saving": "Đang lưu…",
+    "scanToAdd": "Quét để thêm {{name}} làm liên hệ.",
+    "deleteNameQ": "Xóa {{name}}?",
+    "deleteName": "Xóa {{name}}"
   },
   "activity": {
     "sentOut": "đã gửi đi",
@@ -1069,7 +1152,8 @@
     "back": "Quay lại",
     "addPeople": "Thêm người",
     "newGroup": "Nhóm mới",
-    "messageOnePersonInstead": "Nhắn tin cho một người"
+    "messageOnePersonInstead": "Nhắn tin cho một người",
+    "searchHint": "Tìm người theo tên hoặc @tên người dùng. Những người bạn đã lưu làm liên hệ cũng hiện ở đây."
   },
   "merchantOnboarding": {
     "setUpYourMerchantAccount": "Thiết lập tài khoản cửa hàng của bạn",
@@ -1183,7 +1267,9 @@
       "tellUsWhatYouNeed": "Hãy cho chúng tôi biết bạn cần gì. Càng chi tiết càng tốt.",
       "sendMessage": "Gửi tin nhắn",
       "sending": "Đang gửi…",
-      "whereReplyQ": "Chúng tôi nên trả lời bạn ở đâu?"
+      "whereReplyQ": "Chúng tôi nên trả lời bạn ở đâu?",
+      "wellGetBackTo": "Chúng tôi sẽ phản hồi bạn qua {{email}}. Mã tham chiếu của bạn là:",
+      "whatsThisAbout": "Việc này liên quan đến gì?"
     },
     "datePickerSheet": {
       "selectADate": "Chọn ngày"
@@ -1232,7 +1318,9 @@
       "fileLabel": "Tệp: {{name}}",
       "attachmentName": "tệp đính kèm",
       "sizeSuffix": ", {{size}}",
-      "requestReceived": "Chúng tôi đã nhận yêu cầu của bạn và đang có người xem xét."
+      "requestReceived": "Chúng tôi đã nhận yêu cầu của bạn và đang có người xem xét.",
+      "supportReference": "Hỗ trợ · {{reference}}",
+      "photoSize": "Ảnh · {{size}}"
     },
     "paymentReceivedOverlay": {
       "paymentReceived": "Đã nhận thanh toán"
@@ -1265,7 +1353,9 @@
       "couldnTShareThatTry": "Không chia sẻ được. Hãy thử lại.",
       "sentToOfChats": "Đã gửi đến {{count}} / {{count2}} cuộc trò chuyện.",
       "sentToChats_other": "Đã gửi đến {{count}} cuộc trò chuyện.",
-      "sendToChats_other": "Gửi đến {{count}} cuộc trò chuyện"
+      "sendToChats_other": "Gửi đến {{count}} cuộc trò chuyện",
+      "peopleCount_other": "{{count}} người",
+      "cantReceiveMessages": "Hiện không thể nhận tin nhắn"
     },
     "supportRequestModal": {
       "supportRequest": "Yêu cầu hỗ trợ",
@@ -1278,7 +1368,9 @@
       "noMessage": "(Không có tin nhắn)",
       "copy": "Sao chép",
       "close": "Đóng",
-      "copied": "Đã sao chép"
+      "copied": "Đã sao chép",
+      "copyLabel": "Sao chép {{label}}",
+      "labelCopied": "Đã sao chép {{label}}"
     },
     "swipeableRow": {},
     "transactionDetailsModal": {
@@ -1299,7 +1391,9 @@
     "themedActivityIndicator": {},
     "w9CompleteModal": {},
     "w9EscrowCard": {},
-    "w9TierModal": {}
+    "w9TierModal": {
+      "ofThreshold": "trên {{amount}} {{tokenSymbol}}"
+    }
   },
   "app": {
     "theFaucetIsBusyAnd": "Hệ thống phần thưởng đang bận, và phần thưởng của bạn đang chờ đến lượt được gửi. Hãy giữ màn hình này mở.",
@@ -1521,7 +1615,16 @@
     },
     "pushActiveForWallets_other": "Thông báo đẩy đang bật cho {{count}} ví trên thiết bị này.",
     "notificationsOutstanding_other": "Thông báo, còn {{count}}",
-    "whichLocationQ": "Địa điểm nào?"
+    "whichLocationQ": "Địa điểm nào?",
+    "offlineAccountBody": "Không thể tải tài khoản của bạn vì ứng dụng có vẻ đang ngoại tuyến. Hãy kết nối lại và thử lại.",
+    "deviceLockedTo": "Thiết bị này chỉ dùng để nhận SFLuv cho {{location}}.",
+    "movingDeviceTo": "Đang chuyển thiết bị này sang {{location}}.",
+    "fundsNotReturned": "Tài khoản này đã hoạt động trở lại, nhưng số {{tokenSymbol}} đã chuyển đi trong lúc yêu cầu xóa sẽ không tự động quay lại.",
+    "useContactToRecover": "Hãy dùng {{contact}} để lấy lại tiền của bạn.",
+    "scheduledForDeletionOn": "Tài khoản sẽ bị xóa vĩnh viễn vào {{date}}. Nếu bạn kích hoạt lại ngay, hồ sơ và ví của bạn sẽ hoạt động trở lại.",
+    "endOfDeletionWindow": "Tài khoản này đã ở cuối thời hạn xóa. Nếu kích hoạt lại không thành công, có thể cần khôi phục thủ công.",
+    "reviewPrivacyPolicyBody": "Hãy xem Chính sách quyền riêng tư và chọn có nhận thông tin cập nhật qua email từ SFLUV hay không. Bạn cần đánh dấu ô chính sách quyền riêng tư để tiếp tục.",
+    "walletN": "Ví {{n}}"
   },
   "walletHome": {},
   "utils": {
@@ -1544,7 +1647,8 @@
     "sharedIntent": {
       "file": "Tệp",
       "text": "Văn bản",
-      "photo": "Ảnh"
+      "photo": "Ảnh",
+      "filesCount_other": "{{count}} tệp"
     },
     "transactions": {
       "unknown": "Không rõ",

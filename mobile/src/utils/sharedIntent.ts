@@ -25,7 +25,7 @@ export function shareTargetFromIntent(intent: ShareIntent): ShareTarget | null {
   if (files.length > 0) {
     const first = files[0];
     const label =
-      files.length > 1 ? `${files.length} files` : first.isImage ? t("utils.sharedIntent.photo") : first.fileName || t("utils.sharedIntent.file");
+      files.length > 1 ? t("utils.sharedIntent.filesCount", { count: files.length }) : first.isImage ? t("utils.sharedIntent.photo") : first.fileName || t("utils.sharedIntent.file");
     return { kind: "files", files, label };
   }
 

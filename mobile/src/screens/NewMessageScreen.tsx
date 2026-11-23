@@ -215,7 +215,7 @@ export function NewMessageScreen({
               style={styles.chip}
               onPress={() => toggle(entry)}
               accessibilityRole="button"
-              accessibilityLabel={`Remove ${entry.public_name}`}
+              accessibilityLabel={t("common.removeName", { name: entry.public_name })}
             >
               <Text style={styles.chipText} numberOfLines={1}>
                 {entry.public_name}
@@ -255,8 +255,7 @@ export function NewMessageScreen({
             <View style={styles.hint}>
               <Ionicons name="people-outline" size={28} color={palette.textMuted} />
               <Text style={styles.hintText}>
-                Search for someone by name or @username. People you&apos;ve saved as contacts show
-                up here too.
+                {t("newMessage.searchHint")}
               </Text>
             </View>
           ) : results === null ? (
@@ -266,8 +265,7 @@ export function NewMessageScreen({
           ) : (
             <View style={styles.hint}>
               <Text style={styles.hintText}>
-                No one found. People only show up here if they&apos;ve chosen to be findable, if you
-                search their exact @username, or if they&apos;re already one of your contacts.
+                {t("messages.noOneFound")}
               </Text>
             </View>
           )

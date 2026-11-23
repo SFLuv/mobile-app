@@ -312,7 +312,9 @@ export function ChatComposer({
                 onPress={() => onRemoveStaged?.(index)}
                 hitSlop={8}
                 accessibilityRole="button"
-                accessibilityLabel={`Remove ${displayFileName(item.fileName) || "attachment"}`}
+                accessibilityLabel={t("chat.removeAttachment", {
+                  name: displayFileName(item.fileName) || t("components.messageAttachmentCard.attachmentName"),
+                })}
               >
                 <Ionicons name="close" size={12} color={palette.white} />
               </Pressable>
@@ -537,7 +539,7 @@ function AmountPad({
         <Pressable onPress={onCancel} hitSlop={10} accessibilityLabel={t("components.chatComposer.cancelPayment")}>
           <Ionicons name="chevron-down" size={22} color={palette.textMuted} />
         </Pressable>
-        <Text style={styles.padTitle}>Send {tokenSymbol}</Text>
+        <Text style={styles.padTitle}>{t("chat.sendToken", { tokenSymbol })}</Text>
         <View style={{ width: 22 }} />
       </View>
 
@@ -548,10 +550,10 @@ function AmountPad({
         <Text style={styles.padSymbol}>{tokenSymbol}</Text>
       </View>
       {overBalance ? (
-        <Text style={styles.padError}>That&apos;s more than your balance.</Text>
+        <Text style={styles.padError}>{t("chat.moreThanYourBalance")}</Text>
       ) : availableBalance ? (
         <Text style={styles.padBalance}>
-          {availableBalance} {tokenSymbol} available
+          {t("chat.amountAvailable", { amount: availableBalance, tokenSymbol })}
         </Text>
       ) : null}
 
@@ -598,7 +600,7 @@ function AmountPad({
         accessibilityRole="button"
         accessibilityLabel={t("components.chatComposer.attachPayment", { amount: amount || "0", tokenSymbol })}
       >
-        <Text style={styles.padSendText}>{`Attach ${amount || "0"} ${tokenSymbol}`}</Text>
+        <Text style={styles.padSendText}>{t("chat.attachAmount", { amount: amount || "0", tokenSymbol })}</Text>
       </Pressable>
     </View>
   );

@@ -216,7 +216,7 @@ export function MyProfileScreen({
         <View style={styles.emptyCard}>
           <Ionicons name="wallet-outline" size={20} color={palette.textMuted} />
           <Text style={styles.body}>
-            Your wallet is still loading. Once it&apos;s ready, your contact QR will appear here.
+            {t("myProfile.walletLoadingQr")}
           </Text>
         </View>
       )}
@@ -299,14 +299,14 @@ export function MyProfileScreen({
             />
           </View>
           <Text style={styles.hint}>
-            People can find you by this exactly, even if you&apos;re not listed below.
+            {t("myProfile.usernameExactHint")}
           </Text>
 
           <View style={styles.switchRow}>
             <View style={styles.switchText}>
               <Text style={styles.switchTitle}>{t("myProfile.letNeighborsFindMe")}</Text>
               <Text style={styles.switchHint}>
-                Off: only people who know your username can start a chat.
+                {t("myProfile.findableOffHint")}
               </Text>
             </View>
             <Switch

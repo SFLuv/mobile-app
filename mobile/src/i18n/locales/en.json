@@ -11,7 +11,11 @@
     "later": "Later",
     "done": "Done",
     "saving": "Saving...",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "retry": "Retry",
+    "selectedCount": "{{count}} selected",
+    "shareName": "Share {{name}}",
+    "removeName": "Remove {{name}}"
   },
   "permissions": {
     "camera": {
@@ -83,7 +87,9 @@
       "appleLinkedBody": "Apple is linked to this account for future sign-ins.",
       "appleLinkBody": "Link Apple so future Apple sign-ins land on this account.",
       "google": "Google",
-      "apple": "Apple"
+      "apple": "Apple",
+      "googleEmail": "Google email: {{email}}",
+      "appleEmail": "Apple email: {{email}}"
     },
     "wallets": {
       "owner": "Owner",
@@ -134,7 +140,8 @@
       "newPinPlaceholder": "Enter new PIN",
       "savingShort": "Saving",
       "slideReset": "Slide to reset PIN",
-      "slideSave": "Slide to save PIN"
+      "slideSave": "Slide to save PIN",
+      "usesWalletOnDevice": "{{location}} uses {{address}} on this device."
     },
     "improver": {
       "enterRewardsWallet": "Enter a rewards wallet address.",
@@ -162,7 +169,8 @@
       "email": "Improver email: {{email}}",
       "rewardsWallet": "Rewards wallet: {{address}}",
       "primaryAppWallet": "Primary app wallet: {{address}}",
-      "notSet": "Not set"
+      "notSet": "Not set",
+      "pendingSince": "Pending since {{date}}"
     },
     "appSync": "App Sync",
     "tabs": {
@@ -224,7 +232,8 @@
       "notLoaded": "Not loaded",
       "email": "Email: {{email}}",
       "deleteFlowBody": "This starts the account deletion flow and may transfer {{symbol}} out of accessible wallets before the deletion request is submitted.",
-      "dangerBody": "Delete your account and log out. Your account stays recoverable for 30 days, but any {{symbol}} in your accessible wallets will be transferred out before the deletion request is submitted."
+      "dangerBody": "Delete your account and log out. Your account stays recoverable for 30 days, but any {{symbol}} in your accessible wallets will be transferred out before the deletion request is submitted.",
+      "phone": "Phone: {{phone}}"
     },
     "version": "Version {{version}} (build {{build}})",
     "questionsProblemsOrAnythingElse": "Questions, problems, or anything else."
@@ -332,7 +341,9 @@
     "tryAgain": "Try again",
     "thisMerchant": "this merchant",
     "custom": "Custom",
-    "balance": "Balance: {{amount}} {{symbol}}"
+    "balance": "Balance: {{amount}} {{symbol}}",
+    "moreThanAvailableBalance": "That's more than your available balance",
+    "tipFor": "For {{merchant}}"
   },
   "location": {
     "feetAway": "{{count}} ft away",
@@ -528,7 +539,31 @@
     "allRecurringWorkflows_one": "All {{count}} recurring workflow",
     "allRecurringWorkflows_other": "All {{count}} recurring workflows",
     "resultCount_one": "{{count}} result",
-    "resultCount_other": "{{count}} results"
+    "resultCount_other": "{{count}} results",
+    "nextDate": "Next: {{date}}",
+    "upcomingAssignments_one": "{{count}} upcoming assignment",
+    "upcomingAssignments_other": "{{count}} upcoming assignments",
+    "claimableStep": "Claimable: Step {{step}}",
+    "startsDate": "Starts: {{date}}",
+    "pendingPayouts": "Pending payouts: {{count}}",
+    "requestedOn": "Requested {{date}}",
+    "resolvedOn": "Resolved {{date}}",
+    "requestedCredential": "Requested {{credential}}.",
+    "photoN": "Photo {{n}}",
+    "photoRequirement": "Photo ({{photos}}, {{aspect}}, {{source}})",
+    "aspectVertical": "vertical",
+    "aspectHorizontal": "horizontal",
+    "aspectSquare": "square",
+    "itemTitle": "Item {{order}}: {{title}}",
+    "requirementsList": "Requirements: {{list}}",
+    "submittedResponseN": "Submitted response {{n}}",
+    "absenceIntro": "Choose the dates you'll be away. Any assignments in that window are released so another improver can cover them.",
+    "releasesToOthers": "This releases {{what}} to other improvers.",
+    "stepOf": "Step {{step}} of {{total}}",
+    "yoursSteps": " · yours: {{steps}}",
+    "bountyAmount": "Bounty: {{amount}} {{tokenSymbol}}",
+    "assignedTo": "Assigned: {{name}}",
+    "submittedOn": "Submitted on {{date}}"
   },
   "bulletin": {
     "couldnTLoadTheBulletin": "Couldn't load the Bulletin.",
@@ -619,7 +654,20 @@
     "meetupSpot": "Meetup spot",
     "photosFailed_one": "{{count}} photo didn't upload. You can try again from your post.",
     "photosFailed_other": "{{count}} photos didn't upload. You can try again from your post.",
-    "whatArePostingQ": "What are you posting?"
+    "whatArePostingQ": "What are you posting?",
+    "reportTarget": "Report {{target}}",
+    "blockName": "Block {{name}}",
+    "anythingElseOptional": "Anything else we should know? (optional)",
+    "eventTimeOpenInParticipate": "{{time}} · Open in Participate",
+    "meetAt": "Meet at {{place}}",
+    "stepOfThree": "{{step}} of 3",
+    "notAllowedRules": "Not allowed: weapons, drugs, alcohol, animals for sale, housing, jobs, or paid services. Volunteer events are welcome as notices; link them so neighbors can sign up in Participate.",
+    "priceLabel": "Price ({{tokenSymbol}})",
+    "linkedEvent": "Linked event: {{title}}",
+    "withinMiles": "Within {{radius}} mi",
+    "tokenAccepted": "{{tokenSymbol}} accepted",
+    "aboutDistanceAway": "About {{distance}} away",
+    "chooseTokenCashOrBoth": "Choose {{tokenSymbol}}, cash, or both."
   },
   "volunteer": {
     "volunteerEvent": "Volunteer event",
@@ -694,7 +742,8 @@
     "spotsCount_one": "{{count}} spot",
     "spotsCount_other": "{{count}} spots",
     "remainingOf": "{{remaining}} / {{total}} Remaining",
-    "eventWasCancelled": "This event was cancelled."
+    "eventWasCancelled": "This event was cancelled.",
+    "weWillUseNameAndEmail": "We will use the name and email on your SFLuv account."
   },
   "merchantApplication": {
     "publicInformation": "Public Information",
@@ -760,7 +809,9 @@
     "submitting": "Submitting...",
     "howHeardQ": "How did you hear about SFLuv?",
     "acceptTipsQ": "Do you accept tips?",
-    "deviceForStaffQ": "Tablet or phone available to staff?"
+    "deviceForStaffQ": "Tablet or phone available to staff?",
+    "googleListingHint": "If your business has its own Google listing, search for it by name instead — we can fill in far more for you.",
+    "cantFindLocation": "Can't find my location"
   },
   "chat": {
     "couldnTSendTryAgain": "Couldn't send. Try again.",
@@ -817,7 +868,17 @@
     "deleteMessages_other": "Delete {{count}} messages",
     "isTyping": "{{name}} is typing",
     "todayAt": "Today {{time}}",
-    "yesterdayAt": "Yesterday {{time}}"
+    "yesterdayAt": "Yesterday {{time}}",
+    "sendToken": "Send {{tokenSymbol}}",
+    "moreThanYourBalance": "That's more than your balance.",
+    "amountAvailable": "{{amount}} {{tokenSymbol}} available",
+    "attachAmount": "Attach {{amount}} {{tokenSymbol}}",
+    "edited": "edited",
+    "deletedSomeOf": "Deleted {{done}} of {{total}}.",
+    "deleteNMessages_one": "Delete {{count}} message?",
+    "deleteNMessages_other": "Delete {{count}} messages?",
+    "reactWith": "React {{emoji}}",
+    "removeAttachment": "Remove {{name}}"
   },
   "map": {
     "searchMerchants": "Search merchants",
@@ -884,7 +945,20 @@
     "attachmentsCount_one": "📎 {{count}} attachment",
     "attachmentsCount_other": "📎 {{count}} attachments",
     "leaveGroupQ": "Leave this group?",
-    "deleteConversationQ": "Delete this conversation?"
+    "deleteConversationQ": "Delete this conversation?",
+    "muteBody": "Messages still arrive and still show as unread — your phone just won't buzz.",
+    "leaveGroupBody": "You'll stop receiving its messages. The group carries on without you.",
+    "deleteForMeHint": "Hides it from your inbox. It comes back, with its history, if either of you sends a message.",
+    "deleteForEveryoneHint": "Removes it from their inbox too. This can't be undone.",
+    "noOneFound": "No one found. People only show up here if they've chosen to be findable, if you search their exact @username, or if they're already one of your contacts.",
+    "reactedTo": "{{who}} reacted {{emoji}} to \"{{what}}\"",
+    "reactedToAMessage": "{{who}} reacted {{emoji}} to a message",
+    "photosCount_one": "📷 {{count}} photo",
+    "photosCount_other": "📷 {{count}} photos",
+    "videosCount_one": "🎥 {{count}} video",
+    "videosCount_other": "🎥 {{count}} videos",
+    "sharedPlace": "📍 Shared {{name}}",
+    "sharedEvent": "📅 Shared {{name}}"
   },
   "myProfile": {
     "couldnTLoadYourProfile": "Couldn't load your profile.",
@@ -917,7 +991,11 @@
     "yourPicture": "Your picture",
     "everyoneWhoCanSeeYour": "Everyone who can see your name can see this.",
     "copied": "Copied",
-    "saving": "Saving…"
+    "saving": "Saving…",
+    "usernameRulesHint": "Letters, numbers and underscores. People can find you by this exactly, even if you're not listed below.",
+    "usernameExactHint": "People can find you by this exactly, even if you're not listed below.",
+    "findableOffHint": "Off: only people who know your username can start a chat.",
+    "walletLoadingQr": "Your wallet is still loading. Once it's ready, your contact QR will appear here."
   },
   "merchantDeviceSetup": {
     "thosePinsDoNotMatch": "Those PINs do not match.",
@@ -948,7 +1026,8 @@
     "pinHelpSent": "SFLuv support has been asked to reset this business's PIN and will get back to you.",
     "couldNotReachSupport": "Could not reach SFLuv support. Try again.",
     "askingSfluv": "Asking SFLuv…",
-    "forgotPin": "Forgot your PIN?"
+    "forgotPin": "Forgot your PIN?",
+    "paymentsLandHere": "Payments taken here land in this location's wallet, and the day it shows is this location's day."
   },
   "chatInfo": {
     "couldnTRenameTheGroup": "Couldn't rename the group.",
@@ -1000,7 +1079,9 @@
     "owner": "Owner",
     "admin": "Admin",
     "you": "You",
-    "nothingMatchesThat": "Nothing matches that."
+    "nothingMatchesThat": "Nothing matches that.",
+    "blockName": "Block {{name}}",
+    "unblockName": "Unblock {{name}}"
   },
   "notifications": {
     "cancel": "Cancel",
@@ -1024,7 +1105,10 @@
     "moveThisDeviceToAnother": "Move this device to another location",
     "tipsToday": "Tips today",
     "notSetUp": "Not set up",
-    "noPaymentsYetToday": "No payments yet today."
+    "noPaymentsYetToday": "No payments yet today.",
+    "tipAmount": "+{{amount}} tip",
+    "refund": "refund",
+    "todaysPayments": "TODAY'S PAYMENTS"
   },
   "contactDetail": {
     "thisRemovesThemFromYour": "This removes them from your contacts.",
@@ -1050,7 +1134,10 @@
     "couldnTSaveThatPicture": "Couldn't save that picture.",
     "couldnTRemoveThatPicture": "Couldn't remove that picture.",
     "back": "Back",
-    "saving": "Saving…"
+    "saving": "Saving…",
+    "scanToAdd": "Scan to add {{name}} as a contact.",
+    "deleteNameQ": "Delete {{name}}?",
+    "deleteName": "Delete {{name}}"
   },
   "activity": {
     "sentOut": "sent out",
@@ -1086,7 +1173,8 @@
     "back": "Back",
     "addPeople": "Add people",
     "newGroup": "New group",
-    "messageOnePersonInstead": "Message one person instead"
+    "messageOnePersonInstead": "Message one person instead",
+    "searchHint": "Search for someone by name or @username. People you've saved as contacts show up here too."
   },
   "merchantOnboarding": {
     "setUpYourMerchantAccount": "Set up your merchant account",
@@ -1201,7 +1289,9 @@
       "tellUsWhatYouNeed": "Tell us what you need. The more detail the better.",
       "sendMessage": "Send message",
       "sending": "Sending…",
-      "whereReplyQ": "Where should we reply?"
+      "whereReplyQ": "Where should we reply?",
+      "wellGetBackTo": "We'll get back to you at {{email}}. Your reference is:",
+      "whatsThisAbout": "What's this about?"
     },
     "datePickerSheet": {
       "selectADate": "Select a date"
@@ -1250,7 +1340,9 @@
       "fileLabel": "File: {{name}}",
       "attachmentName": "attachment",
       "sizeSuffix": ", {{size}}",
-      "requestReceived": "We have your request and someone is looking at it."
+      "requestReceived": "We have your request and someone is looking at it.",
+      "supportReference": "Support · {{reference}}",
+      "photoSize": "Photo · {{size}}"
     },
     "paymentReceivedOverlay": {
       "paymentReceived": "Payment received"
@@ -1285,7 +1377,10 @@
       "sentToChats_one": "Sent to {{count}} chat.",
       "sentToChats_other": "Sent to {{count}} chats.",
       "sendToChats_one": "Send to {{count}} chat",
-      "sendToChats_other": "Send to {{count}} chats"
+      "sendToChats_other": "Send to {{count}} chats",
+      "peopleCount_one": "{{count}} person",
+      "peopleCount_other": "{{count}} people",
+      "cantReceiveMessages": "Can't receive messages right now"
     },
     "supportRequestModal": {
       "supportRequest": "Support request",
@@ -1298,7 +1393,9 @@
       "noMessage": "(No message)",
       "copy": "Copy",
       "close": "Close",
-      "copied": "Copied"
+      "copied": "Copied",
+      "copyLabel": "Copy {{label}}",
+      "labelCopied": "{{label}} copied"
     },
     "swipeableRow": {},
     "transactionDetailsModal": {
@@ -1319,7 +1416,9 @@
     "themedActivityIndicator": {},
     "w9CompleteModal": {},
     "w9EscrowCard": {},
-    "w9TierModal": {}
+    "w9TierModal": {
+      "ofThreshold": "of {{amount}} {{tokenSymbol}}"
+    }
   },
   "app": {
     "theFaucetIsBusyAnd": "The faucet is busy, and your reward is in line to be sent. Keep this open.",
@@ -1549,7 +1648,16 @@
     "pushActiveForWallets_other": "Push notifications are active for {{count}} wallets on this device.",
     "notificationsOutstanding_one": "Notifications, {{count}} outstanding",
     "notificationsOutstanding_other": "Notifications, {{count}} outstanding",
-    "whichLocationQ": "Which location?"
+    "whichLocationQ": "Which location?",
+    "offlineAccountBody": "We couldn't load your account because the app appears to be offline. Reconnect and try again.",
+    "deviceLockedTo": "This device is locked to receiving SFLuv for {{location}}.",
+    "movingDeviceTo": "Moving this device to {{location}}.",
+    "fundsNotReturned": "This account is active again, but any {{tokenSymbol}} transferred out during the deletion request will not return automatically.",
+    "useContactToRecover": "Use {{contact}} to recover your funds.",
+    "scheduledForDeletionOn": "The account is scheduled for permanent deletion on {{date}}. If you reactivate it now, your profile and wallets will become active again.",
+    "endOfDeletionWindow": "This account is already at the end of its deletion window. If reactivation fails, it may need manual recovery.",
+    "reviewPrivacyPolicyBody": "Review the Privacy Policy and choose whether to receive SFLUV email updates. The privacy-policy checkbox is required to continue.",
+    "walletN": "Wallet {{n}}"
   },
   "walletHome": {},
   "utils": {
@@ -1572,7 +1680,9 @@
     "sharedIntent": {
       "file": "File",
       "text": "Text",
-      "photo": "Photo"
+      "photo": "Photo",
+      "filesCount_one": "{{count}} file",
+      "filesCount_other": "{{count}} files"
     },
     "transactions": {
       "unknown": "Unknown",

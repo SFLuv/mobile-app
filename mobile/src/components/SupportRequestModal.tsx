@@ -76,7 +76,7 @@ export function SupportRequestModal({ visible, request, actions, busyActionId, o
       style={styles.copyButton}
       onPress={() => void copy(value, id)}
       accessibilityRole="button"
-      accessibilityLabel={copied === id ? `${label} copied` : `Copy ${label}`}
+      accessibilityLabel={copied === id ? t("components.supportRequestModal.labelCopied", { label }) : t("components.supportRequestModal.copyLabel", { label })}
       hitSlop={8}
     >
       <Ionicons

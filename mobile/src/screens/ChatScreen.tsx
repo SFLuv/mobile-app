@@ -1115,7 +1115,7 @@ export function ChatScreen({
     if (!isGroup && conversation?.pay_address && onSendPayment) {
       options.push({
         id: "pay",
-        label: `Send ${tokenSymbol}`,
+        label: t("chat.sendToken", { tokenSymbol }),
         icon: "cash-outline",
         // Refused while something else is staged rather than allowed and then
         // silently dropped: a payment is one message and cannot carry a photo,
@@ -1283,7 +1283,7 @@ export function ChatScreen({
       onToast(
         failed.length === ids.length
           ? t("chat.couldnTDeleteThat")
-          : `Deleted ${ids.length - failed.length} of ${ids.length}.`,
+          : t("chat.deletedSomeOf", { done: ids.length - failed.length, total: ids.length }),
         "error",
       );
     }
@@ -1291,7 +1291,7 @@ export function ChatScreen({
 
   const confirmDelete = (ids: number[]) => {
     Alert.alert(
-      ids.length === 1 ? t("chat.deleteThisMessage") : `Delete ${ids.length} messages?`,
+      ids.length === 1 ? t("chat.deleteThisMessage") : t("chat.deleteNMessages", { count: ids.length }),
       t("chat.thisRemovesItForEveryone"),
       [
         { text: t("chat.cancel"), style: "cancel" },
@@ -1731,7 +1731,7 @@ export function ChatScreen({
           ) : null}
 
           {item.edited_at && !item.deleted ? (
-            <Text style={[styles.editedMark, item.is_mine && styles.editedMarkMine]}>edited</Text>
+            <Text style={[styles.editedMark, item.is_mine && styles.editedMarkMine]}>{t("chat.edited")}</Text>
           ) : null}
 
           {item.reactions?.length ? (
@@ -1944,7 +1944,7 @@ export function ChatScreen({
               <Text style={styles.selectionCount}>{t("chat.cancel")}</Text>
             </Pressable>
             <Text style={styles.selectionCount}>
-              {selectedIds.length} selected
+              {t("common.selectedCount", { count: selectedIds.length })}
             </Text>
             <Pressable
               style={[
@@ -2076,7 +2076,7 @@ export function ChatScreen({
                   style={styles.quickReaction}
                   onPress={() => actionTarget && void toggleReaction(actionTarget, emoji)}
                   accessibilityRole="button"
-                  accessibilityLabel={`React ${emoji}`}
+                  accessibilityLabel={t("chat.reactWith", { emoji })}
                 >
                   <Text style={styles.quickReactionEmoji}>{emoji}</Text>
                 </Pressable>
@@ -2244,7 +2244,7 @@ export function ChatScreen({
                   style={styles.pickerCell}
                   onPress={() => reactionPickerFor && void toggleReaction(reactionPickerFor, emoji)}
                   accessibilityRole="button"
-                  accessibilityLabel={`React ${emoji}`}
+                  accessibilityLabel={t("chat.reactWith", { emoji })}
                 >
                   <Text style={styles.pickerEmoji}>{emoji}</Text>
                 </Pressable>
