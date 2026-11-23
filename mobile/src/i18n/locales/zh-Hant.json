@@ -59,7 +59,9 @@
       "statusAllowed": "已允許",
       "statusBlocked": "已在手機「設定」中封鎖",
       "statusAskable": "尚未允許",
-      "statusChecking": "檢查中..."
+      "statusChecking": "檢查中...",
+      "turnOff": "關閉",
+      "turnOffHint": "開啟手機「設定」中的 SFLuv 頁面，您可以在那裡關閉此權限。"
     },
     "social": {
       "linked": "已連結",

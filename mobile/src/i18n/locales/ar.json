@@ -59,7 +59,9 @@
       "statusAllowed": "مسموح",
       "statusBlocked": "محظور في إعدادات هاتفك",
       "statusAskable": "غير مسموح بعد",
-      "statusChecking": "جارٍ التحقق..."
+      "statusChecking": "جارٍ التحقق...",
+      "turnOff": "إيقاف",
+      "turnOffHint": "يفتح صفحة SFLuv في إعدادات هاتفك، حيث يمكنك إيقاف هذا الإذن."
     },
     "social": {
       "linked": "مرتبط",

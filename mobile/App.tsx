@@ -1,6 +1,6 @@
 import "./src/polyfills";
 import { applyLanguagePreference, t, useAppLanguage } from "./src/i18n";
-import { useDirectionSwitching } from "./src/i18n/direction";
+import { holdDirectionCoverIfRestarted, useDirectionSwitching } from "./src/i18n/direction";
 import { loadReturnPoint, peekReturnPoint } from "./src/i18n/returnPoint";
 import { useTranslation } from "react-i18next";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -1419,13 +1419,16 @@ function useStoredPreferences(): [AppPreferences, React.Dispatch<React.SetStateA
 
     const loadPreferences = async () => {
       try {
-        const raw = await AsyncStorage.getItem(PREFERENCES_STORAGE_KEY);
+        // The point to come back to after a language change, read alongside so
+        // the first screen drawn is already that one (src/i18n/returnPoint).
+        const [raw] = await Promise.all([AsyncStorage.getItem(PREFERENCES_STORAGE_KEY), loadReturnPoint()]);
         if (!cancelled && raw) {
           setPreferences(mergePreferences(JSON.parse(raw)));
         }
       } catch (error) {
         console.warn("Unable to load saved app preferences", error);
       } finally {
+        holdDirectionCoverIfRestarted();
         if (!cancelled) {
           setPreferencesLoaded(true);
         }

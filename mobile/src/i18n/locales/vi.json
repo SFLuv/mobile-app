@@ -59,7 +59,9 @@
       "statusAllowed": "Đã cho phép",
       "statusBlocked": "Bị chặn trong Cài đặt của điện thoại",
       "statusAskable": "Chưa cho phép",
-      "statusChecking": "Đang kiểm tra..."
+      "statusChecking": "Đang kiểm tra...",
+      "turnOff": "Tắt",
+      "turnOffHint": "Mở trang SFLuv trong Cài đặt của điện thoại, nơi bạn có thể tắt quyền này."
     },
     "social": {
       "linked": "Đã liên kết",

@@ -9,7 +9,15 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
  * memory for the instant redraw and in storage for the restart, and expires
  * after a couple of minutes so an old one is never applied to a normal launch.
  */
-export type ReturnPoint = { tab: string; section?: string; at: number };
+export type ReturnPoint = {
+  tab: string;
+  section?: string;
+  /** How far down the screen was scrolled, to put the card they used back in view. */
+  scrollY?: number;
+  /** Saved for a direction restart: the app stays covered until it is back here. */
+  restart?: boolean;
+  at: number;
+};
 
 const KEY = "sfluv-wallet:language-return-point";
 const MAX_AGE_MS = 2 * 60 * 1000;
@@ -20,6 +28,15 @@ const fresh = (point: ReturnPoint | null): ReturnPoint | null =>
 
 export function rememberReturnPoint(point: Omit<ReturnPoint, "at">): void {
   memory = { ...point, at: Date.now() };
+  void AsyncStorage.setItem(KEY, JSON.stringify(memory)).catch(() => undefined);
+}
+
+/** The restart about to happen comes back to this point (see direction.ts). */
+export function markReturnPointForRestart(): void {
+  if (!fresh(memory)) {
+    return;
+  }
+  memory = { ...memory!, restart: true };
   void AsyncStorage.setItem(KEY, JSON.stringify(memory)).catch(() => undefined);
 }
 

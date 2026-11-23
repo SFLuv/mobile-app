@@ -35,7 +35,7 @@ import {
   useOnForeground,
 } from "../utils/phonePermissions";
 import { t } from "../i18n";
-import { directionRestartPending, dirIcon, dirSign } from "../i18n/direction";
+import { directionRestartPending, dirIcon, dirSign, releaseDirectionCover } from "../i18n/direction";
 
 type Props = {
   user: AppUser | null;
@@ -411,16 +411,28 @@ function PermissionRow({
         >
           <Text style={styles.syncButtonText}>{access === "blocked" ? t("common.openSettings") : t("common.allow")}</Text>
         </Pressable>
+      ) : access === "granted" ? (
+        // Only the phone can take a permission back, so this goes where that
+        // is done. iOS restarts SFLuv when one is turned off there.
+        <Pressable
+          style={styles.syncButton}
+          accessibilityRole="button"
+          accessibilityHint={t("settings.permissions.turnOffHint")}
+          onPress={openPhoneSettings}
+        >
+          <Text style={styles.syncButtonText}>{t("settings.permissions.turnOff")}</Text>
+        </Pressable>
       ) : null}
     </View>
   );
 }
 
 /**
- * The phone-level permissions SFLuv uses, each with the one action that fixes
+ * The phone-level permissions SFLuv uses, each with the one action that changes
  * it. These are not switches: only the phone can grant or revoke them, so a row
  * either shows the system popup (not asked yet) or opens SFLuv's page in the
- * phone's Settings (refused, and the popup will not come back).
+ * phone's Settings (refused, and the popup will not come back; or allowed, to
+ * turn it off there).
  */
 function PhonePermissionsCard({ onNotificationsAllowed }: { onNotificationsAllowed: () => void }) {
   const { palette } = useAppTheme();
@@ -1099,6 +1111,12 @@ export function SettingsScreen({
   const [section, setSection] = useState<SettingsSection>(
     () => (peekReturnPoint()?.section as SettingsSection | undefined) ?? "general",
   );
+  // Where the list was scrolled to, saved with the return point so a language
+  // change puts the Language card back where it was rather than at the top.
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollYRef = useRef(0);
+  const restoreScrollRef = useRef<number | null>(peekReturnPoint()?.scrollY ?? null);
+  const viewportHeightRef = useRef(0);
   useEffect(() => {
     // Applied: a language change brought them back here. Clear it so it is
     // not reused, after picking up a point saved before a restart.
@@ -1106,11 +1124,41 @@ export function SettingsScreen({
       if (point?.section) {
         setSection(point.section as SettingsSection);
       }
+      if (restoreScrollRef.current === null && point?.scrollY) {
+        restoreScrollRef.current = point.scrollY;
+      }
+      if (!point?.scrollY) {
+        releaseDirectionCover();
+      }
       // Keep it through a right-to-left restart, which comes back here too.
       if (!directionRestartPending()) {
         clearReturnPoint();
       }
     });
+  }, []);
+  // Scrolls back as far as the list allows each time it grows, and lets the
+  // cover go once it reaches the spot. The other language's text can make the
+  // list shorter than it was, so whatever is drawn by a second in counts.
+  const restoreScroll = (contentHeight: number) => {
+    const y = restoreScrollRef.current;
+    if (y === null) {
+      return;
+    }
+    const reachable = Math.max(0, contentHeight - viewportHeightRef.current);
+    scrollRef.current?.scrollTo({ y: Math.min(y, reachable), animated: false });
+    if (reachable >= y) {
+      restoreScrollRef.current = null;
+      requestAnimationFrame(() => releaseDirectionCover());
+    }
+  };
+  useEffect(() => {
+    const settle = setTimeout(() => {
+      if (restoreScrollRef.current !== null) {
+        restoreScrollRef.current = null;
+        releaseDirectionCover();
+      }
+    }, 1000);
+    return () => clearTimeout(settle);
   }, []);
   const [showPushDetails, setShowPushDetails] = useState(false);
   const [rewardsWalletDraft, setRewardsWalletDraft] = useState(
@@ -1209,7 +1257,19 @@ export function SettingsScreen({
 
   return (
     <>
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
+        scrollEventThrottle={100}
+        onScroll={(event) => {
+          scrollYRef.current = event.nativeEvent.contentOffset.y;
+        }}
+        onLayout={(event) => {
+          viewportHeightRef.current = event.nativeEvent.layout.height;
+        }}
+        onContentSizeChange={(_width, height) => restoreScroll(height)}
+      >
       {syncNotice ? (
         <View style={styles.noticeCard}>
           <Text style={styles.noticeTitle}>{t("settings.appSync")}</Text>
@@ -1244,7 +1304,7 @@ export function SettingsScreen({
             value={preferences.languagePreference}
             onChange={(languagePreference) => {
               // Come back to this screen after the redraw (or restart).
-              rememberReturnPoint({ tab: "settings", section: "general" });
+              rememberReturnPoint({ tab: "settings", section: "general", scrollY: Math.round(scrollYRef.current) });
               onUpdatePreferences({ ...preferences, languagePreference });
             }}
           />

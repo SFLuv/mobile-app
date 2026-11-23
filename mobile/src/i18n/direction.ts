@@ -4,6 +4,8 @@ import { Alert, DevSettings, I18nManager } from "react-native";
 import * as Updates from "expo-updates";
 import i18next from "i18next";
 
+import { markReturnPointForRestart, peekReturnPoint } from "./returnPoint";
+
 const t = (key: string) => i18next.t(key) as string;
 
 const PENDING_KEY = "sfluv-wallet:rtl-pending-switch";
@@ -19,6 +21,35 @@ function setSwitching(value: boolean): void {
   }
   switching = value;
   switchingListeners.forEach((listener) => listener(value));
+}
+
+// After the restart the cover stays up until the screen the switch was made
+// from is back as it was (SettingsScreen calls releaseDirectionCover), so the
+// Wallet and an unscrolled Settings never flash by. Never longer than this.
+const HOLD_AFTER_RESTART_MS = 6000;
+let holdTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * At launch, once the saved return point is loaded: if it was saved for a
+ * direction restart, keep the cover up until the app is back there.
+ */
+export function holdDirectionCoverIfRestarted(): void {
+  if (!peekReturnPoint()?.restart || holdTimer) {
+    return;
+  }
+  setSwitching(true);
+  holdTimer = setTimeout(releaseDirectionCover, HOLD_AFTER_RESTART_MS);
+}
+
+/** The screen is back where the person left it. */
+export function releaseDirectionCover(): void {
+  if (holdTimer) {
+    clearTimeout(holdTimer);
+    holdTimer = null;
+  }
+  if (!reloadScheduled) {
+    setSwitching(false);
+  }
 }
 
 /** True from the moment a direction switch is scheduled until the restart. */
@@ -80,6 +111,7 @@ export function ensureDirection(rtl: boolean): void {
     }
     try {
       await AsyncStorage.setItem(PENDING_KEY, rtl ? "rtl" : "ltr");
+      markReturnPointForRestart();
     } catch {
       setSwitching(false);
       return; // Can't record the attempt, so don't risk a loop.

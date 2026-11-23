@@ -59,7 +59,9 @@
       "statusAllowed": "Allowed",
       "statusBlocked": "Blocked in your phone's Settings",
       "statusAskable": "Not allowed yet",
-      "statusChecking": "Checking..."
+      "statusChecking": "Checking...",
+      "turnOff": "Turn off",
+      "turnOffHint": "Opens SFLuv's page in your phone's Settings, where you can turn this off."
     },
     "social": {
       "linked": "Linked",

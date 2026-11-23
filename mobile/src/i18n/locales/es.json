@@ -59,7 +59,9 @@
       "statusAllowed": "Permitido",
       "statusBlocked": "Bloqueado en los Ajustes de su teléfono",
       "statusAskable": "Aún no permitido",
-      "statusChecking": "Verificando..."
+      "statusChecking": "Verificando...",
+      "turnOff": "Desactivar",
+      "turnOffHint": "Abre la página de SFLuv en la Configuración de su teléfono, donde puede desactivarlo."
     },
     "social": {
       "linked": "Vinculado",
