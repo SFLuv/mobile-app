@@ -170,7 +170,13 @@
       "rewardsWallet": "محفظة المكافآت: {{address}}",
       "primaryAppWallet": "المحفظة الرئيسية في التطبيق: {{address}}",
       "notSet": "غير محدد",
-      "pendingSince": "معلّق منذ {{date}}"
+      "pendingSince": "معلّق منذ {{date}}",
+      "statuses": {
+        "approved": "مقبول",
+        "pending": "قيد الانتظار",
+        "rejected": "مرفوض",
+        "denied": "مرفوض"
+      }
     },
     "appSync": "مزامنة التطبيق",
     "tabs": {

@@ -21,6 +21,7 @@ import { formatDistanceLabel, locationDistanceMeters, sortLocationsByProximity, 
 import { currentWeekdayIndex, getOpenState, isTodayHoursLine, OpenState } from "../utils/openingHours";
 import { MerchantIcon, MerchantMapPin, OpenStatusBadge, useMarkerTracking } from "../components/MerchantPin";
 import { t } from "../i18n";
+import { dirSign } from "../i18n/direction";
 
 type MapViewMode = "map" | "list";
 
@@ -596,9 +597,11 @@ export function MapScreen({
                   width: segmentButtonWidth,
                   transform: [
                     {
+                      // Mirrored in Arabic: the List button is on the left there,
+                      // and transforms are not flipped by the RTL layout.
                       translateX: segmentSlide.interpolate({
                         inputRange: [0, 1],
-                        outputRange: [0, segmentButtonWidth + SEGMENT_GAP],
+                        outputRange: [0, (segmentButtonWidth + SEGMENT_GAP) * dirSign()],
                       }),
                     },
                   ],

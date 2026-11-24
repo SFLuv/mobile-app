@@ -310,6 +310,10 @@ function formatStatusLabel(value?: string | null): string {
   if (normalized === "paid_out") {
     return i18next.t("settings.improver.finalized");
   }
+  // The statuses the server sends, as raw words: in the app's language.
+  if (normalized === "approved" || normalized === "pending" || normalized === "rejected" || normalized === "denied") {
+    return i18next.t(`settings.improver.statuses.${normalized}`);
+  }
   return value
     .replace(/_/g, " ")
     .trim()

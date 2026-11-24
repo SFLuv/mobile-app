@@ -170,7 +170,13 @@
       "rewardsWallet": "獎勵錢包：{{address}}",
       "primaryAppWallet": "應用程式主要錢包：{{address}}",
       "notSet": "未設定",
-      "pendingSince": "自 {{date}} 起待處理"
+      "pendingSince": "自 {{date}} 起待處理",
+      "statuses": {
+        "approved": "已批准",
+        "pending": "待處理",
+        "rejected": "已拒絕",
+        "denied": "已拒絕"
+      }
     },
     "appSync": "應用程式同步",
     "tabs": {

@@ -170,7 +170,13 @@
       "rewardsWallet": "Rewards wallet: {{address}}",
       "primaryAppWallet": "Primary app wallet: {{address}}",
       "notSet": "Not set",
-      "pendingSince": "Pending since {{date}}"
+      "pendingSince": "Pending since {{date}}",
+      "statuses": {
+        "approved": "Approved",
+        "pending": "Pending",
+        "rejected": "Rejected",
+        "denied": "Denied"
+      }
     },
     "appSync": "App Sync",
     "tabs": {

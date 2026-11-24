@@ -170,7 +170,13 @@
       "rewardsWallet": "Ví nhận thưởng: {{address}}",
       "primaryAppWallet": "Ví chính của ứng dụng: {{address}}",
       "notSet": "Chưa đặt",
-      "pendingSince": "Đang chờ từ {{date}}"
+      "pendingSince": "Đang chờ từ {{date}}",
+      "statuses": {
+        "approved": "Đã duyệt",
+        "pending": "Đang chờ",
+        "rejected": "Bị từ chối",
+        "denied": "Bị từ chối"
+      }
     },
     "appSync": "Đồng bộ ứng dụng",
     "tabs": {

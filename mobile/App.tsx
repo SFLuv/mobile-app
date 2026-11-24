@@ -1,6 +1,7 @@
 import "./src/polyfills";
 import { applyLanguagePreference, t, useAppLanguage } from "./src/i18n";
 import {
+  dirSign,
   directionSwitchLanguages,
   holdDirectionCoverIfRestarted,
   setReloadScreenColors,
@@ -2369,8 +2370,10 @@ function WalletAppShellContent({
           walletOverlayPane !== null &&
           walletPaneBackSwipeEnabled &&
           !walletPaneAnimatingRef.current &&
-          gesture.x0 <= 28 &&
-          gesture.dx > 10 &&
+          // From the leading edge, toward the trailing one: the left edge
+          // rightwards, or in Arabic the right edge leftwards.
+          (dirSign() > 0 ? gesture.x0 <= 28 : gesture.x0 >= walletPaneSlideDistance - 28) &&
+          gesture.dx * dirSign() > 10 &&
           Math.abs(gesture.dx) > Math.abs(gesture.dy),
         onPanResponderGrant: () => {
           walletPaneAnimationIDRef.current += 1;
@@ -2380,13 +2383,13 @@ function WalletAppShellContent({
         },
         onPanResponderTerminationRequest: () => false,
         onPanResponderMove: (_, gesture) => {
-          const currentValue = Math.max(0, Math.min(gesture.dx, walletPaneSlideDistance));
+          const currentValue = Math.max(0, Math.min(gesture.dx * dirSign(), walletPaneSlideDistance));
           walletPaneGestureMaxXRef.current = Math.max(walletPaneGestureMaxXRef.current, currentValue);
           setWalletPaneTranslateX(currentValue);
         },
         onPanResponderRelease: (_, gesture) => {
-          const currentValue = Math.max(0, Math.min(gesture.dx, walletPaneSlideDistance));
-          finishWalletPaneSwipe(currentValue, gesture.vx);
+          const currentValue = Math.max(0, Math.min(gesture.dx * dirSign(), walletPaneSlideDistance));
+          finishWalletPaneSwipe(currentValue, gesture.vx * dirSign());
         },
         onPanResponderTerminate: () => {
           finishWalletPaneSwipe(walletPaneTranslateXValueRef.current);
@@ -6697,7 +6700,9 @@ function WalletAppShellContent({
       <View style={styles.walletPaneStack}>
         <View style={styles.walletPaneBase}>{walletHomeContent}</View>
         <Animated.View
-          style={[styles.walletPaneOverlay, { transform: [{ translateX: walletPaneTranslateX }] }]}
+          // The pane's offset is a distance in the reading direction (it
+          // comes in from the trailing edge), so it is mirrored in Arabic.
+          style={[styles.walletPaneOverlay, { transform: [{ translateX: Animated.multiply(walletPaneTranslateX, dirSign()) }] }]}
           {...walletPanePanResponder.panHandlers}
         >
           {walletOverlayContent}

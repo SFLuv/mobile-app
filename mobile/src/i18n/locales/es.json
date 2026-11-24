@@ -170,7 +170,13 @@
       "rewardsWallet": "Billetera de recompensas: {{address}}",
       "primaryAppWallet": "Billetera principal de la aplicación: {{address}}",
       "notSet": "Sin configurar",
-      "pendingSince": "Pendiente desde el {{date}}"
+      "pendingSince": "Pendiente desde el {{date}}",
+      "statuses": {
+        "approved": "Aprobado",
+        "pending": "Pendiente",
+        "rejected": "Rechazado",
+        "denied": "Denegado"
+      }
     },
     "appSync": "Sincronización",
     "tabs": {
