@@ -176,11 +176,15 @@ import {
   dismissConversationFromTray,
 } from "./src/services/notificationInbox";
 import { AppPreferences, defaultAppPreferences } from "./src/types/preferences";
+import { buildUniversalAddContactLink } from "./src/utils/universalLinks";
+import { SfluvAppLink, isAppDomainURL, openWebPage, parseSfluvAppLink, webAppURL } from "./src/utils/appLinks";
 import {
-  SfluvUniversalLink,
-  buildUniversalAddContactLink,
-  parseSfluvUniversalLink,
-} from "./src/utils/universalLinks";
+  EmailLinkCard,
+  EmailLinkModal,
+  joinOutcomeCard,
+  verifyOutcomeCard,
+  workingCard,
+} from "./src/components/EmailLinkModal";
 import { TransactionDetailsModal } from "./src/components/TransactionDetailsModal";
 import {
   buildAddressNameMaps,
@@ -218,8 +222,31 @@ type RuntimeState = {
 
 type PendingLinkIntent = {
   id: number;
-  link: SfluvUniversalLink;
+  link: SfluvAppLink;
 };
+
+/**
+ * A link from one of SFLuv's emails that the app finishes itself.
+ *
+ * "waiting" holds it until it can run: a join needs the account bootstrapped,
+ * which on a cold start from the email takes a few seconds after sign-in.
+ */
+type EmailLinkFlow = {
+  id: number;
+  kind: "join" | "verify";
+  token: string;
+  stage: "waiting" | "running" | "done";
+  card: EmailLinkCard;
+};
+
+/**
+ * Links already handled in this run of the JavaScript, by URL.
+ *
+ * The launch URL is still the launch URL when the app shell remounts (a
+ * compatibility gate that came and went), and reading it again would accept
+ * an invitation twice. Module scope so it outlives the component.
+ */
+const handledLaunchURLs = new Set<string>();
 
 type AppleOAuthUserInfoHint = {
   email?: string | null;
@@ -820,8 +847,18 @@ function walletTransactionsCacheKey(address: string): string {
  */
 const PUBLIC_LOCATIONS_CACHE_KEY = "sfluv-wallet:public-locations:v1";
 
-function linkSignature(link: SfluvUniversalLink): string {
+function linkSignature(link: SfluvAppLink): string {
   switch (link.type) {
+    case "orgjoin":
+      return `orgjoin:${link.token}`;
+    case "verifyemail":
+      return `verifyemail:${link.token}`;
+    case "screen":
+      return `screen:${link.screen}`;
+    case "home":
+      return "home";
+    case "web":
+      return `web:${link.href}`;
     case "pay":
       return `pay:${link.address.toLowerCase()}`;
     case "addcontact":
@@ -1739,6 +1776,7 @@ function WalletAppShell({
   onWalletPreferencesSync,
   pendingLinkIntent,
   onConsumePendingLink,
+  onOpenAppLink,
   preferences,
   preferencesLoaded,
   onUpdatePreferences,
@@ -1784,6 +1822,8 @@ function WalletAppShell({
   onWalletPreferencesSync: (user: AppUser, wallets: AppWallet[]) => void;
   pendingLinkIntent: PendingLinkIntent | null;
   onConsumePendingLink: () => void;
+  /** Routes a link on the app's own domain in-app. False for any other URL. */
+  onOpenAppLink: (url: string) => boolean;
   preferences: AppPreferences;
   preferencesLoaded: boolean;
   onUpdatePreferences: (next: AppPreferences) => void;
@@ -1822,6 +1862,7 @@ function WalletAppShell({
       onWalletPreferencesSync={onWalletPreferencesSync}
       pendingLinkIntent={pendingLinkIntent}
       onConsumePendingLink={onConsumePendingLink}
+      onOpenAppLink={onOpenAppLink}
       preferences={preferences}
       preferencesLoaded={preferencesLoaded}
       onUpdatePreferences={onUpdatePreferences}
@@ -1865,6 +1906,7 @@ function WalletAppShellContent({
   onWalletPreferencesSync,
   pendingLinkIntent,
   onConsumePendingLink,
+  onOpenAppLink,
   preferences,
   preferencesLoaded,
   onUpdatePreferences,
@@ -1903,6 +1945,7 @@ function WalletAppShellContent({
   onWalletPreferencesSync: (user: AppUser, wallets: AppWallet[]) => void;
   pendingLinkIntent: PendingLinkIntent | null;
   onConsumePendingLink: () => void;
+  onOpenAppLink: (url: string) => boolean;
   preferences: AppPreferences;
   preferencesLoaded: boolean;
   onUpdatePreferences: (next: AppPreferences) => void;
@@ -4113,6 +4156,11 @@ function WalletAppShellContent({
           }
           return;
         case "url":
+          // A page on our own domain is routed in-app: given to the OS it
+          // would come straight back here, the app being its handler.
+          if (onOpenAppLink(target.url)) {
+            return;
+          }
           // Leaving the app is the point here, so there is no in-app state to
           // set. A link the OS refuses to open fails silently rather than
           // throwing into a tap handler.
@@ -4129,6 +4177,7 @@ function WalletAppShellContent({
       canAccessImproverPanel,
       canAccessVolunteerPanel,
       chatEnabled,
+      onOpenAppLink,
       openConversation,
       openImproverPanel,
       openVolunteerPanel,
@@ -4919,6 +4968,25 @@ function WalletAppShellContent({
     });
   }, []);
 
+  const [emailLinkFlow, setEmailLinkFlow] = useState<EmailLinkFlow | null>(null);
+  const emailLinkFlowIdRef = useRef(0);
+  /**
+   * An invitation refused because it went to another address, held for this
+   * session: verifying an address is what fixes that, and the verification
+   * link lands here too.
+   */
+  const joinAwaitingEmailRef = useRef<string | null>(null);
+  const startEmailLinkFlow = useCallback((kind: EmailLinkFlow["kind"], token: string, workingBody?: string) => {
+    emailLinkFlowIdRef.current += 1;
+    setEmailLinkFlow({
+      id: emailLinkFlowIdRef.current,
+      kind,
+      token,
+      stage: "waiting",
+      card: workingCard(kind, workingBody),
+    });
+  }, []);
+
   useEffect(() => {
     if (!pendingLinkIntent) {
       return;
@@ -4999,8 +5067,46 @@ function WalletAppShellContent({
       return;
     }
 
-    // Everything left is a redeem code; the switch above is exhaustive over the
-    // rest, so this is reached only for that one.
+    // ── Links from SFLuv's emails ───────────────────────────────────────────
+    //
+    // Finished here rather than handed to the web page, because the app is
+    // where the link landed and is already signed in.
+    if (link.type === "orgjoin" || link.type === "verifyemail") {
+      if (merchantModeActive) {
+        Alert.alert(t("app.merchantMode"), t("emailLinks.merchantModeOn"));
+        onConsumePendingLink();
+        return;
+      }
+      startEmailLinkFlow(link.type === "orgjoin" ? "join" : "verify", link.token);
+      onConsumePendingLink();
+      return;
+    }
+
+    if (link.type === "screen") {
+      // A till keeps its own screen; the kiosk effect would put it back anyway.
+      if (!merchantModeActive) {
+        setTab(link.screen);
+        if (link.screen === "wallet") {
+          setWalletPane("home");
+        }
+      }
+      onConsumePendingLink();
+      return;
+    }
+
+    // Opened by the root before they reach here; kept so nothing is dropped.
+    if (link.type === "web") {
+      void openWebPage(link.href);
+      onConsumePendingLink();
+      return;
+    }
+    if (link.type === "home") {
+      onConsumePendingLink();
+      return;
+    }
+
+    // Everything left is a redeem code; the checks above are exhaustive over
+    // the rest, so this is reached only for that one.
     openRedeemFlowForCode(link.code);
     onConsumePendingLink();
   }, [
@@ -5009,7 +5115,108 @@ function WalletAppShellContent({
     openRedeemFlowForCode,
     openVolunteerPanel,
     pendingLinkIntent,
+    startEmailLinkFlow,
   ]);
+
+  /**
+   * Runs a waiting email link once it can run.
+   *
+   * Verifying needs no session, so it goes at once. Joining waits for the
+   * account bootstrap: the backend refuses an account it has not finished
+   * creating, and on a cold start from the email that is a few seconds after
+   * sign-in. A bootstrap that failed is said plainly, with a way to try again.
+   */
+  useEffect(() => {
+    if (!emailLinkFlow || emailLinkFlow.stage !== "waiting") {
+      return;
+    }
+    const flow = emailLinkFlow;
+    if (flow.kind === "join") {
+      if (!backendBootstrapReady && runtime.error) {
+        setEmailLinkFlow({
+          ...flow,
+          stage: "done",
+          card: { tone: "error", title: t("emailLinks.offlineTitle"), body: runtime.error, retry: true },
+        });
+        return;
+      }
+      if (!backendClient || !backendBootstrapReady) {
+        return;
+      }
+    }
+
+    setEmailLinkFlow({ ...flow, stage: "running" });
+    const finish = (card: EmailLinkCard) => {
+      setEmailLinkFlow((current) => (current && current.id === flow.id ? { ...current, stage: "done", card } : current));
+    };
+
+    if (flow.kind === "verify") {
+      void publicBackendClient
+        .verifyEmailToken(flow.token)
+        .then((outcome) => {
+          // An invitation refused for its address, and now an address verified:
+          // very likely the one it was sent to, so it is tried again rather than
+          // leaving the person to find the invite email a second time.
+          const heldJoin = joinAwaitingEmailRef.current;
+          if (outcome.status === "verified" && heldJoin && backendClient) {
+            joinAwaitingEmailRef.current = null;
+            startEmailLinkFlow("join", heldJoin, t("emailLinks.verifiedThenJoining"));
+            return;
+          }
+          finish(verifyOutcomeCard(outcome));
+        })
+        .catch(() => finish(verifyOutcomeCard({ status: "failed" })));
+      return;
+    }
+
+    void (async () => {
+      try {
+        const outcome = await backendClient!.joinOrganization(flow.token);
+        if (outcome.status === "wrong_email") {
+          joinAwaitingEmailRef.current = flow.token;
+        } else {
+          joinAwaitingEmailRef.current = null;
+        }
+        if (outcome.status === "joined") {
+          // Membership brings the organization's roles with it; the profile
+          // carries them.
+          void loadAppProfile();
+        }
+        finish(joinOutcomeCard(outcome));
+      } catch (error) {
+        if (error instanceof AppBackendPolicyRequiredError && error.policyStatus) {
+          setEmailLinkFlow((current) => (current && current.id === flow.id ? null : current));
+          onPolicyRequired?.(error.policyStatus);
+          return;
+        }
+        finish(
+          error instanceof AppBackendAuthError
+            ? { tone: "error", title: t("app.signInAgain"), body: t("emailLinks.sessionEndedBody") }
+            : joinOutcomeCard({ status: "failed" }),
+        );
+      }
+    })();
+    // loadAppProfile is a plain function, new each render; it is called, not watched.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backendBootstrapReady, backendClient, emailLinkFlow, publicBackendClient, runtime.error, startEmailLinkFlow]);
+
+  const retryEmailLinkFlow = useCallback(() => {
+    if (!emailLinkFlow) {
+      return;
+    }
+    if (runtime.error && !backendBootstrapReady) {
+      onRetryConnection?.();
+    }
+    startEmailLinkFlow(emailLinkFlow.kind, emailLinkFlow.token);
+  }, [backendBootstrapReady, emailLinkFlow, onRetryConnection, runtime.error, startEmailLinkFlow]);
+
+  const openEmailLinkWebPage = useCallback(
+    (path: string) => {
+      setEmailLinkFlow(null);
+      void openWebPage(webAppURL(path, clientConfig));
+    },
+    [clientConfig],
+  );
 
   useEffect(() => {
     if (!redeemFlow || redeemFlow.stage !== "awaiting_wallet") {
@@ -7237,6 +7444,7 @@ function WalletAppShellContent({
                 }}
                 onLoadMore={loadMoreNotifications}
                 onAction={runNotificationAction}
+                onOpenAppLink={onOpenAppLink}
                 onOpenSupportChat={
                   chatEnabled
                     ? async (requestId) => {
@@ -8239,6 +8447,13 @@ function WalletAppShellContent({
         tokenSymbol={clientConfig.tokenSymbol}
         onDismiss={() => setW9Released(null)}
       />
+
+      <EmailLinkModal
+        card={emailLinkFlow?.card ?? null}
+        onClose={() => setEmailLinkFlow(null)}
+        onRetry={retryEmailLinkFlow}
+        onOpenWeb={openEmailLinkWebPage}
+      />
     </RootContainer>
   );
 }
@@ -8543,44 +8758,79 @@ function PrivyWalletApp({
     });
   };
 
-  const handleIncomingLink = (rawURL: string | null) => {
+  // Read through a ref: the link listener below is registered once, and the
+  // config can be refreshed after that.
+  const clientConfigRef = useRef(clientConfig);
+  clientConfigRef.current = clientConfig;
+  /** A web page waiting to be shown, until the first screen is up. */
+  const [pendingWebURL, setPendingWebURL] = useState<string | null>(null);
+
+  /**
+   * Takes a link the OS (or a button in the app) handed over, and reports
+   * whether it was one of ours.
+   *
+   * Every link on the app's own domain is ours: the association files claim
+   * the whole domain, so a page the app has nothing for still lands here, and
+   * is sent on to the browser rather than dropped.
+   */
+  const handleIncomingLink = useCallback((rawURL: string | null): boolean => {
     if (!rawURL) {
-      return;
+      return false;
     }
     // The share extension opens the app with "sfluv://dataUrl=…" to hand over
     // what was shared. That is expo-share-intent's to read, not a link to
     // route; parsed as one it would at best do nothing and at worst match a
     // path by accident.
     if (/^[a-z][a-z0-9+.-]*:\/\/dataUrl=/i.test(rawURL)) {
-      return;
+      return false;
     }
-    const parsedLink = parseSfluvUniversalLink(rawURL, clientConfig);
+    const parsedLink = parseSfluvAppLink(rawURL, clientConfigRef.current);
     if (!parsedLink) {
-      return;
+      return false;
     }
+    handledLaunchURLs.add(rawURL);
     const signature = linkSignature(parsedLink);
     const lastHandledLink = recentIncomingLinkRef.current;
     const now = Date.now();
     if (lastHandledLink && lastHandledLink.signature === signature && now - lastHandledLink.timestamp < LINK_DEDUPE_WINDOW_MS) {
-      return;
+      return true;
     }
     recentIncomingLinkRef.current = {
       signature,
       timestamp: now,
     };
+    if (parsedLink.type === "home") {
+      return true;
+    }
+    // Needs no account, so it is not held for sign-in.
+    if (parsedLink.type === "web") {
+      setPendingWebURL(parsedLink.href);
+      return true;
+    }
     nextPendingLinkIDRef.current += 1;
     setPendingLinkIntent({
       id: nextPendingLinkIDRef.current,
       link: parsedLink,
     });
-  };
+    return true;
+  }, []);
+
+  /** For the app's own buttons: true when the link was on our domain and routed here. */
+  const openAppLink = useCallback(
+    (url: string): boolean => isAppDomainURL(url, clientConfigRef.current) && handleIncomingLink(url),
+    [handleIncomingLink],
+  );
 
   useEffect(() => {
     let cancelled = false;
 
     Linking.getInitialURL()
+      // expo-linking's own record of the launch URL, which it takes from the
+      // universal-link callback itself, in case the first comes back empty.
+      .then((url) => url ?? Linking.getLinkingURL())
       .then((url) => {
-        if (!cancelled) {
+        // A remount reads the same launch URL again; it was dealt with then.
+        if (!cancelled && url && !handledLaunchURLs.has(url)) {
           handleIncomingLink(url);
         }
       })
@@ -8596,7 +8846,50 @@ function PrivyWalletApp({
       cancelled = true;
       subscription.remove();
     };
-  }, []);
+  }, [handleIncomingLink]);
+
+  // Shown once the first screen is up, so the browser is not presented over a
+  // launch still in progress.
+  useEffect(() => {
+    if (!pendingWebURL || !isReady) {
+      return;
+    }
+    const url = pendingWebURL;
+    setPendingWebURL(null);
+    void openWebPage(url).then((opened) => {
+      if (!opened) {
+        Alert.alert(t("emailLinks.couldNotOpenTitle"), t("emailLinks.couldNotOpenBody", { url }));
+      }
+    });
+  }, [isReady, pendingWebURL, t]);
+
+  /**
+   * What the sign-in screen says about a link waiting on it.
+   *
+   * An invitation needs an account, so it is held until sign-in and then
+   * accepted; the screen says so, and which address to use. A verification
+   * link needs none, so it is finished here and the result shown here.
+   */
+  const [signedOutLinkNotice, setSignedOutLinkNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isReady || user || pendingLinkIntent?.link.type !== "verifyemail") {
+      return;
+    }
+    const { token } = pendingLinkIntent.link;
+    setPendingLinkIntent(null);
+    setSignedOutLinkNotice(t("emailLinks.verifyingNotice"));
+    void backendClient
+      .verifyEmailToken(token)
+      .then((outcome) => setSignedOutLinkNotice(verifyOutcomeCard(outcome).body))
+      .catch(() => setSignedOutLinkNotice(verifyOutcomeCard({ status: "failed" }).body));
+  }, [backendClient, isReady, pendingLinkIntent, t, user]);
+  useEffect(() => {
+    if (user) {
+      setSignedOutLinkNotice(null);
+    }
+  }, [user]);
+  const pendingJoinNotice =
+    pendingLinkIntent?.link.type === "orgjoin" ? t("emailLinks.signInToJoin") : null;
 
   useEffect(() => {
     if (!isReady) {
@@ -9438,6 +9731,8 @@ function PrivyWalletApp({
                 <Text style={styles.loginTitle}>{t("login.title")}</Text>
                 <Text style={styles.loginBody}>{t("login.body")}</Text>
                 {loginNotice ? <Text style={styles.loginNotice}>{loginNotice}</Text> : null}
+                {pendingJoinNotice ? <Text style={styles.loginNotice}>{pendingJoinNotice}</Text> : null}
+                {signedOutLinkNotice ? <Text style={styles.loginNotice}>{signedOutLinkNotice}</Text> : null}
                 {loginMode === "email" ? (
                   <>
                     {!emailCodeSent ? (
@@ -9678,6 +9973,7 @@ function PrivyWalletApp({
       onWalletPreferencesSync={syncWalletPreferences}
       pendingLinkIntent={pendingLinkIntent}
       onConsumePendingLink={consumePendingLink}
+      onOpenAppLink={openAppLink}
       preferences={preferences}
       preferencesLoaded={preferencesLoaded}
       onUpdatePreferences={onUpdatePreferences}

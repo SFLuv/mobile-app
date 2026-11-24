@@ -75,6 +75,12 @@ type Props = {
    * the message still points somewhere sensible.
    */
   onOpenSupportChat?: (requestId: number) => Promise<void>;
+  /**
+   * Routes a link on the app's own domain in-app (the hub's "Open" buttons
+   * point at pages of the web app) and reports whether it did. Handed to the
+   * OS instead, such a link comes straight back to this app, its handler.
+   */
+  onOpenAppLink?: (url: string) => boolean;
   onClose: () => void;
 };
 
@@ -111,6 +117,7 @@ export function NotificationsScreen({
   onOpen,
   onClose,
   onOpenSupportChat,
+  onOpenAppLink,
 }: Props) {
   const { palette, shadows } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
@@ -191,6 +198,9 @@ export function NotificationsScreen({
       // and the alert stays where it is — replying to somebody is not the same
       // as being finished with their request.
       if (action.url) {
+        if (onOpenAppLink?.(action.url)) {
+          return;
+        }
         try {
           await Linking.openURL(action.url);
         } catch {
@@ -221,7 +231,7 @@ export function NotificationsScreen({
       }
       await run();
     },
-    [onAction, onOpenSupportChat],
+    [onAction, onOpenAppLink, onOpenSupportChat],
   );
 
   /**

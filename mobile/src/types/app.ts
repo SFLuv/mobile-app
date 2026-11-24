@@ -995,6 +995,39 @@ export type RedeemOutcome =
    */
   | { status: "pending"; message: string };
 
+/**
+ * What happened when an organization invitation from an email was accepted.
+ *
+ * Each refusal is its own case because each sends the person somewhere
+ * different: a new invitation, another email address on their account, or
+ * leaving the organization they are already in. The organization's name is
+ * looked up afterwards for the copy, and is null when that lookup fails.
+ */
+export type OrganizationJoinOutcome =
+  | { status: "joined"; organizationName: string | null }
+  /**
+   * Expired, already used, or never issued; the backend does not say which.
+   * The name is the organization this account is in now, if any, which is how
+   * a second tap on an invitation already accepted is told apart.
+   */
+  | { status: "invalid"; organizationName: string | null }
+  /** Sent to an address that is not on this account. */
+  | { status: "wrong_email" }
+  | { status: "already_member"; organizationName: string | null }
+  /** No answer: timed out or no connection. */
+  | { status: "offline" }
+  | { status: "failed" };
+
+/** What happened when an email verification link was opened. */
+export type EmailVerificationOutcome =
+  | { status: "verified"; email: string | null }
+  | { status: "already_verified" }
+  | { status: "expired" }
+  /** Already used (a used token is cleared, so it reads as unknown) or never valid. */
+  | { status: "invalid" }
+  | { status: "offline" }
+  | { status: "failed" };
+
 /** One held or owed payout, as shown in the tax panel. */
 export interface AppW9Item {
   source: string;
