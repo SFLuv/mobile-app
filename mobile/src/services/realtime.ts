@@ -49,6 +49,7 @@ export type RealtimeEventKind =
   | "conversation.updated"
   | "conversation.read"
   | "notification"
+  | "notification.resolved"
   | "beta.changed";
 
 /**

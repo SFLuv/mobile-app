@@ -1456,6 +1456,11 @@
     "w9EscrowCard": {},
     "w9TierModal": {
       "ofThreshold": "de {{amount}} {{tokenSymbol}}"
+    },
+    "notificationDetail": {
+      "notification": "Notificación",
+      "close": "Cerrar",
+      "message": "Mensaje"
     }
   },
   "app": {
@@ -1776,5 +1781,46 @@
     "days_one": "{{count}} d",
     "days_many": "{{count}} d",
     "days_other": "{{count}} d"
+  },
+  "emailLinks": {
+    "joinWorkingTitle": "Uniéndote a tu organización",
+    "verifyWorkingTitle": "Verificando tu correo",
+    "workingBody": "Un momento…",
+    "joinedTitle": "Ya eres parte",
+    "joinedBody": "Te uniste a {{name}}.",
+    "joinedBodyNoName": "Te uniste a la organización.",
+    "openOnTheWeb": "Abrir en la web",
+    "inviteInvalidTitle": "Esta invitación no funciona",
+    "inviteInvalidMemberBody": "Esta invitación a {{name}} venció o ya se usó. Pídeles que te envíen una nueva.",
+    "inviteInvalidBody": "Esta invitación venció o ya se usó. Pide a la organización que te envíe una nueva.",
+    "wrongEmailTitle": "Usa el correo invitado",
+    "wrongEmailBody": "Esta invitación se envió a un correo que aún no está en tu cuenta. Agrega y verifica ese correo, y vuelve a abrir la invitación.",
+    "addItOnTheWeb": "Agregarlo en la web",
+    "alreadyMemberTitle": "Ya eres miembro",
+    "alreadyMemberBody": "Ya formas parte de {{name}}.",
+    "alreadyMemberBodyNoName": "Ya formas parte de esta organización.",
+    "offlineTitle": "Sin conexión",
+    "offlineBody": "Revisa tu conexión e inténtalo de nuevo.",
+    "joinFailedTitle": "No se pudo unir",
+    "joinFailedBody": "Algo salió mal al unirte a la organización. Inténtalo de nuevo en un momento.",
+    "verifiedTitle": "Correo verificado",
+    "verifiedBody": "{{email}} está verificado.",
+    "verifiedBodyNoEmail": "Tu correo está verificado.",
+    "alreadyVerifiedBody": "Este correo ya estaba verificado.",
+    "verifyExpiredTitle": "Este enlace venció",
+    "verifyExpiredBody": "Los enlaces de verificación duran un tiempo limitado. Envía uno nuevo desde Configuración.",
+    "openSettingsOnTheWeb": "Abrir Configuración en la web",
+    "verifyInvalidTitle": "Este enlace no funciona",
+    "verifyInvalidBody": "Este enlace de verificación no es válido o ya se usó. Envía uno nuevo desde Configuración.",
+    "verifyFailedTitle": "No se pudo verificar",
+    "verifyFailedBody": "Algo salió mal al verificar tu correo. Inténtalo de nuevo en un momento.",
+    "tryAgain": "Intentar de nuevo",
+    "merchantModeOn": "Sal del modo comercio para abrir este enlace.",
+    "verifiedThenJoining": "Correo verificado. Uniéndote a la organización…",
+    "sessionEndedBody": "Tu sesión terminó. Inicia sesión de nuevo y abre la invitación.",
+    "couldNotOpenTitle": "No se pudo abrir el enlace",
+    "couldNotOpenBody": "Abre {{url}} en tu navegador.",
+    "verifyingNotice": "Verificando tu correo…",
+    "signInToJoin": "Inicia sesión para unirte a la organización que te invitó."
   }
 }

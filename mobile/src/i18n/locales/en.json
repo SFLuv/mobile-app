@@ -1431,6 +1431,11 @@
     "w9EscrowCard": {},
     "w9TierModal": {
       "ofThreshold": "of {{amount}} {{tokenSymbol}}"
+    },
+    "notificationDetail": {
+      "notification": "Notification",
+      "close": "Close",
+      "message": "Message"
     }
   },
   "app": {
@@ -1739,5 +1744,46 @@
     "hours_other": "{{count}}h",
     "days_one": "{{count}}d",
     "days_other": "{{count}}d"
+  },
+  "emailLinks": {
+    "joinWorkingTitle": "Joining your organization",
+    "verifyWorkingTitle": "Verifying your email",
+    "workingBody": "One moment…",
+    "joinedTitle": "You're in",
+    "joinedBody": "You've joined {{name}}.",
+    "joinedBodyNoName": "You've joined the organization.",
+    "openOnTheWeb": "Open on the web",
+    "inviteInvalidTitle": "This invitation doesn't work",
+    "inviteInvalidMemberBody": "This invitation to {{name}} has expired or was already used. Ask them to send a new one.",
+    "inviteInvalidBody": "This invitation has expired or was already used. Ask the organization to send a new one.",
+    "wrongEmailTitle": "Use the invited email",
+    "wrongEmailBody": "This invitation was sent to an email address that isn't on your account yet. Add and verify that address, then open the invitation again.",
+    "addItOnTheWeb": "Add it on the web",
+    "alreadyMemberTitle": "Already a member",
+    "alreadyMemberBody": "You're already in {{name}}.",
+    "alreadyMemberBodyNoName": "You're already in this organization.",
+    "offlineTitle": "No connection",
+    "offlineBody": "Check your connection and try again.",
+    "joinFailedTitle": "Couldn't join",
+    "joinFailedBody": "Something went wrong joining the organization. Try again in a moment.",
+    "verifiedTitle": "Email verified",
+    "verifiedBody": "{{email}} is verified.",
+    "verifiedBodyNoEmail": "Your email address is verified.",
+    "alreadyVerifiedBody": "This email address was already verified.",
+    "verifyExpiredTitle": "This link has expired",
+    "verifyExpiredBody": "Verification links last a limited time. Send a new one from Settings.",
+    "openSettingsOnTheWeb": "Open Settings on the web",
+    "verifyInvalidTitle": "This link doesn't work",
+    "verifyInvalidBody": "This verification link isn't valid or was already used. Send a new one from Settings.",
+    "verifyFailedTitle": "Couldn't verify",
+    "verifyFailedBody": "Something went wrong verifying your email. Try again in a moment.",
+    "tryAgain": "Try again",
+    "merchantModeOn": "Leave merchant mode to open this link.",
+    "verifiedThenJoining": "Email verified. Joining the organization now…",
+    "sessionEndedBody": "Your session ended. Sign in again, then open the invitation.",
+    "couldNotOpenTitle": "Couldn't open the link",
+    "couldNotOpenBody": "Open {{url}} in your browser.",
+    "verifyingNotice": "Verifying your email…",
+    "signInToJoin": "Sign in to join the organization you were invited to."
   }
 }

@@ -35,6 +35,8 @@ import {
   AppW9Status,
   AppW9Tier,
   RedeemOutcome,
+  EmailVerificationOutcome,
+  OrganizationJoinOutcome,
   AppMerchantModeStatus,
   AppOwnedLocation,
   AppTransaction,
@@ -862,6 +864,18 @@ async function throwRequestError(response: Response, fallbackMessage: string): P
   }
   const message = detail ? `${fallbackMessage} (${response.status}): ${detail}` : `${fallbackMessage} (${response.status}).`;
   throw new AppBackendRequestError(message, response.status, detail || undefined);
+}
+
+/**
+ * Reports a response the caller treats as a failure, for a caller that answers
+ * with an outcome rather than throwing. Same report as throwRequestError.
+ */
+async function reportFailedResponse(response: Response): Promise<void> {
+  const detail = await readResponseDetail(response);
+  const record = requestRecords.get(response);
+  if (record) {
+    reportRequestFailure({ ...record, detail });
+  }
 }
 
 function asString(value: unknown, fallback = ""): string {
@@ -1986,6 +2000,7 @@ function mapInternalNotification(input: unknown): AppInternalNotification | null
     setLabel: asString(record.set_label),
     topic: asString(record.topic),
     topicLabel: asString(record.topic_label),
+    subtitle: asString(record.subtitle),
     alertKey: asString(record.alert_key),
     fields: mapNotificationFields(record.fields),
     urgent: record.urgent === true,
@@ -2344,31 +2359,36 @@ export class AppBackendClient {
     return mapClientVersion((await response.json()) as ClientVersionResponse);
   }
 
+  /** A 401 or 403 read as the session being refused, or the privacy policy gate. */
+  private async throwSessionRejection(response: Response): Promise<never> {
+    if (
+      response.status === 403 &&
+      response.headers.get(POLICY_REQUIRED_HEADER) === POLICY_REQUIRED_REASON
+    ) {
+      let policyStatus: AppUserPolicyStatus | undefined;
+      try {
+        policyStatus = (await this.getUserPolicyStatus()) ?? undefined;
+      } catch {
+        policyStatus = undefined;
+      }
+      const detail = await readResponseDetail(response);
+      const message = detail
+        ? `Shared app backend requires privacy policy acceptance (${response.status}): ${detail}`
+        : "Shared app backend requires privacy policy acceptance before this request can continue.";
+      throw new AppBackendPolicyRequiredError(message, response.status, policyStatus);
+    }
+
+    const detail = await readResponseDetail(response);
+    const message = detail
+      ? `Shared app backend rejected this Privy session (${response.status}): ${detail}`
+      : "Shared app backend rejected this Privy session. Please sign out and sign in again.";
+    throw new AppBackendAuthError(message, response.status);
+  }
+
   private async authFetch(path: string, options: AppRequestInit = {}): Promise<Response> {
     const response = await this.rawAuthFetch(path, options);
     if (response.status === 401 || response.status === 403) {
-      if (
-        response.status === 403 &&
-        response.headers.get(POLICY_REQUIRED_HEADER) === POLICY_REQUIRED_REASON
-      ) {
-        let policyStatus: AppUserPolicyStatus | undefined;
-        try {
-          policyStatus = (await this.getUserPolicyStatus()) ?? undefined;
-        } catch {
-          policyStatus = undefined;
-        }
-        const detail = await readResponseDetail(response);
-        const message = detail
-          ? `Shared app backend requires privacy policy acceptance (${response.status}): ${detail}`
-          : "Shared app backend requires privacy policy acceptance before this request can continue.";
-        throw new AppBackendPolicyRequiredError(message, response.status, policyStatus);
-      }
-
-      const detail = await readResponseDetail(response);
-      const message = detail
-        ? `Shared app backend rejected this Privy session (${response.status}): ${detail}`
-        : "Shared app backend rejected this Privy session. Please sign out and sign in again.";
-      throw new AppBackendAuthError(message, response.status);
+      await this.throwSessionRejection(response);
     }
 
     return response;
@@ -3678,6 +3698,107 @@ export class AppBackendClient {
       createdAt: entry.created_at,
       updatedAt: entry.updated_at,
     }));
+  }
+
+  /**
+   * Confirms an email address from the link in its verification email, the
+   * same call the web's /verify page makes. Needs no session: the token is the
+   * proof, so this works for somebody who is signed out.
+   */
+  async verifyEmailToken(token: string): Promise<EmailVerificationOutcome> {
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(
+        endpoint("/users/verified-emails/verify"),
+        {
+          method: "POST",
+          headers: { ...clientMetadataHeaders(), "Content-Type": "application/json" },
+          body: JSON.stringify({ token: token.trim() }),
+        },
+        APP_BACKEND_REQUEST_TIMEOUT_MS,
+      );
+    } catch {
+      return { status: "offline" };
+    }
+
+    if (response.ok) {
+      const body = (await response.json().catch(() => null)) as { email?: unknown } | null;
+      const email = typeof body?.email === "string" ? body.email.trim() : "";
+      return { status: "verified", email: email || null };
+    }
+    if (response.status === 410) {
+      return { status: "expired" };
+    }
+    if (response.status === 404 || response.status === 400) {
+      const detail = (await readResponseDetail(response)).toLowerCase();
+      return detail.includes("already verified") ? { status: "already_verified" } : { status: "invalid" };
+    }
+    await reportFailedResponse(response);
+    return { status: "failed" };
+  }
+
+  /**
+   * Accepts an organization invitation: the link in the invite email.
+   *
+   * Not authFetch, which reads every 403 as "sign in again". This route also
+   * answers 403 when the invitation went to an address that is not on the
+   * account, which says nothing about the session. That one carries a body;
+   * the guards' own 403s are empty, and the policy gate is marked by a header,
+   * so a refused session still goes the usual way.
+   */
+  async joinOrganization(token: string): Promise<OrganizationJoinOutcome> {
+    let response: Response;
+    try {
+      response = await this.rawAuthFetch("/organizations/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: token.trim() }),
+      });
+    } catch (error) {
+      if (error instanceof AppBackendAuthError) {
+        throw error;
+      }
+      return { status: "offline" };
+    }
+
+    if (response.ok) {
+      return { status: "joined", organizationName: await this.getMyOrganizationName() };
+    }
+    if (response.status === 400) {
+      return { status: "invalid", organizationName: await this.getMyOrganizationName() };
+    }
+    if (response.status === 409) {
+      return { status: "already_member", organizationName: await this.getMyOrganizationName() };
+    }
+    if (response.status === 403 && response.headers.get(POLICY_REQUIRED_HEADER) !== POLICY_REQUIRED_REASON) {
+      if (await readResponseDetail(response)) {
+        return { status: "wrong_email" };
+      }
+      throw new AppBackendAuthError(
+        "Shared app backend rejected this Privy session. Please sign out and sign in again.",
+        response.status,
+      );
+    }
+    if (response.status === 401 || response.status === 403) {
+      await this.throwSessionRejection(response);
+    }
+    await reportFailedResponse(response);
+    return { status: "failed" };
+  }
+
+  /** The name of the organization this account belongs to, for copy. Null when it has none or the lookup fails. */
+  private async getMyOrganizationName(): Promise<string | null> {
+    try {
+      const response = await this.rawAuthFetch("/organizations/mine");
+      if (!response.ok) {
+        return null;
+      }
+      const body = (await response.json()) as { organization?: { name?: unknown } };
+      const name = typeof body.organization?.name === "string" ? body.organization.name.trim() : "";
+      return name || null;
+    } catch {
+      return null;
+    }
   }
 
   async requestVerifiedEmail(email: string): Promise<VerifiedEmail> {

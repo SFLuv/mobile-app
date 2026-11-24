@@ -170,6 +170,110 @@ export async function dismissConversationFromTray(conversationId: number): Promi
   }
 }
 
+/**
+ * Clears one handled team notification from the OS tray.
+ *
+ * Matched on the notification's internal id where the push carried one, and on
+ * its alert key otherwise: a condition that comes back gets a new id under the
+ * same key, and the key alone would clear the new one with the old.
+ */
+export async function dismissTeamNotificationFromTray(alertKey: string, internalId?: string): Promise<void> {
+  if (!alertKey && !internalId) {
+    return;
+  }
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    await Promise.all(
+      presented
+        .filter((notification) => {
+          const data = (notification.request.content.data ?? {}) as Record<string, unknown>;
+          const id = typeof data.internal_id === "string" ? data.internal_id : "";
+          if (internalId && id) {
+            return id === internalId;
+          }
+          return Boolean(alertKey) && data.alert_key === alertKey;
+        })
+        .map((notification) => Notifications.dismissNotificationAsync(notification.request.identifier).catch(() => {})),
+    );
+  } catch {
+    // The tray could not be read. The next time the app comes forward, the
+    // reconcile below catches it.
+  }
+}
+
+/**
+ * Clears every team notification from the OS tray that is no longer live, by
+ * the feed the app has just fetched. The fallback for a handled notification
+ * whose silent push never arrived: iOS rations those.
+ *
+ * Only notifications older than the fetch are judged, so one that arrived
+ * while the feed was loading is not taken for handled.
+ */
+export async function dismissSettledTeamNotifications(liveInternalIds: Set<number>, fetchedAt: number): Promise<void> {
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    await Promise.all(
+      presented
+        .filter((notification) => {
+          const data = (notification.request.content.data ?? {}) as Record<string, unknown>;
+          if (typeof data.type !== "string" || !data.type.startsWith("internal_")) {
+            return false;
+          }
+          const id = Number(data.internal_id);
+          const at = notification.date ? Number(notification.date) : 0;
+          return Number.isFinite(id) && id > 0 && !liveInternalIds.has(id) && at > 0 && at < fetchedAt;
+        })
+        .map((notification) => Notifications.dismissNotificationAsync(notification.request.identifier).catch(() => {})),
+    );
+  } catch {
+    // Nothing to do: the tray could not be read.
+  }
+}
+
+/**
+ * Finds what a silent "clear this" push asks to clear, wherever the platform
+ * put it. A background task receives the push in a different wrapper on iOS
+ * and on Android, and Android sometimes as a JSON string, so this looks for
+ * the keys rather than trusting one shape.
+ */
+export function dismissalFromPayload(payload: unknown): { alertKey: string; internalId: string } | null {
+  const seen = new Set<unknown>();
+  const visit = (value: unknown, depth: number): { alertKey: string; internalId: string } | null => {
+    if (depth > 6 || value === null || value === undefined || seen.has(value)) {
+      return null;
+    }
+    if (typeof value === "string") {
+      if (!value.includes("dismiss_alert_key")) {
+        return null;
+      }
+      try {
+        return visit(JSON.parse(value), depth + 1);
+      } catch {
+        return null;
+      }
+    }
+    if (typeof value !== "object") {
+      return null;
+    }
+    seen.add(value);
+    const record = value as Record<string, unknown>;
+    if (typeof record.dismiss_alert_key === "string" && record.dismiss_alert_key) {
+      return {
+        alertKey: record.dismiss_alert_key,
+        internalId: typeof record.dismiss_internal_id === "string" ? record.dismiss_internal_id : "",
+      };
+    }
+    for (const child of Object.values(record)) {
+      const found = visit(child, depth + 1);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  };
+  return visit(payload, 0);
+}
+
 export function itemFromNotification(notification: Notifications.Notification): InboxNotification {
   const identifier = notification.request.identifier;
   const receivedAt = notification.date ? Number(notification.date) : Date.now();
