@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { ethers } from "ethers";
-import { Animated, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { Animated, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from "react-native";
+import { Text } from "../components/AppText";
 import {
   AppCredentialRequest,
   AppGlobalCredentialType,
@@ -22,6 +23,9 @@ import {
 import { AppPreferences, SendFlowEntryMode, ThemePreference } from "../types/preferences";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import * as MediaLibrary from "expo-media-library";
+import { useTranslation } from "react-i18next";
+import i18next, { LanguagePreference, SUPPORTED_LANGUAGES } from "../i18n";
+import { clearReturnPoint, loadReturnPoint, peekReturnPoint, rememberReturnPoint } from "../i18n/returnPoint";
 import * as Notifications from "expo-notifications";
 import {
   PhoneAccess,
@@ -30,6 +34,8 @@ import {
   useCameraAccess,
   useOnForeground,
 } from "../utils/phonePermissions";
+import { t } from "../i18n";
+import { directionRestartPending, dirIcon, dirSign, releaseDirectionCover } from "../i18n/direction";
 
 type Props = {
   user: AppUser | null;
@@ -102,12 +108,12 @@ function shortAddress(address: string): string {
 
 function walletFallbackName(wallet: AppWallet): string {
   if (wallet.isEoa) {
-    return "Embedded owner wallet";
+    return i18next.t("settings.wallets.embeddedOwner");
   }
   if (typeof wallet.smartIndex === "number") {
-    return `Wallet ${wallet.smartIndex + 1}`;
+    return i18next.t("settings.wallets.numbered", { number: wallet.smartIndex + 1 });
   }
-  return "Wallet";
+  return i18next.t("settings.wallets.wallet");
 }
 
 function walletDisplayName(wallet: AppWallet): string {
@@ -243,10 +249,10 @@ function MerchantPinSwipe({
         onMoveShouldSetPanResponder: (_, gesture) =>
           !disabled && !loading && swipeDistance > 0 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
         onPanResponderMove: (_, gesture) => {
-          translateX.setValue(Math.max(0, Math.min(gesture.dx, swipeDistance)));
+          translateX.setValue(Math.max(0, Math.min(gesture.dx * dirSign(), swipeDistance)));
         },
         onPanResponderRelease: (_, gesture) => {
-          if (gesture.dx >= swipeDistance * 0.72) {
+          if (gesture.dx * dirSign() >= swipeDistance * 0.72) {
             Animated.timing(translateX, {
               toValue: swipeDistance,
               duration: 120,
@@ -272,10 +278,10 @@ function MerchantPinSwipe({
         {loading ? loadingLabel : label}
       </Text>
       <Animated.View
-        style={[styles.pinSwipeThumb, disabled ? styles.pinSwipeThumbDisabled : undefined, { transform: [{ translateX }] }]}
+        style={[styles.pinSwipeThumb, disabled ? styles.pinSwipeThumbDisabled : undefined, { transform: [{ translateX: Animated.multiply(translateX, dirSign()) }] }]}
         {...panResponder.panHandlers}
       >
-        <Ionicons name={loading ? "hourglass-outline" : "arrow-forward"} size={18} color={palette.primaryStrong} />
+        <Ionicons name={loading ? "hourglass-outline" : dirIcon("arrow-forward")} size={18} color={palette.primaryStrong} />
       </Animated.View>
     </View>
   );
@@ -284,15 +290,15 @@ function MerchantPinSwipe({
 function formatPermissionStatus(status: Props["notificationPermissionStatus"]): string {
   switch (status) {
     case "granted":
-      return "Allowed";
+      return i18next.t("settings.notifications.statusAllowed");
     case "denied":
-      return "Blocked";
+      return i18next.t("settings.notifications.statusBlocked");
     case "undetermined":
-      return "Not decided";
+      return i18next.t("settings.notifications.statusNotDecided");
     case "unavailable":
-      return "Device required";
+      return i18next.t("settings.notifications.statusDeviceRequired");
     default:
-      return "Checking";
+      return i18next.t("settings.notifications.statusChecking");
   }
 }
 
@@ -302,7 +308,11 @@ function formatStatusLabel(value?: string | null): string {
   }
   const normalized = value.trim().toLowerCase().replace(/\s+/g, "_");
   if (normalized === "paid_out") {
-    return "Finalized";
+    return i18next.t("settings.improver.finalized");
+  }
+  // The statuses the server sends, as raw words: in the app's language.
+  if (normalized === "approved" || normalized === "pending" || normalized === "rejected" || normalized === "denied") {
+    return i18next.t(`settings.improver.statuses.${normalized}`);
   }
   return value
     .replace(/_/g, " ")
@@ -322,16 +332,19 @@ function ThemeOption({
   label,
   active,
   onPress,
+  fitContent = false,
 }: {
   label: string;
   active: boolean;
+  /** Size to the label rather than share the row equally, for longer translations. */
+  fitContent?: boolean;
   onPress: () => void;
 }) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
 
   return (
-    <Pressable style={[styles.themeOption, active ? styles.themeOptionActive : undefined]} onPress={onPress}>
+    <Pressable style={[styles.themeOption, fitContent ? styles.themeOptionFit : undefined, active ? styles.themeOptionActive : undefined]} onPress={onPress}>
       <Text style={[styles.themeOptionText, active ? styles.themeOptionTextActive : undefined]}>{label}</Text>
     </Pressable>
   );
@@ -369,15 +382,16 @@ function PermissionRow({
 }) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
+  const { t } = useTranslation();
 
   const status =
     access === "granted"
-      ? "Allowed"
+      ? t("settings.permissions.statusAllowed")
       : access === "blocked"
-        ? "Blocked in your phone's Settings"
+        ? t("settings.permissions.statusBlocked")
         : access === "askable"
-          ? "Not allowed yet"
-          : "Checking...";
+          ? t("settings.permissions.statusAskable")
+          : t("settings.permissions.statusChecking");
 
   return (
     <View style={styles.preferenceRow}>
@@ -399,7 +413,18 @@ function PermissionRow({
             onAllow();
           }}
         >
-          <Text style={styles.syncButtonText}>{access === "blocked" ? "Open Settings" : "Allow"}</Text>
+          <Text style={styles.syncButtonText}>{access === "blocked" ? t("common.openSettings") : t("common.allow")}</Text>
+        </Pressable>
+      ) : access === "granted" ? (
+        // Only the phone can take a permission back, so this goes where that
+        // is done. iOS restarts SFLuv when one is turned off there.
+        <Pressable
+          style={styles.syncButton}
+          accessibilityRole="button"
+          accessibilityHint={t("settings.permissions.turnOffHint")}
+          onPress={openPhoneSettings}
+        >
+          <Text style={styles.syncButtonText}>{t("settings.permissions.turnOff")}</Text>
         </Pressable>
       ) : null}
     </View>
@@ -407,14 +432,16 @@ function PermissionRow({
 }
 
 /**
- * The phone-level permissions SFLuv uses, each with the one action that fixes
+ * The phone-level permissions SFLuv uses, each with the one action that changes
  * it. These are not switches: only the phone can grant or revoke them, so a row
  * either shows the system popup (not asked yet) or opens SFLuv's page in the
- * phone's Settings (refused, and the popup will not come back).
+ * phone's Settings (refused, and the popup will not come back; or allowed, to
+ * turn it off there).
  */
 function PhonePermissionsCard({ onNotificationsAllowed }: { onNotificationsAllowed: () => void }) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
+  const { t } = useTranslation();
 
   const camera = useCameraAccess();
   // Add-only, the same access saving a chat photo asks for (attachmentFiles.ts).
@@ -448,22 +475,22 @@ function PhonePermissionsCard({ onNotificationsAllowed }: { onNotificationsAllow
 
   return (
     <View style={styles.card}>
-      <Text style={styles.sectionTitle}>Phone permissions</Text>
+      <Text style={styles.sectionTitle}>{t("settings.permissions.title")}</Text>
       <PermissionRow
-        title="Camera"
-        body="Scan payment, reward and contact QR codes, and take workflow photos."
+        title={t("settings.permissions.cameraTitle")}
+        body={t("settings.permissions.cameraBody")}
         access={camera.access}
         onAllow={() => void camera.ask()}
       />
       <PermissionRow
-        title="Photos"
-        body="Save pictures from your chats to your photo library."
+        title={t("settings.permissions.photosTitle")}
+        body={t("settings.permissions.photosBody")}
         access={phoneAccessOf(photos)}
         onAllow={() => void requestPhotos()}
       />
       <PermissionRow
-        title="Notifications"
-        body="Payments, messages, reminders and other updates."
+        title={t("settings.permissions.notificationsTitle")}
+        body={t("settings.permissions.notificationsBody")}
         access={phoneAccessOf(notifications)}
         onAllow={() => {
           void (async () => {
@@ -472,6 +499,49 @@ function PhonePermissionsCard({ onNotificationsAllowed }: { onNotificationsAllow
           })();
         }}
       />
+    </View>
+  );
+}
+
+/**
+ * Language choice: follow the phone, or pick one of the app's languages.
+ * Hidden while English is the only language the app ships.
+ */
+function LanguageCard({
+  value,
+  onChange,
+}: {
+  value: LanguagePreference;
+  onChange: (next: LanguagePreference) => void;
+}) {
+  const { palette } = useAppTheme();
+  const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
+  const { t } = useTranslation();
+
+  if (SUPPORTED_LANGUAGES.length < 2) {
+    return null;
+  }
+
+  const options: Array<{ code: LanguagePreference; label: string }> = [
+    { code: "system", label: t("settings.language.system") },
+    ...SUPPORTED_LANGUAGES.map((language) => ({ code: language.code, label: language.nativeName })),
+  ];
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.sectionTitle}>{t("settings.language.title")}</Text>
+      <Text style={styles.preferenceBody}>{t("settings.language.body")}</Text>
+      <View style={styles.languageOptions}>
+        {options.map((option) => (
+          <ThemeOption
+            key={option.code}
+            label={option.label}
+            fitContent
+            active={value === option.code}
+            onPress={() => onChange(option.code)}
+          />
+        ))}
+      </View>
     </View>
   );
 }
@@ -522,10 +592,9 @@ function reminderHourOptions(current: number): number[] {
 
 function formatReminderHours(hours: number): string {
   if (hours % 24 === 0) {
-    const days = hours / 24;
-    return days === 1 ? "1 day" : `${days} days`;
+    return i18next.t("settings.notifications.reminderDays", { count: hours / 24 });
   }
-  return hours === 1 ? "1 hour" : `${hours} hours`;
+  return i18next.t("settings.notifications.reminderHours", { count: hours });
 }
 
 function SocialAccountRow({
@@ -552,6 +621,7 @@ function SocialAccountRow({
   onPress?: () => void;
 }) {
   const { palette } = useAppTheme();
+  const { t } = useTranslation();
   const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
 
   return (
@@ -566,7 +636,7 @@ function SocialAccountRow({
               <Text style={styles.socialProviderTitle}>{provider}</Text>
               {linked ? (
                 <View style={styles.socialLinkedPill}>
-                  <Text style={styles.socialLinkedPillText}>Linked</Text>
+                  <Text style={styles.socialLinkedPillText}>{t("settings.social.linked")}</Text>
                 </View>
               ) : null}
             </View>
@@ -616,6 +686,7 @@ function WalletSettingsRow({
   onSetWalletVisibility: (wallet: AppWallet, shouldShow: boolean) => Promise<void>;
 }) {
   const { palette } = useAppTheme();
+  const { t } = useTranslation();
   const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
   const [draftName, setDraftName] = useState(walletDisplayName(wallet));
   const [saveState, setSaveState] = useState<{
@@ -655,11 +726,11 @@ function WalletSettingsRow({
       <View style={styles.walletRowHeader}>
         <View style={styles.walletRowBadges}>
           <View style={styles.walletTypePill}>
-            <Text style={styles.walletTypePillText}>{wallet.isEoa ? "Owner" : "Smart wallet"}</Text>
+            <Text style={styles.walletTypePillText}>{wallet.isEoa ? t("settings.wallets.owner") : t("settings.wallets.smartWallet")}</Text>
           </View>
           {isPrimary ? (
             <View style={styles.primaryPill}>
-              <Text style={styles.primaryPillText}>Primary</Text>
+              <Text style={styles.primaryPillText}>{t("settings.wallets.primary")}</Text>
             </View>
           ) : null}
         </View>
@@ -688,15 +759,15 @@ function WalletSettingsRow({
             void onRenameWallet(wallet, editableName)
               .then(() => {
                 setSaveState((current) => ({ ...current, nameSaving: false }));
-                setSuccess("Wallet name updated.");
+                setSuccess(t("settings.wallets.nameUpdated"));
               })
               .catch((error) => {
                 setSaveState((current) => ({ ...current, nameSaving: false }));
-                setError((error as Error)?.message || "Unable to update wallet name.");
+                setError((error as Error)?.message || t("settings.wallets.nameUpdateFailed"));
               });
           }}
         >
-          <Text style={styles.secondaryButtonText}>{saveState.nameSaving ? "Saving..." : "Save name"}</Text>
+          <Text style={styles.secondaryButtonText}>{saveState.nameSaving ? t("common.saving") : t("settings.wallets.saveName")}</Text>
         </Pressable>
 
         <Pressable
@@ -707,16 +778,16 @@ function WalletSettingsRow({
             void onSetPrimaryWallet(address)
               .then(() => {
                 setSaveState((current) => ({ ...current, primarySaving: false }));
-                setSuccess("Primary wallet updated.");
+                setSuccess(t("settings.wallets.primaryUpdated"));
               })
               .catch((error) => {
                 setSaveState((current) => ({ ...current, primarySaving: false }));
-                setError((error as Error)?.message || "Unable to update primary wallet.");
+                setError((error as Error)?.message || t("settings.wallets.primaryUpdateFailed"));
               });
           }}
         >
           <Text style={styles.primaryActionButtonText}>
-            {saveState.primarySaving ? "Saving..." : isPrimary ? "Primary wallet" : "Set primary"}
+            {saveState.primarySaving ? t("common.saving") : isPrimary ? t("settings.wallets.primaryWallet") : t("settings.wallets.setPrimary")}
           </Text>
         </Pressable>
       </View>
@@ -724,8 +795,8 @@ function WalletSettingsRow({
       {!wallet.isEoa ? (
         <View style={styles.visibilityRow}>
           <View style={styles.preferenceCopy}>
-            <Text style={styles.preferenceTitle}>Show in wallet chooser</Text>
-            <Text style={styles.preferenceBody}>Controls whether this smart wallet appears in the mobile wallet picker.</Text>
+            <Text style={styles.preferenceTitle}>{t("settings.wallets.showInChooser")}</Text>
+            <Text style={styles.preferenceBody}>{t("settings.wallets.showInChooserBody")}</Text>
           </View>
           <Switch
             trackColor={{ false: palette.borderStrong, true: palette.primarySoft }}
@@ -737,17 +808,17 @@ function WalletSettingsRow({
               void onSetWalletVisibility(wallet, next)
                 .then(() => {
                   setSaveState((current) => ({ ...current, visibilitySaving: false }));
-                  setSuccess("Wallet display updated.");
+                  setSuccess(t("settings.wallets.displayUpdated"));
                 })
                 .catch((error) => {
                   setSaveState((current) => ({ ...current, visibilitySaving: false }));
-                  setError((error as Error)?.message || "Unable to update wallet visibility.");
+                  setError((error as Error)?.message || t("settings.wallets.visibilityUpdateFailed"));
                 });
             }}
           />
         </View>
       ) : (
-        <Text style={styles.walletHelperText}>The owner wallet is used for account bootstrap and is not shown in the smart-wallet chooser.</Text>
+        <Text style={styles.walletHelperText}>{t("settings.wallets.ownerHelper")}</Text>
       )}
 
       {saveState.error ? <Text style={styles.inlineError}>{saveState.error}</Text> : null}
@@ -774,6 +845,7 @@ function MerchantModeSettingsCard({
   enrollableLocations?: AppMerchantModeLocation[];
 }) {
   const { palette } = useAppTheme();
+  const { t } = useTranslation();
   const styles = useMemo(() => createStyles(palette, getShadows(palette)), [palette]);
   // The server's list is authoritative: it only contains shops that are
   // approved and have somewhere for money to land, so anything in it can
@@ -841,12 +913,12 @@ function MerchantModeSettingsCard({
       return;
     }
     if (!pinValid) {
-      setLocalError("Enter a 6 digit PIN.");
+      setLocalError(t("settings.merchant.enterPin"));
       setLocalMessage(null);
       return;
     }
     if (!currentPinValid) {
-      setLocalError("Enter the current 6 digit PIN before resetting it.");
+      setLocalError(t("settings.merchant.enterCurrentPin"));
       setLocalMessage(null);
       return;
     }
@@ -857,9 +929,9 @@ function MerchantModeSettingsCard({
       setCurrentPin("");
       setPin("");
       setEditingPinField(passcodeSet ? "current" : "new");
-      setLocalMessage(passcodeSet ? "Merchant mode PIN reset." : "Merchant mode PIN saved.");
+      setLocalMessage(passcodeSet ? t("settings.merchant.pinReset") : t("settings.merchant.pinSaved"));
     } catch (error) {
-      setLocalError((error as Error)?.message || "Unable to save merchant mode PIN.");
+      setLocalError((error as Error)?.message || t("settings.merchant.pinSaveFailed"));
     }
   };
 
@@ -872,21 +944,21 @@ function MerchantModeSettingsCard({
     try {
       await onEnable(selectedLocationID);
     } catch (error) {
-      setLocalError((error as Error)?.message || "Unable to enable merchant mode.");
+      setLocalError((error as Error)?.message || t("settings.merchant.enableFailed"));
     }
   };
 
   return (
     <View style={styles.card}>
-      <Text style={styles.sectionTitle}>Merchant Mode</Text>
+      <Text style={styles.sectionTitle}>{t("settings.merchant.title")}</Text>
 
       {activeDevice ? (
         <View style={styles.merchantModeActiveCard}>
           <Ionicons name="lock-closed" size={18} color={palette.primaryStrong} />
           <View style={styles.preferenceCopy}>
-            <Text style={styles.preferenceTitle}>Merchant mode is active</Text>
+            <Text style={styles.preferenceTitle}>{t("settings.merchant.active")}</Text>
             <Text style={styles.preferenceBody}>
-              {activeDevice.locationName} uses {shortAddress(activeDevice.walletAddress)} on this device.
+              {t("settings.merchant.usesWalletOnDevice", { location: activeDevice.locationName, address: shortAddress(activeDevice.walletAddress) })}
             </Text>
           </View>
         </View>
@@ -899,14 +971,14 @@ function MerchantModeSettingsCard({
           void enableMerchantMode();
         }}
       >
-        <Text style={styles.primaryActionButtonText}>{busy ? "Enabling..." : "Enable Merchant Mode on this device"}</Text>
+        <Text style={styles.primaryActionButtonText}>{busy ? t("settings.merchant.enabling") : t("settings.merchant.enable")}</Text>
       </Pressable>
-      {!passcodeSet ? <Text style={styles.meta}>Save a 6 digit exit PIN before enabling Merchant Mode.</Text> : null}
+      {!passcodeSet ? <Text style={styles.meta}>{t("settings.merchant.savePinFirst")}</Text> : null}
 
       <View style={styles.preferenceStack}>
-        <Text style={styles.preferenceTitle}>Location</Text>
+        <Text style={styles.preferenceTitle}>{t("settings.merchant.location")}</Text>
         {approvedLocations.length === 0 ? (
-          <Text style={styles.meta}>No approved merchant locations are available yet.</Text>
+          <Text style={styles.meta}>{t("settings.merchant.noLocations")}</Text>
         ) : (
           <View style={styles.optionList}>
             {approvedLocations.map((location) => {
@@ -918,9 +990,9 @@ function MerchantModeSettingsCard({
                   onPress={() => setSelectedLocationID(location.id)}
                 >
                   <Text style={[styles.selectOptionTitle, selected ? styles.selectOptionTitleActive : undefined]}>
-                    {location.name || "Merchant location"}
+                    {location.name || t("settings.merchant.locationFallback")}
                   </Text>
-                  <Text style={styles.selectOptionMeta}>{location.street || "Approved SFLuv location"}</Text>
+                  <Text style={styles.selectOptionMeta}>{location.street || t("settings.merchant.approvedLocation")}</Text>
                 </Pressable>
               );
             })}
@@ -929,19 +1001,19 @@ function MerchantModeSettingsCard({
       </View>
 
       <View style={styles.preferenceStack}>
-        <Text style={styles.preferenceTitle}>{passcodeSet ? "Reset 6 digit exit PIN" : "Create 6 digit exit PIN"}</Text>
+        <Text style={styles.preferenceTitle}>{passcodeSet ? t("settings.merchant.resetPin") : t("settings.merchant.createPin")}</Text>
         <Text style={styles.preferenceBody}>
           {passcodeSet
-            ? "Enter the current PIN before choosing a new exit PIN."
-            : "This PIN is required to exit Merchant Mode on the device."}
+            ? t("settings.merchant.resetPinBody")
+            : t("settings.merchant.createPinBody")}
         </Text>
         {passcodeSet ? (
           <Pressable onPress={() => setEditingPinField("current")}>
-            <Text style={styles.pinFieldLabel}>Current PIN</Text>
+            <Text style={styles.pinFieldLabel}>{t("settings.merchant.currentPin")}</Text>
             <View style={editingPinField === "current" ? styles.pinDisplayActive : undefined}>
               <MerchantPinInput
                 value={currentPin}
-                placeholder="Enter current PIN"
+                placeholder={t("settings.merchant.currentPinPlaceholder")}
                 visible={currentPinVisible}
                 onToggleVisible={() => setCurrentPinVisible((current) => !current)}
               />
@@ -949,11 +1021,11 @@ function MerchantModeSettingsCard({
           </Pressable>
         ) : null}
         <Pressable onPress={() => setEditingPinField("new")}>
-          <Text style={styles.pinFieldLabel}>New PIN</Text>
+          <Text style={styles.pinFieldLabel}>{t("settings.merchant.newPin")}</Text>
           <View style={editingPinField === "new" ? styles.pinDisplayActive : undefined}>
             <MerchantPinInput
               value={pin}
-              placeholder="Enter new PIN"
+              placeholder={t("settings.merchant.newPinPlaceholder")}
               visible={newPinVisible}
               onToggleVisible={() => setNewPinVisible((current) => !current)}
             />
@@ -966,8 +1038,8 @@ function MerchantModeSettingsCard({
         <MerchantPinSwipe
           disabled={!canSetPin}
           loading={busy}
-          label={passcodeSet ? "Slide to reset PIN" : "Slide to save PIN"}
-          loadingLabel="Saving"
+          label={passcodeSet ? t("settings.merchant.slideReset") : t("settings.merchant.slideSave")}
+          loadingLabel={t("settings.merchant.savingShort")}
           onComplete={() => {
             void submitPIN();
           }}
@@ -1038,8 +1110,60 @@ export function SettingsScreen({
   onContactSupport,
 }: Props) {
   const { palette, shadows } = useAppTheme();
+  const { t } = useTranslation();
   const styles = useMemo(() => createStyles(palette, shadows), [palette, shadows]);
-  const [section, setSection] = useState<SettingsSection>("general");
+  const [section, setSection] = useState<SettingsSection>(
+    () => (peekReturnPoint()?.section as SettingsSection | undefined) ?? "general",
+  );
+  // Where the list was scrolled to, saved with the return point so a language
+  // change puts the Language card back where it was rather than at the top.
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollYRef = useRef(0);
+  const restoreScrollRef = useRef<number | null>(peekReturnPoint()?.scrollY ?? null);
+  const viewportHeightRef = useRef(0);
+  useEffect(() => {
+    // Applied: a language change brought them back here. Clear it so it is
+    // not reused, after picking up a point saved before a restart.
+    void loadReturnPoint().then((point) => {
+      if (point?.section) {
+        setSection(point.section as SettingsSection);
+      }
+      if (restoreScrollRef.current === null && point?.scrollY) {
+        restoreScrollRef.current = point.scrollY;
+      }
+      if (!point?.scrollY) {
+        releaseDirectionCover();
+      }
+      // Keep it through a right-to-left restart, which comes back here too.
+      if (!directionRestartPending()) {
+        clearReturnPoint();
+      }
+    });
+  }, []);
+  // Scrolls back as far as the list allows each time it grows, and lets the
+  // cover go once it reaches the spot. The other language's text can make the
+  // list shorter than it was, so whatever is drawn by a second in counts.
+  const restoreScroll = (contentHeight: number) => {
+    const y = restoreScrollRef.current;
+    if (y === null) {
+      return;
+    }
+    const reachable = Math.max(0, contentHeight - viewportHeightRef.current);
+    scrollRef.current?.scrollTo({ y: Math.min(y, reachable), animated: false });
+    if (reachable >= y) {
+      restoreScrollRef.current = null;
+      requestAnimationFrame(() => releaseDirectionCover());
+    }
+  };
+  useEffect(() => {
+    const settle = setTimeout(() => {
+      if (restoreScrollRef.current !== null) {
+        restoreScrollRef.current = null;
+        releaseDirectionCover();
+      }
+    }, 1000);
+    return () => clearTimeout(settle);
+  }, []);
   const [showPushDetails, setShowPushDetails] = useState(false);
   const [rewardsWalletDraft, setRewardsWalletDraft] = useState(
     improver?.primaryRewardsAccount?.trim() || primaryWalletAddress || "",
@@ -1094,12 +1218,12 @@ export function SettingsScreen({
 
     const trimmedAddress = rewardsWalletDraft.trim();
     if (!trimmedAddress) {
-      setImproverError("Enter a rewards wallet address.");
+      setImproverError(t("settings.improver.enterRewardsWallet"));
       setImproverMessage(null);
       return;
     }
     if (!ethers.utils.isAddress(trimmedAddress)) {
-      setImproverError("Enter a valid rewards wallet address.");
+      setImproverError(t("settings.improver.invalidRewardsWallet"));
       setImproverMessage(null);
       return;
     }
@@ -1109,9 +1233,9 @@ export function SettingsScreen({
     setImproverMessage(null);
     try {
       await onUpdateImproverRewardsWallet(ethers.utils.getAddress(trimmedAddress));
-      setImproverMessage("Improver rewards wallet updated.");
+      setImproverMessage(t("settings.improver.rewardsWalletUpdated"));
     } catch (error) {
-      setImproverError((error as Error)?.message || "Unable to update the rewards wallet.");
+      setImproverError((error as Error)?.message || t("settings.improver.rewardsWalletUpdateFailed"));
     } finally {
       setImproverBusy(false);
     }
@@ -1137,21 +1261,33 @@ export function SettingsScreen({
 
   return (
     <>
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
+        scrollEventThrottle={100}
+        onScroll={(event) => {
+          scrollYRef.current = event.nativeEvent.contentOffset.y;
+        }}
+        onLayout={(event) => {
+          viewportHeightRef.current = event.nativeEvent.layout.height;
+        }}
+        onContentSizeChange={(_width, height) => restoreScroll(height)}
+      >
       {syncNotice ? (
         <View style={styles.noticeCard}>
-          <Text style={styles.noticeTitle}>App Sync</Text>
+          <Text style={styles.noticeTitle}>{t("settings.appSync")}</Text>
           <Text style={styles.body}>{syncNotice}</Text>
         </View>
       ) : null}
 
       <SegmentedTabs
         segments={[
-          { value: "general" as SettingsSection, label: "General" },
-          { value: "wallets" as SettingsSection, label: "Wallets" },
-          { value: "account" as SettingsSection, label: "Account" },
-          ...(hasMerchantSection ? [{ value: "merchant" as SettingsSection, label: "Merchant" }] : []),
-          ...(hasImproverSection ? [{ value: "improver" as SettingsSection, label: "Improver" }] : []),
+          { value: "general" as SettingsSection, label: t("settings.tabs.general") },
+          { value: "wallets" as SettingsSection, label: t("settings.tabs.wallets") },
+          { value: "account" as SettingsSection, label: t("settings.tabs.account") },
+          ...(hasMerchantSection ? [{ value: "merchant" as SettingsSection, label: t("settings.tabs.merchant") }] : []),
+          ...(hasImproverSection ? [{ value: "improver" as SettingsSection, label: t("settings.tabs.improver") }] : []),
         ]}
         value={section}
         onChange={setSection}
@@ -1160,13 +1296,22 @@ export function SettingsScreen({
       {section === "general" ? (
         <>
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Appearance</Text>
+            <Text style={styles.sectionTitle}>{t("settings.appearance.title")}</Text>
             <View style={styles.themeRow}>
-              <ThemeOption label="System" active={preferences.themePreference === "system"} onPress={() => applyThemePreference("system")} />
-              <ThemeOption label="Light" active={preferences.themePreference === "light"} onPress={() => applyThemePreference("light")} />
-              <ThemeOption label="Dark" active={preferences.themePreference === "dark"} onPress={() => applyThemePreference("dark")} />
+              <ThemeOption label={t("settings.appearance.system")} active={preferences.themePreference === "system"} onPress={() => applyThemePreference("system")} />
+              <ThemeOption label={t("settings.appearance.light")} active={preferences.themePreference === "light"} onPress={() => applyThemePreference("light")} />
+              <ThemeOption label={t("settings.appearance.dark")} active={preferences.themePreference === "dark"} onPress={() => applyThemePreference("dark")} />
             </View>
           </View>
+
+          <LanguageCard
+            value={preferences.languagePreference}
+            onChange={(languagePreference) => {
+              // Come back to this screen after the redraw (or restart).
+              rememberReturnPoint({ tab: "settings", section: "general", scrollY: Math.round(scrollYRef.current) });
+              onUpdatePreferences({ ...preferences, languagePreference });
+            }}
+          />
 
           <PhonePermissionsCard onNotificationsAllowed={onSyncNotifications} />
 
@@ -1174,12 +1319,12 @@ export function SettingsScreen({
               diagnostics kept but folded away — they are for troubleshooting,
               not for every visit. */}
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Notifications</Text>
+            <Text style={styles.sectionTitle}>{t("settings.notifications.title")}</Text>
             {volunteerPanelAvailable ? (
               <>
                 <PreferenceRow
-                  title="Volunteer event reminders"
-                  body="A reminder before events you signed up for."
+                  title={t("settings.notifications.volunteerReminders")}
+                  body={t("settings.notifications.volunteerRemindersBody")}
                   value={volunteerReminderPreferences?.enabled ?? true}
                   disabled={!volunteerReminderPreferences || !onUpdateVolunteerReminderPreferences}
                   onValueChange={(enabled) =>
@@ -1218,7 +1363,7 @@ export function SettingsScreen({
             ) : null}
 
             <Pressable style={styles.disclosureRow} onPress={() => setShowPushDetails((current) => !current)}>
-              <Text style={styles.disclosureText}>Delivery status</Text>
+              <Text style={styles.disclosureText}>{t("settings.notifications.deliveryStatus")}</Text>
               <Ionicons
                 name={showPushDetails ? "chevron-up" : "chevron-down"}
                 size={16}
@@ -1228,19 +1373,19 @@ export function SettingsScreen({
             {showPushDetails ? (
               <View style={styles.pushStatusCard}>
                 <View style={styles.pushStatusHeader}>
-                  <Text style={styles.pushStatusTitle}>Push status</Text>
+                  <Text style={styles.pushStatusTitle}>{t("settings.notifications.pushStatus")}</Text>
                   <Pressable
                     style={[styles.syncButton, notificationSyncState === "syncing" ? styles.buttonDisabled : undefined]}
                     disabled={notificationSyncState === "syncing"}
                     onPress={onSyncNotifications}
                   >
-                    <Text style={styles.syncButtonText}>{notificationSyncState === "syncing" ? "Syncing..." : "Sync now"}</Text>
+                    <Text style={styles.syncButtonText}>{notificationSyncState === "syncing" ? t("settings.notifications.syncing") : t("settings.notifications.syncNow")}</Text>
                   </Pressable>
                 </View>
-                <Text style={styles.pushStatusMeta}>System permission: {formatPermissionStatus(notificationPermissionStatus)}</Text>
-                <Text style={styles.pushStatusMeta}>Device token: {notificationTokenRegistered ? "Registered" : "Missing"}</Text>
+                <Text style={styles.pushStatusMeta}>{t("settings.notifications.systemPermission", { status: formatPermissionStatus(notificationPermissionStatus) })}</Text>
+                <Text style={styles.pushStatusMeta}>{t("settings.notifications.deviceToken", { status: notificationTokenRegistered ? t("settings.notifications.registered") : t("settings.notifications.missing") })}</Text>
                 <Text style={styles.pushStatusMeta}>
-                  Wallet subscriptions: {notificationSubscribedCount} / {notificationAddressCount}
+                  {t("settings.notifications.walletSubscriptions", { subscribed: notificationSubscribedCount, total: notificationAddressCount })}
                 </Text>
                 {notificationStatusMessage ? <Text style={styles.pushStatusMessage}>{notificationStatusMessage}</Text> : null}
               </View>
@@ -1248,34 +1393,26 @@ export function SettingsScreen({
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>App behavior</Text>
+            <Text style={styles.sectionTitle}>{t("settings.behavior.title")}</Text>
             <PreferenceRow
-              title="Haptic feedback"
-              body="Buzz on send and receive."
+              title={t("settings.behavior.haptics")}
+              body={t("settings.behavior.hapticsBody")}
               value={preferences.hapticsEnabled}
               onValueChange={(hapticsEnabled) => onUpdatePreferences({ ...preferences, hapticsEnabled })}
             />
-            {volunteerPanelAvailable ? (
-              <PreferenceRow
-                title="Show volunteer panel"
-                body="Keep volunteer events in the bottom navigation."
-                value={preferences.showVolunteerPanel}
-                onValueChange={(showVolunteerPanel) => onUpdatePreferences({ ...preferences, showVolunteerPanel })}
-              />
-            ) : null}
             <View style={styles.preferenceStack}>
               <View style={styles.preferenceCopy}>
-                <Text style={styles.preferenceTitle}>Send opens on</Text>
-                <Text style={styles.preferenceBody}>Search for a recipient, or go straight to the scanner.</Text>
+                <Text style={styles.preferenceTitle}>{t("settings.behavior.sendOpensOn")}</Text>
+                <Text style={styles.preferenceBody}>{t("settings.behavior.sendOpensOnBody")}</Text>
               </View>
               <View style={styles.themeRow}>
                 <SendFlowOption
-                  label="Search"
+                  label={t("settings.behavior.search")}
                   active={preferences.defaultSendEntryMode === "manual"}
                   onPress={() => applyDefaultSendEntryMode("manual")}
                 />
                 <SendFlowOption
-                  label="QR scan"
+                  label={t("settings.behavior.qrScan")}
                   active={preferences.defaultSendEntryMode === "scan"}
                   onPress={() => applyDefaultSendEntryMode("scan")}
                 />
@@ -1286,10 +1423,10 @@ export function SettingsScreen({
       ) : null}
       {section === "wallets" ? (
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Wallet settings</Text>
-          <Text style={styles.body}>Wallet names come from the shared backend. You can rename them here, choose your primary wallet, and decide which smart wallets appear in the chooser.</Text>
+          <Text style={styles.sectionTitle}>{t("settings.wallets.title")}</Text>
+          <Text style={styles.body}>{t("settings.wallets.body")}</Text>
           {wallets.length === 0 ? (
-            <Text style={styles.meta}>No wallets are loaded yet.</Text>
+            <Text style={styles.meta}>{t("settings.wallets.none")}</Text>
           ) : (
             wallets.map((wallet) => (
               <WalletSettingsRow
@@ -1308,19 +1445,19 @@ export function SettingsScreen({
       {section === "account" ? (
         <>
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>{user?.name || "SFLUV User"}</Text>
-            <Text style={styles.meta}>User ID: {user?.id || "Not loaded"}</Text>
-            {user?.contactEmail ? <Text style={styles.meta}>Email: {user.contactEmail}</Text> : null}
-            {user?.contactPhone ? <Text style={styles.meta}>Phone: {user.contactPhone}</Text> : null}
+            <Text style={styles.sectionTitle}>{user?.name || t("settings.account.defaultName")}</Text>
+            <Text style={styles.meta}>{t("settings.account.userId", { id: user?.id || t("settings.account.notLoaded") })}</Text>
+            {user?.contactEmail ? <Text style={styles.meta}>{t("settings.account.email", { email: user.contactEmail })}</Text> : null}
+            {user?.contactPhone ? <Text style={styles.meta}>{t("settings.account.phone", { phone: user.contactPhone })}</Text> : null}
           </View>
 
           <View style={styles.card}>
             <View style={styles.sectionTitleRow}>
-              <Text style={styles.sectionTitle}>Link Socials</Text>
+              <Text style={styles.sectionTitle}>{t("settings.social.title")}</Text>
               <Pressable
                 style={styles.titleInfoButton}
                 accessibilityRole="button"
-                accessibilityLabel="About linked socials"
+                accessibilityLabel={t("settings.social.about")}
                 onPress={() => setSocialHelpVisible(true)}
               >
                 <Ionicons name="information-circle-outline" size={19} color={palette.primaryStrong} />
@@ -1334,11 +1471,11 @@ export function SettingsScreen({
               buttonLabel={
                 googleLinkedNow
                   ? googleCanDisconnect
-                    ? "Disconnect Google"
-                    : "Google linked"
-                  : "Link Google"
+                    ? t("settings.social.disconnectGoogle")
+                    : t("settings.social.googleLinked")
+                  : t("settings.social.linkGoogle")
               }
-              buttonBusyLabel={googleLinkedNow ? "Disconnecting Google..." : "Linking Google..."}
+              buttonBusyLabel={googleLinkedNow ? t("settings.social.disconnectingGoogle") : t("settings.social.linkingGoogle")}
               busy={googleActionBusy}
               buttonDisabled={googleLinkedNow ? !googleCanDisconnect : !onLinkGoogle}
               actionVariant={googleLinkedNow ? "outline" : "primary"}
@@ -1353,11 +1490,11 @@ export function SettingsScreen({
               buttonLabel={
                 appleLinkedNow
                   ? appleCanDisconnect
-                    ? "Disconnect Apple"
-                    : "Apple linked"
-                  : "Link Apple"
+                    ? t("settings.social.disconnectApple")
+                    : t("settings.social.appleLinked")
+                  : t("settings.social.linkApple")
               }
-              buttonBusyLabel={appleLinkedNow ? "Disconnecting Apple..." : "Linking Apple..."}
+              buttonBusyLabel={appleLinkedNow ? t("settings.social.disconnectingApple") : t("settings.social.linkingApple")}
               busy={appleLinkBusy}
               buttonDisabled={appleLinkedNow ? !appleCanDisconnect : !onLinkApple}
               actionVariant={appleLinkedNow ? "outline" : "primary"}
@@ -1375,22 +1512,22 @@ export function SettingsScreen({
               style={styles.supportButton}
               onPress={onContactSupport}
               accessibilityRole="button"
-              accessibilityLabel="Contact SFLuv"
+              accessibilityLabel={t("settings.account.contact")}
             >
               <Ionicons name="help-buoy-outline" size={18} color={palette.primaryStrong} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.supportButtonText}>Contact SFLuv</Text>
+                <Text style={styles.supportButtonText}>{t("settings.account.contact")}</Text>
                 <Text style={styles.supportButtonHint}>
-                  Questions, problems, or anything else.
+                  {t("settings.questionsProblemsOrAnythingElse")}
                 </Text>
               </View>
-              <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
+              <Ionicons name={dirIcon("chevron-forward")} size={16} color={palette.textMuted} />
             </Pressable>
           ) : null}
 
           {onLogout ? (
             <Pressable style={styles.logoutButton} onPress={onLogout}>
-              <Text style={styles.logoutButtonText}>Log out</Text>
+              <Text style={styles.logoutButtonText}>{t("settings.account.logout")}</Text>
             </Pressable>
           ) : null}
 
@@ -1402,7 +1539,7 @@ export function SettingsScreen({
               >
                 <View style={styles.dangerZoneHeader}>
                   <Ionicons name="warning-outline" size={18} color="#b91c1c" />
-                  <Text style={styles.dangerZoneTitle}>Danger Zone</Text>
+                  <Text style={styles.dangerZoneTitle}>{t("settings.account.dangerZone")}</Text>
                 </View>
                 <Ionicons
                   name={dangerZoneOpen ? "chevron-up" : "chevron-down"}
@@ -1413,9 +1550,9 @@ export function SettingsScreen({
               {dangerZoneOpen ? (
                 <View style={styles.dangerZoneContent}>
                   <Text style={styles.body}>
-                    Delete your account and log out. Your account stays recoverable for 30 days, but any {tokenSymbol} in your accessible wallets will be transferred out before the deletion request is submitted.
+                    {t("settings.account.dangerBody", { symbol: tokenSymbol })}
                   </Text>
-                  <Text style={styles.dangerZoneNote}>Only use this if you really want to remove this account.</Text>
+                  <Text style={styles.dangerZoneNote}>{t("settings.account.dangerNote")}</Text>
                   {accountDeletionMessage ? <Text style={styles.inlineError}>{accountDeletionMessage}</Text> : null}
                   <Pressable
                     style={[styles.deleteAccountButton, accountDeletionBusy ? styles.buttonDisabled : undefined]}
@@ -1423,7 +1560,7 @@ export function SettingsScreen({
                     onPress={openDeleteConfirm}
                   >
                     <Text style={styles.deleteAccountButtonText}>
-                      {accountDeletionBusy ? "Preparing..." : "Delete account"}
+                      {accountDeletionBusy ? t("settings.account.preparing") : t("settings.account.delete")}
                     </Text>
                   </Pressable>
                 </View>
@@ -1451,17 +1588,17 @@ export function SettingsScreen({
         <>
           {onOpenImprover && !isApprovedImprover ? (
             <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Improver Access</Text>
+              <Text style={styles.sectionTitle}>{t("settings.improver.accessTitle")}</Text>
               <Text style={styles.body}>
                 {improver
-                  ? "View your improver request and finish any remaining setup steps."
-                  : "Become an improver using the email attached to your account."}
+                  ? t("settings.improver.accessBodyExisting")
+                  : t("settings.improver.accessBodyNew")}
               </Text>
-              {improver ? <Text style={styles.meta}>Status: {formatStatusLabel(improver.status)}</Text> : null}
-              {improver?.email ? <Text style={styles.meta}>Improver email: {improver.email}</Text> : null}
+              {improver ? <Text style={styles.meta}>{t("settings.improver.status", { status: formatStatusLabel(improver.status) })}</Text> : null}
+              {improver?.email ? <Text style={styles.meta}>{t("settings.improver.email", { email: improver.email })}</Text> : null}
               <Pressable style={[styles.primaryActionButton, styles.settingsWideButton]} onPress={onOpenImprover}>
                 <Text style={styles.primaryActionButtonText}>
-                  {improver ? "View improver request" : "Become an improver"}
+                  {improver ? t("settings.improver.viewRequest") : t("settings.improver.become")}
                 </Text>
               </Pressable>
             </View>
@@ -1469,25 +1606,25 @@ export function SettingsScreen({
 
           {improver || user?.isImprover ? (
             <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Improver Profile</Text>
-              <Text style={styles.body}>Manage the wallet used for improver payouts and review the improver profile tied to this account.</Text>
+              <Text style={styles.sectionTitle}>{t("settings.improver.profileTitle")}</Text>
+              <Text style={styles.body}>{t("settings.improver.profileBody")}</Text>
               {isApprovedImprover ? (
                 <PreferenceRow
-                  title="Show improver panel"
-                  body="Keep the improver panel in the bottom navigation."
+                  title={t("settings.improver.showPanel")}
+                  body={t("settings.improver.showPanelBody")}
                   value={preferences.showImproverPanel}
                   onValueChange={(showImproverPanel) => onUpdatePreferences({ ...preferences, showImproverPanel })}
                 />
               ) : null}
-              {improver ? <Text style={styles.meta}>Status: {formatStatusLabel(improver.status)}</Text> : null}
-              {improver?.email ? <Text style={styles.meta}>Improver email: {improver.email}</Text> : null}
-              <Text style={styles.meta}>Rewards wallet: {shortAddress(improver?.primaryRewardsAccount || rewardsWalletDraft || "Not set")}</Text>
-              <Text style={styles.meta}>Primary app wallet: {shortAddress(primaryWalletAddress || "Not set")}</Text>
+              {improver ? <Text style={styles.meta}>{t("settings.improver.status", { status: formatStatusLabel(improver.status) })}</Text> : null}
+              {improver?.email ? <Text style={styles.meta}>{t("settings.improver.email", { email: improver.email })}</Text> : null}
+              <Text style={styles.meta}>{t("settings.improver.rewardsWallet", { address: shortAddress(improver?.primaryRewardsAccount || rewardsWalletDraft || t("settings.improver.notSet")) })}</Text>
+              <Text style={styles.meta}>{t("settings.improver.primaryAppWallet", { address: shortAddress(primaryWalletAddress || t("settings.improver.notSet")) })}</Text>
               <TextInput
                 style={styles.walletNameInput}
                 autoCapitalize="none"
                 autoCorrect={false}
-                placeholder="Improver rewards wallet"
+                placeholder={t("settings.improver.rewardsWalletPlaceholder")}
                 placeholderTextColor={palette.textMuted}
                 value={rewardsWalletDraft}
                 onChangeText={(value) => {
@@ -1511,7 +1648,7 @@ export function SettingsScreen({
                   }}
                 >
                   <Text style={styles.primaryActionButtonText}>
-                    {improverBusy ? "Saving..." : "Save rewards wallet"}
+                    {improverBusy ? t("common.saving") : t("settings.improver.saveRewardsWallet")}
                   </Text>
                 </Pressable>
                 {primaryWalletAddress ? (
@@ -1523,7 +1660,7 @@ export function SettingsScreen({
                       setImproverMessage(null);
                     }}
                   >
-                    <Text style={styles.secondaryButtonText}>Use primary wallet</Text>
+                    <Text style={styles.secondaryButtonText}>{t("settings.improver.usePrimary")}</Text>
                   </Pressable>
                 ) : null}
               </View>
@@ -1534,17 +1671,17 @@ export function SettingsScreen({
 
           {isApprovedImprover ? (
             <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Credentials</Text>
+              <Text style={styles.sectionTitle}>{t("settings.improver.credentials")}</Text>
               {onOpenImproverCredentials ? (
                 <Pressable
                   style={[styles.primaryActionButton, styles.settingsWideButton]}
                   onPress={onOpenImproverCredentials}
                 >
-                  <Text style={styles.primaryActionButtonText}>View credentials</Text>
+                  <Text style={styles.primaryActionButtonText}>{t("settings.improver.viewCredentials")}</Text>
                 </Pressable>
               ) : null}
               {credentialRequestsLoading ? (
-                <Text style={styles.meta}>Loading pending credential requests...</Text>
+                <Text style={styles.meta}>{t("settings.improver.loadingCredentials")}</Text>
               ) : pendingCredentialRequests.length > 0 ? (
                 <View style={styles.optionList}>
                   {pendingCredentialRequests.map((request) => (
@@ -1553,13 +1690,13 @@ export function SettingsScreen({
                         {formatCredentialLabel(request.credentialType, credentialTypes)}
                       </Text>
                       <Text style={styles.selectOptionMeta}>
-                        Pending since {new Date(request.requestedAt).toLocaleString()}
+                        {t("settings.improver.pendingSince", { date: new Date(request.requestedAt).toLocaleString() })}
                       </Text>
                     </View>
                   ))}
                 </View>
               ) : (
-                <Text style={styles.meta}>No pending credential requests.</Text>
+                <Text style={styles.meta}>{t("settings.improver.noCredentials")}</Text>
               )}
             </View>
           ) : null}
@@ -1567,7 +1704,7 @@ export function SettingsScreen({
       ) : null}
         {/* Which build this is, for support. */}
         <Text style={styles.versionFooter}>
-          Version {getClientMetadata().version} (build {getClientMetadata().buildLabel})
+          {t("settings.version", { version: getClientMetadata().version, build: getClientMetadata().buildLabel })}
         </Text>
       </ScrollView>
       <Modal
@@ -1581,12 +1718,12 @@ export function SettingsScreen({
           <Pressable style={styles.deleteConfirmCard} onPress={() => {}}>
             <View style={styles.deleteConfirmHeader}>
               <Ionicons name="warning-outline" size={22} color="#b91c1c" />
-              <Text style={styles.deleteConfirmTitle}>Confirm account deletion</Text>
+              <Text style={styles.deleteConfirmTitle}>{t("settings.account.confirmDelete")}</Text>
             </View>
             <Text style={styles.body}>
-              This starts the account deletion flow and may transfer {tokenSymbol} out of accessible wallets before the deletion request is submitted.
+              {t("settings.account.deleteFlowBody", { symbol: tokenSymbol })}
             </Text>
-            <Text style={styles.dangerZoneNote}>Type DELETE to continue.</Text>
+            <Text style={styles.dangerZoneNote}>{t("settings.account.typeDelete")}</Text>
             <TextInput
               style={styles.deleteConfirmInput}
               autoCapitalize="characters"
@@ -1604,7 +1741,7 @@ export function SettingsScreen({
                 disabled={accountDeletionBusy}
                 onPress={closeDeleteConfirm}
               >
-                <Text style={styles.secondaryButtonText}>Cancel</Text>
+                <Text style={styles.secondaryButtonText}>{t("common.cancel")}</Text>
               </Pressable>
               <Pressable
                 style={[
@@ -1616,7 +1753,7 @@ export function SettingsScreen({
                 onPress={confirmDeleteAccount}
               >
                 <Text style={styles.deleteAccountButtonText}>
-                  {accountDeletionBusy ? "Preparing..." : "Delete account"}
+                  {accountDeletionBusy ? t("settings.account.preparing") : t("settings.account.delete")}
                 </Text>
               </Pressable>
             </View>
@@ -1633,33 +1770,33 @@ export function SettingsScreen({
         <Pressable style={styles.modalOverlay} onPress={() => setSocialHelpVisible(false)}>
           <Pressable style={styles.socialHelpCard} onPress={() => {}}>
             <View style={styles.socialHelpHeader}>
-              <Text style={styles.sectionTitle}>Link Socials</Text>
+              <Text style={styles.sectionTitle}>{t("settings.social.title")}</Text>
               <Pressable style={styles.titleInfoButton} onPress={() => setSocialHelpVisible(false)}>
                 <Ionicons name="close" size={18} color={palette.primaryStrong} />
               </Pressable>
             </View>
-            <Text style={styles.body}>Attach Google or Apple sign-in methods to this SFLUV account so future social sign-ins land here.</Text>
+            <Text style={styles.body}>{t("settings.social.body")}</Text>
             <View style={styles.socialHelpProviderCard}>
-              <Text style={styles.socialProviderTitle}>Google</Text>
+              <Text style={styles.socialProviderTitle}>{t("settings.social.google")}</Text>
               <Text style={styles.socialProviderMeta}>
                 {googleLinkedNow
-                  ? "Google is linked to this account for future sign-ins."
-                  : "Link Google so future Google sign-ins land on this account."}
+                  ? t("settings.social.googleLinkedBody")
+                  : t("settings.social.googleLinkBody")}
               </Text>
-              {googleLinkedEmail ? <Text style={styles.socialProviderMeta}>Google email: {googleLinkedEmail}</Text> : null}
+              {googleLinkedEmail ? <Text style={styles.socialProviderMeta}>{t("settings.social.googleEmail", { email: googleLinkedEmail })}</Text> : null}
               {googleLinkedNow && googleDisconnectDisabledReason ? (
                 <Text style={styles.socialProviderMeta}>{googleDisconnectDisabledReason}</Text>
               ) : null}
               {googleMessage ? <Text style={styles.socialProviderMeta}>{googleMessage}</Text> : null}
             </View>
             <View style={styles.socialHelpProviderCard}>
-              <Text style={styles.socialProviderTitle}>Apple</Text>
+              <Text style={styles.socialProviderTitle}>{t("settings.social.apple")}</Text>
               <Text style={styles.socialProviderMeta}>
                 {appleLinkedNow
-                  ? "Apple is linked to this account for future sign-ins."
-                  : "Link Apple so future Apple sign-ins land on this account."}
+                  ? t("settings.social.appleLinkedBody")
+                  : t("settings.social.appleLinkBody")}
               </Text>
-              {appleLinkedEmail ? <Text style={styles.socialProviderMeta}>Apple email: {appleLinkedEmail}</Text> : null}
+              {appleLinkedEmail ? <Text style={styles.socialProviderMeta}>{t("settings.social.appleEmail", { email: appleLinkedEmail })}</Text> : null}
               {appleLinkedNow && appleDisconnectDisabledReason ? (
                 <Text style={styles.socialProviderMeta}>{appleDisconnectDisabledReason}</Text>
               ) : null}
@@ -1762,6 +1899,11 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
       backgroundColor: palette.surfaceStrong,
       paddingVertical: 12,
       alignItems: "center",
+    },
+    themeOptionFit: {
+      flex: 0,
+      flexGrow: 1,
+      paddingHorizontal: 16,
     },
     themeOptionActive: {
       borderColor: palette.primary,
@@ -1874,6 +2016,11 @@ function createStyles(palette: Palette, shadows: ReturnType<typeof getShadows>) 
     preferenceBody: {
       color: palette.textMuted,
       lineHeight: 20,
+    },
+    languageOptions: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: spacing.sm,
     },
     permissionStatus: {
       color: palette.text,

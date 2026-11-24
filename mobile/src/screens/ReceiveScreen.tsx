@@ -5,12 +5,13 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   View,
   useWindowDimensions,
 } from "react-native";
+import { Text } from "../components/AppText";
 import Constants from "expo-constants";
 import { CameraView } from "expo-camera";
+import { useTranslation } from "react-i18next";
 import { Ionicons } from "@expo/vector-icons";
 import { SegmentedTabs } from "../components/SegmentedTabs";
 import { SfluvQRCode, prewarmQRCode } from "../components/SfluvQRCode";
@@ -21,6 +22,7 @@ import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { buildUniversalPayLink, parseSfluvUniversalLink } from "../utils/universalLinks";
 import { AppClientConfig } from "../types/app";
 import { openPhoneSettings, useCameraAccess } from "../utils/phonePermissions";
+import { dirIcon } from "../i18n/direction";
 
 type Props = {
   clientConfig: AppClientConfig;
@@ -32,10 +34,6 @@ type Props = {
 
 type ReceiveMode = "link" | "address";
 
-const RECEIVE_TABS: Array<{ value: ReceiveMode; label: string }> = [
-  { value: "link", label: "Link" },
-  { value: "address", label: "Address" },
-];
 
 function shortAddress(address: string): string {
   if (!address) {
@@ -81,6 +79,11 @@ export function ReceiveScreen({
   onBack,
 }: Props) {
   const { palette, shadows } = useAppTheme();
+  const { t } = useTranslation();
+  const receiveTabs: Array<{ value: ReceiveMode; label: string }> = [
+    { value: "link", label: t("receive.tabLink") },
+    { value: "address", label: t("receive.tabAddress") },
+  ];
   const windowFrame = useWindowDimensions();
   const compactLayout = windowFrame.height < 740;
   const styles = useMemo(() => createStyles(palette, shadows, compactLayout), [compactLayout, palette, shadows]);
@@ -127,7 +130,7 @@ export function ReceiveScreen({
     const wasBlocked = cameraAccess === "blocked";
     if (!(await askCamera())) {
       if (!wasBlocked) {
-        setScanError("Camera permission is required to scan faucet reward QRs.");
+        setScanError(t("receive.cameraRequired"));
       }
       return;
     }
@@ -159,13 +162,13 @@ export function ReceiveScreen({
         <View style={styles.content}>
           <View style={styles.paneHeaderRow}>
             {onBack ? (
-              <Pressable style={styles.paneBackButton} onPress={onBack} hitSlop={8} accessibilityLabel="Back">
-                <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
+              <Pressable style={styles.paneBackButton} onPress={onBack} hitSlop={8} accessibilityLabel={t("common.back")}>
+                <Ionicons name={dirIcon("arrow-back")} size={18} color={palette.primaryStrong} />
               </Pressable>
             ) : null}
             <SegmentedTabs
               style={styles.modeToggleFill}
-              segments={RECEIVE_TABS}
+              segments={receiveTabs}
               value={mode}
               onChange={setMode}
             />
@@ -180,10 +183,10 @@ export function ReceiveScreen({
 
           <View style={styles.qrCard}>
             <View style={styles.qrHeader}>
-              <Text style={styles.qrTitle}>{mode === "link" ? "Payment link" : "Wallet address"}</Text>
+              <Text style={styles.qrTitle}>{mode === "link" ? t("receive.paymentLink") : t("receive.walletAddress")}</Text>
               <Pressable style={styles.copyButton} onPress={() => void copyQrValue()}>
                 <Ionicons name={copied ? "checkmark" : "copy-outline"} size={16} color={palette.primaryStrong} />
-                <Text style={styles.copyButtonText}>{copied ? "Copied" : "Copy"}</Text>
+                <Text style={styles.copyButtonText}>{copied ? t("common.copied") : t("common.copy")}</Text>
               </Pressable>
             </View>
 
@@ -210,7 +213,7 @@ export function ReceiveScreen({
         {showRedeemScanner ? (
           <Pressable style={styles.redeemButton} onPress={() => void openRedeemScanner()}>
             <Ionicons name="scan-outline" size={18} color={palette.white} />
-            <Text style={styles.redeemButtonText}>Redeem code</Text>
+            <Text style={styles.redeemButtonText}>{t("receive.redeemCode")}</Text>
           </Pressable>
         ) : null}
       </ScrollView>
@@ -226,7 +229,7 @@ export function ReceiveScreen({
       >
         <View style={styles.scannerScreen}>
           <View style={[styles.scannerHeader, { paddingTop: topInset + spacing.xxl + spacing.md }]}>
-            <Text style={styles.scannerTitle}>Scan reward QR</Text>
+            <Text style={styles.scannerTitle}>{t("receive.scanRewardTitle")}</Text>
             <Pressable
               style={styles.scannerClose}
               onPress={() => {
@@ -260,7 +263,7 @@ export function ReceiveScreen({
                   }
 
                   setScanLocked(true);
-                  setScanError("Unsupported QR. Scan a faucet reward QR code from the SFLUV web app.");
+                  setScanError(t("receive.unsupportedQr"));
                   setTimeout(() => {
                     setScanLocked(false);
                   }, 900);
@@ -269,12 +272,12 @@ export function ReceiveScreen({
             ) : (
               <View style={styles.permissionCard}>
                 <Text style={styles.permissionTitle}>
-                  {cameraAccess === "blocked" ? "Camera access is off" : "Camera access needed"}
+                  {cameraAccess === "blocked" ? t("permissions.camera.offTitle") : t("permissions.camera.neededTitle")}
                 </Text>
                 <Text style={styles.permissionBody}>
                   {cameraAccess === "blocked"
-                    ? "Turn on Camera for SFLuv in your phone's Settings to scan faucet reward QR codes here."
-                    : "Allow camera access to scan faucet reward QR codes here."}
+                    ? t("permissions.camera.turnOnForRewards")
+                    : t("permissions.camera.allowForRewards")}
                 </Text>
                 <Pressable
                   style={styles.permissionButton}
@@ -287,7 +290,7 @@ export function ReceiveScreen({
                   }}
                 >
                   <Text style={styles.permissionButtonText}>
-                    {cameraAccess === "blocked" ? "Open Settings" : "Enable camera"}
+                    {cameraAccess === "blocked" ? t("common.openSettings") : t("permissions.camera.enable")}
                   </Text>
                 </Pressable>
               </View>
@@ -296,7 +299,7 @@ export function ReceiveScreen({
           </View>
           <View style={styles.scannerFooter}>
             {scanLocked ? <ThemedActivityIndicator size="small" color={palette.white} /> : null}
-            <Text style={styles.scannerHint}>Center the faucet QR inside the frame to redeem it to this wallet.</Text>
+            <Text style={styles.scannerHint}>{t("receive.scanRewardHint")}</Text>
           </View>
         </View>
       </Modal>

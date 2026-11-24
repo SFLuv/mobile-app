@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Easing, Image, StyleSheet, Text, View } from "react-native";
+import { Animated, Easing, Image, StyleSheet, View } from "react-native";
+import { Text } from "./AppText";
 import Svg, { Circle, Path } from "react-native-svg";
 
 import { Palette, useAppTheme } from "../theme";
@@ -19,6 +20,7 @@ import {
   pinColor,
 } from "../utils/merchantIcon";
 import { OpenState } from "../utils/openingHours";
+import { t } from "../i18n";
 
 type MerchantIconProps = {
   name: string;
@@ -168,7 +170,7 @@ export function OpenStatusBadge({ state }: { state: OpenState }) {
     return (
       <View style={styles.row}>
         <View style={[styles.dot, { backgroundColor: palette.textMuted, opacity: 0.4 }]} />
-        <Text style={styles.mutedText}>Hours not available</Text>
+        <Text style={styles.mutedText}>{t("components.merchantPin.hoursNotAvailable")}</Text>
       </View>
     );
   }
@@ -191,7 +193,7 @@ export function OpenStatusBadge({ state }: { state: OpenState }) {
         <View style={[styles.dot, { backgroundColor: open ? palette.primary : palette.textMuted }]} />
       </View>
       <Text style={[styles.text, { color: open ? palette.primaryStrong : palette.textMuted }]}>
-        {open ? "Open now" : "Closed"}
+        {open ? t("components.merchantPin.openNow") : t("components.merchantPin.closed")}
       </Text>
     </View>
   );

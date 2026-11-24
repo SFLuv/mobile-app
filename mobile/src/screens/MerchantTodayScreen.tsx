@@ -1,8 +1,10 @@
 import { useMemo } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { Text } from "../components/AppText";
 import { Ionicons } from "@expo/vector-icons";
 import { palette } from "../theme";
 import type { MerchantDayRow, MerchantToday } from "../types/app";
+import { t } from "../i18n";
 
 type Props = {
   today: MerchantToday | null;
@@ -43,8 +45,8 @@ function Row({ row, decimals }: { row: MerchantDayRow; decimals: number }) {
         <Text style={[styles.rowPayment, row.refund ? styles.rowRefund : undefined]}>
           {formatBase(row.paymentBase, decimals)}
         </Text>
-        {tip ? <Text style={styles.rowTip}>+{tip} tip</Text> : null}
-        {row.refund ? <Text style={styles.rowRefundLabel}>refund</Text> : null}
+        {tip ? <Text style={styles.rowTip}>{t("merchantToday.tipAmount", { amount: tip })}</Text> : null}
+        {row.refund ? <Text style={styles.rowRefundLabel}>{t("merchantToday.refund")}</Text> : null}
       </View>
     </View>
   );
@@ -82,7 +84,7 @@ export function MerchantTodayScreen({
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primaryStrong} />}
     >
       <View style={styles.paymentsCard}>
-        <Text style={styles.paymentsLabel}>TODAY'S PAYMENTS</Text>
+        <Text style={styles.paymentsLabel}>{t("merchantToday.todaysPayments")}</Text>
         <Text style={styles.paymentsValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.4}>
           {formatBase(today?.paymentsBase ?? "0", decimals)}
         </Text>
@@ -101,7 +103,7 @@ export function MerchantTodayScreen({
               style={styles.locationSwitch}
               accessibilityRole="button"
               accessibilityLabel={locationName}
-              accessibilityHint="Move this device to another location"
+              accessibilityHint={t("merchantToday.moveThisDeviceToAnother")}
               onPress={onSwitchLocation}
             >
               <Text style={styles.locationName}>{locationName}</Text>
@@ -114,7 +116,7 @@ export function MerchantTodayScreen({
       </View>
 
       <View style={styles.tipsCard}>
-        <Text style={styles.tipsLabel}>Tips today</Text>
+        <Text style={styles.tipsLabel}>{t("merchantToday.tipsToday")}</Text>
         {today?.tipsWalletConfigured ? (
           <Text style={styles.tipsValue}>
             {formatBase(today?.tipsBase ?? "0", decimals)} {tokenSymbol}
@@ -122,13 +124,13 @@ export function MerchantTodayScreen({
         ) : (
           // Not "0": a zero here reads as "nobody tipped", when the truth is that
           // no tipping wallet is set up for this location.
-          <Text style={styles.tipsUnset}>Not set up</Text>
+          <Text style={styles.tipsUnset}>{t("merchantToday.notSetUp")}</Text>
         )}
       </View>
 
       <View style={styles.list}>
         {rows.length === 0 ? (
-          <Text style={styles.empty}>No payments yet today.</Text>
+          <Text style={styles.empty}>{t("merchantToday.noPaymentsYetToday")}</Text>
         ) : (
           rows.map((row, index) => (
             <Row key={`${row.paymentHash ?? row.tipHash ?? "row"}-${index}`} row={row} decimals={decimals} />

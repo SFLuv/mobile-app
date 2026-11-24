@@ -8,14 +8,15 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   TouchableWithoutFeedback,
   View,
   useWindowDimensions,
 } from "react-native";
+import { Text } from "../components/AppText";
 import Constants from "expo-constants";
 import { CameraView } from "expo-camera";
+import { useTranslation } from "react-i18next";
 import { Ionicons } from "@expo/vector-icons";
 import { ethers } from "ethers";
 import { ScannerCornerGuide } from "../components/ScannerCornerGuide";
@@ -31,6 +32,8 @@ import { formatDistanceLabel, locationDistanceMeters, sortLocationsByProximity }
 import { parseSendTarget, parseSfluvUniversalLink, SendTarget, SfluvUniversalLink } from "../utils/universalLinks";
 import { triggerClickHaptic } from "../utils/haptics";
 import { openPhoneSettings, useCameraAccess } from "../utils/phonePermissions";
+import { t } from "../i18n";
+import { dirIcon, dirSign } from "../i18n/direction";
 
 // How close someone must be to a merchant in setup for the payment screen to
 // offer it. Wide enough for indoor GPS drift, narrow enough that it is only
@@ -43,10 +46,6 @@ type SendPhase = "editing" | "sending" | "success" | "failure";
 type TipChoice = "10" | "15" | "20" | "custom";
 type RecipientEntryMode = SendFlowEntryMode;
 
-const ENTRY_MODE_TABS: Array<{ value: RecipientEntryMode; label: string }> = [
-  { value: "manual", label: "Search" },
-  { value: "scan", label: "Scan" },
-];
 type SendLayoutMode = "regular" | "compact" | "dense";
 
 type RecipientSuggestion = {
@@ -184,12 +183,15 @@ function formatTokenAmount(value: ethers.BigNumberish, tokenDecimals: number, ma
 function formatBalanceText(rawBalance: string, tokenDecimals: number, tokenSymbol: string): string {
   const normalized = rawBalance.trim();
   if (!normalized || normalized === "...") {
-    return `Balance: ... ${tokenSymbol}`;
+    return t("send.balance", { amount: "...", symbol: tokenSymbol });
   }
   try {
-    return `Balance: ${sanitizeTokenInput(formatTokenAmount(ethers.utils.parseUnits(normalized, tokenDecimals), tokenDecimals, 2), tokenDecimals) || "0"} ${tokenSymbol}`;
+    return t("send.balance", {
+      amount: sanitizeTokenInput(formatTokenAmount(ethers.utils.parseUnits(normalized, tokenDecimals), tokenDecimals, 2), tokenDecimals) || "0",
+      symbol: tokenSymbol,
+    });
   } catch {
-    return `Balance: ${normalized} ${tokenSymbol}`;
+    return t("send.balance", { amount: normalized, symbol: tokenSymbol });
   }
 }
 
@@ -221,6 +223,7 @@ function SwipeToSend({
   layoutMode?: SendLayoutMode;
 }) {
   const { palette, shadows } = useAppTheme();
+  const { t } = useTranslation();
   const styles = useMemo(() => createStyles(palette, shadows, layoutMode), [layoutMode, palette, shadows]);
   const translateX = useRef(new Animated.Value(0)).current;
   const [trackWidth, setTrackWidth] = useState(0);
@@ -254,10 +257,10 @@ function SwipeToSend({
         onMoveShouldSetPanResponder: (_, gesture) =>
           !disabled && !loading && swipeDistance > 0 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
         onPanResponderMove: (_, gesture) => {
-          translateX.setValue(Math.max(0, Math.min(gesture.dx, swipeDistance)));
+          translateX.setValue(Math.max(0, Math.min(gesture.dx * dirSign(), swipeDistance)));
         },
         onPanResponderRelease: (_, gesture) => {
-          if (gesture.dx >= swipeDistance * 0.72) {
+          if (gesture.dx * dirSign() >= swipeDistance * 0.72) {
             Animated.timing(translateX, {
               toValue: swipeDistance,
               duration: 120,
@@ -284,13 +287,13 @@ function SwipeToSend({
       }}
     >
       <Text style={[styles.swipeTrackText, disabled ? styles.swipeTrackTextDisabled : undefined]}>
-        {loading ? "Sending" : label}
+        {loading ? t("send.sending") : label}
       </Text>
       <Animated.View
         style={[
           styles.swipeThumb,
           {
-            transform: [{ translateX }],
+            transform: [{ translateX: Animated.multiply(translateX, dirSign()) }],
           },
           disabled ? styles.swipeThumbDisabled : undefined,
         ]}
@@ -299,7 +302,7 @@ function SwipeToSend({
         {loading ? (
           <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
         ) : (
-          <Ionicons name="arrow-forward" size={18} color={palette.primaryStrong} />
+          <Ionicons name={dirIcon("arrow-forward")} size={18} color={palette.primaryStrong} />
         )}
       </Animated.View>
     </View>
@@ -407,6 +410,11 @@ export function SendScreen({
   const [tipMessage, setTipMessage] = useState<string | null>(null);
   const [noteFocused, setNoteFocused] = useState(false);
   const { permission, access: cameraAccess, ask: askCamera } = useCameraAccess();
+  const { t } = useTranslation();
+  const entryModeTabs: Array<{ value: RecipientEntryMode; label: string }> = [
+    { value: "manual", label: t("send.tabSearch") },
+    { value: "scan", label: t("send.tabScan") },
+  ];
   const { location: userLocation } = useCurrentLocation(step === "recipient" && phase === "editing");
 
   const parsedTarget = useMemo(() => parseSendTarget(recipientInput, clientConfig), [clientConfig, recipientInput]);
@@ -546,7 +554,7 @@ export function SendScreen({
     if (!target || !recipientLookup?.found || !recipientLookup.isMerchant) {
       return null;
     }
-    const label = (recipientLookup.merchantName || recipientLookup.walletName || "Merchant").trim() || "Merchant";
+    const label = (recipientLookup.merchantName || recipientLookup.walletName || t("send.merchant")).trim() || t("send.merchant");
     const subtitle =
       recipientLookup.walletName?.trim() && recipientLookup.walletName.trim() !== label
         ? recipientLookup.walletName.trim()
@@ -573,7 +581,7 @@ export function SendScreen({
     return {
       key: `payment-link:${target.recipient.toLowerCase()}`,
       kind: "payment-link",
-      label: "Payment link",
+      label: t("send.paymentLink"),
       address: target.recipient,
       subtitle: shortAddress(target.recipient),
       tipToAddress: target.tipToAddress,
@@ -608,8 +616,8 @@ export function SendScreen({
       return {
         merchantName:
           resolvedRecipient?.kind === "payment-link"
-            ? "this merchant"
-            : resolvedRecipient?.label || "this merchant",
+            ? t("send.thisMerchant")
+            : resolvedRecipient?.label || t("send.thisMerchant"),
         tipToAddress: target.tipToAddress,
       };
     }
@@ -621,7 +629,7 @@ export function SendScreen({
       recipientLookup.tipToAddress.toLowerCase() !== target.recipient.toLowerCase()
     ) {
       return {
-        merchantName: (recipientLookup.merchantName || recipientLookup.walletName || resolvedRecipient?.label || "Merchant").trim() || "Merchant",
+        merchantName: (recipientLookup.merchantName || recipientLookup.walletName || resolvedRecipient?.label || t("send.merchant")).trim() || t("send.merchant"),
         tipToAddress: recipientLookup.tipToAddress,
       };
     }
@@ -966,14 +974,14 @@ export function SendScreen({
     try {
       await onPrepareSend(resultAttempt.tipTarget.tipToAddress, selectedTipAmount, "token", "");
       setTipStatus("sent");
-      setTipMessage("Tip sent.");
+      setTipMessage(t("send.tipSent"));
       tipExitTimeoutRef.current = setTimeout(() => {
         exitFlow();
       }, 2000);
     } catch {
       tipSubmissionLockedRef.current = false;
       setTipStatus("error");
-      setTipMessage("Tip failed to send.");
+      setTipMessage(t("send.tipFailed"));
       setTipChoice(null);
       setCustomTipInput("");
     }
@@ -1006,7 +1014,7 @@ export function SendScreen({
           onOpenUniversalLink(universalLink);
           return;
         }
-        setFeedback("Unsupported QR.");
+        setFeedback(t("send.unsupportedQr"));
         setScanLocked(false);
         return;
       }
@@ -1025,7 +1033,7 @@ export function SendScreen({
       setActiveTarget(null);
       setDraftRecipient(null);
       setEntryMode("manual");
-      setFeedback("Scanned.");
+      setFeedback(t("send.scanned"));
     },
     [clientConfig, continueToAmount, hapticsEnabled, onOpenUniversalLink, scanLocked, suggestionByAddress],
   );
@@ -1050,7 +1058,7 @@ export function SendScreen({
                 suggestion.kind === "merchant" ? styles.kindBadgeTextMerchant : styles.kindBadgeTextContact,
               ]}
             >
-              {suggestion.kind === "merchant" ? "Merchant" : suggestion.kind === "payment-link" ? "Link" : "Contact"}
+              {suggestion.kind === "merchant" ? t("send.merchant") : suggestion.kind === "payment-link" ? t("send.link") : t("send.contact")}
             </Text>
           </View>
         </View>
@@ -1081,7 +1089,7 @@ export function SendScreen({
                 suggestion.kind === "merchant" ? styles.kindBadgeTextMerchant : styles.kindBadgeTextContact,
               ]}
             >
-              {suggestion.kind === "merchant" ? "Merchant" : suggestion.kind === "payment-link" ? "Link" : "Contact"}
+              {suggestion.kind === "merchant" ? t("send.merchant") : suggestion.kind === "payment-link" ? t("send.link") : t("send.contact")}
             </Text>
           </View>
         </View>
@@ -1091,7 +1099,7 @@ export function SendScreen({
       </View>
       <Pressable
         style={styles.selectedRecipientClearButton}
-        accessibilityLabel="Clear selected recipient"
+        accessibilityLabel={t("send.clearRecipient")}
         accessibilityRole="button"
         onPress={clearRecipientSelection}
       >
@@ -1121,11 +1129,11 @@ export function SendScreen({
 
         <View style={styles.entryModeHeaderRow}>
           <Pressable style={styles.iconButton} onPress={handleBack}>
-            <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
+            <Ionicons name={dirIcon("arrow-back")} size={18} color={palette.primaryStrong} />
           </Pressable>
           <SegmentedTabs
             style={styles.entryModeRowFill}
-            segments={ENTRY_MODE_TABS}
+            segments={entryModeTabs}
             value={entryMode}
             onChange={setEntryMode}
             hapticsEnabled={hapticsEnabled}
@@ -1148,7 +1156,7 @@ export function SendScreen({
                       setDraftRecipient(null);
                       setFeedback(null);
                     }}
-                    placeholder="Search or paste an address"
+                    placeholder={t("send.searchPlaceholder")}
                     placeholderTextColor={palette.textMuted}
                     autoCapitalize="none"
                     autoCorrect={false}
@@ -1182,12 +1190,12 @@ export function SendScreen({
                 <View style={styles.inlinePermissionCard}>
                   <Ionicons name="camera-outline" size={28} color={palette.primaryStrong} />
                   <Text style={styles.inlinePermissionTitle}>
-                    {cameraAccess === "blocked" ? "Camera access is off" : "Camera access needed"}
+                    {cameraAccess === "blocked" ? t("permissions.camera.offTitle") : t("permissions.camera.neededTitle")}
                   </Text>
                   <Text style={styles.inlinePermissionBody}>
                     {cameraAccess === "blocked"
-                      ? "Turn on Camera for SFLuv in your phone's Settings to scan payment QRs here."
-                      : "Allow camera access to scan payment QRs here."}
+                      ? t("permissions.camera.turnOnForPayments")
+                      : t("permissions.camera.allowForPayments")}
                   </Text>
                   <Pressable
                     style={styles.inlinePermissionButton}
@@ -1200,14 +1208,14 @@ export function SendScreen({
                     }}
                   >
                     <Text style={styles.inlinePermissionButtonText}>
-                      {cameraAccess === "blocked" ? "Open Settings" : "Enable camera"}
+                      {cameraAccess === "blocked" ? t("common.openSettings") : t("permissions.camera.enable")}
                     </Text>
                   </Pressable>
                 </View>
               )}
             </View>
 
-            <Text style={styles.inlineScannerHint}>Scan a payment QR inside the frame.</Text>
+            <Text style={styles.inlineScannerHint}>{t("send.scanHint")}</Text>
           </View>
         )}
       </ScrollView>
@@ -1223,7 +1231,7 @@ export function SendScreen({
               }
             }}
           >
-            <Text style={styles.primaryButtonText}>Continue</Text>
+            <Text style={styles.primaryButtonText}>{t("send.continue")}</Text>
           </Pressable>
         </View>
       ) : null}
@@ -1251,10 +1259,10 @@ export function SendScreen({
             <View style={styles.amountHero}>
               <View style={styles.amountHeroTop}>
                 <Pressable style={styles.iconButton} onPress={handleBack}>
-                  <Ionicons name="arrow-back" size={18} color={palette.primaryStrong} />
+                  <Ionicons name={dirIcon("arrow-back")} size={18} color={palette.primaryStrong} />
                 </Pressable>
                 <Text style={[styles.recipientLine, styles.recipientLineInline]} numberOfLines={1}>
-                  To {primaryRecipientLabel || "Recipient"}
+                  {t("send.to", { name: primaryRecipientLabel || t("send.recipient") })}
                 </Text>
               </View>
               <Pressable
@@ -1280,7 +1288,7 @@ export function SendScreen({
             <View style={styles.amountMetaBlock}>
               {exceedsBalance ? (
                 <Text style={[styles.balanceLabel, { color: palette.danger ?? "#c62828", fontWeight: "600" }]}>
-                  That's more than your available balance
+                  {t("send.moreThanAvailableBalance")}
                 </Text>
               ) : null}
               <Text style={styles.balanceLabel}>
@@ -1294,7 +1302,7 @@ export function SendScreen({
                   onChangeText={setMemoInput}
                   onFocus={() => setNoteFocused(true)}
                   onBlur={() => setNoteFocused(false)}
-                  placeholder="Add a note"
+                  placeholder={t("send.notePlaceholder")}
                   placeholderTextColor={palette.textMuted}
                   returnKeyType="done"
                 />
@@ -1317,7 +1325,7 @@ export function SendScreen({
                 layoutMode={layoutMode}
                 disabled={!activeTarget || !amountRaw || amountRaw.lte(0) || exceedsBalance || phase !== "editing"}
                 loading={phase === "sending"}
-                label="Slide to send"
+                label={t("send.slideToSend")}
                 onComplete={() => {
                   void submitPayment();
                 }}
@@ -1330,14 +1338,14 @@ export function SendScreen({
   );
 
   const renderStateScreen = (success: boolean) => {
-    const title = success ? "Sent" : "Failed";
+    const title = success ? t("send.sent") : t("send.failed");
     const message = resultAttempt
       ? success
-        ? `Sent ${resultAttempt.amountLabel} to ${resultAttempt.recipientLabel}`
-        : `Failed to send ${resultAttempt.amountLabel} to ${resultAttempt.recipientLabel}`
+        ? t("send.sentAmountTo", { amount: resultAttempt.amountLabel, name: resultAttempt.recipientLabel })
+        : t("send.failedAmountTo", { amount: resultAttempt.amountLabel, name: resultAttempt.recipientLabel })
       : success
-        ? "Sent"
-        : "Failed";
+        ? t("send.sent")
+        : t("send.failed");
     const canTip = success && Boolean(resultAttempt?.tipTarget);
     const tipSelectionLocked = tipStatus === "sending" || tipStatus === "sent";
     const customTipActive = tipChoice === "custom";
@@ -1373,14 +1381,14 @@ export function SendScreen({
 
               {canTip ? (
                 <View style={styles.tipCard}>
-                  <Text style={styles.tipTitle}>Add tip</Text>
+                  <Text style={styles.tipTitle}>{t("send.addTip")}</Text>
                   {resultAttempt?.tipTarget ? (
-                    <Text style={styles.tipBody}>For {resultAttempt.tipTarget.merchantName}</Text>
+                    <Text style={styles.tipBody}>{t("send.tipFor", { merchant: resultAttempt.tipTarget.merchantName })}</Text>
                   ) : null}
 
                   {customTipActive ? (
                     <View style={styles.customTipBlock}>
-                      <Text style={styles.customTipLabel}>Custom tip amount</Text>
+                      <Text style={styles.customTipLabel}>{t("send.customTipAmount")}</Text>
                       <TextInput
                         style={[
                           styles.customTipInput,
@@ -1479,7 +1487,7 @@ export function SendScreen({
                             tipSelectionLocked ? styles.tipChoiceTextDisabled : undefined,
                           ]}
                         >
-                          Custom
+                          {t("send.custom")}
                         </Text>
                       </Pressable>
                     ) : null}
@@ -1522,21 +1530,21 @@ export function SendScreen({
                   ) : tipStatus === "sent" ? (
                     <View style={styles.buttonRow}>
                       <Ionicons name="checkmark-circle" size={16} color={palette.white} />
-                      <Text style={styles.primaryButtonText}>Tip sent</Text>
+                      <Text style={styles.primaryButtonText}>{t("send.tipSentButton")}</Text>
                     </View>
                   ) : (
                     <Text style={styles.primaryButtonText}>
-                      {selectedTipAmountRaw && selectedTipAmountRaw.gt(0) ? "Send tip" : "Done"}
+                      {selectedTipAmountRaw && selectedTipAmountRaw.gt(0) ? t("send.sendTip") : t("common.done")}
                     </Text>
                   )}
                 </Pressable>
               ) : (
                 <>
                   <Pressable style={styles.primaryButton} onPress={retryPayment}>
-                    <Text style={styles.primaryButtonText}>Try again</Text>
+                    <Text style={styles.primaryButtonText}>{t("send.tryAgain")}</Text>
                   </Pressable>
                   <Pressable style={styles.secondaryButton} onPress={exitFlow}>
-                    <Text style={styles.secondaryButtonText}>Done</Text>
+                    <Text style={styles.secondaryButtonText}>{t("common.done")}</Text>
                   </Pressable>
                 </>
               )}
@@ -1552,7 +1560,7 @@ export function SendScreen({
       <View style={[styles.stateScreen, { paddingTop: spacing.lg, paddingBottom: spacing.xl }]}>
         <View style={styles.stateInner}>
           <ThemedActivityIndicator size="large" color={palette.primaryStrong} />
-          <Text style={styles.resultTitle}>Sending</Text>
+          <Text style={styles.resultTitle}>{t("send.sending")}</Text>
         </View>
       </View>
     );
@@ -1964,7 +1972,9 @@ function createStyles(
       minHeight: focusedNoteGap,
     },
     keypadRow: {
+      // Number pads read 1-2-3 left to right in every language, Arabic too.
       flexDirection: "row",
+      direction: "ltr",
       gap: keypadGap,
     },
     keypadKey: {

@@ -1,3 +1,5 @@
+import { t } from "../i18n";
+
 // Types for the neighborhood Bulletin and Messages. Field names mirror the
 // backend's JSON so responses can be used as they arrive.
 
@@ -213,6 +215,22 @@ export interface ChatMessage {
   reply_to?: MessageQuote;
   attachments?: MessageAttachment[];
   reactions?: MessageReaction[];
+  /**
+   * People tagged with @, Telegram style. The body keeps the plain "@Name" the
+   * sender saw, for older apps, the web and the push; these say who each one
+   * is, so every reader's app can show the name they saved that person as.
+   */
+  mentions?: MessageMention[];
+}
+
+/**
+ * One @-tag in a message: a span of the body, in UTF-16 code units (which is
+ * how JavaScript indexes a string), and who it tags.
+ */
+export interface MessageMention {
+  user_id: string;
+  offset: number;
+  length: number;
 }
 
 /** One person in a group, as the other members see them. */
@@ -331,26 +349,38 @@ export interface UserSearchResult {
 
 export type ReportReason = "prohibited_item" | "scam" | "harassment" | "spam" | "unsafe" | "other";
 
-export const REPORT_REASONS: Array<{ value: ReportReason; label: string }> = [
-  { value: "prohibited_item", label: "Not allowed on the Bulletin" },
-  { value: "scam", label: "Scam or fraud" },
-  { value: "harassment", label: "Harassment" },
-  { value: "spam", label: "Spam" },
-  { value: "unsafe", label: "Feels unsafe" },
-  { value: "other", label: "Something else" },
-];
+/** Report reasons for the picker, in the app's language. */
+export function reportReasons(): Array<{ value: ReportReason; label: string }> {
+  return [
+    { value: "prohibited_item", label: t("utils.bulletin.notAllowedOnTheBulletin") },
+    { value: "scam", label: t("utils.bulletin.scamOrFraud") },
+    { value: "harassment", label: t("utils.bulletin.harassment") },
+    { value: "spam", label: t("utils.bulletin.spam") },
+    { value: "unsafe", label: t("utils.bulletin.feelsUnsafe") },
+    { value: "other", label: t("utils.bulletin.somethingElse") },
+  ];
+}
 
-export const BULLETIN_CATEGORY_LABELS: Record<BulletinCategory, string> = {
-  free: "Free",
-  for_sale: "For sale",
-  notice: "Neighborhood notice",
+const CATEGORY_LABEL_KEYS: Record<BulletinCategory, string> = {
+  free: "utils.bulletin.free",
+  for_sale: "utils.bulletin.forSale",
+  notice: "utils.bulletin.neighborhoodNotice",
 };
 
-export const BULLETIN_BADGE_LABELS: Record<BulletinBadge, string> = {
-  merchant: "Merchant",
-  improver: "Improver",
-  verified_volunteer: "Verified volunteer",
+export function bulletinCategoryLabel(category: BulletinCategory): string {
+  return t(CATEGORY_LABEL_KEYS[category]);
+}
+
+const BADGE_LABEL_KEYS: Record<BulletinBadge, string> = {
+  merchant: "utils.bulletin.merchant",
+  improver: "utils.bulletin.improver",
+  verified_volunteer: "utils.bulletin.verifiedVolunteer",
 };
+
+export function bulletinBadgeLabel(badge: BulletinBadge): string {
+  const key = BADGE_LABEL_KEYS[badge];
+  return key ? t(key) : "";
+}
 
 /** A Bulletin request the server refused, with its readable message and code. */
 export class BulletinRequestError extends Error {

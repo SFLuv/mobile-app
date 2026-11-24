@@ -121,6 +121,12 @@ export class RealtimeClient {
   constructor(
     private readonly baseURL: string,
     private readonly getToken: () => Promise<string | null>,
+    /**
+     * Which install of the app this is: the id its push subscription is
+     * registered under. Sent with the auth frame so the server skips the push
+     * only to this device while it is open, not to the person's other devices.
+     */
+    private readonly getInstallationId: () => Promise<string | null> = async () => null,
   ) {}
 
   /** Starts connecting, and keeps the socket up while the app is foregrounded. */
@@ -239,6 +245,16 @@ export class RealtimeClient {
       return;
     }
 
+    let installationId: string | null = null;
+    try {
+      installationId = await this.getInstallationId();
+    } catch {
+      installationId = null;
+    }
+    if (!this.wanted) {
+      return;
+    }
+
     let socket: WebSocket;
     try {
       socket = new WebSocket(this.socketURL());
@@ -253,7 +269,9 @@ export class RealtimeClient {
 
     socket.onopen = () => {
       try {
-        socket.send(JSON.stringify({ kind: "auth", token }));
+        socket.send(
+          JSON.stringify(installationId ? { kind: "auth", token, installation_id: installationId } : { kind: "auth", token }),
+        );
       } catch {
         this.disconnect("auth failed");
         this.scheduleReconnect();

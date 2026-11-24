@@ -2,6 +2,7 @@ import { File, Paths } from "expo-file-system";
 import type { ShareIntent } from "expo-share-intent";
 
 import type { ShareTarget } from "../components/ShareSheet";
+import { t } from "../i18n";
 
 /**
  * What another app shared into SFLuv, as something the share sheet can send.
@@ -24,7 +25,7 @@ export function shareTargetFromIntent(intent: ShareIntent): ShareTarget | null {
   if (files.length > 0) {
     const first = files[0];
     const label =
-      files.length > 1 ? `${files.length} files` : first.isImage ? "Photo" : first.fileName || "File";
+      files.length > 1 ? t("utils.sharedIntent.filesCount", { count: files.length }) : first.isImage ? t("utils.sharedIntent.photo") : first.fileName || t("utils.sharedIntent.file");
     return { kind: "files", files, label };
   }
 
@@ -38,7 +39,7 @@ export function shareTargetFromIntent(intent: ShareIntent): ShareTarget | null {
     return { kind: "text", text: text && !text.includes(url) ? `${text}\n${url}` : text || url, label: "Link" };
   }
   if (text) {
-    return { kind: "text", text, label: "Text" };
+    return { kind: "text", text, label: t("utils.sharedIntent.text") };
   }
   return null;
 }

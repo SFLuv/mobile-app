@@ -7,16 +7,17 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from "react-native";
+import { Text } from "./AppText";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
 import { displayFileName, fileTypeIconFor } from "../utils/attachmentFiles";
 import { reportHandledError } from "../services/observability";
+import { t } from "../i18n";
 
 /**
  * The message field, as a native paste-aware input where the build has one.
@@ -247,14 +248,14 @@ export function ChatComposer({
                 {stagedPayment.amount} {tokenSymbol}
               </Text>
               <Text style={styles.paymentChipMeta} numberOfLines={1}>
-                {stagedPayment.note || "Sends when you hit send"}
+                {stagedPayment.note || t("components.chatComposer.sendsWhenYouHitSend")}
               </Text>
             </View>
             <Pressable
               onPress={onRemoveStagedPayment}
               hitSlop={10}
               accessibilityRole="button"
-              accessibilityLabel="Remove payment"
+              accessibilityLabel={t("components.chatComposer.removePayment")}
             >
               <Ionicons name="close" size={16} color={palette.textMuted} />
             </Pressable>
@@ -293,7 +294,7 @@ export function ChatComposer({
                   </View>
                   <View style={styles.stagedFileText}>
                     <Text style={styles.stagedFileName} numberOfLines={2}>
-                      {displayFileName(item.fileName) || "File"}
+                      {displayFileName(item.fileName) || t("components.chatComposer.file")}
                     </Text>
                     <Text style={styles.stagedFileKind} numberOfLines={1}>
                       {
@@ -311,7 +312,9 @@ export function ChatComposer({
                 onPress={() => onRemoveStaged?.(index)}
                 hitSlop={8}
                 accessibilityRole="button"
-                accessibilityLabel={`Remove ${displayFileName(item.fileName) || "attachment"}`}
+                accessibilityLabel={t("chat.removeAttachment", {
+                  name: displayFileName(item.fileName) || t("components.messageAttachmentCard.attachmentName"),
+                })}
               >
                 <Ionicons name="close" size={12} color={palette.white} />
               </Pressable>
@@ -331,7 +334,7 @@ export function ChatComposer({
               {replyingTo.body}
             </Text>
           </View>
-          <Pressable onPress={onCancelReply} hitSlop={10} accessibilityLabel="Cancel reply">
+          <Pressable onPress={onCancelReply} hitSlop={10} accessibilityLabel={t("components.chatComposer.cancelReply")}>
             <Ionicons name="close" size={16} color={palette.textMuted} />
           </Pressable>
         </View>
@@ -378,9 +381,9 @@ export function ChatComposer({
             style={styles.trayClose}
             onPress={() => onModeChange("text")}
             accessibilityRole="button"
-            accessibilityLabel="Close attachment options"
+            accessibilityLabel={t("components.chatComposer.closeAttachmentOptions")}
           >
-            <Text style={styles.trayCloseText}>Cancel</Text>
+            <Text style={styles.trayCloseText}>{t("components.chatComposer.cancel")}</Text>
           </Pressable>
         </Animated.View>
       ) : (
@@ -395,7 +398,7 @@ export function ChatComposer({
               onModeChange("attach");
             }}
             accessibilityRole="button"
-            accessibilityLabel="Attach something"
+            accessibilityLabel={t("components.chatComposer.attachSomething")}
           >
             <Ionicons name="add" size={22} color={palette.primaryStrong} />
           </Pressable>
@@ -451,7 +454,7 @@ export function ChatComposer({
             onPress={() => void onSend()}
             disabled={(!draft.trim() && !stagedAttachments?.length && !stagedPayment) || sending}
             accessibilityRole="button"
-            accessibilityLabel="Send message"
+            accessibilityLabel={t("components.chatComposer.sendMessage")}
           >
             <Ionicons name="arrow-up" size={18} color={palette.white} />
           </Pressable>
@@ -533,10 +536,10 @@ function AmountPad({
   return (
     <View style={styles.pad}>
       <View style={styles.padHeader}>
-        <Pressable onPress={onCancel} hitSlop={10} accessibilityLabel="Cancel payment">
+        <Pressable onPress={onCancel} hitSlop={10} accessibilityLabel={t("components.chatComposer.cancelPayment")}>
           <Ionicons name="chevron-down" size={22} color={palette.textMuted} />
         </Pressable>
-        <Text style={styles.padTitle}>Send {tokenSymbol}</Text>
+        <Text style={styles.padTitle}>{t("chat.sendToken", { tokenSymbol })}</Text>
         <View style={{ width: 22 }} />
       </View>
 
@@ -547,10 +550,10 @@ function AmountPad({
         <Text style={styles.padSymbol}>{tokenSymbol}</Text>
       </View>
       {overBalance ? (
-        <Text style={styles.padError}>That&apos;s more than your balance.</Text>
+        <Text style={styles.padError}>{t("chat.moreThanYourBalance")}</Text>
       ) : availableBalance ? (
         <Text style={styles.padBalance}>
-          {availableBalance} {tokenSymbol} available
+          {t("chat.amountAvailable", { amount: availableBalance, tokenSymbol })}
         </Text>
       ) : null}
 
@@ -558,7 +561,7 @@ function AmountPad({
         style={styles.padNote}
         value={note}
         onChangeText={setNote}
-        placeholder="What's it for? (optional)"
+        placeholder={t("components.chatComposer.whatSItForOptional")}
         placeholderTextColor={palette.textMuted}
         maxLength={200}
       />
@@ -572,7 +575,7 @@ function AmountPad({
                 style={styles.padKey}
                 onPress={() => press(key)}
                 accessibilityRole="button"
-                accessibilityLabel={key === "del" ? "Delete" : key}
+                accessibilityLabel={key === "del" ? t("components.chatComposer.delete") : key}
               >
                 {key === "del" ? (
                   <Ionicons name="backspace-outline" size={20} color={palette.text} />
@@ -595,9 +598,9 @@ function AmountPad({
         onPress={stage}
         disabled={!ready}
         accessibilityRole="button"
-        accessibilityLabel={`Attach a payment of ${amount || "0"} ${tokenSymbol}`}
+        accessibilityLabel={t("components.chatComposer.attachPayment", { amount: amount || "0", tokenSymbol })}
       >
-        <Text style={styles.padSendText}>{`Attach ${amount || "0"} ${tokenSymbol}`}</Text>
+        <Text style={styles.padSendText}>{t("chat.attachAmount", { amount: amount || "0", tokenSymbol })}</Text>
       </Pressable>
     </View>
   );

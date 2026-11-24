@@ -1,23 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, Pressable, StyleSheet, View } from "react-native";
+import { Text } from "./AppText";
 import { Ionicons } from "@expo/vector-icons";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
+import i18next, { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
 
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
-const MONTHS = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
+/** Month names in the app's language, from the phone's own date formatting. */
+function monthName(month: number, style: "long" | "short" = "long"): string {
+  return new Date(2000, month, 1).toLocaleDateString(i18next.language, { month: style });
+}
 
 // All dates are handled as calendar days in UTC (matching the "YYYY-MM-DD"
 // absence values), so month math never drifts across timezones/DST.
@@ -41,8 +34,12 @@ function todayYmd(): string {
 
 function longLabel(value: string): string {
   const parsed = parseYmd(value);
-  if (!parsed) return "Select a date";
-  return `${MONTHS[parsed.month]} ${parsed.day}, ${parsed.year}`;
+  if (!parsed) return t("components.datePickerSheet.selectADate");
+  return new Date(parsed.year, parsed.month, parsed.day).toLocaleDateString(i18next.language, {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 export interface DatePickerSheetProps {
@@ -117,13 +114,13 @@ export function DatePickerSheet({ visible, value, title, minDate, onSelect, onCl
 
           <View style={styles.monthRow}>
             <Pressable style={styles.navButton} onPress={goPrevMonth} hitSlop={8}>
-              <Ionicons name="chevron-back" size={20} color={palette.text} />
+              <Ionicons name={dirIcon("chevron-back")} size={20} color={palette.text} />
             </Pressable>
             <Text style={styles.monthLabel}>
-              {MONTHS[viewMonth]} {viewYear}
+              {new Date(viewYear, viewMonth, 1).toLocaleDateString(i18next.language, { month: "long", year: "numeric" })}
             </Text>
             <Pressable style={styles.navButton} onPress={goNextMonth} hitSlop={8}>
-              <Ionicons name="chevron-forward" size={20} color={palette.text} />
+              <Ionicons name={dirIcon("chevron-forward")} size={20} color={palette.text} />
             </Pressable>
           </View>
 

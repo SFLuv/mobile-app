@@ -1,6 +1,9 @@
 import { useMemo } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, Pressable, StyleSheet, View } from "react-native";
+import { Text } from "./AppText";
 import { Ionicons } from "@expo/vector-icons";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import type { AppW9Tier } from "../types/app";
 
@@ -57,6 +60,7 @@ type Presentation = {
  * and are plain about it.
  */
 function presentationFor(
+  t: TFunction,
   tier: AppW9Tier,
   threshold: string,
   symbol: string,
@@ -73,9 +77,9 @@ function presentationFor(
     return {
       icon: "mail",
       tone: "warning",
-      title: "We couldn't verify your W-9",
-      body: "The name and taxpayer number on your W-9 still didn't match IRS records. Please use Contact SFLuv in Settings and we'll help sort it out.",
-      dismiss: "OK",
+      title: t("w9.supportTitle"),
+      body: t("w9.supportBody"),
+      dismiss: t("common.ok"),
       startable: false,
     };
   }
@@ -86,10 +90,10 @@ function presentationFor(
     return {
       icon: "create",
       tone: "warning",
-      title: "We need a corrected W-9",
-      body: "The name or taxpayer number on your W-9 didn't match IRS records. Check your number digit by digit, and use your name exactly as it appears on your Social Security card.",
-      emphasis: "You'll get a fresh, blank form.",
-      dismiss: "Later",
+      title: t("w9.correctionTitle"),
+      body: t("w9.correctionBody"),
+      emphasis: t("w9.correctionEmphasis"),
+      dismiss: t("common.later"),
     };
   }
   // Asked for by an admin. The backend delivers the request as the notice or
@@ -100,9 +104,9 @@ function presentationFor(
     return {
       icon: "document-text",
       tone: "notice",
-      title: "SFLuv has asked you for a W-9",
-      body: `We need a W-9 on file for you${taxYear ? ` for ${taxYear}` : ""}. It takes a couple of minutes, and the form is hosted securely by our tax provider.`,
-      dismiss: "Later",
+      title: t("w9.adminTitle"),
+      body: taxYear ? t("w9.adminBodyYear", { year: taxYear }) : t("w9.adminBody"),
+      dismiss: t("common.later"),
     };
   }
   switch (tier) {
@@ -110,9 +114,9 @@ function presentationFor(
       return {
         icon: "information-circle",
         tone: "notice",
-        title: "You're on your way to a tax form",
-        body: `Once you've earned ${threshold} ${symbol} in a year, we need a W-9 on file before we can send you any more.`,
-        dismiss: "Later",
+        title: t("w9.noticeTitle"),
+        body: t("w9.noticeBody", { threshold, symbol }),
+        dismiss: t("common.later"),
       };
     case "warning_500":
       // While enforcement is off, the warning is also what somebody already
@@ -121,37 +125,37 @@ function presentationFor(
         return {
           icon: "alert-circle",
           tone: "warning",
-          title: "We need a W-9 from you",
-          body: `You're past ${threshold} ${symbol} for the year, so we need a W-9 on file. It takes a couple of minutes.`,
-          dismiss: "Later",
+          title: t("w9.pastLimitTitle"),
+          body: t("w9.pastLimitBody", { threshold, symbol }),
+          dismiss: t("common.later"),
         };
       }
       return {
         icon: "alert-circle",
         tone: "warning",
-        title: `You're close to the ${threshold} ${symbol} limit`,
-        body: `We'll need a W-9 on file before we can send anything past ${threshold} ${symbol}. It takes a couple of minutes.`,
-        emphasis: "Do it now and your rewards keep arriving without interruption.",
-        dismiss: "Later",
+        title: t("w9.warningTitle", { threshold, symbol }),
+        body: t("w9.warningBody", { threshold, symbol }),
+        emphasis: t("w9.warningEmphasis"),
+        dismiss: t("common.later"),
       };
     case "escrow_600":
       return {
         icon: "lock-closed",
         tone: "stopped",
-        title: "Your reward is being held",
-        body: `You've reached ${threshold} ${symbol} for the year, so we're holding this reward until your W-9 is on file.`,
-        emphasis: "The money is yours. Complete the form and we'll send it straight over.",
-        dismiss: "Later",
+        title: t("w9.escrowTitle"),
+        body: t("w9.escrowBody", { threshold, symbol }),
+        emphasis: t("w9.escrowEmphasis"),
+        dismiss: t("common.later"),
       };
     case "blocked":
     default:
       return {
         icon: "close-circle",
         tone: "stopped",
-        title: "We can't send your rewards yet",
-        body: `You have earned more than ${threshold} ${symbol} this year already. Please fill out a W-9 here.`,
-        emphasis: "Your QR code is still good — scan it again once the form is in.",
-        dismiss: "Not now",
+        title: t("w9.blockedTitle"),
+        body: t("w9.blockedBody", { threshold, symbol }),
+        emphasis: t("w9.blockedEmphasis"),
+        dismiss: t("common.notNow"),
       };
   }
 }
@@ -199,10 +203,12 @@ export function W9TierModal({
 }: Props) {
   const { palette } = useAppTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
+  const { t } = useTranslation();
   const presentation = useMemo(
     () =>
       tier
         ? presentationFor(
+            t,
             tier,
             thresholdSfluv,
             tokenSymbol,
@@ -213,7 +219,7 @@ export function W9TierModal({
             isPastLimit(earnedBase, thresholdBase),
           )
         : null,
-    [adminRequested, correctionNeeded, earnedBase, supportNeeded, taxYear, thresholdBase, thresholdSfluv, tier, tokenSymbol],
+    [adminRequested, correctionNeeded, earnedBase, supportNeeded, t, taxYear, thresholdBase, thresholdSfluv, tier, tokenSymbol],
   );
 
   if (!presentation) {
@@ -244,13 +250,13 @@ export function W9TierModal({
                 {earnedSfluv} {tokenSymbol}
               </Text>
               <Text style={styles.meterLimit}>
-                of {thresholdSfluv} {tokenSymbol}
+                {t("components.w9TierModal.ofThreshold", { amount: thresholdSfluv, tokenSymbol })}
               </Text>
             </View>
             <View style={styles.meterTrack}>
               <View style={[styles.meterFill, { width: `${percent}%`, backgroundColor: accent }]} />
             </View>
-            <Text style={styles.meterCaption}>Earned so far this year</Text>
+            <Text style={styles.meterCaption}>{t("w9.earnedSoFar")}</Text>
           </View>
 
           <Text style={styles.body}>{presentation.body}</Text>
@@ -269,10 +275,10 @@ export function W9TierModal({
                 // the text, and iOS builds the name by concatenating them, so this
                 // announces as ", Fill out my W-9" — leading comma — without an
                 // explicit label.
-                accessibilityLabel={busy ? "Opening your form" : "Fill out my W-9"}
+                accessibilityLabel={busy ? t("w9.opening") : t("w9.fillOut")}
               >
                 <Ionicons name="open-outline" size={16} color={palette.white} />
-                <Text style={styles.primaryButtonText}>{busy ? "Opening your form…" : "Fill out my W-9"}</Text>
+                <Text style={styles.primaryButtonText}>{busy ? t("w9.openingEllipsis") : t("w9.fillOut")}</Text>
               </Pressable>
 
               {/*
@@ -280,7 +286,7 @@ export function W9TierModal({
                 loud so that is expected rather than alarming — the address bar is
                 the point.
               */}
-              <Text style={styles.footnote}>Opens the secure tax form outside the app.</Text>
+              <Text style={styles.footnote}>{t("w9.opensOutside")}</Text>
             </>
           )}
 

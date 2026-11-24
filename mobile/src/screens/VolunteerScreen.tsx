@@ -13,11 +13,11 @@ import {
   ScrollView,
   StyleSheet,
   Switch,
-  Text,
   TextInput,
   View,
   useWindowDimensions,
 } from "react-native";
+import { Text } from "../components/AppText";
 import { Ionicons } from "@expo/vector-icons";
 import { SegmentedTabs } from "../components/SegmentedTabs";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
@@ -38,6 +38,9 @@ import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { W9EscrowCard } from "../components/W9EscrowCard";
 import { triggerClickHaptic } from "../utils/haptics";
 import { ICON_FACE, ICON_TEXT_COLOR, ICON_TEXT_NUDGE_EM, merchantInitials } from "../utils/merchantIcon";
+import { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
+import { appLocale } from "../i18n";
 
 /**
  * SFLuv's own mark, bundled rather than fetched.
@@ -75,10 +78,11 @@ type FeedOption = {
   label: string;
 };
 
-const FEED_OPTIONS: FeedOption[] = [
-  { value: "upcoming", label: "Upcoming" },
-  { value: "past", label: "Past" },
-  { value: "mine", label: "My events" },
+/** Built per call so labels follow the current language. */
+const FEED_OPTIONS = (): FeedOption[] => [
+  { value: "upcoming", label: t("volunteer.upcoming") },
+  { value: "past", label: t("volunteer.past") },
+  { value: "mine", label: t("volunteer.myEvents") },
 ];
 
 const SEARCH_DEBOUNCE_MS = 350;
@@ -105,13 +109,13 @@ function parseDate(value?: string | null): Date | null {
  * different zone sees the hour their phone would show them.
  */
 function formatLocal(date: Date, options: Intl.DateTimeFormatOptions): string {
-  return date.toLocaleString("en-US", options);
+  return date.toLocaleString(appLocale(), options);
 }
 
 function formatEventDay(event: AppVolunteerEvent): string {
   const start = parseDate(event.startAt);
   if (!start) {
-    return "Date to be announced";
+    return t("volunteer.dateToBeAnnounced");
   }
   return formatLocal(start, {
     weekday: "short",
@@ -158,7 +162,7 @@ function hasCoordinates(location: AppVolunteerLocation): boolean {
 
 async function openDirections(location: AppVolunteerLocation): Promise<void> {
   const { lat, lng } = location;
-  const label = encodeURIComponent(location.name || "Volunteer event");
+  const label = encodeURIComponent(location.name || t("volunteer.volunteerEvent"));
   const nativeUrl =
     Platform.OS === "android"
       ? `geo:${lat},${lng}?q=${lat},${lng}(${label})`
@@ -185,27 +189,27 @@ async function openDirections(location: AppVolunteerLocation): Promise<void> {
  */
 function signupSuccessMessage(result: AppVolunteerSignupResult): string {
   if (result.status === "pending_confirmation") {
-    return "Your spot is held. Check your email to confirm it.";
+    return t("volunteer.yourSpotIsHeldCheck");
   }
   // Only mention the email list when it needs something from the user. An
   // already-active subscription is not news worth crowding the confirmation
   // with — the same reason PJ had the line dropped from the web flow.
   if (result.volunteerList === "pending_confirmation") {
-    return "You are signed up. Check your email to join the volunteer list.";
+    return t("volunteer.youAreSignedUpCheck");
   }
-  return "You are signed up. See you there!";
+  return t("volunteer.youAreSignedUpSee");
 }
 
 /** "12 / 40 Remaining", or "Full" once there is nothing left to claim. */
 function remainingSpotsLabel(event: AppVolunteerEvent): string | null {
   if (typeof event.spotsRemaining === "number" && typeof event.maxParticipants === "number") {
     return event.spotsRemaining > 0
-      ? `${event.spotsRemaining} / ${event.maxParticipants} Remaining`
-      : "Full";
+      ? t("volunteer.remainingOf", { remaining: event.spotsRemaining, total: event.maxParticipants })
+      : t("volunteer.full");
   }
   // External and no-signup events publish a cap but not a live count.
   if (typeof event.maxParticipants === "number") {
-    return `${event.maxParticipants} spots`;
+    return t("volunteer.spotsCount", { count: event.maxParticipants });
   }
   return null;
 }
@@ -213,11 +217,11 @@ function remainingSpotsLabel(event: AppVolunteerEvent): string | null {
 function spotsLabel(event: AppVolunteerEvent): string | null {
   if (typeof event.spotsRemaining === "number" && typeof event.maxParticipants === "number") {
     return event.spotsRemaining > 0
-      ? `${event.spotsRemaining} of ${event.maxParticipants} spots left`
-      : "Full";
+      ? t("volunteer.ofSpotsLeft", { spotsRemaining: event.spotsRemaining, maxParticipants: event.maxParticipants })
+      : t("volunteer.full");
   }
   if (typeof event.maxParticipants === "number") {
-    return `${event.maxParticipants} spots`;
+    return t("volunteer.spotsCount", { count: event.maxParticipants });
   }
   return null;
 }
@@ -225,13 +229,13 @@ function spotsLabel(event: AppVolunteerEvent): string | null {
 function signupClosedLabel(event: AppVolunteerEvent): string | null {
   switch (event.signup.closedReason) {
     case "full":
-      return "This event is full";
+      return t("volunteer.thisEventIsFull");
     case "ended":
-      return "This event has ended";
+      return t("volunteer.thisEventHasEnded");
     case "cancelled":
-      return "This event was cancelled";
+      return t("volunteer.thisEventWasCancelled2");
     case "not_open_yet":
-      return "Sign ups have not opened yet";
+      return t("volunteer.signUpsHaveNotOpened");
     default:
       return null;
   }
@@ -344,7 +348,7 @@ export function VolunteerScreen({
   const fetchPage = useCallback(
     async (targetPage: number) => {
       if (!backendClient) {
-        throw new Error("Backend not configured.");
+        throw new Error(t("volunteer.backendNotConfigured"));
       }
       const request = { ...query, page: targetPage };
       return feed === "mine"
@@ -358,7 +362,7 @@ export function VolunteerScreen({
     async (options?: { silent?: boolean }) => {
       if (!backendClient) {
         setLoading(false);
-        setListError("Sign in again to browse volunteer events.");
+        setListError(t("volunteer.signInAgainToBrowse"));
         return;
       }
       const requestId = listRequestRef.current + 1;
@@ -381,7 +385,7 @@ export function VolunteerScreen({
         }
         setEvents([]);
         setHasMore(false);
-        setListError((error as Error)?.message || "Unable to load volunteer events.");
+        setListError((error as Error)?.message || t("volunteer.unableToLoadVolunteerEvents"));
       } finally {
         if (listRequestRef.current === requestId) {
           setLoading(false);
@@ -437,7 +441,7 @@ export function VolunteerScreen({
       setPage(result.page);
       setHasMore(result.hasMore);
     } catch (error) {
-      onToast?.((error as Error)?.message || "Unable to load more events.", "error");
+      onToast?.((error as Error)?.message || t("volunteer.unableToLoadMoreEvents"), "error");
     } finally {
       setLoadingMore(false);
     }
@@ -508,7 +512,7 @@ export function VolunteerScreen({
         // With nothing already known there is no pane to show, and rendering
         // neither one reads as a broken screen rather than a failed load.
         if (!known) {
-          setDetailError("Sign in again to open this event.");
+          setDetailError(t("volunteer.signInAgainToOpen"));
         }
         return;
       }
@@ -527,7 +531,7 @@ export function VolunteerScreen({
           return;
         }
         if (!known) {
-          setDetailError((error as Error)?.message || "Unable to load this event.");
+          setDetailError((error as Error)?.message || t("volunteer.unableToLoadThisEvent"));
         }
       } finally {
         if (detailRequestRef.current === requestId) {
@@ -734,14 +738,14 @@ export function VolunteerScreen({
     async (event: AppVolunteerEvent) => {
       const url = event.signup.url?.trim();
       if (!url) {
-        onToast?.("This event has no sign up link yet.", "error");
+        onToast?.(t("volunteer.thisEventHasNoSign"), "error");
         return;
       }
       haptics();
       try {
         await Linking.openURL(url);
       } catch {
-        onToast?.("Unable to open the sign up link.", "error");
+        onToast?.(t("volunteer.unableToOpenTheSign"), "error");
       }
     },
     [haptics, onToast],
@@ -792,7 +796,7 @@ export function VolunteerScreen({
         setSignupSheetOpen(false);
         onToast?.(error.message, "info");
       } else {
-        onToast?.((error as Error)?.message || "Unable to sign you up right now.", "error");
+        onToast?.((error as Error)?.message || t("volunteer.unableToSignYouUp"), "error");
         // A "full" rejection means our copy of the event is stale.
         void openEvent({ id: selectedEvent.id });
       }
@@ -829,9 +833,9 @@ export function VolunteerScreen({
       };
       applyEventUpdate(next);
       setSelectedEvent(next);
-      onToast?.("Your spot was released.", "info");
+      onToast?.(t("volunteer.yourSpotWasReleased"), "info");
     } catch (error) {
-      onToast?.((error as Error)?.message || "Unable to cancel your spot.", "error");
+      onToast?.((error as Error)?.message || t("volunteer.unableToCancelYourSpot"), "error");
     } finally {
       setSignupBusy(false);
     }
@@ -839,10 +843,10 @@ export function VolunteerScreen({
 
   const organizerFilterLabel = useMemo(() => {
     if (organizerFilter === ORGANIZER_FILTER_ALL) {
-      return "All organizers";
+      return t("volunteer.allOrganizers");
     }
     const match = organizers.find((organizer) => organizerFilterKey(organizer) === organizerFilter);
-    return match?.name || "All organizers";
+    return match?.name || t("volunteer.allOrganizers");
   }, [organizerFilter, organizers]);
 
   /*
@@ -925,7 +929,7 @@ export function VolunteerScreen({
         <View style={styles.filterHeaderRow}>
           <SegmentedTabs
             style={styles.segmentRowFill}
-            segments={FEED_OPTIONS}
+            segments={FEED_OPTIONS()}
             value={feed}
             onChange={setFeed}
             hapticsEnabled={hapticsEnabled}
@@ -935,7 +939,7 @@ export function VolunteerScreen({
             onPress={toggleSearch}
             hitSlop={6}
             accessibilityRole="button"
-            accessibilityLabel={searchOpen ? "Hide search" : "Search events"}
+            accessibilityLabel={searchOpen ? t("volunteer.hideSearch") : t("volunteer.searchEvents")}
           >
             <Ionicons
               name={searchOpen ? "close" : "search"}
@@ -961,7 +965,7 @@ export function VolunteerScreen({
                 style={styles.searchInput}
                 value={searchInput}
                 onChangeText={setSearchInput}
-                placeholder="Search events or organizers"
+                placeholder={t("volunteer.searchEventsOrOrganizers")}
                 placeholderTextColor={palette.textMuted}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -1012,7 +1016,7 @@ export function VolunteerScreen({
                 color={showFull ? palette.primaryStrong : palette.textMuted}
               />
               <Text style={[styles.filterChipText, showFull ? styles.filterChipTextActive : undefined]}>
-                Show full
+                {t("volunteer.showFull")}
               </Text>
             </Pressable>
           </View>
@@ -1022,15 +1026,15 @@ export function VolunteerScreen({
         {loading ? (
           <View style={styles.stateCard}>
             <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
-            <Text style={styles.stateTitle}>Loading events</Text>
+            <Text style={styles.stateTitle}>{t("volunteer.loadingEvents")}</Text>
           </View>
         ) : listError ? (
           <View style={styles.stateCard}>
             <Ionicons name="alert-circle-outline" size={22} color={palette.danger} />
-            <Text style={styles.stateTitle}>Could not load events</Text>
+            <Text style={styles.stateTitle}>{t("volunteer.couldNotLoadEvents")}</Text>
             <Text style={styles.stateBody}>{listError}</Text>
             <Pressable style={styles.retryButton} onPress={() => void loadFirstPage()}>
-              <Text style={styles.retryButtonText}>Try again</Text>
+              <Text style={styles.retryButtonText}>{t("volunteer.tryAgain")}</Text>
             </Pressable>
           </View>
         ) : events.length === 0 ? (
@@ -1038,21 +1042,21 @@ export function VolunteerScreen({
             <Ionicons name="calendar-outline" size={22} color={palette.textMuted} />
             <Text style={styles.stateTitle}>
               {feed === "mine"
-                ? "No sign ups yet"
+                ? t("volunteer.noSignUpsYet")
                 : search
-                  ? "No matching events"
+                  ? t("volunteer.noMatchingEvents")
                   : feed === "past"
-                    ? "No previous events"
-                    : "No events scheduled"}
+                    ? t("volunteer.noPreviousEvents")
+                    : t("volunteer.noEventsScheduled")}
             </Text>
             <Text style={styles.stateBody}>
               {feed === "mine"
-                ? "Events you sign up for will show up here."
+                ? t("volunteer.eventsYouSignUpFor")
                 : search
-                  ? "Try a different search or clear your filters."
+                  ? t("volunteer.tryADifferentSearchOr")
                   : feed === "past"
-                    ? "Events that have already happened will show up here."
-                    : "New volunteer events are posted regularly. Check back soon."}
+                    ? t("volunteer.eventsThatHaveAlreadyHappened")
+                    : t("volunteer.newVolunteerEventsArePosted")}
             </Text>
           </View>
         ) : (
@@ -1078,7 +1082,7 @@ export function VolunteerScreen({
             onPress={() => void loadMore()}
           >
             {loadingMore ? <ThemedActivityIndicator size="small" color={palette.white} /> : null}
-            <Text style={styles.loadMoreText}>{loadingMore ? "Loading..." : "Load more events"}</Text>
+            <Text style={styles.loadMoreText}>{loadingMore ? t("volunteer.loading") : t("volunteer.loadMoreEvents")}</Text>
           </Pressable>
         ) : null}
       </ScrollView>
@@ -1093,7 +1097,7 @@ export function VolunteerScreen({
         <Pressable style={styles.modalOverlay} onPress={() => setOrganizerPickerOpen(false)}>
           <Pressable style={styles.sheetCard} onPress={() => {}}>
             <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>Organizer</Text>
+              <Text style={styles.sheetTitle}>{t("volunteer.organizer")}</Text>
               <Pressable style={styles.sheetClose} onPress={() => setOrganizerPickerOpen(false)} hitSlop={8}>
                 <Ionicons name="close" size={18} color={palette.primaryStrong} />
               </Pressable>
@@ -1110,7 +1114,7 @@ export function VolunteerScreen({
                   setOrganizerPickerOpen(false);
                 }}
               >
-                <Text style={styles.sheetOptionText}>All organizers</Text>
+                <Text style={styles.sheetOptionText}>{t("volunteer.allOrganizers")}</Text>
                 {organizerFilter === ORGANIZER_FILTER_ALL ? (
                   <Ionicons name="checkmark" size={16} color={palette.primaryStrong} />
                 ) : null}
@@ -1139,7 +1143,7 @@ export function VolunteerScreen({
               })}
 
               {organizers.length === 0 ? (
-                <Text style={styles.sheetEmpty}>No organizers to filter by yet.</Text>
+                <Text style={styles.sheetEmpty}>{t("volunteer.noOrganizersToFilterBy")}</Text>
               ) : null}
             </ScrollView>
           </Pressable>
@@ -1282,12 +1286,12 @@ function EventCard({
           {cancelled ? (
             <View style={styles.cancelledChip}>
               <Ionicons name="close-circle" size={11} color={palette.danger} />
-              <Text style={styles.cancelledChipText}>Cancelled</Text>
+              <Text style={styles.cancelledChipText}>{t("volunteer.cancelled")}</Text>
             </View>
           ) : signedUp ? (
             <View style={styles.goingChip}>
               <Ionicons name="checkmark" size={11} color={palette.success} />
-              <Text style={styles.goingChipText}>Going</Text>
+              <Text style={styles.goingChipText}>{t("volunteer.going")}</Text>
             </View>
           ) : null}
         </View>
@@ -1413,8 +1417,8 @@ function EventDetail({
     <>
       <View style={styles.detailPage}>
         <View style={styles.detailTitleRow}>
-          <Pressable style={styles.backButton} onPress={onBack} hitSlop={10} accessibilityLabel="All events">
-            <Ionicons name="chevron-back" size={22} color={palette.primaryStrong} />
+          <Pressable style={styles.backButton} onPress={onBack} hitSlop={10} accessibilityLabel={t("volunteer.allEvents")}>
+            <Ionicons name={dirIcon("chevron-back")} size={22} color={palette.primaryStrong} />
           </Pressable>
           {event ? (
             <Text style={styles.detailTitle} numberOfLines={2}>
@@ -1428,13 +1432,13 @@ function EventDetail({
             {loading ? (
               <>
                 <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
-                <Text style={styles.stateTitle}>Loading event</Text>
+                <Text style={styles.stateTitle}>{t("volunteer.loadingEvent")}</Text>
               </>
             ) : (
               <>
                 <Ionicons name="alert-circle-outline" size={22} color={palette.danger} />
-                <Text style={styles.stateTitle}>Event unavailable</Text>
-                <Text style={styles.stateBody}>{error || "This event is no longer available."}</Text>
+                <Text style={styles.stateTitle}>{t("volunteer.eventUnavailable")}</Text>
+                <Text style={styles.stateBody}>{error || t("volunteer.thisEventIsNoLonger")}</Text>
               </>
             )}
           </View>
@@ -1500,7 +1504,7 @@ function EventDetail({
                   style={styles.organizerLink}
                   onPress={() => onOpenOrganizer(event)}
                   accessibilityRole="button"
-                  accessibilityLabel={`See all events from ${event.organizer.name}`}
+                  accessibilityLabel={t("volunteer.seeAllEventsFrom", { name: event.organizer.name })}
                 >
                   <OrganizerAvatar styles={styles} palette={palette} organizer={event.organizer} size={34} />
                   <Text style={[styles.organizerNameStrong, styles.detailOrganizerName]} numberOfLines={1}>
@@ -1516,7 +1520,7 @@ function EventDetail({
                   </View>
                 ) : (
                   <View style={styles.noRewardBubble}>
-                    <Text style={styles.noRewardBubbleText}>No Reward</Text>
+                    <Text style={styles.noRewardBubbleText}>{t("volunteer.noReward")}</Text>
                   </View>
                 )}
               </View>
@@ -1541,8 +1545,8 @@ function EventDetail({
                 <View style={styles.cancelledBanner}>
                   <Ionicons name="close-circle" size={16} color={palette.danger} />
                   <Text style={styles.cancelledBannerText}>
-                    This event was cancelled.
-                    {signedUp ? " Your sign up is no longer active." : ""}
+                    {t("volunteer.eventWasCancelled")}
+                    {signedUp ? t("volunteer.yourSignUpIsNo") : ""}
                   </Text>
                 </View>
               ) : null}
@@ -1550,7 +1554,7 @@ function EventDetail({
               {signedUp && event.status !== "cancelled" ? (
                 <View style={styles.signedUpBanner}>
                   <Ionicons name="checkmark-circle" size={16} color={palette.success} />
-                  <Text style={styles.signedUpBannerText}>You are signed up for this event.</Text>
+                  <Text style={styles.signedUpBannerText}>{t("volunteer.youAreSignedUpFor")}</Text>
                 </View>
               ) : null}
 
@@ -1579,7 +1583,7 @@ function EventDetail({
                   }}
                 >
                   <Ionicons name="navigate-outline" size={16} color={palette.primaryStrong} />
-                  <Text style={styles.secondaryButtonText}>Directions</Text>
+                  <Text style={styles.secondaryButtonText}>{t("volunteer.directions")}</Text>
                 </Pressable>
               ) : null}
               {/* Part of the details, not a component of its own.
@@ -1598,10 +1602,10 @@ function EventDetail({
               {event.status === "cancelled" ? (
                 <View style={styles.signupClosedCard}>
                   <Ionicons name="close-circle-outline" size={16} color={palette.textMuted} />
-                  <Text style={styles.signupNote}>This event was cancelled.</Text>
+                  <Text style={styles.signupNote}>{t("volunteer.thisEventWasCancelled")}</Text>
                 </View>
               ) : event.signup.mode === "none" ? (
-                <Text style={styles.signupNote}>No sign up needed. Just show up.</Text>
+                <Text style={styles.signupNote}>{t("volunteer.noSignUpNeededJust")}</Text>
               ) : signedUp ? (
                 <Pressable
                   style={[styles.secondaryButton, signupBusy ? styles.buttonDisabled : undefined]}
@@ -1609,22 +1613,22 @@ function EventDetail({
                   onPress={onCancelSignup}
                 >
                   {signupBusy ? <ThemedActivityIndicator size="small" color={palette.primaryStrong} /> : null}
-                  <Text style={styles.secondaryButtonText}>Cancel my spot</Text>
+                  <Text style={styles.secondaryButtonText}>{t("volunteer.cancelMySpot")}</Text>
                 </Pressable>
               ) : !event.signup.open ? (
                 <View style={styles.signupClosedCard}>
                   <Ionicons name="lock-closed-outline" size={16} color={palette.textMuted} />
-                  <Text style={styles.signupNote}>{closedLabel || "Sign ups are closed."}</Text>
+                  <Text style={styles.signupNote}>{closedLabel || t("volunteer.signUpsAreClosed")}</Text>
                 </View>
               ) : event.signup.mode === "external" ? (
                 <Pressable style={styles.primaryButton} onPress={() => onExternalSignup(event)}>
-                  <Text style={styles.primaryButtonText}>Sign up</Text>
+                  <Text style={styles.primaryButtonText}>{t("volunteer.signUp")}</Text>
                   <Ionicons name="open-outline" size={16} color={palette.white} />
                 </Pressable>
               ) : (
                 <Pressable style={styles.primaryButton} onPress={onOpenSignupSheet}>
-                  <Text style={styles.primaryButtonText}>Sign up</Text>
-                  <Ionicons name="arrow-forward" size={16} color={palette.white} />
+                  <Text style={styles.primaryButtonText}>{t("volunteer.signUp")}</Text>
+                  <Ionicons name={dirIcon("arrow-forward")} size={16} color={palette.white} />
                 </Pressable>
               )}
 
@@ -1640,10 +1644,10 @@ function EventDetail({
                   style={styles.secondaryButton}
                   onPress={() => onShareEvent(event)}
                   accessibilityRole="button"
-                  accessibilityLabel={`Share ${event.title}`}
+                  accessibilityLabel={t("common.shareName", { name: event.title })}
                 >
                   <Ionicons name="share-outline" size={16} color={palette.primaryStrong} />
-                  <Text style={styles.secondaryButtonText}>Share</Text>
+                  <Text style={styles.secondaryButtonText}>{t("volunteer.share")}</Text>
                 </Pressable>
               ) : null}
             </View>
@@ -1661,24 +1665,24 @@ function EventDetail({
         <Pressable style={styles.modalOverlay} onPress={signupBusy ? undefined : onCloseSignupSheet}>
           <Pressable style={styles.sheetCard} onPress={() => {}}>
             <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>Sign up</Text>
+              <Text style={styles.sheetTitle}>{t("volunteer.signUp")}</Text>
               <Pressable style={styles.sheetClose} onPress={onCloseSignupSheet} hitSlop={8} disabled={signupBusy}>
                 <Ionicons name="close" size={18} color={palette.primaryStrong} />
               </Pressable>
             </View>
 
             <Text style={styles.sheetBody}>
-              {event ? `You are signing up for "${event.title}".` : "You are signing up for this event."} We will use
-              the name and email on your SFLuv account.
+              {event ? t("volunteer.youAreSigningUpFor2", { title: event.title }) : t("volunteer.youAreSigningUpFor")}{" "}
+              {t("volunteer.weWillUseNameAndEmail")}
             </Text>
 
             <View style={styles.optInRow}>
               <View style={styles.optInCopy}>
-                <Text style={styles.optInLabel}>Email me about other volunteer events</Text>
+                <Text style={styles.optInLabel}>{t("volunteer.emailMeAboutOtherVolunteer")}</Text>
                 <Text style={styles.optInBody}>
                   {alreadyOnVolunteerList
-                    ? "You are on the SFLuv volunteer email list. Turn this off to leave it."
-                    : "Adds you to the SFLuv volunteer email list. You can opt out any time."}
+                    ? t("volunteer.youAreOnTheSfluv")
+                    : t("volunteer.addsYouToTheSfluv")}
                 </Text>
               </View>
               <Switch
@@ -1696,7 +1700,7 @@ function EventDetail({
               onPress={onConfirmSignup}
             >
               {signupBusy ? <ThemedActivityIndicator size="small" color={palette.white} /> : null}
-              <Text style={styles.primaryButtonText}>{signupBusy ? "Signing up..." : "Confirm sign up"}</Text>
+              <Text style={styles.primaryButtonText}>{signupBusy ? t("volunteer.signingUp") : t("volunteer.confirmSignUp")}</Text>
             </Pressable>
           </Pressable>
         </Pressable>

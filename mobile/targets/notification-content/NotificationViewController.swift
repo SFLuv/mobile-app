@@ -41,6 +41,13 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
   private var threadURL: URL?
   private var isGroup = false
   private var bubbles: [Bubble] = []
+  /// The thread's history has been drawn (or given up on). Until then the
+  /// push's own message waits, briefly, so the sheet is drawn once with the
+  /// conversation rather than once alone and again a moment later, larger.
+  private var firstDrawDone = false
+  /// How long the first draw waits for the history before showing the push's
+  /// own message alone.
+  private static let historyWait: TimeInterval = 0.75
   /// Ids for replies not yet confirmed, below zero so they never meet a real one.
   private var nextPendingId: Int64 = -1
 
@@ -67,13 +74,11 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
       stack.trailingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.trailingAnchor, constant: -12),
     ])
 
-    // Interaction is on so the history scrolls, which turns off the system's
-    // own tap-to-open. A tap still opens the chat, as it does on any push.
-    view.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(openChat)))
-  }
-
-  @objc private func openChat() {
-    extensionContext?.performNotificationDefaultAction()
+    // UNNotificationExtensionUserInteractionEnabled is false (Info.plist):
+    // the system takes every tap on this view and opens the app on the chat,
+    // as a tap on any push does. With it on, current iOS delivered no touches
+    // here at all, so neither a tap nor scrolling worked; the history is laid
+    // out with the newest message in view instead.
   }
 
   // MARK: - Content
@@ -98,9 +103,26 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
     }
     if messageId == 0 || !bubbles.contains(where: { $0.id == messageId }) {
       bubbles.append(Bubble(id: messageId, mine: false, sender: isGroup ? senderName : nil, text: line, system: false, pending: false))
-      render()
+      // Drawn now only if there is no history coming, or it has already been
+      // drawn (a second push arriving while this one is open).
+      if firstDrawDone || threadURL == nil {
+        firstDrawDone = true
+        render()
+      }
+    }
+    if threadURL != nil && !firstDrawDone {
+      DispatchQueue.main.asyncAfter(deadline: .now() + Self.historyWait) { [weak self] in
+        self?.drawFirstIfWaiting()
+      }
     }
     loadHistory()
+  }
+
+  /// The history did not arrive in time (or failed): show what there is.
+  private func drawFirstIfWaiting() {
+    guard !firstDrawDone else { return }
+    firstDrawDone = true
+    render()
   }
 
   private func loadHistory() {
@@ -116,6 +138,7 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
         let messages = page["messages"] as? [[String: Any]]
       else {
         Self.log.notice("thread history refused: status \(status, privacy: .public)")
+        DispatchQueue.main.async { self?.drawFirstIfWaiting() }
         return
       }
       let loaded = messages.compactMap(Self.bubble(from:)).suffix(Self.maxBubbles)
@@ -124,6 +147,7 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
         // Replies still on their way are kept under what the server returned.
         let pending = self.bubbles.filter { $0.pending }
         self.bubbles = Array(loaded) + pending
+        self.firstDrawDone = true
         self.render()
       }
     }.resume()
@@ -322,14 +346,14 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
     let body = ((message["body"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 
     if (message["deleted"] as? Bool) == true {
-      return Bubble(id: id, mine: mine, sender: sender, text: "Message deleted", system: false, pending: false)
+      return Bubble(id: id, mine: mine, sender: sender, text: Strings.text("messageDeleted"), system: false, pending: false)
     }
     if kind == "system" {
       return Bubble(id: id, mine: false, sender: nil, text: body, system: true, pending: false)
     }
     if kind == "payment" {
       let amount = formatAmount(message["amount_sfluv_base"] as? String)
-      let sent = mine ? "You sent \(amount) SFLUV" : "Sent you \(amount) SFLUV"
+      let sent = Strings.text(mine ? "youSent" : "sentYou").replacingOccurrences(of: "{amount}", with: "\(amount) SFLUV")
       return Bubble(id: id, mine: mine, sender: sender, text: body.isEmpty ? sent : "\(sent) · \(body)", system: false, pending: false)
     }
     let attachments = (message["attachments"] as? [[String: Any]]) ?? []
@@ -349,19 +373,23 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
       let images = kinds.filter { $0 == "image" }.count
       let videos = attachments.filter(isVideo).count
       let files = kinds.count - images - videos
-      if files == 0 && videos == 0 { return images > 1 ? "📷 \(images) photos" : "📷 Photo" }
-      if files == 0 && images == 0 { return videos > 1 ? "🎥 \(videos) videos" : "🎥 Video" }
-      if files == 0 { return "📷 \(images + videos) photos and videos" }
-      if images + videos == 0 { return files > 1 ? "📎 \(files) files" : "📎 File" }
-      return "📎 \(kinds.count) attachments"
+      if files == 0 && videos == 0 { return images > 1 ? Strings.count("photosCount", images) : Strings.text("photo") }
+      if files == 0 && images == 0 { return videos > 1 ? Strings.count("videosCount", videos) : Strings.text("video") }
+      if files == 0 { return Strings.count("photosAndVideos", images + videos) }
+      if images + videos == 0 { return files > 1 ? Strings.count("filesCount", files) : "📎 " + Strings.text("file") }
+      return Strings.count("attachmentsCount", kinds.count)
     }
     let first = attachments[0]
     switch kinds[0] {
-    case "link": return "🔗 " + ((first["link_title"] as? String) ?? (first["link_site_name"] as? String) ?? "Link")
-    case "transaction": return "🧾 Shared a transaction"
-    case "merchant": return "📍 Shared " + ((first["location_name"] as? String) ?? "a merchant")
-    case "event": return "📅 Shared " + ((first["event_title"] as? String) ?? "an event")
-    default: return "Attachment"
+    case "link": return "🔗 " + ((first["link_title"] as? String) ?? (first["link_site_name"] as? String) ?? Strings.text("link"))
+    case "transaction": return Strings.text("sharedTransaction")
+    case "merchant":
+      return Strings.text("sharedPlace").replacingOccurrences(
+        of: "{name}", with: (first["location_name"] as? String) ?? Strings.text("aMerchant"))
+    case "event":
+      return Strings.text("sharedEvent").replacingOccurrences(
+        of: "{name}", with: (first["event_title"] as? String) ?? Strings.text("anEvent"))
+    default: return Strings.text("attachment")
     }
   }
 

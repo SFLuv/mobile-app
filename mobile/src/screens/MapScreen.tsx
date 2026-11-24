@@ -9,10 +9,10 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from "react-native";
+import { Text } from "../components/AppText";
 import MapView, { Marker, PROVIDER_GOOGLE, Region } from "react-native-maps";
 import { useCurrentLocation } from "../hooks/useCurrentLocation";
 import { AppLocation } from "../types/app";
@@ -20,6 +20,8 @@ import { Palette, chromeLabel, getShadows, radii, spacing, useAppTheme } from ".
 import { formatDistanceLabel, locationDistanceMeters, sortLocationsByProximity, UserLocation } from "../utils/location";
 import { currentWeekdayIndex, getOpenState, isTodayHoursLine, OpenState } from "../utils/openingHours";
 import { MerchantIcon, MerchantMapPin, OpenStatusBadge, useMarkerTracking } from "../components/MerchantPin";
+import { t } from "../i18n";
+import { dirSign } from "../i18n/direction";
 
 type MapViewMode = "map" | "list";
 
@@ -578,7 +580,7 @@ export function MapScreen({
           style={styles.input}
           value={query}
           onChangeText={setQuery}
-          placeholder="Search merchants"
+          placeholder={t("map.searchMerchants")}
           placeholderTextColor={palette.textMuted}
         />
 
@@ -595,9 +597,11 @@ export function MapScreen({
                   width: segmentButtonWidth,
                   transform: [
                     {
+                      // Mirrored in Arabic: the List button is on the left there,
+                      // and transforms are not flipped by the RTL layout.
                       translateX: segmentSlide.interpolate({
                         inputRange: [0, 1],
-                        outputRange: [0, segmentButtonWidth + SEGMENT_GAP],
+                        outputRange: [0, (segmentButtonWidth + SEGMENT_GAP) * dirSign()],
                       }),
                     },
                   ],
@@ -613,7 +617,7 @@ export function MapScreen({
               maxFontSizeMultiplier={chromeLabel.maxFontSizeMultiplier}
               style={[styles.segmentText, viewMode === "map" ? styles.segmentTextActive : undefined]}
             >
-              Map View
+              {t("map.mapView")}
             </Text>
           </Pressable>
           <Pressable style={styles.segmentButton} onPress={() => onChangeViewMode("list")}>
@@ -624,17 +628,17 @@ export function MapScreen({
               maxFontSizeMultiplier={chromeLabel.maxFontSizeMultiplier}
               style={[styles.segmentText, viewMode === "list" ? styles.segmentTextActive : undefined]}
             >
-              List View
+              {t("map.listView")}
             </Text>
           </Pressable>
         </View>
 
         <View style={styles.resultsHeader}>
           <Text style={styles.resultsTitle}>
-            {filteredLocations.length} merchant{filteredLocations.length === 1 ? "" : "s"}
+            {t("map.merchantCount", { count: filteredLocations.length })}
           </Text>
           <Text style={styles.resultsSubtitle}>
-            {userLocation ? "Showing nearest merchants first." : "Enable location to sort by proximity."}
+            {userLocation ? t("map.showingNearestMerchantsFirst") : t("map.enableLocationToSortBy")}
           </Text>
         </View>
 
@@ -672,8 +676,8 @@ export function MapScreen({
           <View style={styles.listWrap}>
             {filteredLocations.length === 0 ? (
               <View style={styles.emptyCard}>
-                <Text style={styles.emptyTitle}>No merchants match that search.</Text>
-                <Text style={styles.emptyText}>Try clearing the search and browsing the full list.</Text>
+                <Text style={styles.emptyTitle}>{t("map.noMerchantsMatchThatSearch")}</Text>
+                <Text style={styles.emptyText}>{t("map.tryClearingTheSearchAnd")}</Text>
               </View>
             ) : (
               listLocations.map((location) => {
@@ -701,17 +705,17 @@ export function MapScreen({
                     </Pressable>
 
                     <View style={styles.cardFooter}>
-                      {!location.payToAddress ? <Text style={styles.cardMetaMuted}>Payment unavailable right now</Text> : null}
+                      {!location.payToAddress ? <Text style={styles.cardMetaMuted}>{t("map.paymentUnavailableRightNow")}</Text> : null}
                       <View style={styles.cardActionRow}>
                         <Pressable style={styles.cardSecondaryButton} onPress={() => openMerchantSheet(location)}>
-                          <Text style={styles.cardSecondaryButtonText}>Details</Text>
+                          <Text style={styles.cardSecondaryButtonText}>{t("map.details")}</Text>
                         </Pressable>
                         <Pressable
                           style={[styles.cardPrimaryButton, !location.payToAddress ? styles.cardPrimaryButtonDisabled : undefined]}
                           disabled={!location.payToAddress}
                           onPress={() => onPayLocation?.(location)}
                         >
-                          <Text style={styles.cardPrimaryButtonText}>Pay</Text>
+                          <Text style={styles.cardPrimaryButtonText}>{t("map.pay")}</Text>
                         </Pressable>
                       </View>
                     </View>
@@ -831,7 +835,7 @@ export function MapScreen({
                         void openGoogleMaps(selectedLocation);
                       }}
                     >
-                      <Text style={styles.directionsLinkText}>Get directions</Text>
+                      <Text style={styles.directionsLinkText}>{t("map.getDirections")}</Text>
                       <Ionicons name="open-outline" size={14} color={palette.primaryStrong} />
                     </Pressable>
                     {onShareLocation ? (
@@ -845,7 +849,7 @@ export function MapScreen({
                           closeMerchantSheet(() => onShareLocation(target));
                         }}
                         accessibilityRole="button"
-                        accessibilityLabel={`Share ${selectedLocation.name}`}
+                        accessibilityLabel={t("common.shareName", { name: selectedLocation.name })}
                       >
                         <Ionicons name="share-outline" size={17} color={palette.primaryStrong} />
                       </Pressable>
@@ -854,7 +858,7 @@ export function MapScreen({
 
                   {!selectedLocation.payToAddress ? (
                     <Text style={styles.sheetMetaMuted}>
-                      Payment is not available for this merchant right now.
+                      {t("map.paymentIsNotAvailableFor")}
                     </Text>
                   ) : null}
                 </ScrollView>
@@ -866,7 +870,7 @@ export function MapScreen({
                       onPress={() => void Linking.openURL(normalizeWebsite(selectedLocation.website))}
                     >
                       <Ionicons name="globe-outline" size={16} color={palette.primaryStrong} />
-                      <Text style={styles.secondaryActionText}>Open website</Text>
+                      <Text style={styles.secondaryActionText}>{t("map.openWebsite")}</Text>
                     </Pressable>
                   ) : null}
                   <Pressable
@@ -882,7 +886,7 @@ export function MapScreen({
                     }}
                   >
                     <Ionicons name="arrow-up" size={16} color={palette.white} />
-                    <Text style={styles.primaryActionText}>Pay merchant</Text>
+                    <Text style={styles.primaryActionText}>{t("map.payMerchant")}</Text>
                   </Pressable>
                 </View>
               </>

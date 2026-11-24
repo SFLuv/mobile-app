@@ -13,10 +13,10 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from "react-native";
+import { Text } from "../components/AppText";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import * as ImagePicker from "expo-image-picker";
@@ -48,19 +48,21 @@ import { AttachmentPreview } from "../components/AttachmentPreview";
 import { displayFileName, saveAttachment } from "../utils/attachmentFiles";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { useContactNames } from "../services/contactOverrides";
+import {
+  activeMention,
+  collectMentions,
+  insertMention,
+  mentionSegments,
+  picksFromMessage,
+  type MentionPick,
+} from "../utils/mentions";
 import { noteRead } from "../services/pendingReads";
 import { triggerClickHaptic } from "../utils/haptics";
 import type { RealtimeEvent } from "../services/realtime";
 import { useTypingIndicators, useTypingReporter } from "../hooks/useRealtime";
 import { useKeyboardLift } from "../hooks/useKeyboardLift";
 import Reanimated from "react-native-reanimated";
-import {
-  CAMERA_BLOCKED_MESSAGE,
-  CAMERA_BLOCKED_TITLE,
-  PHOTOS_BLOCKED_MESSAGE,
-  PHOTOS_BLOCKED_TITLE,
-  promptOpenSettings,
-} from "../utils/phonePermissions";
+import { promptCameraBlocked, promptPhotosBlocked } from "../utils/phonePermissions";
 
 /**
  * SFLuv's own mark, bundled rather than fetched.
@@ -75,6 +77,9 @@ import {
   Conversation,
   MessageAttachment,
 } from "../types/bulletin";
+import { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
+import { appLocale } from "../i18n";
 
 /**
  * One conversation, as a screen.
@@ -211,6 +216,14 @@ type Props = {
    * notifications for the thread.
    */
   onRead?: (conversationId: number) => void;
+  /** Who is signed in, so a group's @-suggestions leave them out. */
+  myUserId?: string;
+  /**
+   * Scroll to this message and flash it, loading older pages until it is in
+   * the thread. From a search result in Chat Info; the nonce makes picking the
+   * same result twice jump twice.
+   */
+  jumpTo?: { messageId: number; nonce: number } | null;
 };
 
 export function ChatScreen({
@@ -234,6 +247,8 @@ export function ChatScreen({
   sendTyping,
   onToast,
   onRead,
+  myUserId,
+  jumpTo,
 }: Props) {
   const { palette } = useAppTheme();
   // What you saved people as in Contacts wins over their own name, here and in
@@ -343,6 +358,11 @@ export function ChatScreen({
     splitAt: number;
   } | null>(null);
   const caretRef = useRef(0);
+  // The caret as state too, for the @-suggestions, which redraw as it moves.
+  const [caret, setCaret] = useState(0);
+  // People picked from the @-suggestions while writing this draft. Found again
+  // in the text at send time (utils/mentions), so edits cannot misplace them.
+  const mentionPicksRef = useRef<MentionPick[]>([]);
 
   const inputRef = useRef<TextInput | null>(null);
   const swipeRef = useRef<SwipeBackHandle>(null);
@@ -571,7 +591,7 @@ export function ChatScreen({
           // A failed load leaves whatever was already on screen. An empty
           // thread and an unreachable one are different things, and showing
           // the first for the second is how a chat looks deleted.
-          onToastRef.current("Couldn't refresh this conversation.", "error");
+          onToastRef.current(t("chat.couldnTRefreshThisConversation"), "error");
         }
       }
     },
@@ -803,6 +823,127 @@ export function ChatScreen({
     return () => clearTimeout(timer);
   }, [autoFocus, conversationId]);
 
+  // ── Jumping to a message (from search) ────────────────────────────────────
+
+  const listRef = useRef<FlatList<ChatRow>>(null);
+  const [highlightedId, setHighlightedId] = useState<number | null>(null);
+  // The message to scroll to once it is in the rows.
+  const [pendingJump, setPendingJump] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!jumpTo || !backendClient) {
+      return;
+    }
+    const target = jumpTo.messageId;
+    const forThread = conversationId;
+    let cancelled = false;
+    void (async () => {
+      if (!messages.some((m) => m.id === target)) {
+        // Older pages until it is in, contiguous with what is shown, so the
+        // thread never has a gap. Capped: a search result years back is
+        // reached in a few dozen pages at most.
+        let oldest = messages[0]?.id ?? null;
+        let more = hasMore;
+        const loaded: ChatMessage[] = [];
+        for (let page = 0; page < 40 && more && oldest !== null; page += 1) {
+          try {
+            const result = await backendClient.getConversationMessages(conversationId, oldest);
+            if (cancelled || stateThread.current !== forThread) {
+              return;
+            }
+            loaded.unshift(...result.messages);
+            more = result.has_more;
+            oldest = result.messages[0]?.id ?? null;
+            if (result.messages.some((m) => m.id === target)) {
+              break;
+            }
+          } catch {
+            break;
+          }
+        }
+        setMessages((current) => {
+          const known = new Set(current.map((m) => m.id));
+          return [...loaded.filter((m) => !known.has(m.id)), ...current];
+        });
+        setHasMore(more);
+        if (!loaded.some((m) => m.id === target)) {
+          onToast(t("chat.couldntFindThatMessage"), "info");
+          return;
+        }
+      }
+      setPendingJump(target);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Only a new jump starts this; the thread's own updates must not re-run it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpTo?.nonce]);
+
+  useEffect(() => {
+    if (pendingJump === null) {
+      return;
+    }
+    const index = rows.findIndex((row) => row.kind === "message" && row.message.id === pendingJump);
+    if (index < 0) {
+      return;
+    }
+    setPendingJump(null);
+    setHighlightedId(pendingJump);
+    requestAnimationFrame(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true }));
+    const timer = setTimeout(() => setHighlightedId(null), 2200);
+    return () => clearTimeout(timer);
+  }, [pendingJump, rows]);
+
+  // ── @-suggestions ─────────────────────────────────────────────────────────
+
+  // Groups only: in a two-person chat there is nobody else to tag.
+  const mentionable = useMemo(
+    () =>
+      isGroup
+        ? (conversation?.members ?? []).filter(
+            (member) => !member.left && member.user.user_id !== myUserId,
+          )
+        : [],
+    [conversation?.members, isGroup, myUserId],
+  );
+  const typingMention =
+    mentionable.length > 0 && mode === "text" && !staged ? activeMention(draft, caret) : null;
+  const mentionSuggestions = useMemo(() => {
+    if (!typingMention) {
+      return [];
+    }
+    const query = typingMention.query.toLocaleLowerCase();
+    return mentionable
+      .map((member) => {
+        const name = nameFor(member.user.user_id, member.user.public_name);
+        const haystack = [name, member.user.public_name, member.user.handle ?? ""].map((v) => v.toLocaleLowerCase());
+        const rank = haystack.some((v) => v.startsWith(query)) ? 0 : haystack.some((v) => v.includes(query)) ? 1 : 2;
+        return { member, name, rank };
+      })
+      .filter((entry) => entry.rank < 2)
+      .sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name))
+      .slice(0, 6);
+  }, [mentionable, nameFor, typingMention?.query, typingMention !== null]);
+
+  const pickMention = (member: (typeof mentionable)[number]) => {
+    if (!typingMention) {
+      return;
+    }
+    // The name everyone else will read in older apps and the push: the one the
+    // person chose. Each reader's app then shows its own saved name for them.
+    const label = member.user.public_name.trim() || member.user.handle || "";
+    if (!label) {
+      return;
+    }
+    const next = insertMention(draft, typingMention, label);
+    mentionPicksRef.current = [...mentionPicksRef.current, { userId: member.user.user_id, label }];
+    setDraft(next.text);
+    caretRef.current = next.caret;
+    setCaret(next.caret);
+    void triggerClickHaptic(hapticsEnabled);
+  };
+
   const loadOlder = async () => {
     if (!backendClient || !hasMore || loadingOlder || messages.length === 0) {
       return;
@@ -842,13 +983,15 @@ export function ChatScreen({
       // being turned into a link attachment here. What was typed is what is
       // stored, what a notification shows, and what an edit edits; and nobody
       // is asked whether they meant to send a link.
-      const message = await backendClient.sendConversationMessage(conversationId, body, replyTo);
+      const mentions = collectMentions(body, mentionPicksRef.current);
+      const message = await backendClient.sendConversationMessage(conversationId, body, replyTo, mentions);
       setMessages((current) => mergeMessage(current, message));
+      mentionPicksRef.current = [];
       setDraft("");
       setReplyingTo(null);
       reportTyping(false);
     } catch (e) {
-      onToast(e instanceof BulletinRequestError ? e.message : "Couldn't send. Try again.", "error");
+      onToast(e instanceof BulletinRequestError ? e.message : t("chat.couldnTSendTryAgain"), "error");
     } finally {
       setSending(false);
     }
@@ -865,7 +1008,7 @@ export function ChatScreen({
     // here, so this is where a staged payment is protected. Rebuilding `staged`
     // below without it is exactly how one used to vanish.
     if (staged?.payment) {
-      onToast("Send or remove the payment first.", "error");
+      onToast(t("chat.sendOrRemoveThePayment"), "error");
       return;
     }
     setMode("text");
@@ -925,7 +1068,7 @@ export function ChatScreen({
           // Refused out loud. Falling through would send the text and quietly
           // drop the payment, which is the one failure here nobody would
           // notice until they were asked where the money was.
-          onToast("This conversation can't take a payment.", "error");
+          onToast(t("chat.thisConversationCanTTake"), "error");
           return;
         }
         await onSendPayment({
@@ -996,7 +1139,7 @@ export function ChatScreen({
       setReplyingTo(null);
       reportTyping(false);
     } catch (e) {
-      onToast(e instanceof BulletinRequestError ? e.message : "Couldn't send that.", "error");
+      onToast(e instanceof BulletinRequestError ? e.message : t("chat.couldnTSendThat"), "error");
     } finally {
       setSending(false);
     }
@@ -1009,7 +1152,7 @@ export function ChatScreen({
     const options: AttachmentOption[] = [
       {
         id: "photo",
-        label: "Photos",
+        label: t("chat.photos"),
         icon: "image-outline",
         onPress: () => {
           void (async () => {
@@ -1040,19 +1183,19 @@ export function ChatScreen({
       },
       {
         id: "camera",
-        label: "Camera",
+        label: t("chat.camera"),
         icon: "camera-outline",
         onPress: () => {
           void (async () => {
             const current = await ImagePicker.getCameraPermissionsAsync();
             if (!current.granted && !current.canAskAgain) {
               // Asking again would show nothing: explain, and offer Settings.
-              promptOpenSettings(CAMERA_BLOCKED_TITLE, CAMERA_BLOCKED_MESSAGE);
+              promptCameraBlocked();
               return;
             }
             const permission = current.granted ? current : await ImagePicker.requestCameraPermissionsAsync();
             if (!permission.granted) {
-              onToast("SFLuv needs camera access to take a picture.", "error");
+              onToast(t("chat.sfluvNeedsCameraAccessTo"), "error");
               return;
             }
             const result = await ImagePicker.launchCameraAsync({ quality: 0.85 });
@@ -1072,7 +1215,7 @@ export function ChatScreen({
       },
       {
         id: "file",
-        label: "File",
+        label: t("chat.file"),
         icon: "document-outline",
         onPress: () => {
           void (async () => {
@@ -1118,7 +1261,7 @@ export function ChatScreen({
     if (!isGroup && conversation?.pay_address && onSendPayment) {
       options.push({
         id: "pay",
-        label: `Send ${tokenSymbol}`,
+        label: t("chat.sendToken", { tokenSymbol }),
         icon: "cash-outline",
         // Refused while something else is staged rather than allowed and then
         // silently dropped: a payment is one message and cannot carry a photo,
@@ -1245,13 +1388,19 @@ export function ChatScreen({
     }
     setSending(true);
     try {
-      const updated = await backendClient.editConversationMessage(conversationId, target.id, body);
+      const updated = await backendClient.editConversationMessage(
+        conversationId,
+        target.id,
+        body,
+        collectMentions(body, mentionPicksRef.current),
+      );
       setMessages((current) => current.map((m) => (m.id === updated.id ? updated : m)));
       setEditing(null);
+      mentionPicksRef.current = [];
       setDraft("");
     } catch (e) {
       onToast(
-        e instanceof BulletinRequestError ? e.message : "Couldn't save that edit.",
+        e instanceof BulletinRequestError ? e.message : t("chat.couldnTSaveThatEdit"),
         "error",
       );
     } finally {
@@ -1285,8 +1434,8 @@ export function ChatScreen({
     if (failed.length > 0) {
       onToast(
         failed.length === ids.length
-          ? "Couldn't delete that."
-          : `Deleted ${ids.length - failed.length} of ${ids.length}.`,
+          ? t("chat.couldnTDeleteThat")
+          : t("chat.deletedSomeOf", { done: ids.length - failed.length, total: ids.length }),
         "error",
       );
     }
@@ -1294,11 +1443,11 @@ export function ChatScreen({
 
   const confirmDelete = (ids: number[]) => {
     Alert.alert(
-      ids.length === 1 ? "Delete this message?" : `Delete ${ids.length} messages?`,
-      "This removes it for everyone in the chat. They'll see that a message was deleted.",
+      ids.length === 1 ? t("chat.deleteThisMessage") : t("chat.deleteNMessages", { count: ids.length }),
+      t("chat.thisRemovesItForEveryone"),
       [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: () => void deleteMessages(ids) },
+        { text: t("chat.cancel"), style: "cancel" },
+        { text: t("chat.delete"), style: "destructive", onPress: () => void deleteMessages(ids) },
       ],
     );
   };
@@ -1361,11 +1510,11 @@ export function ChatScreen({
     const text = body && !bodyIsJustTheLink ? body : fromAttachment || body;
 
     if (!text) {
-      onToast("There's nothing to copy.", "info");
+      onToast(t("chat.thereSNothingToCopy"), "info");
       return;
     }
     await Clipboard.setStringAsync(text);
-    onToast("Copied.", "success");
+    onToast(t("chat.copied"), "success");
   };
 
   // ── Rendering ─────────────────────────────────────────────────────────────
@@ -1459,6 +1608,7 @@ export function ChatScreen({
         style={[
           styles.messageRow,
           item.is_mine ? styles.messageRowMine : undefined,
+          item.id === highlightedId ? styles.messageRowFound : undefined,
           { transform: [{ translateX: stampReveal }] },
         ]}
       >
@@ -1536,7 +1686,7 @@ export function ChatScreen({
                   there is nothing here to hide. */}
               {item.deleted ? (
                 <View style={styles.deletedBubble}>
-                  <Text style={styles.deletedText}>Message was deleted</Text>
+                  <Text style={styles.deletedText}>{t("chat.messageWasDeleted")}</Text>
                 </View>
               ) : null}
 
@@ -1545,14 +1695,14 @@ export function ChatScreen({
                   <View style={styles.quoteStripe} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.quoteName} numberOfLines={1}>
-                      {nameFor(item.reply_to.sender_id, item.reply_to.sender_name || "Message")}
+                      {nameFor(item.reply_to.sender_id, item.reply_to.sender_name || t("chat.message"))}
                     </Text>
                     <Text
                       style={[styles.quoteBody, item.reply_to.deleted && styles.quoteBodyDeleted]}
                       numberOfLines={2}
                     >
                       {item.reply_to.deleted
-                        ? "Message was deleted"
+                        ? t("chat.messageWasDeleted")
                         : item.reply_to.body?.trim() ||
                           attachmentKindLabel(item.reply_to.attachment_kind)}
                     </Text>
@@ -1613,10 +1763,10 @@ export function ChatScreen({
                     {/* A state, not a detail: an unconfirmed amount must not read
                         as a settled one. */}
                     {!item.payment_verified ? (
-                      <Text style={styles.paymentPending}>Confirming…</Text>
+                      <Text style={styles.paymentPending}>{t("chat.confirming")}</Text>
                     ) : null}
                   </View>
-                  <Ionicons name="chevron-forward" size={15} color={palette.textMuted} />
+                  <Ionicons name={dirIcon("chevron-forward")} size={15} color={palette.textMuted} />
                 </Pressable>
               ) : (
                 (() => {
@@ -1673,6 +1823,10 @@ export function ChatScreen({
                           >
                             <LinkifiedText
                               text={item.body}
+                              mentions={
+                                item.mentions?.length ? mentionSegments(item.body, item.mentions, nameFor) : undefined
+                              }
+                              mentionStyle={item.is_mine ? styles.mentionMine : styles.mention}
                               style={item.is_mine ? styles.bubbleTextMine : styles.bubbleText}
                               linkStyle={item.is_mine ? styles.bubbleLinkMine : styles.bubbleLink}
                               onLongPress={menuMessage}
@@ -1728,13 +1882,13 @@ export function ChatScreen({
           {item.is_mine && !item.deleted && item.id === lastOwnMessageId ? (
             <Text style={styles.deliveryState}>
               {conversation && (conversation.other_last_read_message_id ?? 0) >= item.id
-                ? "Read"
-                : "Delivered"}
+                ? t("chat.read")
+                : t("chat.delivered")}
             </Text>
           ) : null}
 
           {item.edited_at && !item.deleted ? (
-            <Text style={[styles.editedMark, item.is_mine && styles.editedMarkMine]}>edited</Text>
+            <Text style={[styles.editedMark, item.is_mine && styles.editedMarkMine]}>{t("chat.edited")}</Text>
           ) : null}
 
           {item.reactions?.length ? (
@@ -1745,7 +1899,7 @@ export function ChatScreen({
                   style={[styles.reactionChip, reaction.mine ? styles.reactionChipMine : undefined]}
                   onPress={() => void toggleReaction(item, reaction.emoji)}
                   accessibilityRole="button"
-                  accessibilityLabel={`${reaction.emoji} ${reaction.count}${reaction.mine ? ", yours" : ""}`}
+                  accessibilityLabel={`${reaction.emoji} ${reaction.count}${reaction.mine ? t("chat.yours") : ""}`}
                 >
                   <Text style={styles.reactionEmoji}>{reaction.emoji}</Text>
                   {reaction.count > 1 ? (
@@ -1770,16 +1924,16 @@ export function ChatScreen({
   const headerTitle = !conversation
     ? placeholderTitle || ""
     : isGroup
-      ? conversation.title || "Group"
+      ? conversation.title || t("chat.group")
       : otherName;
   const headerSubtitle = isGroup
-    ? `${conversation?.member_count ?? 0} ${conversation?.member_count === 1 ? "person" : "people"}`
+    ? t("components.shareSheet.peopleCount", { count: conversation?.member_count ?? 0 })
     : null;
 
   const composerDisabledReason = conversation?.blocked_by_me
-    ? `You blocked ${otherName}.`
+    ? t("chat.youBlocked", { otherName })
     : conversation?.other_user_inactive
-      ? `${otherName} can't receive messages right now.`
+      ? t("chat.canTReceiveMessagesRight", { otherName })
       : null;
 
   return (
@@ -1794,15 +1948,15 @@ export function ChatScreen({
           onPress={() => swipeRef.current?.close()}
           hitSlop={10}
           accessibilityRole="button"
-          accessibilityLabel="Back"
+          accessibilityLabel={t("chat.back")}
         >
-          <Ionicons name="chevron-back" size={26} color={palette.text} />
+          <Ionicons name={dirIcon("chevron-back")} size={26} color={palette.text} />
         </Pressable>
         <Pressable
           style={styles.headerIdentity}
           onPress={() => conversation && onOpenInfo(conversation)}
           accessibilityRole="button"
-          accessibilityLabel={isGroup ? "Group info" : "Contact info"}
+          accessibilityLabel={isGroup ? t("chat.groupInfo") : t("chat.contactInfo")}
         >
           {/* The person's picture, or the group's — the same face the inbox
               row and the in-app banner show, over the same initials. */}
@@ -1831,7 +1985,7 @@ export function ChatScreen({
             way. Only with something on screen: an empty thread has its own
             spinner in the middle, and two at once is one too many. */}
         {!pageLoaded && !historyStalled && messages.length > 0 ? (
-          <ThemedActivityIndicator size="small" accessibilityLabel="Loading messages" />
+          <ThemedActivityIndicator size="small" accessibilityLabel={t("chat.loadingMessages")} />
         ) : null}
         <Pressable
           onPress={() => {
@@ -1849,7 +2003,7 @@ export function ChatScreen({
           // Replaces the "..." this had: a menu glyph promises a list of
           // actions, and what is actually behind it is a screen about this
           // conversation. The actions moved onto that screen.
-          accessibilityLabel={isGroup ? "Group info" : "Conversation info"}
+          accessibilityLabel={isGroup ? t("chat.groupInfo") : t("chat.conversationInfo")}
         >
           <Ionicons name="information-circle-outline" size={24} color={palette.text} />
         </Pressable>
@@ -1875,6 +2029,14 @@ export function ChatScreen({
           useKeyboardLift. */}
       <Reanimated.View ref={keyboardRef} onLayout={measureKeyboardGap} style={[styles.body, liftStyle]}>
         <FlatList
+          ref={listRef}
+          onScrollToIndexFailed={(info) => {
+            // Rows not measured yet: get close, then try again once they are.
+            listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
+            setTimeout(() => {
+              listRef.current?.scrollToIndex({ index: info.index, viewPosition: 0.5, animated: true });
+            }, 250);
+          }}
           {...stampResponder.panHandlers}
           // Inverted: index 0 is the newest message, so the resting position is
           // the bottom and the keyboard cannot fight a scroll-to-end. See the
@@ -1902,7 +2064,7 @@ export function ChatScreen({
             conversation && pageLoaded ? (
               <View style={styles.empty}>
                 <Ionicons name="chatbubbles-outline" size={30} color={palette.textMuted} />
-                <Text style={styles.emptyText}>Say hello.</Text>
+                <Text style={styles.emptyText}>{t("chat.sayHello")}</Text>
               </View>
             ) : (
               <View style={styles.empty}>
@@ -1931,8 +2093,8 @@ export function ChatScreen({
             {isGroup ? (
               <Text style={styles.typingWho} numberOfLines={1}>
                 {typing.length === 1
-                  ? `${typing[0].userName} is typing`
-                  : `${typing.length} people are typing`}
+                  ? t("chat.isTyping", { name: typing[0].userName })
+                  : t("chat.peopleAreTyping", { count: typing.length })}
               </Text>
             ) : null}
           </View>
@@ -1944,10 +2106,10 @@ export function ChatScreen({
         {selectedIds !== null ? (
           <View style={styles.selectionBar}>
             <Pressable onPress={() => setSelectedIds(null)} hitSlop={8}>
-              <Text style={styles.selectionCount}>Cancel</Text>
+              <Text style={styles.selectionCount}>{t("chat.cancel")}</Text>
             </Pressable>
             <Text style={styles.selectionCount}>
-              {selectedIds.length} selected
+              {t("common.selectedCount", { count: selectedIds.length })}
             </Text>
             <Pressable
               style={[
@@ -1957,10 +2119,10 @@ export function ChatScreen({
               onPress={() => confirmDelete(selectedIds)}
               disabled={selectedIds.length === 0}
               accessibilityRole="button"
-              accessibilityLabel={`Delete ${selectedIds.length} messages`}
+              accessibilityLabel={t("chat.deleteMessages", { count: selectedIds.length })}
             >
               <Ionicons name="trash-outline" size={16} color={palette.white} />
-              <Text style={styles.selectionDeleteText}>Delete</Text>
+              <Text style={styles.selectionDeleteText}>{t("chat.delete")}</Text>
             </Pressable>
           </View>
         ) : composerDisabledReason ? (
@@ -1973,19 +2135,45 @@ export function ChatScreen({
             <View style={styles.editBanner}>
               <Ionicons name="pencil" size={13} color={palette.primaryStrong} />
               <Text style={styles.editBannerText} numberOfLines={1}>
-                Editing a message
+                {t("chat.editingAMessage")}
               </Text>
               <Pressable
                 onPress={() => {
                   setEditing(null);
+                  mentionPicksRef.current = [];
                   setDraft("");
                 }}
                 hitSlop={10}
                 accessibilityRole="button"
-                accessibilityLabel="Stop editing"
+                accessibilityLabel={t("chat.stopEditing")}
               >
                 <Ionicons name="close" size={16} color={palette.textMuted} />
               </Pressable>
+            </View>
+          ) : null}
+          {mentionSuggestions.length > 0 ? (
+            <View style={styles.mentionList}>
+              {mentionSuggestions.map(({ member, name }) => (
+                <Pressable
+                  key={member.user.user_id}
+                  style={styles.mentionRow}
+                  onPress={() => pickMention(member)}
+                  accessibilityRole="button"
+                  accessibilityLabel={t("chat.mentionName", { name })}
+                >
+                  <ChatAvatar client={backendClient} name={name} size={28} userId={member.user.user_id} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.mentionName} numberOfLines={1}>
+                      {name}
+                    </Text>
+                    {member.user.handle ? (
+                      <Text style={styles.mentionHandle} numberOfLines={1}>
+                        @{member.user.handle}
+                      </Text>
+                    ) : null}
+                  </View>
+                </Pressable>
+              ))}
             </View>
           ) : null}
           <ChatComposer
@@ -2022,8 +2210,8 @@ export function ChatScreen({
                 ? {
                     id: replyingTo.id,
                     senderName: replyingTo.is_mine
-                      ? "You"
-                      : nameFor(replyingTo.sender_id, replyingTo.sender_name || otherName || "Message"),
+                      ? t("chat.you")
+                      : nameFor(replyingTo.sender_id, replyingTo.sender_name || otherName || t("chat.message")),
                     body: replyingTo.body?.trim() || attachmentKindLabel(replyingTo.attachments?.[0]?.kind),
                   }
                 : null
@@ -2043,10 +2231,11 @@ export function ChatScreen({
             }
             onCaretChange={(position) => {
               caretRef.current = position;
+              setCaret(position);
             }}
             hapticsEnabled={hapticsEnabled}
             inputRef={inputRef}
-            placeholder={editing ? "Edit your message" : "Message"}
+            placeholder={editing ? t("chat.editYourMessage") : t("chat.message")}
             // Photos and files pasted into the field itself — staged like any
             // picked from the library, through the same payment guard. Not
             // while editing: an edit changes words, it cannot gain a photo.
@@ -2079,7 +2268,7 @@ export function ChatScreen({
                   style={styles.quickReaction}
                   onPress={() => actionTarget && void toggleReaction(actionTarget, emoji)}
                   accessibilityRole="button"
-                  accessibilityLabel={`React ${emoji}`}
+                  accessibilityLabel={t("chat.reactWith", { emoji })}
                 >
                   <Text style={styles.quickReactionEmoji}>{emoji}</Text>
                 </Pressable>
@@ -2095,7 +2284,7 @@ export function ChatScreen({
                   setActionTarget(null);
                 }}
                 accessibilityRole="button"
-                accessibilityLabel="More reactions"
+                accessibilityLabel={t("chat.moreReactions")}
               >
                 <Ionicons name="add" size={20} color={palette.textMuted} />
               </Pressable>
@@ -2103,7 +2292,7 @@ export function ChatScreen({
 
             <ActionRow
               icon="arrow-undo-outline"
-              label="Reply"
+              label={t("chat.reply")}
               onPress={() => {
                 setReplyingTo(actionTarget);
                 setActionTarget(null);
@@ -2113,7 +2302,7 @@ export function ChatScreen({
             />
             <ActionRow
               icon="copy-outline"
-              label="Copy"
+              label={t("chat.copy")}
               onPress={() => actionTarget && void copyMessage(actionTarget)}
             />
             {/* Editing is offered only inside the window, and the window is
@@ -2123,11 +2312,12 @@ export function ChatScreen({
             {actionTarget && canEdit(actionTarget) ? (
               <ActionRow
                 icon="pencil-outline"
-                label="Edit"
+                label={t("chat.edit")}
                 onPress={() => {
                   const target = actionTarget;
                   setActionTarget(null);
                   setEditing(target);
+                  mentionPicksRef.current = picksFromMessage(target.body ?? "", target.mentions);
                   setDraft(target.body ?? "");
                   setReplyingTo(null);
                   setMode("text");
@@ -2154,9 +2344,9 @@ export function ChatScreen({
                   void (async () => {
                     const outcome = await saveAttachment(backendClient, conversationId, target);
                     if (outcome.status === "saved-to-photos") {
-                      onToast("Saved to your photos.", "success");
+                      onToast(t("chat.savedToYourPhotos"), "success");
                     } else if (outcome.status === "blocked") {
-                      promptOpenSettings(PHOTOS_BLOCKED_TITLE, PHOTOS_BLOCKED_MESSAGE);
+                      promptPhotosBlocked();
                     } else if (outcome.status === "denied" || outcome.status === "failed") {
                       onToast(outcome.message, "error");
                     }
@@ -2167,7 +2357,7 @@ export function ChatScreen({
             {actionTarget?.is_mine ? (
               <ActionRow
                 icon="trash-outline"
-                label="Delete"
+                label={t("chat.delete")}
                 destructive
                 onPress={() => {
                   const target = actionTarget;
@@ -2181,7 +2371,7 @@ export function ChatScreen({
             {actionTarget?.is_mine ? (
               <ActionRow
                 icon="checkmark-circle-outline"
-                label="Select more…"
+                label={t("chat.selectMore")}
                 onPress={() => {
                   const target = actionTarget;
                   setActionTarget(null);
@@ -2195,7 +2385,7 @@ export function ChatScreen({
             {actionTarget && !actionTarget.is_mine ? (
               <ActionRow
                 icon="flag-outline"
-                label="Report"
+                label={t("chat.report")}
                 destructive
                 onPress={() => {
                   const target = actionTarget;
@@ -2204,12 +2394,12 @@ export function ChatScreen({
                     return;
                   }
                   Alert.alert(
-                    "Report this message?",
-                    "An SFLuv admin will review it. The sender isn't told who reported them.",
+                    t("chat.reportThisMessage"),
+                    t("chat.anSfluvAdminWillReview"),
                     [
-                      { text: "Cancel", style: "cancel" },
+                      { text: t("chat.cancel"), style: "cancel" },
                       {
-                        text: "Report",
+                        text: t("chat.report"),
                         style: "destructive",
                         onPress: () =>
                           void backendClient
@@ -2218,8 +2408,8 @@ export function ChatScreen({
                               target_id: String(target.id),
                               reason: "other",
                             })
-                            .then(() => onToast("Thanks. We'll take a look.", "success"))
-                            .catch(() => onToast("Couldn't send that report.", "error")),
+                            .then(() => onToast(t("chat.thanksWeLlTakeA"), "success"))
+                            .catch(() => onToast(t("chat.couldnTSendThatReport"), "error")),
                       },
                     ],
                   );
@@ -2239,7 +2429,7 @@ export function ChatScreen({
       >
         <Pressable style={styles.sheetBackdrop} onPress={() => setReactionPickerFor(null)}>
           <Pressable style={styles.pickerCard} onPress={() => {}}>
-            <Text style={styles.pickerTitle}>React</Text>
+            <Text style={styles.pickerTitle}>{t("chat.react")}</Text>
             <View style={styles.pickerGrid}>
               {[...DEFAULT_REACTIONS, ...MORE_REACTIONS].map((emoji) => (
                 <Pressable
@@ -2247,7 +2437,7 @@ export function ChatScreen({
                   style={styles.pickerCell}
                   onPress={() => reactionPickerFor && void toggleReaction(reactionPickerFor, emoji)}
                   accessibilityRole="button"
-                  accessibilityLabel={`React ${emoji}`}
+                  accessibilityLabel={t("chat.reactWith", { emoji })}
                 >
                   <Text style={styles.pickerEmoji}>{emoji}</Text>
                 </Pressable>
@@ -2462,19 +2652,19 @@ function sessionSeparator(previous: ChatMessage | undefined, current: ChatMessag
 
 /** "Today 14:32", "Yesterday 09:10", "Mon 3 Mar 18:45". */
 function formatSessionStamp(at: Date): string {
-  const time = at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const time = at.toLocaleTimeString(appLocale(), { hour: "numeric", minute: "2-digit" });
   const now = new Date();
   const sameDay = at.toDateString() === now.toDateString();
   if (sameDay) {
-    return `Today ${time}`;
+    return t("chat.todayAt", { time });
   }
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
   if (at.toDateString() === yesterday.toDateString()) {
-    return `Yesterday ${time}`;
+    return t("chat.yesterdayAt", { time });
   }
   const sameYear = at.getFullYear() === now.getFullYear();
-  const day = at.toLocaleDateString(undefined, {
+  const day = at.toLocaleDateString(appLocale(), {
     weekday: "short",
     day: "numeric",
     month: "short",
@@ -2580,7 +2770,7 @@ function seedThread(conversationId: number, expectMessageId?: number) {
 }
 
 function formatMessageStamp(at: string): string {
-  return new Date(at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return new Date(at).toLocaleTimeString(appLocale(), { hour: "numeric", minute: "2-digit" });
 }
 
 
@@ -2649,6 +2839,22 @@ function createStyles(palette: Palette) {
     // accent, so an accent-coloured link would vanish into it.
     bubbleLink: { color: palette.primaryStrong, textDecorationLine: "underline" },
     bubbleLinkMine: { color: palette.white, textDecorationLine: "underline" },
+    mention: { color: palette.primaryStrong, fontWeight: "700" },
+    mentionMine: { color: palette.white, fontWeight: "700" },
+    // A message reached from search, flashed for a moment.
+    messageRowFound: { backgroundColor: palette.primarySoft, borderRadius: 12 },
+    mentionList: {
+      marginHorizontal: 10,
+      marginBottom: 6,
+      borderRadius: 14,
+      backgroundColor: palette.surface,
+      borderWidth: 1,
+      borderColor: palette.border,
+      overflow: "hidden",
+    },
+    mentionRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 8 },
+    mentionName: { color: palette.text, fontSize: 15, fontWeight: "600" },
+    mentionHandle: { color: palette.textMuted, fontSize: 13 },
     caption: { marginTop: 6, color: palette.text },
     attachments: { gap: 6 },
 

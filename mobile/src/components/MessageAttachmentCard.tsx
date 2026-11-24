@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
-import { ActivityIndicator, Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Linking, Pressable, StyleSheet, View } from "react-native";
+import { Text } from "./AppText";
 import { Ionicons } from "@expo/vector-icons";
 
 import { AppBackendClient } from "../services/appBackend";
@@ -8,6 +9,8 @@ import { Palette, radii, spacing, useAppTheme } from "../theme";
 import type { ChatTransactionRef } from "../utils/transactions";
 import type { AttachmentKind, MessageAttachment } from "../types/bulletin";
 import { displayFileName } from "../utils/attachmentFiles";
+import { t } from "../i18n";
+import { appLocale } from "../i18n";
 
 /**
  * One card under a message: a photo, a file, a link preview, or a reference to
@@ -84,21 +87,21 @@ const ICON_FOR_KIND: Record<AttachmentKind, keyof typeof Ionicons.glyphMap> = {
 export function attachmentKindLabel(kind?: AttachmentKind): string {
   switch (kind) {
     case "image":
-      return "Photo";
+      return t("components.messageAttachmentCard.photo");
     case "file":
-      return "File";
+      return t("components.messageAttachmentCard.file");
     case "link":
-      return "Link";
+      return t("components.messageAttachmentCard.link");
     case "transaction":
-      return "Transaction";
+      return t("components.messageAttachmentCard.transaction");
     case "merchant":
-      return "Merchant";
+      return t("components.messageAttachmentCard.merchant");
     case "event":
-      return "Event";
+      return t("components.messageAttachmentCard.event");
     case "support":
-      return "Support request";
+      return t("components.messageAttachmentCard.supportRequest");
     default:
-      return "Attachment";
+      return t("components.messageAttachmentCard.attachment");
   }
 }
 
@@ -171,7 +174,7 @@ export function MessageAttachmentCard({
           onLongPress={onLongPress}
           delayLongPress={280}
           accessibilityRole="link"
-          accessibilityLabel={attachment.link_title || attachment.link_url || "Link"}
+          accessibilityLabel={attachment.link_title || attachment.link_url || t("components.messageAttachmentCard.link")}
         >
           {attachment.link_image_url ? (
             <Image source={{ uri: attachment.link_image_url }} style={styles.linkImage} resizeMode="cover" />
@@ -223,11 +226,11 @@ export function MessageAttachmentCard({
           onLongPress={onLongPress}
           delayLongPress={280}
           accessibilityRole="button"
-          accessibilityLabel="Transaction record"
+          accessibilityLabel={t("components.messageAttachmentCard.transactionRecord")}
         >
           <View style={styles.referenceBanner}>
             <Ionicons name="receipt-outline" size={15} color={palette.primaryStrong} />
-            <Text style={styles.referenceKicker}>Transaction record</Text>
+            <Text style={styles.referenceKicker}>{t("components.messageAttachmentCard.transactionRecord")}</Text>
           </View>
           <View style={styles.referenceBody}>
             <Text style={styles.referenceTitle} numberOfLines={1}>
@@ -235,13 +238,13 @@ export function MessageAttachmentCard({
                   after it was made is simply not indexed yet, and the two are
                   indistinguishable from here. */}
               {attachment.unavailable
-                ? "Confirming on the network…"
+                ? t("components.messageAttachmentCard.confirmingOnTheNetwork")
                 : `${formatBaseAmount(attachment.tx_amount_sfluv_base)} ${tokenSymbol}`}
             </Text>
             {!attachment.unavailable && attachment.tx_at ? (
               <Text style={styles.referenceDetail}>{formatTxDate(attachment.tx_at)}</Text>
             ) : null}
-            <Text style={styles.referenceAction}>View transaction</Text>
+            <Text style={styles.referenceAction}>{t("components.messageAttachmentCard.viewTransaction")}</Text>
           </View>
         </Pressable>
       );
@@ -255,17 +258,17 @@ export function MessageAttachmentCard({
           onLongPress={onLongPress}
           delayLongPress={280}
           accessibilityRole="button"
-          accessibilityLabel={`Merchant: ${attachment.location_name ?? "unavailable"}`}
+          accessibilityLabel={t("components.messageAttachmentCard.merchantLabel", { name: attachment.location_name ?? t("components.messageAttachmentCard.unavailable") })}
         >
           <View style={styles.referenceBanner}>
             <Ionicons name="storefront" size={15} color={palette.primaryStrong} />
             <Text style={styles.referenceKicker} numberOfLines={1}>
-              SFLuv merchant
+              {t("components.messageAttachmentCard.sfluvMerchant")}
             </Text>
           </View>
           <View style={styles.referenceBody}>
             <Text style={styles.referenceTitle} numberOfLines={2}>
-              {attachment.unavailable ? "Merchant no longer listed" : attachment.location_name}
+              {attachment.unavailable ? t("components.messageAttachmentCard.merchantNoLongerListed") : attachment.location_name}
             </Text>
             {!attachment.unavailable && attachment.location_address ? (
               <Text style={styles.referenceDetail} numberOfLines={2}>
@@ -273,7 +276,7 @@ export function MessageAttachmentCard({
               </Text>
             ) : null}
             {attachment.unavailable ? null : (
-              <Text style={styles.referenceAction}>View on the map</Text>
+              <Text style={styles.referenceAction}>{t("components.messageAttachmentCard.viewOnTheMap")}</Text>
             )}
           </View>
         </Pressable>
@@ -296,17 +299,17 @@ export function MessageAttachmentCard({
           onLongPress={onLongPress}
           delayLongPress={280}
           accessibilityRole="button"
-          accessibilityLabel={`Volunteer event: ${attachment.event_title ?? "unavailable"}`}
+          accessibilityLabel={t("components.messageAttachmentCard.volunteerEvent", { title: attachment.event_title ?? t("components.messageAttachmentCard.unavailable") })}
         >
           <View style={styles.referenceBanner}>
             <Ionicons name="calendar" size={15} color={palette.primaryStrong} />
             <Text style={styles.referenceKicker} numberOfLines={1}>
-              {attachment.unavailable ? "Past event" : "Volunteer event"}
+              {attachment.unavailable ? t("components.messageAttachmentCard.pastEvent") : t("components.messageAttachmentCard.volunteerEvent")}
             </Text>
           </View>
           <View style={styles.referenceBody}>
             <Text style={styles.referenceTitle} numberOfLines={2}>
-              {attachment.event_title || "Volunteer event"}
+              {attachment.event_title || t("components.messageAttachmentCard.volunteerEvent")}
             </Text>
             {attachment.event_start_at ? (
               <Text style={styles.referenceDetail} numberOfLines={1}>
@@ -317,7 +320,7 @@ export function MessageAttachmentCard({
               {/* An event that has finished still shows its title and date — it
                   is marked past rather than hidden, because "we did this
                   together last week" is a thing people share. */}
-              {attachment.unavailable ? "This event has finished" : "View event and sign up"}
+              {attachment.unavailable ? t("components.messageAttachmentCard.thisEventHasFinished") : t("components.messageAttachmentCard.viewEventAndSignUp")}
             </Text>
           </View>
         </Pressable>
@@ -333,23 +336,23 @@ export function MessageAttachmentCard({
           onLongPress={onLongPress}
           delayLongPress={280}
           accessibilityRole="button"
-          accessibilityLabel="Support request"
+          accessibilityLabel={t("components.messageAttachmentCard.supportRequest")}
         >
           <View style={styles.referenceBanner}>
             <Ionicons name="help-buoy" size={15} color={palette.primaryStrong} />
             <Text style={styles.referenceKicker} numberOfLines={1}>
               {attachment.support_reference
-                ? `Support · ${attachment.support_reference}`
-                : "Support request"}
+                ? t("components.messageAttachmentCard.supportReference", { reference: attachment.support_reference })
+                : t("components.messageAttachmentCard.supportRequest")}
             </Text>
           </View>
           <View style={styles.referenceBody}>
             <Text style={styles.referenceTitle} numberOfLines={2}>
-              {attachment.support_subject || "Your message to SFLuv"}
+              {attachment.support_subject || t("components.messageAttachmentCard.yourMessageToSfluv")}
             </Text>
             <Text style={styles.referenceDetail}>
               {/* Never the body or the email — see resolveSupportCard. */}
-              We have your request and someone is looking at it.
+              {t("components.messageAttachmentCard.requestReceived")}
             </Text>
           </View>
         </Pressable>
@@ -369,8 +372,8 @@ export function MessageAttachmentCard({
             {/* A kind this build does not know: a newer server added one. Shown
                 as a neutral card rather than dropped, so the message is not
                 silently empty. */}
-            <Text style={styles.cardTitle}>Attachment</Text>
-            <Text style={styles.cardMeta}>Update SFLuv to see this.</Text>
+            <Text style={styles.cardTitle}>{t("components.messageAttachmentCard.attachment")}</Text>
+            <Text style={styles.cardMeta}>{t("components.messageAttachmentCard.updateSfluvToSeeThis")}</Text>
           </View>
         </View>
       );
@@ -406,8 +409,8 @@ function AttachmentFileCard({
   const onDevice = state.status === "cached";
   const meta =
     state.status === "downloading"
-      ? "Downloading…"
-      : [size, onDevice ? "On this device" : null].filter(Boolean).join(" · ");
+      ? t("components.messageAttachmentCard.downloading")
+      : [size, onDevice ? t("components.messageAttachmentCard.onThisDevice") : null].filter(Boolean).join(" · ");
 
   return (
     <Pressable
@@ -416,16 +419,20 @@ function AttachmentFileCard({
       onLongPress={onLongPress}
       delayLongPress={280}
       accessibilityRole="button"
-      accessibilityLabel={`File: ${displayFileName(attachment.file_name) || "attachment"}${size ? `, ${size}` : ""}${
-        onDevice ? ", on this device" : ", not downloaded"
-      }`}
+      accessibilityLabel={
+        t("components.messageAttachmentCard.fileLabel", {
+          name: displayFileName(attachment.file_name) || t("components.messageAttachmentCard.attachmentName"),
+        }) +
+        (size ? t("components.messageAttachmentCard.sizeSuffix", { size }) : "") +
+        (onDevice ? t("components.messageAttachmentCard.onThisDevice2") : t("components.messageAttachmentCard.notDownloaded"))
+      }
     >
       <View style={styles.iconWrap}>
         <Ionicons name={fileIcon(attachment.content_type)} size={20} color={palette.primaryStrong} />
       </View>
       <View style={styles.cardBody}>
         <Text style={styles.cardTitle} numberOfLines={2}>
-          {displayFileName(attachment.file_name) || "Attachment"}
+          {displayFileName(attachment.file_name) || t("components.messageAttachmentCard.attachment")}
         </Text>
         {meta ? <Text style={styles.cardMeta}>{meta}</Text> : null}
       </View>
@@ -490,7 +497,7 @@ function AttachmentImage({
         onLongPress={onLongPress}
         delayLongPress={280}
         accessibilityRole="imagebutton"
-        accessibilityLabel={displayFileName(attachment.file_name) || "Photo"}
+        accessibilityLabel={displayFileName(attachment.file_name) || t("components.messageAttachmentCard.photo")}
       >
         {/* The placeholder stays underneath rather than being swapped out, so
             the bubble is the right size from the first frame and the photo
@@ -512,12 +519,12 @@ function AttachmentImage({
   const downloading = state.status === "downloading";
   const size = formatFileSize(attachment.size_bytes);
   const label = downloading
-    ? "Downloading…"
+    ? t("components.messageAttachmentCard.downloading")
     : state.status === "failed" || corrupt
-      ? "Couldn't load · Tap to retry"
+      ? t("components.messageAttachmentCard.couldnTLoadTapTo")
       : size
-        ? `Photo · ${size}`
-        : "Tap to download";
+        ? t("components.messageAttachmentCard.photoSize", { size })
+        : t("components.messageAttachmentCard.tapToDownload");
 
   return (
     <Pressable
@@ -533,7 +540,13 @@ function AttachmentImage({
       onLongPress={onLongPress}
       delayLongPress={280}
       accessibilityRole="button"
-      accessibilityLabel={downloading ? "Downloading photo" : `Download photo${size ? `, ${size}` : ""}`}
+      accessibilityLabel={
+        downloading
+          ? t("components.messageAttachmentCard.downloadingPhoto")
+          : size
+            ? t("components.messageAttachmentCard.downloadPhotoSize", { size })
+            : t("components.messageAttachmentCard.downloadPhoto")
+      }
     >
       <View style={styles.downloadPill}>
         {downloading ? (
@@ -553,7 +566,7 @@ function AttachmentImage({
 
 /** The date a shared transaction happened, for the record card's subtitle. */
 function formatTxDate(seconds: number): string {
-  return new Date(seconds * 1000).toLocaleDateString(undefined, {
+  return new Date(seconds * 1000).toLocaleDateString(appLocale(), {
     day: "numeric",
     month: "short",
     year: new Date(seconds * 1000).getFullYear() === new Date().getFullYear() ? undefined : "numeric",
@@ -570,12 +583,12 @@ function formatBaseAmount(base?: string): string {
 /** "Sat 2 Nov · 9:00 – 12:00", or just the day when there is no end. */
 function formatEventWhen(startSeconds: number, endSeconds?: number): string {
   const start = new Date(startSeconds * 1000);
-  const day = start.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
-  const from = start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const day = start.toLocaleDateString(appLocale(), { weekday: "short", day: "numeric", month: "short" });
+  const from = start.toLocaleTimeString(appLocale(), { hour: "numeric", minute: "2-digit" });
   if (!endSeconds) {
     return `${day} · ${from}`;
   }
-  const to = new Date(endSeconds * 1000).toLocaleTimeString(undefined, {
+  const to = new Date(endSeconds * 1000).toLocaleTimeString(appLocale(), {
     hour: "numeric",
     minute: "2-digit",
   });

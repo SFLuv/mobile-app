@@ -1,5 +1,9 @@
 import React, { useMemo, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { Text } from "../components/AppText";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
+import i18next from "../i18n";
 import { Ionicons } from "@expo/vector-icons";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { TransactionDetailsModal } from "../components/TransactionDetailsModal";
@@ -47,15 +51,16 @@ type Props = {
   merchantLocationName?: string;
 };
 
-function formatTxTitle(tx: AppTransaction, faucetAddress?: string): string {
+/** A whole sentence per case, so each language can put the name where it belongs. */
+function formatTxTitle(t: TFunction, tx: AppTransaction, name: string, faucetAddress?: string): string {
   if (isRewardTransaction(tx, faucetAddress)) {
-    return "Received Reward";
+    return t("wallet.rewardFrom", { name });
   }
-  return tx.direction === "send" ? "Sent" : "Received";
+  return tx.direction === "send" ? t("wallet.sentTo", { name }) : t("wallet.receivedFrom", { name });
 }
 
 function formatTxDate(timestamp: number): string {
-  return new Date(timestamp * 1000).toLocaleDateString("en-US", {
+  return new Date(timestamp * 1000).toLocaleDateString(i18next.language, {
     month: "short",
     day: "numeric",
   });
@@ -90,6 +95,7 @@ export function WalletHomeScreen({
   onShareTransaction,
 }: Props) {
   const { palette, shadows, isDark } = useAppTheme();
+  const { t } = useTranslation();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const [selectedTransaction, setSelectedTransaction] = useState<TransactionDetailPayload | null>(null);
   const refreshAccent = palette.primaryStrong;
@@ -147,12 +153,12 @@ export function WalletHomeScreen({
             {merchantMode ? (
               <View style={styles.heroBadge}>
                 <Ionicons name="storefront" size={14} color={palette.primaryStrong} />
-                <Text style={styles.heroBadgeText}>Merchant mode</Text>
+                <Text style={styles.heroBadgeText}>{t("wallet.merchantMode")}</Text>
               </View>
             ) : isPrimaryWallet ? (
               <View style={styles.heroBadge}>
                 <Ionicons name="star" size={13} color={palette.primaryStrong} />
-                <Text style={styles.heroBadgeText}>Primary</Text>
+                <Text style={styles.heroBadgeText}>{t("wallet.primary")}</Text>
               </View>
             ) : null}
             {showWalletChooser ? (
@@ -175,28 +181,28 @@ export function WalletHomeScreen({
           >
             {balance}
           </Text>
-          <Text style={styles.heroCurrency}>{tokenSymbol} available</Text>
+          <Text style={styles.heroCurrency}>{t("wallet.available", { symbol: tokenSymbol })}</Text>
 
           <View style={styles.heroActionRow}>
             {!merchantMode ? (
               <Pressable
                 style={styles.heroPrimaryAction}
                 accessibilityRole="button"
-                accessibilityLabel="Send"
+                accessibilityLabel={t("wallet.send")}
                 onPress={onOpenSend}
               >
                 <Ionicons name="arrow-up" size={16} color={palette.white} />
-                <Text style={styles.heroPrimaryActionText}>Send</Text>
+                <Text style={styles.heroPrimaryActionText}>{t("wallet.send")}</Text>
               </Pressable>
             ) : null}
             <Pressable
               style={[styles.heroSecondaryAction, merchantMode ? styles.heroFullWidthAction : undefined]}
               accessibilityRole="button"
-              accessibilityLabel="Receive"
+              accessibilityLabel={t("wallet.receive")}
               onPress={onOpenReceive}
             >
               <Ionicons name="arrow-down" size={16} color={palette.primaryStrong} />
-              <Text style={styles.heroSecondaryActionText}>Receive</Text>
+              <Text style={styles.heroSecondaryActionText}>{t("wallet.receive")}</Text>
             </Pressable>
           </View>
         </View>
@@ -204,11 +210,11 @@ export function WalletHomeScreen({
         <View style={styles.sectionCard}>
           <View style={styles.sectionHeaderRow}>
             <View>
-              <Text style={styles.sectionTitle}>Recent activity</Text>
+              <Text style={styles.sectionTitle}>{t("wallet.recentActivity")}</Text>
             </View>
             {!merchantMode ? (
               <Pressable onPress={onOpenActivity}>
-                <Text style={styles.link}>See all</Text>
+                <Text style={styles.link}>{t("wallet.seeAll")}</Text>
               </Pressable>
             ) : null}
           </View>
@@ -216,13 +222,13 @@ export function WalletHomeScreen({
           {!transactionsLoaded ? (
             <View style={styles.emptyState}>
               <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
-              <Text style={styles.emptyTitle}>loading transactions</Text>
+              <Text style={styles.emptyTitle}>{t("wallet.loadingTransactions")}</Text>
             </View>
           ) : decoratedTransactions.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="time-outline" size={22} color={palette.textMuted} />
-              <Text style={styles.emptyTitle}>No payments yet</Text>
-              <Text style={styles.emptyBody}>Your latest sends and receives will appear here after the first transfer.</Text>
+              <Text style={styles.emptyTitle}>{t("wallet.noPaymentsTitle")}</Text>
+              <Text style={styles.emptyBody}>{t("wallet.noPaymentsBody")}</Text>
             </View>
           ) : (
             decoratedTransactions.slice(0, merchantMode ? 10 : 5).map((details) => {
@@ -250,8 +256,8 @@ export function WalletHomeScreen({
                   <View style={styles.txBody}>
                     <Text style={styles.txTitle}>
                       {reward
-                        ? "Received Reward"
-                        : `${formatTxTitle(details.transaction, faucetAddress)} ${incoming ? "from" : "to"} ${counterpartyLabel}`}
+                        ? t("wallet.receivedReward")
+                        : formatTxTitle(t, details.transaction, counterpartyLabel, faucetAddress)}
                     </Text>
                     <Text style={styles.txMeta}>{counterpartyMeta}</Text>
                   </View>

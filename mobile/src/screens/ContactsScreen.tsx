@@ -9,12 +9,13 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
   type KeyboardEvent,
 } from "react-native";
+import { Text } from "../components/AppText";
 import { CameraView } from "expo-camera";
+import { useTranslation } from "react-i18next";
 import { Ionicons } from "@expo/vector-icons";
 import { prewarmQRCode } from "../components/SfluvQRCode";
 import { ethers } from "ethers";
@@ -28,6 +29,8 @@ import { AppClientConfig, AppContact } from "../types/app";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
 import { buildUniversalAddContactLink, parseSendTarget, parseSfluvUniversalLink } from "../utils/universalLinks";
 import { openPhoneSettings, useCameraAccess } from "../utils/phonePermissions";
+import { t } from "../i18n";
+import { dirIcon } from "../i18n/direction";
 
 type Props = {
   clientConfig: AppClientConfig;
@@ -69,9 +72,10 @@ type Props = {
  */
 type ContactMode = "contacts" | "profile";
 
-const CONTACT_TABS: Array<{ value: ContactMode; label: string }> = [
-  { value: "contacts", label: "My Contacts" },
-  { value: "profile", label: "My Profile" },
+/** Built per call so labels follow the current language. */
+const CONTACT_TABS = (): Array<{ value: ContactMode; label: string }> => [
+  { value: "contacts", label: t("contacts.myContacts") },
+  { value: "profile", label: t("contacts.myProfile") },
 ];
 
 function shortAddress(address: string): string {
@@ -81,10 +85,10 @@ function shortAddress(address: string): string {
 
 function validateContactInput(name: string, address: string): string | null {
   if (!name.trim()) {
-    return "Enter a contact name.";
+    return t("contacts.enterAContactName");
   }
   if (!ethers.utils.isAddress(address.trim())) {
-    return "Enter a valid wallet address.";
+    return t("contacts.enterAValidWalletAddress");
   }
   return null;
 }
@@ -151,6 +155,7 @@ export function ContactsScreen({
   const [pendingScannedAddress, setPendingScannedAddress] = useState<string | null>(null);
   const [pendingScannedName, setPendingScannedName] = useState("");
   const { permission, access: cameraAccess, ask: askCamera } = useCameraAccess();
+  const { t } = useTranslation();
   const scanCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scanLockedRef = useRef(false);
 
@@ -226,7 +231,7 @@ export function ContactsScreen({
     if (existingContact) {
       setPendingScannedAddress(null);
       setPendingScannedName("");
-      setScanErrorMessage(`${existingContact.name} is already saved in your contacts.`);
+      setScanErrorMessage(t("contacts.isAlreadySavedInYour", { name: existingContact.name }));
     } else {
       setPendingScannedAddress(normalizedAddress);
       setPendingScannedName("");
@@ -336,14 +341,14 @@ export function ContactsScreen({
     }
     const resolvedAddress = resolveScannedAddress(raw, clientConfig);
     if (!resolvedAddress) {
-      setScanErrorMessage("That is not a wallet address or a SFLuv link.");
+      setScanErrorMessage(t("contacts.thatIsNotAWallet"));
       return;
     }
     const existingContact = contacts.find(
       (contact) => contact.address.toLowerCase() === resolvedAddress.toLowerCase(),
     );
     if (existingContact) {
-      setScanErrorMessage(`${existingContact.name} is already saved in your contacts.`);
+      setScanErrorMessage(t("contacts.isAlreadySavedInYour2", { name: existingContact.name }));
       return;
     }
     setPendingScannedAddress(resolvedAddress);
@@ -368,13 +373,13 @@ export function ContactsScreen({
 
     const resolvedAddress = resolveScannedAddress(rawValue, clientConfig);
     if (!resolvedAddress) {
-      setScanErrorMessage("That QR code does not contain a valid wallet address.");
+      setScanErrorMessage(t("contacts.thatQrCodeDoesNot"));
       return;
     }
 
     const existingContact = contacts.find((contact) => contact.address.toLowerCase() === resolvedAddress.toLowerCase());
     if (existingContact) {
-      setScanErrorMessage(`${existingContact.name} is already saved in your contacts.`);
+      setScanErrorMessage(t("contacts.isAlreadySavedInYour3", { name: existingContact.name }));
       return;
     }
 
@@ -392,7 +397,7 @@ export function ContactsScreen({
     >
       {syncNotice ? (
         <View style={styles.noticeCard}>
-          <Text style={styles.noticeTitle}>App Sync</Text>
+          <Text style={styles.noticeTitle}>{t("contacts.appSync")}</Text>
           <Text style={styles.body}>{syncNotice}</Text>
         </View>
       ) : null}
@@ -401,7 +406,7 @@ export function ContactsScreen({
         <View style={styles.tabHeaderRow}>
           <SegmentedTabs
             style={styles.tabHeaderFill}
-            segments={CONTACT_TABS}
+            segments={CONTACT_TABS()}
             value={contactMode}
             onChange={(next) => {
               setContactMode(next);
@@ -414,7 +419,7 @@ export function ContactsScreen({
               onPress={toggleContactSearch}
               hitSlop={6}
               accessibilityRole="button"
-              accessibilityLabel={searchOpen ? "Hide search" : "Search contacts"}
+              accessibilityLabel={searchOpen ? t("contacts.hideSearch") : t("contacts.searchContacts")}
             >
               <Ionicons
                 name={searchOpen ? "close" : "search"}
@@ -444,7 +449,7 @@ export function ContactsScreen({
                 style={styles.searchInput}
                 value={contactSearch}
                 onChangeText={setContactSearch}
-                placeholder="Search name or address"
+                placeholder={t("contacts.searchNameOrAddress")}
                 placeholderTextColor={palette.textMuted}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -462,7 +467,7 @@ export function ContactsScreen({
 
         {visibleContacts.length === 0 ? (
           <Text style={styles.body}>
-            {contactSearch.trim() ? "No contacts match that search." : "No contacts saved yet."}
+            {contactSearch.trim() ? t("contacts.noContactsMatchThatSearch") : t("contacts.noContactsSavedYet")}
           </Text>
         ) : (
           visibleContacts.map((contact) => {
@@ -481,7 +486,7 @@ export function ContactsScreen({
                   onPress={() => onOpenContact(contact)}
                   accessibilityRole="button"
                   accessibilityLabel={contact.name}
-                  accessibilityHint="Opens this contact's details"
+                  accessibilityHint={t("contacts.opensThisContactSDetails")}
                 >
                   <ContactAvatar contact={contact} client={backendClient ?? null} />
                   <View style={styles.contactRowBody}>
@@ -489,7 +494,7 @@ export function ContactsScreen({
                       {contact.name}
                     </Text>
                     <Text style={styles.meta} numberOfLines={1}>
-                      {[shortAddress(contact.address), contact.notes?.trim() ? "Note" : ""]
+                      {[shortAddress(contact.address), contact.notes?.trim() ? t("contacts.note") : ""]
                         .filter(Boolean)
                         .join(" · ")}
                     </Text>
@@ -503,13 +508,13 @@ export function ContactsScreen({
                       try {
                         await onToggleFavorite(contact);
                       } catch (error) {
-                        setListErrorMessage((error as Error).message || "Unable to update favorite.");
+                        setListErrorMessage((error as Error).message || t("contacts.unableToUpdateFavorite"));
                       } finally {
                         setBusyID(null);
                       }
                     }}
                     accessibilityRole="button"
-                    accessibilityLabel={contact.isFavorite ? "Remove from favorites" : "Mark as favorite"}
+                    accessibilityLabel={contact.isFavorite ? t("contacts.removeFromFavorites") : t("contacts.markAsFavorite")}
                   >
                     <Ionicons
                       name={contact.isFavorite ? "star" : "star-outline"}
@@ -517,7 +522,7 @@ export function ContactsScreen({
                       color={contact.isFavorite ? palette.primaryStrong : palette.textMuted}
                     />
                   </Pressable>
-                  <Ionicons name="chevron-forward" size={16} color={palette.textMuted} />
+                  <Ionicons name={dirIcon("chevron-forward")} size={16} color={palette.textMuted} />
                 </Pressable>
               );
             }
@@ -537,7 +542,7 @@ export function ContactsScreen({
                       try {
                         await onToggleFavorite(contact);
                       } catch (error) {
-                        setListErrorMessage((error as Error).message || "Unable to update favorite.");
+                        setListErrorMessage((error as Error).message || t("contacts.unableToUpdateFavorite"));
                       } finally {
                         setBusyID(null);
                       }
@@ -549,7 +554,7 @@ export function ContactsScreen({
                       color={contact.isFavorite ? palette.primaryStrong : palette.textMuted}
                     />
                     <Text style={[styles.favoriteChipText, contact.isFavorite ? styles.favoriteChipTextActive : undefined]}>
-                      {contact.isFavorite ? "Favorite" : "Mark favorite"}
+                      {contact.isFavorite ? t("contacts.favorite") : t("contacts.markFavorite")}
                     </Text>
                   </Pressable>
                 </View>
@@ -560,14 +565,14 @@ export function ContactsScreen({
                       style={styles.input}
                       value={editingName}
                       onChangeText={setEditingName}
-                      placeholder="Contact name"
+                      placeholder={t("contacts.contactName")}
                       placeholderTextColor={palette.textMuted}
                     />
                     <TextInput
                       style={styles.input}
                       value={editingAddress}
                       onChangeText={setEditingAddress}
-                      placeholder="0x address"
+                      placeholder={t("contacts.0xAddress")}
                       placeholderTextColor={palette.textMuted}
                       autoCapitalize="none"
                       autoCorrect={false}
@@ -595,13 +600,13 @@ export function ContactsScreen({
                             setEditingName("");
                             setEditingAddress("");
                           } catch (error) {
-                            setListErrorMessage((error as Error).message || "Unable to save contact.");
+                            setListErrorMessage((error as Error).message || t("contacts.unableToSaveContact"));
                           } finally {
                             setBusyID(null);
                           }
                         }}
                       >
-                        <Text style={styles.inlineButtonText}>Save</Text>
+                        <Text style={styles.inlineButtonText}>{t("contacts.save")}</Text>
                       </Pressable>
                       <Pressable
                         style={styles.inlineButtonMuted}
@@ -612,14 +617,14 @@ export function ContactsScreen({
                           setListErrorMessage(null);
                         }}
                       >
-                        <Text style={styles.inlineButtonMutedText}>Cancel</Text>
+                        <Text style={styles.inlineButtonMutedText}>{t("contacts.cancel")}</Text>
                       </Pressable>
                     </View>
                   </View>
                 ) : (
                   <View style={styles.inlineActions}>
                     <Pressable style={styles.inlineButton} onPress={() => beginEdit(contact)}>
-                      <Text style={styles.inlineButtonText}>Edit</Text>
+                      <Text style={styles.inlineButtonText}>{t("contacts.edit")}</Text>
                     </Pressable>
                     <Pressable
                       style={[styles.inlineButtonDanger, busy ? styles.buttonDisabled : undefined]}
@@ -633,13 +638,13 @@ export function ContactsScreen({
                             setEditingID(null);
                           }
                         } catch (error) {
-                          setListErrorMessage((error as Error).message || "Unable to delete contact.");
+                          setListErrorMessage((error as Error).message || t("contacts.unableToDeleteContact"));
                         } finally {
                           setBusyID(null);
                         }
                       }}
                     >
-                      <Text style={styles.inlineButtonDangerText}>Delete</Text>
+                      <Text style={styles.inlineButtonDangerText}>{t("contacts.delete")}</Text>
                     </Pressable>
                   </View>
                 )}
@@ -658,7 +663,7 @@ export function ContactsScreen({
           style={[styles.fab, { bottom: styles.fab.bottom + dockLift }]}
           onPress={openAddSheet}
           accessibilityRole="button"
-          accessibilityLabel="Add contact"
+          accessibilityLabel={t("contacts.addContact")}
         >
           <Ionicons name="add" size={30} color={palette.white} />
         </Pressable>
@@ -700,7 +705,7 @@ export function ContactsScreen({
             ]}
           >
             <View style={styles.addSheetHeader}>
-              <Text style={styles.sectionTitle}>Add contact</Text>
+              <Text style={styles.sectionTitle}>{t("contacts.addContact")}</Text>
               <Pressable style={styles.addSheetClose} onPress={closeAddSheet} hitSlop={8}>
                 <Ionicons name="close" size={18} color={palette.primaryStrong} />
               </Pressable>
@@ -728,8 +733,8 @@ export function ContactsScreen({
                   <Ionicons name="camera-outline" size={24} color={palette.primaryStrong} />
                   <Text style={styles.permissionText}>
                     {cameraAccess === "blocked"
-                      ? "Camera access is off. Turn on Camera for SFLuv in your phone's Settings to scan contact QR codes here."
-                      : "Allow camera access to scan contact QR codes here."}
+                      ? t("permissions.camera.turnOnForContacts")
+                      : t("permissions.camera.allowForContacts")}
                   </Text>
                   <Pressable
                     style={styles.permissionButton}
@@ -742,7 +747,7 @@ export function ContactsScreen({
                     }}
                   >
                     <Text style={styles.permissionButtonText}>
-                      {cameraAccess === "blocked" ? "Open Settings" : "Enable Camera"}
+                      {cameraAccess === "blocked" ? t("common.openSettings") : t("permissions.camera.enable")}
                     </Text>
                   </Pressable>
                 </View>
@@ -750,13 +755,13 @@ export function ContactsScreen({
 
               {pendingScannedAddress ? (
                 <View style={styles.pendingCard}>
-                  <Text style={styles.sectionTitle}>Save scanned contact</Text>
+                  <Text style={styles.sectionTitle}>{t("contacts.saveScannedContact")}</Text>
                   <Text style={styles.meta}>{shortAddress(pendingScannedAddress)}</Text>
                   <TextInput
                     style={styles.input}
                     value={pendingScannedName}
                     onChangeText={setPendingScannedName}
-                    placeholder="Contact name"
+                    placeholder={t("contacts.contactName")}
                     placeholderTextColor={palette.textMuted}
                   />
                   {scanErrorMessage ? <Text style={styles.errorText}>{scanErrorMessage}</Text> : null}
@@ -783,7 +788,7 @@ export function ContactsScreen({
                           // The contact is saved, so the sheet has done its job.
                           closeAddSheet();
                         } catch (error) {
-                          setScanErrorMessage((error as Error).message || "Unable to add contact.");
+                          setScanErrorMessage((error as Error).message || t("contacts.unableToAddContact"));
                         } finally {
                           setBusyID(null);
                         }
@@ -792,11 +797,11 @@ export function ContactsScreen({
                       {busyID === "scan" ? (
                         <ThemedActivityIndicator size="small" color={palette.white} />
                       ) : (
-                        <Text style={styles.primaryButtonText}>Save contact</Text>
+                        <Text style={styles.primaryButtonText}>{t("contacts.saveContact")}</Text>
                       )}
                     </Pressable>
                     <Pressable style={styles.inlineButtonMuted} onPress={clearPendingScan}>
-                      <Text style={styles.inlineButtonMutedText}>Cancel</Text>
+                      <Text style={styles.inlineButtonMutedText}>{t("contacts.cancel")}</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -805,7 +810,7 @@ export function ContactsScreen({
               {scanErrorMessage && !pendingScannedAddress ? <Text style={styles.errorText}>{scanErrorMessage}</Text> : null}
             </View>
               <View style={styles.manualEntryBlock}>
-                <Text style={styles.manualEntryLabel}>Or paste an address or link</Text>
+                <Text style={styles.manualEntryLabel}>{t("contacts.orPasteAnAddressOr")}</Text>
                 <View style={styles.manualEntryRow}>
                   <TextInput
                     style={[
@@ -817,7 +822,7 @@ export function ContactsScreen({
                       setManualEntry(next);
                       setScanErrorMessage(null);
                     }}
-                    placeholder="0x… or sfluv.org link"
+                    placeholder={t("contacts.0xOrSfluvOrgLink")}
                     placeholderTextColor={palette.textMuted}
                     autoCapitalize="none"
                     autoCorrect={false}
@@ -836,7 +841,7 @@ export function ContactsScreen({
                         manualEntryResolved ? styles.manualEntryButtonTextActive : undefined,
                       ]}
                     >
-                      Add
+                      {t("contacts.add")}
                     </Text>
                   </Pressable>
                 </View>

@@ -1,14 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  I18nManager,
   Animated,
   LayoutChangeEvent,
   Pressable,
   StyleProp,
   StyleSheet,
-  Text,
   View,
   ViewStyle,
 } from "react-native";
+import { Text } from "./AppText";
 import { Palette, radii, spacing, useAppTheme } from "../theme";
 import { triggerClickHaptic } from "../utils/haptics";
 
@@ -62,6 +63,10 @@ export function SegmentedTabs<T extends string>({
   );
   const measured = slots.length === segments.length && slots.every(Boolean);
   const activeSlot = measured ? slots[activeIndex] : undefined;
+  // In right-to-left layout the highlight is anchored to the right edge (React
+  // Native swaps its left: 0), while slot x is still measured from the left.
+  const [wrapWidth, setWrapWidth] = useState(0);
+  const targetX = activeSlot ? (I18nManager.isRTL ? -(wrapWidth - activeSlot.x - activeSlot.width) : activeSlot.x) : 0;
 
   const translateX = useRef(new Animated.Value(0)).current;
   const indicatorWidth = useRef(new Animated.Value(0)).current;
@@ -74,13 +79,13 @@ export function SegmentedTabs<T extends string>({
     // First placement lands without a slide; there is nothing to animate from.
     if (!placedRef.current) {
       placedRef.current = true;
-      translateX.setValue(activeSlot.x);
+      translateX.setValue(targetX);
       indicatorWidth.setValue(activeSlot.width);
       return;
     }
     Animated.parallel([
       Animated.spring(translateX, {
-        toValue: activeSlot.x,
+        toValue: targetX,
         useNativeDriver: false,
         friction: 12,
         tension: 110,
@@ -92,10 +97,10 @@ export function SegmentedTabs<T extends string>({
         tension: 110,
       }),
     ]).start();
-  }, [activeSlot, indicatorWidth, translateX]);
+  }, [activeSlot, indicatorWidth, targetX, translateX]);
 
   return (
-    <View style={[styles.wrap, style]}>
+    <View style={[styles.wrap, style]} onLayout={(event) => setWrapWidth(event.nativeEvent.layout.width)}>
       {measured ? (
         <Animated.View
           pointerEvents="none"
@@ -123,6 +128,10 @@ export function SegmentedTabs<T extends string>({
           >
             <Text
               numberOfLines={1}
+              // Translations run longer than English ("Billetera" for "Wallets"):
+              // shrink a little to fit before falling back to an ellipsis.
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
               style={[styles.segmentText, active ? styles.segmentTextActive : undefined]}
             >
               {segment.label}

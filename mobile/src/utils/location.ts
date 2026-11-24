@@ -1,4 +1,5 @@
 import { AppLocation } from "../types/app";
+import i18next from "../i18n";
 
 export type UserLocation = {
   lat: number;
@@ -26,14 +27,14 @@ export function metersToFeet(distance: number): number {
 export function formatDistanceLabel(distanceMetersValue: number): string {
   const feet = metersToFeet(distanceMetersValue);
   if (feet < 1_000) {
-    return `${Math.max(1, Math.round(feet))} ft away`;
+    return i18next.t("location.feetAway", { count: Math.max(1, Math.round(feet)) });
   }
 
   const miles = feet / 5_280;
   if (miles < 10) {
-    return `${miles.toFixed(1)} mi away`;
+    return i18next.t("location.milesAway", { miles: miles.toFixed(1) });
   }
-  return `${Math.round(miles)} mi away`;
+  return i18next.t("location.milesAway", { miles: Math.round(miles) });
 }
 
 export function locationDistanceMeters(location: AppLocation, userLocation: UserLocation | null): number | null {

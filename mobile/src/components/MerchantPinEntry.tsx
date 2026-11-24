@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Animated, PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, PanResponder, Pressable, StyleSheet, View } from "react-native";
+import { Text } from "./AppText";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Palette, radii, spacing, useAppTheme } from "../theme";
+import { dirIcon, dirSign } from "../i18n/direction";
 
 /**
  * The merchant PIN pad, in one place because a till now asks for the PIN in
@@ -135,11 +137,13 @@ export function MerchantPinSlider({
         onStartShouldSetPanResponder: () => !disabled && !loading && swipeDistance > 0,
         onMoveShouldSetPanResponder: (_, gesture) =>
           !disabled && !loading && swipeDistance > 0 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+        // Distances in the reading direction: in Arabic the thumb starts on
+        // the right and is swiped left (dirSign is -1 there).
         onPanResponderMove: (_, gesture) => {
-          translateX.setValue(Math.max(0, Math.min(gesture.dx, swipeDistance)));
+          translateX.setValue(Math.max(0, Math.min(gesture.dx * dirSign(), swipeDistance)));
         },
         onPanResponderRelease: (_, gesture) => {
-          if (gesture.dx >= swipeDistance * 0.72) {
+          if (gesture.dx * dirSign() >= swipeDistance * 0.72) {
             Animated.timing(translateX, {
               toValue: swipeDistance,
               duration: 120,
@@ -165,10 +169,10 @@ export function MerchantPinSlider({
         {loading ? loadingLabel : label}
       </Text>
       <Animated.View
-        style={[styles.swipeThumb, disabled ? styles.swipeThumbDisabled : undefined, { transform: [{ translateX }] }]}
+        style={[styles.swipeThumb, disabled ? styles.swipeThumbDisabled : undefined, { transform: [{ translateX: Animated.multiply(translateX, dirSign()) }] }]}
         {...panResponder.panHandlers}
       >
-        <Ionicons name={loading ? "hourglass-outline" : "arrow-forward"} size={18} color={palette.primaryStrong} />
+        <Ionicons name={loading ? "hourglass-outline" : dirIcon("arrow-forward")} size={18} color={palette.primaryStrong} />
       </Animated.View>
     </View>
   );
@@ -210,7 +214,9 @@ function createStyles(palette: Palette) {
       gap: spacing.xs,
     },
     keypadRow: {
+      // Number pads read 1-2-3 left to right in every language.
       flexDirection: "row",
+      direction: "ltr",
       gap: spacing.xs,
     },
     keypadKey: {

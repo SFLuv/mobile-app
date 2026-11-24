@@ -1,4 +1,14 @@
 import "./src/polyfills";
+import { applyLanguagePreference, t, useAppLanguage } from "./src/i18n";
+import {
+  dirSign,
+  directionSwitchLanguages,
+  holdDirectionCoverIfRestarted,
+  setReloadScreenColors,
+  useDirectionSwitching,
+} from "./src/i18n/direction";
+import { loadReturnPoint, peekReturnPoint } from "./src/i18n/returnPoint";
+import { useTranslation } from "react-i18next";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
@@ -15,11 +25,11 @@ import {
   SafeAreaView,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   TouchableWithoutFeedback,
   View,
 } from "react-native";
+import { Text } from "./src/components/AppText";
 import { Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -75,6 +85,7 @@ import {
   initSentry,
   recordStep,
   reportHandledError,
+  reportSignInFailure,
   syncSentryUser,
   useStuckWatch,
   watchForStuck,
@@ -143,7 +154,6 @@ import {
   countUnread,
   onReadConfirmed,
   primePendingReads,
-  reconcileWithSummary,
   setPendingReadsUser,
   usePendingReadsVersion,
 } from "./src/services/pendingReads";
@@ -187,6 +197,7 @@ import {
   useAppTheme,
   chromeLabel,
 } from "./src/theme";
+import { appLocale } from "./src/i18n";
 
 /*
  * At module scope, before anything renders, so a crash during startup is still
@@ -199,6 +210,9 @@ type RuntimeState = {
   service: SmartWalletService | null;
   discovery: RouteDiscovery | null;
   error: string | null;
+  /** The error was a timeout or no network, decided from the error itself:
+   * `error` is translated text and can't be matched in every language. */
+  offline?: boolean;
   loadingMessage?: string | null;
 };
 
@@ -241,12 +255,12 @@ type RedeemFlowState = {
  */
 function redeemWaitingText(elapsedSeconds: number, tokenSymbol: string): string {
   if (elapsedSeconds < 20) {
-    return `Requesting your ${tokenSymbol} reward from the event faucet.`;
+    return t("app.requestingYourRewardFromThe", { tokenSymbol });
   }
   if (elapsedSeconds < 90) {
-    return "The faucet is busy, and your reward is in line to be sent. Keep this open.";
+    return t("app.theFaucetIsBusyAnd");
   }
-  return "Still sending. This can take a few minutes when the network is busy. Keep this open, or check your wallet later.";
+  return t("app.stillSendingThisCanTake");
 }
 
 type ToastState = {
@@ -337,23 +351,24 @@ const TAB_SLIDE_ORDER: Tab[] = [
 const TAB_SLIDE_DISTANCE = 26;
 
 /** The panels reachable from the Participate slot, in the order they're offered. */
-const PARTICIPATE_ENTRIES: Record<
+/** Built per call so labels follow the current language. */
+const PARTICIPATE_ENTRIES = (): Record<
   Extract<Tab, "volunteer" | "improver">,
   { label: string; body: string; icon: keyof typeof Ionicons.glyphMap; activeIcon: keyof typeof Ionicons.glyphMap }
-> = {
+> => ({
   volunteer: {
-    label: "Volunteer",
-    body: "Find volunteer events and earn rewards.",
+    label: t("app.volunteer"),
+    body: t("app.findVolunteerEventsAndEarn"),
     icon: "people-circle-outline",
     activeIcon: "people-circle",
   },
   improver: {
-    label: "Improver",
-    body: "Claims, payouts, badges, and credentials.",
+    label: t("app.improver"),
+    body: t("app.claimsPayoutsBadgesAndCredentials"),
     icon: "construct-outline",
     activeIcon: "construct",
   },
-};
+});
 type WalletPane = "home" | "send" | "receive";
 type OverlayWalletPane = Exclude<WalletPane, "home">;
 
@@ -463,6 +478,15 @@ async function getOrCreateAppInstallationID(): Promise<string> {
   return nextID;
 }
 
+/** A step that ran out of time. Its message is translated, so callers test
+ * the type, never the text. */
+class StepTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StepTimeoutError";
+  }
+}
+
 async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -471,7 +495,7 @@ async function withTimeout<T>(
   let timeoutID: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timeoutID = setTimeout(() => {
-      reject(new Error(`Timed out while trying to ${label}. Please try again.`));
+      reject(new StepTimeoutError(t("app.timedOutWhileTryingTo", { label })));
     }, timeoutMs);
   });
 
@@ -602,7 +626,7 @@ async function readPushRegistrationAsync(requestPermission: boolean): Promise<Pu
       token: null,
       permissionStatus: "unavailable",
       deviceRegistered: false,
-      error: "Push notifications require a physical device.",
+      error: t("app.pushNotificationsRequireAPhysical"),
     };
   }
 
@@ -612,7 +636,7 @@ async function readPushRegistrationAsync(requestPermission: boolean): Promise<Pu
       token: null,
       permissionStatus: "unknown",
       deviceRegistered: false,
-      error: "Expo project ID is required to register this device for push notifications.",
+      error: t("app.expoProjectIdIsRequired"),
     };
   }
 
@@ -629,8 +653,8 @@ async function readPushRegistrationAsync(requestPermission: boolean): Promise<Pu
         deviceRegistered: false,
         error:
           permissionStatus === "denied"
-            ? "Push notifications are blocked for this app in system settings."
-            : "Notification permission has not been granted.",
+            ? t("app.pushNotificationsAreBlockedFor")
+            : t("app.notificationPermissionHasNotBeen"),
       };
     }
 
@@ -639,14 +663,14 @@ async function readPushRegistrationAsync(requestPermission: boolean): Promise<Pu
       token: token.data,
       permissionStatus,
       deviceRegistered: Boolean(token.data),
-      error: token.data ? undefined : "Unable to register this device for push notifications right now.",
+      error: token.data ? undefined : t("app.unableToRegisterThisDevice"),
     };
   } catch (error) {
     return {
       token: null,
       permissionStatus: await readPushPermissionStatus(),
       deviceRegistered: false,
-      error: (error as Error)?.message || "Unable to register this device for push notifications.",
+      error: (error as Error)?.message || t("app.unableToRegisterThisDevice2"),
     };
   }
 }
@@ -817,9 +841,9 @@ function linkSignature(link: SfluvUniversalLink): string {
 
 function walletLabel(smartIndex: number | undefined): string {
   if (typeof smartIndex !== "number" || smartIndex < 0) {
-    return "Wallet";
+    return t("app.wallet");
   }
-  return `Wallet ${smartIndex + 1}`;
+  return t("app.walletN", { n: smartIndex + 1 });
 }
 
 function walletDisplayName(
@@ -972,7 +996,7 @@ function eoaWalletName(walletOrder: number): string {
 
 function smartWalletName(walletOrder: number, smartIndex: number, isNewAccount: boolean): string {
   if (smartIndex === 0 && isNewAccount) {
-    return "Primary Wallet";
+    return t("app.primaryWallet");
   }
   return `SW-${walletOrder + 1}-${smartIndex + 1}`;
 }
@@ -1152,27 +1176,40 @@ function describeAppBackendIssue(error: unknown): string {
     return error.message;
   }
   if ((error as Error)?.name === "AbortError") {
-    return "That request timed out. Check your connection and try again.";
+    return t("app.thatRequestTimedOutCheck");
   }
   const message = (error as Error)?.message?.trim();
   if (!message) {
-    return "Some shared app features could not sync right now. Wallet transfers still work.";
+    return t("app.someSharedAppFeaturesCould");
   }
   return message;
 }
 
 function describeLoginIssue(error: unknown, fallback = "Unable to sign in right now."): string {
   if (error instanceof AppBackendPolicyRequiredError && error.policyStatus) {
-    return "Privacy policy acceptance is required before this account can finish loading.";
+    return t("app.privacyPolicyAcceptanceIsRequired");
   }
   if (error instanceof AppBackendAuthError) {
     return error.message;
   }
   if ((error as Error)?.name === "AbortError") {
-    return "A login request timed out. Check your connection and try again.";
+    return t("app.aLoginRequestTimedOut");
   }
   const message = (error as Error)?.message?.trim();
   return message || fallback;
+}
+
+/**
+ * Whether a failure looks like no connection: one of our own timeouts, an
+ * aborted request, or the platform's untranslated network errors ("Network
+ * request failed"). Decided from the error, before it becomes display text.
+ */
+function isConnectivityError(error: unknown): boolean {
+  const name = (error as Error)?.name;
+  if (name === "StepTimeoutError" || name === "AbortError") {
+    return true;
+  }
+  return isConnectivityErrorMessage((error as Error)?.message);
 }
 
 function isConnectivityErrorMessage(message: string | null | undefined): boolean {
@@ -1228,7 +1265,7 @@ function formatDeletionDateLabel(value?: string | null): string | null {
     return null;
   }
 
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(appLocale(), {
     month: "long",
     day: "numeric",
     year: "numeric",
@@ -1241,25 +1278,33 @@ function getDeletionFallbackDateLabel(): string {
   return (
     formatDeletionDateLabel(
       new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-    ) || "30 days from now"
+    ) || t("app.30DaysFromNow")
   );
 }
 
 function buildDeleteAccountPreviewMessage(preview: AppAccountDeletionPreview): string {
   const scheduledDate =
     formatDeletionDateLabel(preview.deleteDate) || getDeletionFallbackDateLabel();
-  const summaryParts = [
-    preview.counts.wallets > 0 ? `${preview.counts.wallets} wallets` : null,
-    preview.counts.contacts > 0 ? `${preview.counts.contacts} contacts` : null,
-    preview.counts.locations > 0 ? `${preview.counts.locations} locations` : null,
-    preview.counts.verifiedEmails > 0 ? `${preview.counts.verifiedEmails} verified emails` : null,
-    preview.counts.ponderSubscriptions > 0 ? `${preview.counts.ponderSubscriptions} notification subscriptions` : null,
-    preview.counts.memos > 0 ? `${preview.counts.memos} memos` : null,
-  ].filter((value): value is string => Boolean(value));
+  // Each count is its own plural phrase, joined with the language's list
+  // separator, so no English pieces end up inside a translated sentence.
+  const counts: Array<[string, number]> = [
+    ["wallets", preview.counts.wallets],
+    ["contacts", preview.counts.contacts],
+    ["locations", preview.counts.locations],
+    ["verifiedEmails", preview.counts.verifiedEmails],
+    ["notificationSubscriptions", preview.counts.ponderSubscriptions],
+    ["memos", preview.counts.memos],
+  ];
+  const summaryParts = counts
+    .filter(([, count]) => count > 0)
+    .map(([kind, count]) => t(`app.deletion.${kind}`, { count }));
 
-  const summary = summaryParts.length > 0 ? ` This includes ${summaryParts.join(", ")}.` : "";
+  const summary =
+    summaryParts.length > 0
+      ? t("app.deletion.includes", { list: summaryParts.join(t("app.deletion.listSeparator")) })
+      : "";
 
-  return `Your account will be marked inactive immediately and scheduled for permanent deletion on ${scheduledDate}.${summary} You can reactivate it any time during the 30-day window by signing in again.`;
+  return t("app.yourAccountWillBeMarked", { scheduledDate, summary });
 }
 
 function getLinkedOAuthAccount(
@@ -1360,10 +1405,14 @@ function mergePreferences(input: unknown): AppPreferences {
       typeof candidate.showImproverPanel === "boolean"
         ? candidate.showImproverPanel
         : defaultAppPreferences.showImproverPanel,
-    showVolunteerPanel:
-      typeof candidate.showVolunteerPanel === "boolean"
-        ? candidate.showVolunteerPanel
-        : defaultAppPreferences.showVolunteerPanel,
+    // Always on. The "Show volunteer panel" switch is gone from Settings
+    // (2026-11-18): turning it off by accident hid the panel with no obvious
+    // way back. A stored false is ignored so nobody stays without it.
+    showVolunteerPanel: true,
+    languagePreference:
+      typeof candidate.languagePreference === "string" && candidate.languagePreference
+        ? candidate.languagePreference
+        : defaultAppPreferences.languagePreference,
   };
 }
 
@@ -1376,13 +1425,16 @@ function useStoredPreferences(): [AppPreferences, React.Dispatch<React.SetStateA
 
     const loadPreferences = async () => {
       try {
-        const raw = await AsyncStorage.getItem(PREFERENCES_STORAGE_KEY);
+        // The point to come back to after a language change, read alongside so
+        // the first screen drawn is already that one (src/i18n/returnPoint).
+        const [raw] = await Promise.all([AsyncStorage.getItem(PREFERENCES_STORAGE_KEY), loadReturnPoint()]);
         if (!cancelled && raw) {
           setPreferences(mergePreferences(JSON.parse(raw)));
         }
       } catch (error) {
         console.warn("Unable to load saved app preferences", error);
       } finally {
+        holdDirectionCoverIfRestarted();
         if (!cancelled) {
           setPreferencesLoaded(true);
         }
@@ -1404,6 +1456,17 @@ function useStoredPreferences(): [AppPreferences, React.Dispatch<React.SetStateA
       console.warn("Unable to persist app preferences", error);
     });
   }, [preferences, preferencesLoaded]);
+
+  // The app's language follows the saved choice, or the phone when it is "system".
+  // Only once the saved preferences have loaded: before that this holds the
+  // default ("system"), and applying it would switch the layout direction (and
+  // restart) away from a saved right-to-left choice, then back, forever.
+  useEffect(() => {
+    if (!preferencesLoaded) {
+      return;
+    }
+    applyLanguagePreference(preferences.languagePreference);
+  }, [preferences.languagePreference, preferencesLoaded]);
 
   return [preferences, setPreferences, preferencesLoaded];
 }
@@ -1568,6 +1631,10 @@ function BottomDock({
       <View pointerEvents="none" style={styles.bottomDockGlassLayer} />
       <View pointerEvents="none" style={styles.bottomDockGlassSheen} />
       {measured ? (
+        // Slot positions are measured from the left edge in every language, so
+        // the bubble lives in a left-to-right layer; otherwise in Arabic its
+        // left: 0 becomes right: 0 and it slides off the end of the bar.
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { direction: "ltr" }]}>
         <Animated.View
           pointerEvents="none"
           style={[
@@ -1582,6 +1649,7 @@ function BottomDock({
             },
           ]}
         />
+        </View>
       ) : null}
 
       {tabs.map((tab, index) => {
@@ -1861,7 +1929,19 @@ function WalletAppShellContent({
 }) {
   const { palette, shadows, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
-  const [tab, setTab] = useState<Tab>("wallet");
+  // Back where they were after a language change (see src/i18n/returnPoint).
+  const [tab, setTab] = useState<Tab>(() => (peekReturnPoint()?.tab as Tab | undefined) ?? "wallet");
+  useEffect(() => {
+    if (peekReturnPoint()) {
+      return;
+    }
+    // After a restart (right-to-left switch) the point is only in storage.
+    void loadReturnPoint().then((point) => {
+      if (point?.tab) {
+        setTab(point.tab as Tab);
+      }
+    });
+  }, []);
   // Every screen change goes into the trail a Sentry issue carries.
   useEffect(() => {
     recordStep("navigation", `tab: ${tab}`);
@@ -1968,6 +2048,8 @@ function WalletAppShellContent({
     null,
   );
   const [chatInfoRoute, setChatInfoRoute] = useState<Conversation | null>(null);
+  // A message to scroll the open thread to, from a search result in Chat Info.
+  const [chatJump, setChatJump] = useState<{ conversationId: number; messageId: number; nonce: number } | null>(null);
   const [newMessageRoute, setNewMessageRoute] = useState<{
     mode: "choose" | "group" | "add";
     conversationId?: number;
@@ -2180,7 +2262,7 @@ function WalletAppShellContent({
   const walletPaneGestureMaxXRef = useRef(0);
   const walletPaneGestureActiveRef = useRef(false);
   const walletOverlayPane: OverlayWalletPane | null = walletPane === "home" ? null : walletPane;
-  const runtimeOffline = isConnectivityErrorMessage(runtime.error);
+  const runtimeOffline = Boolean(runtime.offline) || isConnectivityErrorMessage(runtime.error);
   const runtimeNodeIssue = isRetryableNodeErrorMessage(runtime.error);
 
   const setWalletPaneTranslateX = React.useCallback(
@@ -2288,8 +2370,10 @@ function WalletAppShellContent({
           walletOverlayPane !== null &&
           walletPaneBackSwipeEnabled &&
           !walletPaneAnimatingRef.current &&
-          gesture.x0 <= 28 &&
-          gesture.dx > 10 &&
+          // From the leading edge, toward the trailing one: the left edge
+          // rightwards, or in Arabic the right edge leftwards.
+          (dirSign() > 0 ? gesture.x0 <= 28 : gesture.x0 >= walletPaneSlideDistance - 28) &&
+          gesture.dx * dirSign() > 10 &&
           Math.abs(gesture.dx) > Math.abs(gesture.dy),
         onPanResponderGrant: () => {
           walletPaneAnimationIDRef.current += 1;
@@ -2299,13 +2383,13 @@ function WalletAppShellContent({
         },
         onPanResponderTerminationRequest: () => false,
         onPanResponderMove: (_, gesture) => {
-          const currentValue = Math.max(0, Math.min(gesture.dx, walletPaneSlideDistance));
+          const currentValue = Math.max(0, Math.min(gesture.dx * dirSign(), walletPaneSlideDistance));
           walletPaneGestureMaxXRef.current = Math.max(walletPaneGestureMaxXRef.current, currentValue);
           setWalletPaneTranslateX(currentValue);
         },
         onPanResponderRelease: (_, gesture) => {
-          const currentValue = Math.max(0, Math.min(gesture.dx, walletPaneSlideDistance));
-          finishWalletPaneSwipe(currentValue, gesture.vx);
+          const currentValue = Math.max(0, Math.min(gesture.dx * dirSign(), walletPaneSlideDistance));
+          finishWalletPaneSwipe(currentValue, gesture.vx * dirSign());
         },
         onPanResponderTerminate: () => {
           finishWalletPaneSwipe(walletPaneTranslateXValueRef.current);
@@ -2484,6 +2568,10 @@ function WalletAppShellContent({
   const { subscribe: subscribeRealtime, sendTyping, connected: socketConnected } = useRealtime({
     baseURL: mobileConfig.appBackendURL,
     getToken: getAccessToken,
+    // The id this phone's push subscription is registered under, so the server
+    // skips the push only here while the app is open, not on the person's
+    // other devices.
+    getInstallationId: getOrCreateAppInstallationID,
     enabled: Boolean(appUser) && Boolean(backendClient),
   });
 
@@ -2639,15 +2727,15 @@ function WalletAppShellContent({
     }
     const incomingFiles = target.kind === "files" ? target.files.map((file) => file.uri) : [];
     if (merchantKiosk || merchantModeActive) {
-      showToast("Sharing to chats is off while this device is a till.", "info");
+      showToast(t("app.sharingToChatsIsOff"), "info");
       discardSharedFiles(incomingFiles);
       return;
     }
     if (!chatEnabled) {
       showToast(
         betaKnown
-          ? "Messages isn't on for your account yet, so there's no chat to share that to."
-          : "Couldn't reach Messages to share that. Try again in a moment.",
+          ? t("app.messagesIsnTOnFor")
+          : t("app.couldnTReachMessagesTo"),
         "info",
       );
       discardSharedFiles(incomingFiles);
@@ -3023,8 +3111,8 @@ function WalletAppShellContent({
           syncState: deviceStateSynced ? "success" : current.syncState,
           message: deviceStateSynced
             ? registration.deviceRegistered
-              ? "Push notification device status is in sync."
-              : "Push notifications are disabled in system settings."
+              ? t("app.pushNotificationDeviceStatusIs")
+              : t("app.pushNotificationsAreDisabledIn")
             : current.message,
           lastSyncedAt: deviceStateSynced ? Date.now() : current.lastSyncedAt,
         }));
@@ -3307,7 +3395,7 @@ function WalletAppShellContent({
       // form is never lost.
       setW9FormOpen(false);
       setW9AwaitingConfirmation(false);
-      showToast("Could not open the tax form. Please try again.", "error");
+      showToast(t("app.couldNotOpenTheTax"), "error");
       return;
     }
 
@@ -3374,7 +3462,7 @@ function WalletAppShellContent({
         void presentW9Form();
       }, 1200);
     } catch (error) {
-      showToast((error as Error)?.message || "Could not open the tax form.", "error");
+      showToast((error as Error)?.message || t("app.couldNotOpenTheTax2"), "error");
     } finally {
       // Only ever guarded the mint; presentation has its own failure path.
       setW9Busy(false);
@@ -3573,7 +3661,7 @@ function WalletAppShellContent({
       setSyncNotice(message);
       if (error instanceof AppBackendAuthError && onLogout && !backendAuthFailureHandledRef.current) {
         backendAuthFailureHandledRef.current = true;
-        Alert.alert("Sign in again", message, [
+        Alert.alert(t("app.signInAgain"), message, [
           {
             text: "OK",
             onPress: () => {
@@ -3644,23 +3732,23 @@ function WalletAppShellContent({
       // volunteer's tax notice lit nothing here while the bell showed one.
       tabs.push({
         key: "participate",
-        label: "Participate",
+        label: t("app.participate"),
         icon: participateActive ? "people-circle" : "people-circle-outline",
       });
     }
-    tabs.push({ key: "map", label: "Map", icon: tab === "map" ? "map" : "map-outline" });
-    tabs.push({ key: "wallet", label: "Wallet", icon: "wallet", center: true });
+    tabs.push({ key: "map", label: t("app.map"), icon: tab === "map" ? "map" : "map-outline" });
+    tabs.push({ key: "wallet", label: t("app.wallet"), icon: "wallet", center: true });
     // The dock is five slots, always. Each beta surface SWAPS the tab already
     // in its slot rather than adding one: Bulletin takes Activity's, Messages
     // takes Contacts'. Turning a beta on therefore changes what a slot leads
     // to and never how many there are, so the row does not reflow around
     // somebody's thumb when their access changes.
     if (bulletinEnabled) {
-      tabs.push({ key: "bulletin", label: "Bulletin", icon: tab === "bulletin" ? "newspaper" : "newspaper-outline" });
+      tabs.push({ key: "bulletin", label: t("app.bulletin"), icon: tab === "bulletin" ? "newspaper" : "newspaper-outline" });
     } else {
       // Activity is still reachable from the wallet's "See all" when Bulletin
       // has the slot — this is a second way in, not the only one.
-      tabs.push({ key: "activity", label: "Activity", icon: tab === "activity" ? "pulse" : "pulse-outline" });
+      tabs.push({ key: "activity", label: t("app.activity"), icon: tab === "activity" ? "pulse" : "pulse-outline" });
     }
     if (chatEnabled) {
       // The one dock tab with its own indicator, and for the same reason the
@@ -3670,7 +3758,7 @@ function WalletAppShellContent({
       // place for them, and nothing above says it twice.
       tabs.push({
         key: "messages",
-        label: "Messages",
+        label: t("app.messages"),
         icon: tab === "messages" || tab === "contacts" ? "chatbubbles" : "chatbubbles-outline",
         badge: messagesUnread,
       });
@@ -3679,7 +3767,7 @@ function WalletAppShellContent({
       // where Contacts lives, so without it the only remaining way in is an
       // addcontact deep link, and a screen reachable solely by link is a
       // screen nobody finds.
-      tabs.push({ key: "contacts", label: "Contacts", icon: tab === "contacts" ? "people" : "people-outline" });
+      tabs.push({ key: "contacts", label: t("app.contacts"), icon: tab === "contacts" ? "people" : "people-outline" });
     }
     return tabs;
   }, [bulletinEnabled, chatEnabled, messagesUnread, participateActive, participateTargets, tab]);
@@ -3916,7 +4004,7 @@ function WalletAppShellContent({
           reportHandledError("messages: start conversation", error);
         }
         showToast(
-          error instanceof BulletinRequestError ? error.message : "Couldn't start a conversation.",
+          error instanceof BulletinRequestError ? error.message : t("app.couldnTStartAConversation"),
           "error",
         );
       } finally {
@@ -4202,6 +4290,21 @@ function WalletAppShellContent({
     }
     void Notifications.setBadgeCountAsync(iconBadge).catch(() => {});
   }, [iconBadge, iconBadgeKnown]);
+  // And again every time the app comes back to the front. A push that landed
+  // while it was in the background put its own number on the icon, and the
+  // effect above runs only when the app's count moves — so with the count
+  // already right (0, say) the push's 1 stayed however often the app was
+  // opened, until something else changed.
+  const iconBadgeRef = useRef<number | null>(null);
+  iconBadgeRef.current = iconBadgeKnown ? iconBadge : null;
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active" && iconBadgeRef.current !== null) {
+        void Notifications.setBadgeCountAsync(iconBadgeRef.current).catch(() => {});
+      }
+    });
+    return () => subscription.remove();
+  }, []);
 
   // Reaching a screen under your own steam handles the notification for it just
   // as tapping it would, so it clears from our list and the OS tray together.
@@ -4390,9 +4493,6 @@ function WalletAppShellContent({
       if (seq !== messagesUnreadSeq.current) {
         return;
       }
-      if (summary.unread) {
-        reconcileWithSummary(summary.unread);
-      }
       messagesUnreadKnown.current = true;
       setMessagesUnreadSource({ count: summary.unread_conversations, items: summary.unread ?? null });
     } catch {
@@ -4532,7 +4632,7 @@ function WalletAppShellContent({
         const notice = event.notice;
         const fallbackLine =
           message.kind === "payment" ? "Sent you SFLUV" : message.body?.trim() || "Sent an attachment";
-        let title = notice?.title || message.sender_name?.trim() || "New message";
+        let title = notice?.title || message.sender_name?.trim() || t("app.newMessage");
         let body = notice?.body || fallbackLine;
         let spoken = notice?.spoken;
         // What you saved the sender as, if you did — as their push now says
@@ -4561,7 +4661,7 @@ function WalletAppShellContent({
           title,
           body,
           spoken,
-          hint: notice?.is_group ? `In ${title}. Opens the conversation.` : "Opens the conversation.",
+          hint: notice?.is_group ? t("app.inOpensTheConversation", { title }) : t("app.opensTheConversation"),
           // The group's picture for a group, the person's for a direct thread.
           avatar: notice?.is_group
             ? { name: title, conversationId, iconAttachmentId: notice.icon_attachment_id }
@@ -4831,7 +4931,7 @@ function WalletAppShellContent({
     const { link } = pendingLinkIntent;
     if (link.type === "pay") {
       if (merchantModeActive) {
-        Alert.alert("Merchant Mode", "Sending is disabled on this device until Merchant Mode is exited.");
+        Alert.alert(t("app.merchantMode"), t("app.sendingIsDisabledOnThis"));
         onConsumePendingLink();
         return;
       }
@@ -4846,7 +4946,7 @@ function WalletAppShellContent({
 
     if (link.type === "request") {
       if (merchantModeActive) {
-        Alert.alert("Merchant Mode", "Sending is disabled on this device until Merchant Mode is exited.");
+        Alert.alert(t("app.merchantMode"), t("app.sendingIsDisabledOnThis"));
         onConsumePendingLink();
         return;
       }
@@ -4894,7 +4994,7 @@ function WalletAppShellContent({
       // transaction usually is not — Activity, with a word about why, beats a
       // sheet that cannot be filled in.
       setTab("activity");
-      showToast("Opening your activity. Shared transactions only show if they involve your wallet.", "info");
+      showToast(t("app.openingYourActivitySharedTransactions"), "info");
       onConsumePendingLink();
       return;
     }
@@ -4953,7 +5053,7 @@ function WalletAppShellContent({
             ? {
                 code: current.code,
                 stage: "error",
-                message: (error as Error)?.message || "Unable to prepare this reward right now.",
+                message: (error as Error)?.message || t("app.unableToPrepareThisReward"),
               }
             : current,
         );
@@ -5037,7 +5137,7 @@ function WalletAppShellContent({
                 code,
                 stage: "success",
                 walletAddress: payoutAddress,
-                message: `Your ${clientConfig.tokenSymbol} perk was sent to this wallet.`,
+                message: t("app.yourPerkWasSentTo", { tokenSymbol: clientConfig.tokenSymbol }),
               }
             : current,
         );
@@ -5053,7 +5153,7 @@ function WalletAppShellContent({
                 code,
                 stage: "error",
                 walletAddress: payoutAddress,
-                message: (error as Error)?.message || "Unable to redeem this QR code right now.",
+                message: (error as Error)?.message || t("app.unableToRedeemThisQr"),
               }
             : current,
         );
@@ -5501,7 +5601,7 @@ function WalletAppShellContent({
       const baseState = {
         addressCount,
         syncState: "syncing" as const,
-        message: preferences.notificationsEnabled ? "Syncing push notifications..." : "Removing push notifications...",
+        message: preferences.notificationsEnabled ? t("app.syncingPushNotifications") : t("app.removingPushNotifications"),
       };
 
       setPushSyncState((current) => ({
@@ -5530,7 +5630,7 @@ function WalletAppShellContent({
               addressCount,
               subscribedCount: 0,
               token: null,
-              message: "Unable to find this device's push token to turn notifications off.",
+              message: t("app.unableToFindThisDevice"),
             }));
             handledPushSyncRequestVersionRef.current = pushSyncRequestVersion;
             pendingPushPreferenceChangeRef.current = null;
@@ -5555,7 +5655,7 @@ function WalletAppShellContent({
             token: syncToken,
             addressCount,
             subscribedCount: countPushSubscriptionsForAddresses(registrations, notificationAddresses, syncToken),
-            message: "Push notifications are off for this device.",
+            message: t("app.pushNotificationsAreOffFor"),
             lastSyncedAt: Date.now(),
           }));
         } catch (error) {
@@ -5567,7 +5667,7 @@ function WalletAppShellContent({
             ...current,
             syncState: "error",
             addressCount,
-            message: (error as Error)?.message || "Unable to disable push notifications right now.",
+            message: (error as Error)?.message || t("app.unableToDisablePushNotifications"),
           }));
         }
         return;
@@ -5609,7 +5709,7 @@ function WalletAppShellContent({
               token: syncToken,
               message:
                 registration.error ||
-                "Push notifications are blocked in system settings, but your in-app preference is saved.",
+                t("app.pushNotificationsAreBlockedIn"),
               lastSyncedAt: Date.now(),
             }));
           } catch (error) {
@@ -5621,7 +5721,7 @@ function WalletAppShellContent({
               ...current,
               syncState: "error",
               addressCount,
-              message: (error as Error)?.message || "Unable to save your push notification preference right now.",
+              message: (error as Error)?.message || t("app.unableToSaveYourPush"),
             }));
           }
           return;
@@ -5634,7 +5734,7 @@ function WalletAppShellContent({
           subscribedCount: 0,
           token: syncToken ?? null,
           message: requestPermission
-            ? registration.error || "Unable to register this device for push notifications."
+            ? registration.error || t("app.unableToRegisterThisDevice2")
             : current.message,
         }));
         if (hasPendingExplicitSync) {
@@ -5667,7 +5767,7 @@ function WalletAppShellContent({
           addressCount,
           subscribedCount: 0,
           token: registration.token,
-          message: "Push permission is ready. Waiting for your wallets to finish loading before subscribing.",
+          message: t("app.pushPermissionIsReadyWaiting"),
         }));
         return;
       }
@@ -5699,8 +5799,8 @@ function WalletAppShellContent({
           token: registration.token,
           message:
             subscribedCount > 0
-              ? `Push notifications are active for ${subscribedCount} wallet${subscribedCount === 1 ? "" : "s"} on this device.`
-              : "This device has permission to receive notifications, but no wallet subscriptions were created yet.",
+              ? t("app.pushActiveForWallets", { count: subscribedCount })
+              : t("app.thisDeviceHasPermissionTo"),
           lastSyncedAt: Date.now(),
         }));
       } catch (error) {
@@ -5713,7 +5813,7 @@ function WalletAppShellContent({
           permissionStatus: registration.permissionStatus,
           syncState: "error",
           addressCount,
-          message: (error as Error)?.message || "Unable to sync push notifications right now.",
+          message: (error as Error)?.message || t("app.unableToSyncPushNotifications"),
         }));
       }
     };
@@ -5747,7 +5847,7 @@ function WalletAppShellContent({
       setPushSyncState((current) => ({
         ...current,
         syncState: "idle",
-        message: "Sign in fully before syncing push notifications.",
+        message: t("app.signInFullyBeforeSyncing"),
       }));
       return;
     }
@@ -5757,7 +5857,7 @@ function WalletAppShellContent({
         ...current,
         syncState: "idle",
         addressCount: notificationAddresses.length,
-        message: "Waiting for your wallets to finish loading before syncing push notifications.",
+        message: t("app.waitingForYourWalletsTo"),
       }));
       return;
     }
@@ -5823,15 +5923,15 @@ function WalletAppShellContent({
    * which screen it sits on.
    */
   const confirmLogout = () => {
-    Alert.alert("Log out?", "You will need to sign in again to pick up where you left off.", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Log out", style: "destructive", onPress: () => handleLogout() },
+    Alert.alert(t("app.logOut"), t("app.youWillNeedToSign"), [
+      { text: t("app.cancel"), style: "cancel" },
+      { text: t("app.logOut2"), style: "destructive", onPress: () => handleLogout() },
     ]);
   };
 
   const handleSetMerchantModePin = async (pin: string, currentPin?: string) => {
     if (!backendClient) {
-      throw new Error("Backend not configured.");
+      throw new Error(t("app.backendNotConfigured"));
     }
     setMerchantModeBusy(true);
     setMerchantModeMessage(null);
@@ -5843,7 +5943,7 @@ function WalletAppShellContent({
       setMerchantModeStatus((current) =>
         current?.device && !status.device ? { ...status, device: current.device } : status,
       );
-      setMerchantModeMessage("Merchant Mode PIN saved.");
+      setMerchantModeMessage(t("app.merchantModePinSaved"));
     } finally {
       setMerchantModeBusy(false);
     }
@@ -5851,7 +5951,7 @@ function WalletAppShellContent({
 
   const handleEnableMerchantMode = async (locationID: number) => {
     if (!backendClient) {
-      throw new Error("Backend not configured.");
+      throw new Error(t("app.backendNotConfigured"));
     }
     const installationID = merchantModeInstallationID ?? (await getOrCreateAppInstallationID());
     if (!merchantModeInstallationID) {
@@ -5864,12 +5964,12 @@ function WalletAppShellContent({
       const status = await backendClient.enableMerchantMode({
         installationID,
         locationID,
-        displayName: Device.deviceName || Device.modelName || "Store device",
+        displayName: Device.deviceName || Device.modelName || t("app.storeDevice"),
         platform: Platform.OS,
         appVersion: Constants.expoConfig?.version || Constants.nativeAppVersion || "",
       });
       setMerchantModeStatus(status);
-      setMerchantModeMessage("Merchant Mode enabled on this device.");
+      setMerchantModeMessage(t("app.merchantModeEnabledOnThis"));
       setWalletPane("home");
       setTab("wallet");
       await refreshEverything();
@@ -5903,11 +6003,11 @@ function WalletAppShellContent({
     // first one, and would accept anything typed. A device in merchant mode
     // always has one, so this is a guard against a state that should not exist.
     if (!merchantModeStatus?.passcodeSet) {
-      setMerchantSwitchError("No Merchant Mode PIN is set for this account.");
+      setMerchantSwitchError(t("app.noMerchantModePinIs"));
       return;
     }
     if (!/^\d{6}$/.test(pin)) {
-      setMerchantSwitchError("Enter the 6 digit Merchant Mode PIN.");
+      setMerchantSwitchError(t("app.enterThe6DigitMerchant"));
       return;
     }
     const installationID = merchantModeInstallationID ?? (await getOrCreateAppInstallationID());
@@ -5922,7 +6022,7 @@ function WalletAppShellContent({
       const status = await backendClient.enableMerchantMode({
         installationID,
         locationID,
-        displayName: Device.deviceName || Device.modelName || "Store device",
+        displayName: Device.deviceName || Device.modelName || t("app.storeDevice"),
         platform: Platform.OS,
         appVersion: Constants.expoConfig?.version || Constants.nativeAppVersion || "",
       });
@@ -5935,7 +6035,7 @@ function WalletAppShellContent({
       setMerchantToday(null);
       await refreshMerchantToday();
     } catch (error) {
-      setMerchantSwitchError((error as Error)?.message || "Unable to switch location.");
+      setMerchantSwitchError((error as Error)?.message || t("app.unableToSwitchLocation"));
     } finally {
       setMerchantModeBusy(false);
     }
@@ -5956,10 +6056,10 @@ function WalletAppShellContent({
    */
   const handleConfirmMerchantModePin = async (pin: string) => {
     if (!backendClient) {
-      throw new Error("Backend not configured.");
+      throw new Error(t("app.backendNotConfigured"));
     }
     if (!merchantModeStatus?.passcodeSet) {
-      throw new Error("No Merchant Mode PIN is set for this account.");
+      throw new Error(t("app.noMerchantModePinIs"));
     }
     setMerchantModeBusy(true);
     try {
@@ -5971,17 +6071,17 @@ function WalletAppShellContent({
 
   const handleDisableMerchantMode = async () => {
     if (!backendClient) {
-      setMerchantModeExitError("Backend not configured.");
+      setMerchantModeExitError(t("app.backendNotConfigured"));
       return;
     }
     // A merchant account has no consumer app to be let out into, so the exit is
     // not offered to one and must not be reachable by any other route either.
     if (merchantAccount) {
-      setMerchantModeExitError("Merchant accounts stay in Merchant Mode.");
+      setMerchantModeExitError(t("app.merchantAccountsStayInMerchant"));
       return;
     }
     if (!/^\d{6}$/.test(merchantModeExitPin)) {
-      setMerchantModeExitError("Enter the 6 digit Merchant Mode PIN.");
+      setMerchantModeExitError(t("app.enterThe6DigitMerchant"));
       return;
     }
 
@@ -6000,9 +6100,9 @@ function WalletAppShellContent({
       setMerchantModeStatus(status);
       setMerchantModeExitPin("");
       setMerchantModeExitOpen(false);
-      setMerchantModeMessage("Merchant Mode exited on this device.");
+      setMerchantModeMessage(t("app.merchantModeExitedOnThis"));
     } catch (error) {
-      setMerchantModeExitError((error as Error)?.message || "Unable to exit Merchant Mode.");
+      setMerchantModeExitError((error as Error)?.message || t("app.unableToExitMerchantMode"));
     } finally {
       setMerchantModeBusy(false);
     }
@@ -6029,7 +6129,7 @@ function WalletAppShellContent({
 
   const handleRenameWallet = async (wallet: AppWallet, nextName: string) => {
     if (!backendClient) {
-      throw new Error("Backend not configured.");
+      throw new Error(t("app.backendNotConfigured"));
     }
     await backendClient.updateWallet({
       ...wallet,
@@ -6040,7 +6140,7 @@ function WalletAppShellContent({
 
   const handleSetWalletVisibility = async (wallet: AppWallet, shouldShow: boolean) => {
     if (!backendClient) {
-      throw new Error("Backend not configured.");
+      throw new Error(t("app.backendNotConfigured"));
     }
     await backendClient.updateWallet({
       ...wallet,
@@ -6051,7 +6151,7 @@ function WalletAppShellContent({
 
   const handleSetPrimaryWallet = async (address: string) => {
     if (!backendClient) {
-      throw new Error("Backend not configured.");
+      throw new Error(t("app.backendNotConfigured"));
     }
     await backendClient.updatePrimaryWallet(address);
     await loadAppProfile();
@@ -6059,12 +6159,12 @@ function WalletAppShellContent({
 
   const handleDeleteAccount = async () => {
     if (!backendClient) {
-      setAccountDeletionMessage("Backend not configured.");
+      setAccountDeletionMessage(t("app.backendNotConfigured"));
       return;
     }
     const service = runtime.service;
     if (!service) {
-      setAccountDeletionMessage("Wallet service is still loading.");
+      setAccountDeletionMessage(t("app.walletServiceIsStillLoading"));
       return;
     }
 
@@ -6073,24 +6173,24 @@ function WalletAppShellContent({
     try {
       const preview = await backendClient.getDeleteAccountPreview();
       Alert.alert(
-        "Delete account",
-        `${buildDeleteAccountPreviewMessage(preview)} Before the delete request is sent, any ${clientConfig.tokenSymbol} in your accessible wallets will be transferred out of your account. If you later reactivate during the grace period, use ${ACCOUNT_RECOVERY_CONTACT} to recover those funds.`,
+        t("app.deleteAccount"),
+        t("app.beforeTheDeleteRequestIs", { preview: buildDeleteAccountPreviewMessage(preview), tokenSymbol: clientConfig.tokenSymbol, ACCOUNT_RECOVERY_CONTACT }),
         [
           {
-            text: "Keep account",
+            text: t("app.keepAccount"),
             style: "cancel",
             onPress: () => {
               setAccountDeletionBusy(false);
             },
           },
           {
-            text: "Delete account",
+            text: t("app.deleteAccount"),
             style: "destructive",
             onPress: () => {
               void (async () => {
                 try {
                   setAccountDeletionMessage(
-                    `Transferring ${clientConfig.tokenSymbol} out of your accessible wallets before submitting the deletion request...`,
+                    t("app.transferringOutOfYourAccessible", { tokenSymbol: clientConfig.tokenSymbol }),
                   );
                   await sweepAccessibleSFLUVToAdmin({
                     service,
@@ -6098,15 +6198,15 @@ function WalletAppShellContent({
                     discovery: runtime.discovery,
                   });
                   setAccountDeletionMessage(
-                    `Submitting your deletion request. If you later stop the scheduled deletion, use ${ACCOUNT_RECOVERY_CONTACT} to recover your transferred funds.`,
+                    t("app.submittingYourDeletionRequestIf", { ACCOUNT_RECOVERY_CONTACT }),
                   );
                   const status = await backendClient.deleteAccount();
                   const deleteDateLabel =
                     formatDeletionDateLabel(status.deleteDate) ||
                     getDeletionFallbackDateLabel();
                   Alert.alert(
-                    "Account scheduled for deletion",
-                    `This account is inactive and scheduled for deletion on ${deleteDateLabel}. Sign in again during that window if you want to reactivate it. If you reactivate later, use ${ACCOUNT_RECOVERY_CONTACT} to recover any ${clientConfig.tokenSymbol} transferred out during the deletion request.`,
+                    t("app.accountScheduledForDeletion"),
+                    t("app.thisAccountIsInactiveAnd", { deleteDateLabel, ACCOUNT_RECOVERY_CONTACT, tokenSymbol: clientConfig.tokenSymbol }),
                     [
                       {
                         text: "OK",
@@ -6151,7 +6251,7 @@ function WalletAppShellContent({
 
   const handleSend = async (recipient: string, amount: string, unit: "wei" | "token", memo: string) => {
     if (!runtime.service) {
-      throw new Error("Wallet signer is not ready.");
+      throw new Error(t("app.walletSignerIsNotReady"));
     }
 
     const result = await sendWatched("payment: send", () => runtime.service!.sendSFLUV(recipient, amount, unit));
@@ -6166,7 +6266,7 @@ function WalletAppShellContent({
       // The server checks the transfer against the indexer; a not-yet-indexed
       // transfer is stored as pending and confirmed when the chat is next read.
       void backendClient.attachConversationPayment(chatPayment.conversationId, result.txHash).catch(() => {
-        showToast("Payment sent, but it couldn't be added to the chat.", "error");
+        showToast(t("app.paymentSentButItCouldn"), "error");
       });
     }
     if (memo.trim() && result.txHash && backendClient) {
@@ -6209,10 +6309,10 @@ function WalletAppShellContent({
     note: string;
   }) => {
     if (!runtime.service) {
-      throw new Error("Your wallet isn't ready yet.");
+      throw new Error(t("app.yourWalletIsnTReady"));
     }
     if (!backendClient) {
-      throw new Error("You're not signed in.");
+      throw new Error(t("app.youReNotSignedIn"));
     }
 
     // Marked BEFORE the transfer, so handleSend's own attach path knows this
@@ -6222,7 +6322,7 @@ function WalletAppShellContent({
 
     const result = await sendWatched("payment: send in chat", () => runtime.service!.sendSFLUV(payAddress, amount, "token"));
     if (!result.txHash) {
-      throw new Error("The transfer didn't go through. Nothing was sent.");
+      throw new Error(t("app.theTransferDidnTGo"));
     }
 
     // Base units, which is what the server stores. Six decimals, floored —
@@ -6236,7 +6336,7 @@ function WalletAppShellContent({
     } catch {
       // The money moved; only the chat bubble failed. Saying so is important —
       // somebody who sees nothing in the thread will send again.
-      showToast("Payment sent, but it couldn't be added to the chat.", "error");
+      showToast(t("app.paymentSentButItCouldn"), "error");
     }
 
     const activeAddress = smartAddressRef.current || selectedCandidate?.accountAddress || "";
@@ -6287,30 +6387,30 @@ function WalletAppShellContent({
 
   const activeTitle =
     merchantModeActive
-      ? "Merchant Mode"
+      ? t("app.merchantMode")
       : merchantDeviceSetupPending
-      ? "Merchant Setup"
+      ? t("app.merchantSetup")
       : tab === "wallet"
       ? walletPane === "send"
-        ? "Send"
+        ? t("app.send")
         : walletPane === "receive"
-          ? "Receive"
-          : "Wallet"
+          ? t("app.receive")
+          : t("app.wallet")
       : tab === "activity"
-        ? "Activity"
+        ? t("app.activity")
       : tab === "improver"
-        ? "Improver"
+        ? t("app.improver")
       : tab === "volunteer"
-        ? "Volunteer"
+        ? t("app.volunteer")
       : tab === "map"
-        ? "Merchant Map"
+        ? t("app.merchantMap")
       : tab === "bulletin"
-        ? "Bulletin"
+        ? t("app.bulletin")
       : tab === "messages" || tab === "contacts"
-        ? "Messages"
+        ? t("app.messages")
       : tab === "notifications"
-        ? "Notifications"
-          : "Settings";
+        ? t("app.notifications")
+          : t("app.settings");
   /**
    * Whether the wallet signer is still being prepared.
    *
@@ -6419,7 +6519,7 @@ function WalletAppShellContent({
    */
   const shareTransactionToChat = useCallback(
     (txHash: string) => {
-      setShareTarget({ kind: "transaction", txHash, label: "Transaction" });
+      setShareTarget({ kind: "transaction", txHash, label: t("app.transaction") });
     },
     [],
   );
@@ -6454,7 +6554,7 @@ function WalletAppShellContent({
       }}
       onOpenSend={() => {
         if (merchantModeActive) {
-          Alert.alert("Merchant Mode", "Sending is disabled on this device until Merchant Mode is exited.");
+          Alert.alert(t("app.merchantMode"), t("app.sendingIsDisabledOnThis"));
           return;
         }
         setWalletPane("send");
@@ -6508,7 +6608,7 @@ function WalletAppShellContent({
           // coerced into a recipient, which is what reading `.address` off it
           // would have done.
           if (link.type === "event" || link.type === "merchant" || link.type === "transaction") {
-            showToast("That's a link to something to look at, not an address to pay.", "info");
+            showToast(t("app.thatSALinkTo"), "info");
             return;
           }
           openSendDraft({
@@ -6540,7 +6640,7 @@ function WalletAppShellContent({
         onClose={() => setMerchantApplicationOpen(false)}
         onSubmit={async (draft) => {
           if (!backendClient) {
-            throw new Error("Not signed in — log out and back in, then try again.");
+            throw new Error(t("app.notSignedInLogOut"));
           }
           await backendClient.submitMerchantApplication(draft);
           // Re-read before the form closes: the listing it just created is what
@@ -6571,6 +6671,13 @@ function WalletAppShellContent({
       onSelectLocation={handleEnableMerchantMode}
       onRefresh={refreshEverything}
       onLogout={confirmLogout}
+      onContactSupport={() => setContactSupportOpen(true)}
+      onRequestPinHelp={async () => {
+        if (!backendClient) {
+          throw new Error(t("app.notSignedInLogOut"));
+        }
+        await backendClient.requestMerchantModePinHelp(appUser?.contactEmail ?? undefined);
+      }}
     />
   );
   const merchantTodayContent = (
@@ -6593,7 +6700,9 @@ function WalletAppShellContent({
       <View style={styles.walletPaneStack}>
         <View style={styles.walletPaneBase}>{walletHomeContent}</View>
         <Animated.View
-          style={[styles.walletPaneOverlay, { transform: [{ translateX: walletPaneTranslateX }] }]}
+          // The pane's offset is a distance in the reading direction (it
+          // comes in from the trailing edge), so it is mirrored in Arabic.
+          style={[styles.walletPaneOverlay, { transform: [{ translateX: Animated.multiply(walletPaneTranslateX, dirSign()) }] }]}
           {...walletPanePanResponder.panHandlers}
         >
           {walletOverlayContent}
@@ -6695,7 +6804,7 @@ function WalletAppShellContent({
       }}
       onAddContact={async (name, address) => {
         if (!backendClient) {
-          throw new Error("Backend not configured.");
+          throw new Error(t("app.backendNotConfigured"));
         }
         await backendClient.addContact(name, address);
         const updatedContacts = await backendClient.getContacts();
@@ -6703,7 +6812,7 @@ function WalletAppShellContent({
       }}
       onUpdateContact={async (contact) => {
         if (!backendClient) {
-          throw new Error("Backend not configured.");
+          throw new Error(t("app.backendNotConfigured"));
         }
         await backendClient.updateContact(contact);
         const updatedContacts = await backendClient.getContacts();
@@ -6711,7 +6820,7 @@ function WalletAppShellContent({
       }}
       onToggleFavorite={async (contact) => {
         if (!backendClient) {
-          throw new Error("Backend not configured.");
+          throw new Error(t("app.backendNotConfigured"));
         }
         await backendClient.toggleFavorite(contact);
         const updatedContacts = await backendClient.getContacts();
@@ -6719,7 +6828,7 @@ function WalletAppShellContent({
       }}
       onDeleteContact={async (contactID) => {
         if (!backendClient) {
-          throw new Error("Backend not configured.");
+          throw new Error(t("app.backendNotConfigured"));
         }
         await backendClient.deleteContact(contactID);
         const updatedContacts = await backendClient.getContacts();
@@ -6824,10 +6933,10 @@ function WalletAppShellContent({
                   accessibilityRole="button"
                   accessibilityLabel={
                     backgroundLoading
-                      ? "Notifications, still loading"
+                      ? t("app.notificationsStillLoading")
                       : panelNotificationCount > 0
-                        ? `Notifications, ${panelNotificationCount} outstanding`
-                        : "Notifications"
+                        ? t("app.notificationsOutstanding", { count: panelNotificationCount })
+                        : t("app.notifications")
                   }
                 >
                   {/* The bell IS the loading indicator while anything is still
@@ -6866,8 +6975,8 @@ function WalletAppShellContent({
                   style={styles.iconButton}
                   onPress={confirmLogout}
                   accessibilityRole="button"
-                  accessibilityLabel="Log out"
-                  accessibilityHint="Signs this device out of the SFLuv account"
+                  accessibilityLabel={t("app.logOut2")}
+                  accessibilityHint={t("app.signsThisDeviceOutOf")}
                 >
                   <Ionicons name="log-out-outline" size={18} color={palette.primaryStrong} />
                 </Pressable>
@@ -6877,9 +6986,9 @@ function WalletAppShellContent({
                   // Icon-only, and in merchant mode it is the ONLY control on the
                   // screen — without a label it reaches VoiceOver as a bare glyph.
                   accessibilityRole="button"
-                  accessibilityLabel={merchantModeActive ? "Merchant mode options" : "Settings"}
+                  accessibilityLabel={merchantModeActive ? t("app.merchantModeOptions") : t("app.settings")}
                   accessibilityHint={
-                    merchantModeActive ? "Move this device to another location, or sign out" : undefined
+                    merchantModeActive ? t("app.moveThisDeviceToAnother") : undefined
                   }
                   onPress={() => {
                     if (merchantModeActive) {
@@ -6916,16 +7025,16 @@ function WalletAppShellContent({
               <View style={styles.centerState}>
                 <ThemedActivityIndicator size="large" color={palette.primaryStrong} />
                 <Text style={styles.stateText}>
-                  {runtime.loadingMessage || "Preparing your wallet..."}
+                  {runtime.loadingMessage || t("app.preparingYourWallet")}
                 </Text>
                 {bootStalled ? (
                   <>
-                    <Text style={styles.stateText}>This is taking longer than usual.</Text>
+                    <Text style={styles.stateText}>{t("app.thisIsTakingLongerThan")}</Text>
                     <Pressable style={styles.connectionStateButton} onPress={onRetryConnection}>
-                      <Text style={styles.connectionStateButtonText}>Try again</Text>
+                      <Text style={styles.connectionStateButtonText}>{t("app.tryAgain")}</Text>
                     </Pressable>
                     <Pressable onPress={handleLogout}>
-                      <Text style={styles.connectionStateLogoutText}>Log out</Text>
+                      <Text style={styles.connectionStateLogoutText}>{t("app.logOut2")}</Text>
                     </Pressable>
                   </>
                 ) : null}
@@ -6937,15 +7046,15 @@ function WalletAppShellContent({
                     <View style={styles.connectionStateIconWrap}>
                       <Ionicons name="cloud-offline-outline" size={26} color={palette.primaryStrong} />
                     </View>
-                    <Text style={styles.connectionStateTitle}>No Connection</Text>
+                    <Text style={styles.connectionStateTitle}>{t("app.noConnection")}</Text>
                     <Text style={styles.connectionStateBody}>
-                      We couldn&apos;t load your account because the app appears to be offline. Reconnect and try again.
+                      {t("app.offlineAccountBody")}
                     </Text>
                     <Pressable style={styles.connectionStateButton} onPress={onRetryConnection}>
-                      <Text style={styles.connectionStateButtonText}>Try again</Text>
+                      <Text style={styles.connectionStateButtonText}>{t("app.tryAgain")}</Text>
                     </Pressable>
                     <Pressable onPress={handleLogout}>
-                      <Text style={styles.connectionStateLogoutText}>Log out</Text>
+                      <Text style={styles.connectionStateLogoutText}>{t("app.logOut2")}</Text>
                     </Pressable>
                   </View>
                 ) : (
@@ -6954,12 +7063,12 @@ function WalletAppShellContent({
                       <Ionicons name="alert-circle-outline" size={26} color={palette.primaryStrong} />
                     </View>
                     <Text style={styles.connectionStateTitle}>
-                      {runtimeNodeIssue ? "Network hiccup" : "Something went wrong"}
+                      {runtimeNodeIssue ? t("app.networkHiccup") : t("app.somethingWentWrong")}
                     </Text>
                     <Text style={styles.connectionStateBody}>
                       {runtimeNodeIssue
-                        ? "The network node had trouble responding. This usually clears up if you try again."
-                        : "We could not finish setting up your wallet."}
+                        ? t("app.theNetworkNodeHadTrouble")
+                        : t("app.weCouldNotFinishSetting")}
                     </Text>
                     <ScrollView
                       style={styles.errorScroll}
@@ -6970,10 +7079,10 @@ function WalletAppShellContent({
                       <Text style={styles.errorText}>{runtime.error}</Text>
                     </ScrollView>
                     <Pressable style={styles.connectionStateButton} onPress={onRetryConnection}>
-                      <Text style={styles.connectionStateButtonText}>Try again</Text>
+                      <Text style={styles.connectionStateButtonText}>{t("app.tryAgain")}</Text>
                     </Pressable>
                     <Pressable onPress={handleLogout}>
-                      <Text style={styles.connectionStateLogoutText}>Log out</Text>
+                      <Text style={styles.connectionStateLogoutText}>{t("app.logOut2")}</Text>
                     </Pressable>
                   </View>
                 )}
@@ -6985,7 +7094,7 @@ function WalletAppShellContent({
               // the guess that shows is the one a merchant is never given.
               <View style={styles.centerState}>
                 <ThemedActivityIndicator size="large" color={palette.primaryStrong} />
-                <Text style={styles.stateText}>Loading your account...</Text>
+                <Text style={styles.stateText}>{t("app.loadingYourAccount")}</Text>
               </View>
             ) : merchantOnboardingContent ? (
               // Ahead of every tab: a merchant account with no till has no app to
@@ -7077,7 +7186,7 @@ function WalletAppShellContent({
                 }
                 onPayLocation={(location) => {
                   if (!location.payToAddress) {
-                    showToast("Payment is not available for this merchant right now.", "error");
+                    showToast(t("app.paymentIsNotAvailableFor"), "error");
                     return;
                   }
                   openSendDraft({
@@ -7100,7 +7209,7 @@ function WalletAppShellContent({
                 hapticsEnabled={preferences.hapticsEnabled}
                 onMessageAboutPost={async (post: BulletinPost) => {
                   if (!backendClient) {
-                    throw new Error("Backend not configured.");
+                    throw new Error(t("app.backendNotConfigured"));
                   }
                   const conversation = await backendClient.startConversation(post.author.user_id, post.id);
                   openConversation(conversation.id);
@@ -7109,7 +7218,7 @@ function WalletAppShellContent({
                   if (canAccessVolunteerPanel) {
                     openVolunteerPanel(eventId);
                   } else {
-                    showToast("Volunteer events aren't available right now.", "info");
+                    showToast(t("app.volunteerEventsArenTAvailable"), "info");
                   }
                 }}
                 onToast={showToast}
@@ -7146,7 +7255,7 @@ function WalletAppShellContent({
                           showToast(
                             error instanceof BulletinRequestError
                               ? error.message
-                              : "Couldn't open a chat with them.",
+                              : t("app.couldnTOpenAChat"),
                             "error",
                           );
                         }
@@ -7234,7 +7343,7 @@ function WalletAppShellContent({
                 accountDeletionMessage={accountDeletionMessage}
                 onUpdateImproverRewardsWallet={async (address) => {
                   if (!backendClient) {
-                    throw new Error("Backend not configured.");
+                    throw new Error(t("app.backendNotConfigured"));
                   }
                   await backendClient.updateImproverPrimaryRewardsAccount(address.trim());
                   await loadAppProfile();
@@ -7362,6 +7471,8 @@ function WalletAppShellContent({
                 onInitialDraftApplied={() => setSupportReplyDraft(null)}
                 onBack={closeChatRoute}
                 onOpenInfo={setChatInfoRoute}
+                myUserId={appUser?.id ?? ""}
+                jumpTo={chatJump?.conversationId === chatRoute.conversationId ? chatJump : null}
                 onSendPayment={handleSendInChat}
                 onOpenTransaction={(ref) => {
                   // The wallet and Activity already have this sheet; the shell
@@ -7407,7 +7518,7 @@ function WalletAppShellContent({
                 onOpenMerchant={(locationId) => {
                   const match = listedLocations.find((location) => location.id === locationId);
                   if (!match) {
-                    showToast("That merchant isn't listed right now.", "info");
+                    showToast(t("app.thatMerchantIsnTListed"), "info");
                     return;
                   }
                   // Opens the map's own merchant sheet. One sheet in the app,
@@ -7479,6 +7590,13 @@ function WalletAppShellContent({
                   onAddMembers={(conversationId) =>
                     setNewMessageRoute({ mode: "add", conversationId })
                   }
+                  onJumpToMessage={(messageId) => {
+                    // Back to the thread, which loads back to the message and
+                    // scrolls to it.
+                    const conversationId = chatInfoRoute.id;
+                    setChatInfoRoute(null);
+                    setChatJump({ conversationId, messageId, nonce: Date.now() });
+                  }}
                   onToast={showToast}
                 />
               </View>
@@ -7560,7 +7678,7 @@ function WalletAppShellContent({
                         await backendClient.deleteContact(contactID);
                         setContacts(await backendClient.getContacts());
                       } catch {
-                        showToast("Couldn't delete that contact.", "error");
+                        showToast(t("app.couldnTDeleteThatContact"), "error");
                       }
                     })();
                   }}
@@ -7647,9 +7765,9 @@ function WalletAppShellContent({
           <Pressable style={styles.moreMenuCard} onPress={() => {}} accessible={false}>
             <View style={styles.moreMenuHeader}>
               <View style={styles.moreMenuHeaderCopy}>
-                <Text style={styles.moreMenuTitle}>Merchant Mode</Text>
+                <Text style={styles.moreMenuTitle}>{t("app.merchantMode")}</Text>
                 <Text style={styles.moreMenuSubtitle}>
-                  This device is locked to receiving SFLuv for {merchantModeDevice?.locationName || "this location"}.
+                  {t("app.deviceLockedTo", { location: merchantModeDevice?.locationName || t("app.thisLocation") })}
                 </Text>
               </View>
               <Pressable style={styles.walletChooserClose} onPress={() => setMerchantModeExitOpen(false)}>
@@ -7669,12 +7787,12 @@ function WalletAppShellContent({
               // Both halves are now conditional on there being somewhere to go.
               <View style={styles.merchantExitCard}>
                 <Text style={styles.merchantExitTitle}>
-                  {merchantModeLocations.length > 1 ? "This device is a till" : "This device stays a till"}
+                  {merchantModeLocations.length > 1 ? t("app.thisDeviceIsATill") : t("app.thisDeviceStaysATill")}
                 </Text>
                 <Text style={styles.merchantExitBody}>
                   {merchantModeLocations.length > 1
-                    ? "Merchant accounts do not have a personal wallet to switch back to, but you can move this device to another of your locations."
-                    : "Merchant accounts do not have a personal wallet to switch back to. Payments taken here go to this location."}
+                    ? t("app.merchantAccountsDoNotHave")
+                    : t("app.merchantAccountsDoNotHave2")}
                 </Text>
                 {merchantModeLocations.length > 1 ? (
                   <Pressable
@@ -7685,7 +7803,7 @@ function WalletAppShellContent({
                       setMerchantLocationChooserOpen(true);
                     }}
                   >
-                    <Text style={styles.connectionStateButtonText}>Switch location</Text>
+                    <Text style={styles.connectionStateButtonText}>{t("app.switchLocation")}</Text>
                   </Pressable>
                 ) : null}
                 {/* Settings are unreachable from a till, so this is the only way
@@ -7696,12 +7814,12 @@ function WalletAppShellContent({
                 <Pressable
                   onPress={() => {
                     Alert.alert(
-                      "Sign out of this till?",
-                      "This device will stop taking payments for this location until someone signs in again.",
+                      t("app.signOutOfThisTill"),
+                      t("app.thisDeviceWillStopTaking"),
                       [
-                        { text: "Cancel", style: "cancel" },
+                        { text: t("app.cancel"), style: "cancel" },
                         {
-                          text: "Sign out",
+                          text: t("app.signOut"),
                           style: "destructive",
                           onPress: () => {
                             setMerchantModeExitOpen(false);
@@ -7712,16 +7830,16 @@ function WalletAppShellContent({
                     );
                   }}
                 >
-                  <Text style={styles.merchantExitSignOut}>Sign out</Text>
+                  <Text style={styles.merchantExitSignOut}>{t("app.signOut")}</Text>
                 </Pressable>
               </View>
             ) : (
               // The opt-in merchant mode a personal account can turn on, and so
               // must be able to turn off again.
               <View style={styles.merchantExitCard}>
-                <Text style={styles.merchantExitTitle}>Exit Merchant Mode</Text>
+                <Text style={styles.merchantExitTitle}>{t("app.exitMerchantMode")}</Text>
                 <Text style={styles.merchantExitBody}>
-                  Enter the 6 digit merchant PIN on this device to return to the full app.
+                  {t("app.enterThe6DigitMerchant2")}
                 </Text>
                 <MerchantPinDisplay
                   value={merchantModeExitPin}
@@ -7742,7 +7860,7 @@ function WalletAppShellContent({
                 <MerchantPinSlider
                   disabled={merchantModeBusy || !/^\d{6}$/.test(merchantModeExitPin)}
                   loading={merchantModeBusy}
-                  label="Slide to exit"
+                  label={t("app.slideToExit")}
                   onComplete={() => {
                     void handleDisableMerchantMode();
                   }}
@@ -7768,7 +7886,7 @@ function WalletAppShellContent({
           <Pressable style={styles.walletChooserCard} onPress={() => {}} accessible={false}>
             <View style={styles.walletChooserHeader}>
               <View style={styles.walletChooserHeaderCopy}>
-                <Text style={styles.walletChooserTitle}>Which location?</Text>
+                <Text style={styles.walletChooserTitle}>{t("app.whichLocationQ")}</Text>
               </View>
               <Pressable style={styles.walletChooserClose} onPress={() => setMerchantLocationChooserOpen(false)}>
                 <Ionicons name="close" size={20} color={palette.primaryStrong} />
@@ -7828,12 +7946,13 @@ function WalletAppShellContent({
           <Pressable style={styles.moreMenuCard} onPress={() => {}} accessible={false}>
             <View style={styles.moreMenuHeader}>
               <View style={styles.moreMenuHeaderCopy}>
-                <Text style={styles.moreMenuTitle}>Merchant PIN</Text>
+                <Text style={styles.moreMenuTitle}>{t("app.merchantPin")}</Text>
                 <Text style={styles.moreMenuSubtitle}>
-                  Moving this device to{" "}
-                  {merchantModeLocations.find((location) => location.id === merchantSwitchLocationID)?.name ||
-                    "another location"}
-                  .
+                  {t("app.movingDeviceTo", {
+                    location:
+                      merchantModeLocations.find((location) => location.id === merchantSwitchLocationID)?.name ||
+                      t("app.anotherLocation"),
+                  })}
                 </Text>
               </View>
               <Pressable style={styles.walletChooserClose} onPress={closeMerchantSwitchPrompt}>
@@ -7843,7 +7962,7 @@ function WalletAppShellContent({
 
             <View style={styles.merchantExitCard}>
               <Text style={styles.merchantExitBody}>
-                Payments taken on this device will go to the new location from now on.
+                {t("app.paymentsTakenOnThisDevice")}
               </Text>
               <MerchantPinDisplay
                 value={merchantSwitchPin}
@@ -7864,8 +7983,8 @@ function WalletAppShellContent({
               <MerchantPinSlider
                 disabled={merchantModeBusy || !/^\d{6}$/.test(merchantSwitchPin)}
                 loading={merchantModeBusy}
-                label="Slide to switch"
-                loadingLabel="Switching"
+                label={t("app.slideToSwitch")}
+                loadingLabel={t("app.switching")}
                 onComplete={() => {
                   if (merchantSwitchLocationID === null) {
                     return;
@@ -7892,7 +8011,7 @@ function WalletAppShellContent({
           <Pressable style={styles.walletChooserCard} onPress={() => {}} accessible={false}>
             <View style={styles.walletChooserHeader}>
               <View style={styles.walletChooserHeaderCopy}>
-                <Text style={styles.walletChooserTitle}>Merchant mode ended</Text>
+                <Text style={styles.walletChooserTitle}>{t("app.merchantModeEnded")}</Text>
               </View>
             </View>
             <Text style={styles.walletChooserBalance}>{merchantForcedExitNotice}</Text>
@@ -7900,7 +8019,7 @@ function WalletAppShellContent({
               style={styles.connectionStateButton}
               onPress={() => setMerchantForcedExitNotice(null)}
             >
-              <Text style={styles.connectionStateButtonText}>OK</Text>
+              <Text style={styles.connectionStateButtonText}>{t("common.ok")}</Text>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -7917,7 +8036,7 @@ function WalletAppShellContent({
           <Pressable style={styles.walletChooserCard} onPress={() => {}} accessible={false}>
             <View style={styles.walletChooserHeader}>
               <View style={styles.walletChooserHeaderCopy}>
-                <Text style={styles.walletChooserTitle}>Choose Wallet</Text>
+                <Text style={styles.walletChooserTitle}>{t("app.chooseWallet")}</Text>
               </View>
               <Pressable style={styles.walletChooserClose} onPress={() => setShowWalletChooser(false)}>
                 <Ionicons name="close" size={20} color={palette.primaryStrong} />
@@ -7975,8 +8094,8 @@ function WalletAppShellContent({
           <Pressable style={styles.moreMenuCard} onPress={() => {}} accessible={false}>
             <View style={styles.moreMenuHeader}>
               <View style={styles.moreMenuHeaderCopy}>
-                <Text style={styles.moreMenuTitle}>Participate</Text>
-                <Text style={styles.moreMenuSubtitle}>Choose how you want to pitch in.</Text>
+                <Text style={styles.moreMenuTitle}>{t("app.participate")}</Text>
+                <Text style={styles.moreMenuSubtitle}>{t("app.chooseHowYouWantTo")}</Text>
               </View>
               <Pressable style={styles.walletChooserClose} onPress={() => setShowParticipateMenu(false)}>
                 <Ionicons name="close" size={20} color={palette.primaryStrong} />
@@ -7985,7 +8104,7 @@ function WalletAppShellContent({
 
             <View style={styles.moreMenuList}>
               {participateTargets.map((target) => {
-                const entry = PARTICIPATE_ENTRIES[target];
+                const entry = PARTICIPATE_ENTRIES()[target];
                 const active = tab === target;
                 return (
                   <Pressable
@@ -8030,29 +8149,29 @@ function WalletAppShellContent({
             )}
             <Text style={styles.sendingTitle}>
               {redeemFlow?.stage === "awaiting_wallet"
-                ? "Preparing your wallet…"
+                ? t("app.preparingYourWallet2")
                 : redeemFlow?.stage === "redeeming"
-                  ? "Redeeming your perk…"
+                  ? t("app.redeemingYourPerk")
                   : redeemFlow?.stage === "pending"
-                    ? "Still confirming"
+                    ? t("app.stillConfirming")
                     : redeemFlow?.stage === "success"
-                      ? "Perk redeemed"
-                      : "Redeem failed"}
+                      ? t("app.perkRedeemed")
+                      : t("app.redeemFailed")}
             </Text>
             <Text style={styles.sendingText}>
               {redeemFlow?.message ||
                 (redeemFlow?.stage === "awaiting_wallet"
-                  ? "Finishing wallet setup before the reward is claimed."
+                  ? t("app.finishingWalletSetupBeforeThe")
                   : redeemFlow?.stage === "redeeming"
                     ? redeemWaitingText(
                         Math.max(0, (redeemClock - (redeemFlow.startedAt ?? redeemClock)) / 1000),
                         clientConfig.tokenSymbol,
                       )
-                    : "Close this modal and try again.")}
+                    : t("app.closeThisModalAndTry"))}
             </Text>
             {redeemFlow?.stage === "success" || redeemFlow?.stage === "pending" || redeemFlow?.stage === "error" ? (
               <Pressable style={styles.dismissButton} onPress={() => setRedeemFlow(null)}>
-                <Text style={styles.dismissButtonText}>Close</Text>
+                <Text style={styles.dismissButtonText}>{t("app.close")}</Text>
               </Pressable>
             ) : null}
           </View>
@@ -8068,16 +8187,15 @@ function WalletAppShellContent({
         <View style={styles.sendingOverlay}>
           <View style={styles.sendingCard}>
             <Ionicons name="information-circle" size={42} color={palette.primaryStrong} />
-            <Text style={styles.sendingTitle}>Funds recovery</Text>
+            <Text style={styles.sendingTitle}>{t("app.fundsRecovery")}</Text>
             <Text style={styles.sendingText}>
-              This account is active again, but any {clientConfig.tokenSymbol} transferred out during the deletion
-              request will not return automatically.
+              {t("app.fundsNotReturned", { tokenSymbol: clientConfig.tokenSymbol })}
             </Text>
             <Text style={styles.sendingText}>
-              Use {ACCOUNT_RECOVERY_CONTACT} to recover your funds.
+              {t("app.useContactToRecover", { contact: ACCOUNT_RECOVERY_CONTACT })}
             </Text>
             <Pressable style={styles.dismissButton} onPress={onDismissRecoveryFundsNotice}>
-              <Text style={styles.dismissButtonText}>Understood</Text>
+              <Text style={styles.dismissButtonText}>{t("app.understood")}</Text>
             </Pressable>
           </View>
         </View>
@@ -8143,6 +8261,7 @@ function PrivyWalletApp({
   onSignedInChange: (signedIn: boolean) => void;
 }) {
   const { palette, shadows, isDark } = useAppTheme();
+  const { t } = useTranslation();
   const styles = useMemo(() => createStyles(palette, shadows, isDark), [palette, shadows, isDark]);
   const { user, isReady, logout, getAccessToken } = usePrivy();
   // Ties Sentry events to the signed-in Privy DID, and unties them when Privy
@@ -8316,9 +8435,9 @@ function PrivyWalletApp({
   const canDisconnectApple = appleLinked && signInMethodCount > 1;
   const canDisconnectGoogle = googleLinked && signInMethodCount > 1;
   const appleDisconnectDisabledReason =
-    appleLinked && !canDisconnectApple ? "Add email or Google before disconnecting Apple." : null;
+    appleLinked && !canDisconnectApple ? t("app.addEmailOrGoogleBefore") : null;
   const googleDisconnectDisabledReason =
-    googleLinked && !canDisconnectGoogle ? "Add email or Apple before disconnecting Google." : null;
+    googleLinked && !canDisconnectGoogle ? t("app.addEmailOrAppleBefore") : null;
   const appleActionBusy = linkOauthState.status === "loading" || appleUnlinkBusy;
   const googleActionBusy = linkOauthState.status === "loading" || googleUnlinkBusy;
   const googleLinkedEmail = linkedGoogleAccount?.email?.trim() || undefined;
@@ -8347,13 +8466,19 @@ function PrivyWalletApp({
     },
   });
 
-  const presentLoginError = (error: unknown) => {
+  const presentLoginError = (error: unknown, failure?: { step: string; startedAt: number }) => {
     const message = describeLoginIssue(error);
+    const offline = isConnectivityError(error);
+    // An expired session (401) is handled by signing in again, as elsewhere.
+    if (failure && !(error instanceof AppBackendAuthError)) {
+      reportSignInFailure(error, { step: failure.step, offline, elapsedMs: Date.now() - failure.startedAt });
+    }
     setRuntime({
       loading: false,
       service: null,
       discovery: null,
       error: message,
+      offline,
       loadingMessage: null,
     });
   };
@@ -8365,7 +8490,7 @@ function PrivyWalletApp({
       ...state,
       loading: true,
       error: null,
-      loadingMessage: "Checking your connection...",
+      loadingMessage: t("app.checkingYourConnection"),
     }));
     setBootstrapRetryVersion((current) => current + 1);
   }, []);
@@ -8527,7 +8652,7 @@ function PrivyWalletApp({
             status = await withTimeout(
               backendClient.getDeleteAccountStatus(),
               BACKEND_BOOTSTRAP_TIMEOUT_MS,
-              "check your account status",
+              t("app.checkYourAccountStatus"),
             );
           }
           if (cancelled) {
@@ -8546,13 +8671,14 @@ function PrivyWalletApp({
         return false;
       };
 
+      const failure = { step: "new account: profile", startedAt: Date.now() };
       try {
         // ensureUser's combined fetch also brings back the delete status, so
         // profile load and account-status check now share one round trip.
         await withTimeout(
           backendClient.ensureUser(),
           BACKEND_BOOTSTRAP_TIMEOUT_MS,
-          "prepare your SFLUV profile",
+          t("app.prepareYourSfluvProfile"),
         );
         if (cancelled) {
           return;
@@ -8563,10 +8689,11 @@ function PrivyWalletApp({
         if (cancelled || wallets.length > 0) {
           return;
         }
+        failure.step = "new account: create Privy wallet";
         await withTimeout(
           create({ createAdditional: false }),
           WALLET_CREATE_TIMEOUT_MS,
-          "create your Privy wallet",
+          t("app.createYourPrivyWallet"),
         );
       } catch (error) {
         if (cancelled) {
@@ -8583,7 +8710,7 @@ function PrivyWalletApp({
           showPolicyGate(error.policyStatus);
           return;
         }
-        presentLoginError(error);
+        presentLoginError(error, failure);
       } finally {
         creatingWalletRef.current = false;
       }
@@ -8733,11 +8860,12 @@ function PrivyWalletApp({
 
     let cancelled = false;
     const bootstrap = async () => {
+      const failure = { step: "profile and Privy wallet", startedAt: Date.now() };
       setRuntime((state) => ({
         ...state,
         loading: true,
         error: null,
-        loadingMessage: "Loading your SFLUV profile...",
+        loadingMessage: t("app.loadingYourSfluvProfile"),
       }));
       try {
         // The profile fetch (backend) and the Privy embedded provider (local
@@ -8747,7 +8875,7 @@ function PrivyWalletApp({
           withTimeout(
             backendClient.ensureUser(),
             BACKEND_BOOTSTRAP_TIMEOUT_MS,
-            "load your SFLUV profile",
+            t("app.loadYourSfluvProfile"),
           ),
           embeddedWallet.getProvider(),
         ]);
@@ -8758,7 +8886,7 @@ function PrivyWalletApp({
           ...state,
           loading: true,
           error: null,
-          loadingMessage: "Opening your Privy wallet...",
+          loadingMessage: t("app.openingYourPrivyWallet"),
         }));
         const web3Provider = new ethers.providers.Web3Provider(embeddedProvider as any);
         const signer = web3Provider.getSigner(embeddedWallet.address);
@@ -8767,8 +8895,9 @@ function PrivyWalletApp({
           ...state,
           loading: true,
           error: null,
-          loadingMessage: "Finding your smart wallet...",
+          loadingMessage: t("app.findingYourSmartWallet"),
         }));
+        failure.step = "find smart wallet";
         let { service, discovery } = await withTimeout(
           createSmartWalletServiceFromSigner(
             signer,
@@ -8777,7 +8906,7 @@ function PrivyWalletApp({
             accessTokenProvider,
           ),
           WALLET_DISCOVERY_TIMEOUT_MS,
-          "discover your smart wallet",
+          t("app.discoverYourSmartWallet"),
         );
         const initialPreferredCandidateKey = resolveCandidateKeyWithPreferences({
           candidates: discovery.candidates,
@@ -8787,6 +8916,7 @@ function PrivyWalletApp({
           hiddenWalletAddresses: walletPreferences.hiddenWalletAddresses,
         });
         if (initialPreferredCandidateKey && initialPreferredCandidateKey !== discovery.selectedCandidateKey) {
+          failure.step = "load selected smart wallet";
           ({ service, discovery } = await withTimeout(
             createSmartWalletServiceFromSigner(
               signer,
@@ -8795,7 +8925,7 @@ function PrivyWalletApp({
               accessTokenProvider,
             ),
             WALLET_DISCOVERY_TIMEOUT_MS,
-            "load your selected smart wallet",
+            t("app.loadYourSelectedSmartWallet"),
           ));
         }
         const bootstrapKey = `${privyUserId}:${discovery.ownerAddress.toLowerCase()}`;
@@ -8807,9 +8937,10 @@ function PrivyWalletApp({
               ...state,
               loading: true,
               error: null,
-              loadingMessage: "Syncing your wallet profile...",
+              loadingMessage: t("app.syncingYourWalletProfile"),
             }));
           }
+          failure.step = "sync wallet profile";
           const { latestWallets, deployedPrimarySmartWallet } = await withTimeout(
             ensureManagedEmbeddedWallets({
               backendClient,
@@ -8818,7 +8949,7 @@ function PrivyWalletApp({
               isNewAccount: profile.wallets.length === 0,
             }),
             BACKEND_BOOTSTRAP_TIMEOUT_MS,
-            "sync your wallet profile",
+            t("app.syncYourWalletProfile"),
           );
           const updatedPrimaryWalletAddress =
             (await ensureDefaultPrimaryWalletAssignment(
@@ -8844,6 +8975,7 @@ function PrivyWalletApp({
             clearCachedRouteDiscovery(discovery.ownerAddress, clientConfig);
           }
           if (deployedPrimarySmartWallet || (syncedPreferredCandidateKey && syncedPreferredCandidateKey !== discovery.selectedCandidateKey)) {
+            failure.step = "refresh smart wallet";
             ({ service, discovery } = await withTimeout(
               createSmartWalletServiceFromSigner(
                 signer,
@@ -8853,7 +8985,7 @@ function PrivyWalletApp({
                 deployedPrimarySmartWallet ? { forceRefresh: true } : undefined,
               ),
               WALLET_DISCOVERY_TIMEOUT_MS,
-              "refresh your smart wallet",
+              t("app.refreshYourSmartWallet"),
             ));
           }
           bootstrappedIdentityRef.current = bootstrapKey;
@@ -8889,7 +9021,7 @@ function PrivyWalletApp({
             console.warn("Unable to load deleted-account status", statusError);
           }
         }
-        presentLoginError(error);
+        presentLoginError(error, failure);
       }
     };
 
@@ -8944,10 +9076,10 @@ function PrivyWalletApp({
   const selectedCandidateKey = runtime.discovery?.selectedCandidateKey;
   const walletInitializingMessage =
     !walletPreferencesReady
-      ? "Loading wallet preferences..."
+      ? t("app.loadingWalletPreferences")
       : !embeddedWallet
-        ? "Creating your Privy wallet..."
-        : runtime.loadingMessage || (runtime.loading ? "Preparing your wallet..." : null);
+        ? t("app.creatingYourPrivyWallet")
+        : runtime.loadingMessage || (runtime.loading ? t("app.preparingYourWallet") : null);
   const walletInitializing =
     Boolean(user) &&
     !runtime.error &&
@@ -8995,7 +9127,7 @@ function PrivyWalletApp({
   const handleSendEmailCode = async () => {
     const normalizedEmail = emailAddress.trim();
     if (!normalizedEmail) {
-      presentLoginError(new Error("Enter your email address to continue."));
+      presentLoginError(new Error(t("app.enterYourEmailAddressTo")));
       return;
     }
 
@@ -9019,11 +9151,11 @@ function PrivyWalletApp({
     const normalizedEmail = emailAddress.trim();
     const normalizedCode = (codeOverride ?? normalizedEmailCode).replace(/\D/g, "").slice(0, EMAIL_LOGIN_CODE_LENGTH);
     if (!normalizedEmail) {
-      presentLoginError(new Error("Enter your email address to continue."));
+      presentLoginError(new Error(t("app.enterYourEmailAddressTo")));
       return;
     }
     if (normalizedCode.length !== EMAIL_LOGIN_CODE_LENGTH) {
-      presentLoginError(new Error("Enter the 6 digit code sent to your email."));
+      presentLoginError(new Error(t("app.enterThe6DigitCode")));
       return;
     }
 
@@ -9123,9 +9255,9 @@ function PrivyWalletApp({
           });
         },
       });
-      setAppleLinkMessage("Apple is now linked to this account.");
+      setAppleLinkMessage(t("app.appleIsNowLinkedTo"));
     } catch (error) {
-      setAppleLinkMessage((error as Error)?.message || "Unable to link Apple right now.");
+      setAppleLinkMessage((error as Error)?.message || t("app.unableToLinkAppleRight"));
     }
   };
 
@@ -9135,15 +9267,15 @@ function PrivyWalletApp({
       await link({
         provider: "google",
       });
-      setGoogleMessage("Google is now linked to this account.");
+      setGoogleMessage(t("app.googleIsNowLinkedTo"));
     } catch (error) {
-      setGoogleMessage((error as Error)?.message || "Unable to link Google right now.");
+      setGoogleMessage((error as Error)?.message || t("app.unableToLinkGoogleRight"));
     }
   };
 
   const handleDisconnectApple = () => {
     if (!linkedAppleAccount?.subject) {
-      setAppleLinkMessage("Apple is not linked to this account.");
+      setAppleLinkMessage(t("app.appleIsNotLinkedTo"));
       return;
     }
     if (!canDisconnectApple) {
@@ -9153,12 +9285,12 @@ function PrivyWalletApp({
     const appleSubject = linkedAppleAccount.subject;
 
     Alert.alert(
-      "Disconnect Apple",
-      "Apple will no longer be able to sign in to this SFLUV account until you link it again.",
+      t("app.disconnectApple"),
+      t("app.appleWillNoLongerBe"),
       [
-        { text: "Keep Apple", style: "cancel" },
+        { text: t("app.keepApple"), style: "cancel" },
         {
-          text: "Disconnect Apple",
+          text: t("app.disconnectApple"),
           style: "destructive",
           onPress: () => {
             void (async () => {
@@ -9169,10 +9301,10 @@ function PrivyWalletApp({
                   provider: "apple",
                   subject: appleSubject,
                 });
-                setAppleLinkMessage("Apple has been disconnected from this account.");
+                setAppleLinkMessage(t("app.appleHasBeenDisconnectedFrom"));
               } catch (error) {
                 setAppleLinkMessage(
-                  (error as Error)?.message || "Unable to disconnect Apple right now.",
+                  (error as Error)?.message || t("app.unableToDisconnectAppleRight"),
                 );
               } finally {
                 setAppleUnlinkBusy(false);
@@ -9186,7 +9318,7 @@ function PrivyWalletApp({
 
   const handleDisconnectGoogle = () => {
     if (!linkedGoogleAccount?.subject) {
-      setGoogleMessage("Google is not linked to this account.");
+      setGoogleMessage(t("app.googleIsNotLinkedTo"));
       return;
     }
     if (!canDisconnectGoogle) {
@@ -9196,12 +9328,12 @@ function PrivyWalletApp({
     const googleSubject = linkedGoogleAccount.subject;
 
     Alert.alert(
-      "Disconnect Google",
-      "Google will no longer be able to sign in to this SFLUV account until you link it again.",
+      t("app.disconnectGoogle"),
+      t("app.googleWillNoLongerBe"),
       [
-        { text: "Keep Google", style: "cancel" },
+        { text: t("app.keepGoogle"), style: "cancel" },
         {
-          text: "Disconnect Google",
+          text: t("app.disconnectGoogle"),
           style: "destructive",
           onPress: () => {
             void (async () => {
@@ -9212,10 +9344,10 @@ function PrivyWalletApp({
                   provider: "google",
                   subject: googleSubject,
                 });
-                setGoogleMessage("Google has been disconnected from this account.");
+                setGoogleMessage(t("app.googleHasBeenDisconnectedFrom"));
               } catch (error) {
                 setGoogleMessage(
-                  (error as Error)?.message || "Unable to disconnect Google right now.",
+                  (error as Error)?.message || t("app.unableToDisconnectGoogleRight"),
                 );
               } finally {
                 setGoogleUnlinkBusy(false);
@@ -9250,7 +9382,7 @@ function PrivyWalletApp({
       <SafeAreaView style={styles.safe}>
         <View style={styles.centerState}>
           <ThemedActivityIndicator size="large" color={palette.primaryStrong} />
-          <Text style={styles.stateText}>Starting SFLUV…</Text>
+          <Text style={styles.stateText}>{t("app.startingSfluv")}</Text>
         </View>
       </SafeAreaView>
     );
@@ -9288,7 +9420,7 @@ function PrivyWalletApp({
     );
   }
 
-  const runtimeOffline = isConnectivityErrorMessage(runtime.error);
+  const runtimeOffline = Boolean(runtime.offline) || isConnectivityErrorMessage(runtime.error);
 
   if (!user) {
     return (
@@ -9303,8 +9435,8 @@ function PrivyWalletApp({
             >
               <View style={styles.loginWrap}>
                 <Text style={styles.loginBrand}>SFLUV</Text>
-                <Text style={styles.loginTitle}>A community currency for San Francisco</Text>
-                <Text style={styles.loginBody}>Sign in to send, receive, and redeem SFLUV.</Text>
+                <Text style={styles.loginTitle}>{t("login.title")}</Text>
+                <Text style={styles.loginBody}>{t("login.body")}</Text>
                 {loginNotice ? <Text style={styles.loginNotice}>{loginNotice}</Text> : null}
                 {loginMode === "email" ? (
                   <>
@@ -9317,7 +9449,7 @@ function PrivyWalletApp({
                         inputMode="email"
                         keyboardType="email-address"
                         onChangeText={setEmailAddress}
-                        placeholder="Email address"
+                        placeholder={t("login.emailPlaceholder")}
                         placeholderTextColor={palette.textMuted}
                         textContentType="emailAddress"
                         value={emailAddress}
@@ -9326,7 +9458,7 @@ function PrivyWalletApp({
                     {emailCodeSent ? (
                       <>
                         <Text style={styles.loginCodePrompt}>
-                          Input the 6 digit code sent to your email at {emailAddress.trim()}.
+                          {t("login.codePrompt", { email: emailAddress.trim() })}
                         </Text>
                         <Pressable
                           style={styles.loginCodeInputWrap}
@@ -9379,11 +9511,11 @@ function PrivyWalletApp({
                       <Text style={styles.loginButtonText}>
                         {emailLoading
                           ? emailCodeSent
-                            ? "Verifying..."
-                            : "Sending code..."
+                            ? t("login.verifying")
+                            : t("login.sendingCode")
                           : emailCodeSent
-                            ? "Continue"
-                            : "Email me a code"}
+                            ? t("login.continue")
+                            : t("login.emailMeCode")}
                       </Text>
                     </Pressable>
                     {emailCodeSent ? (
@@ -9394,7 +9526,7 @@ function PrivyWalletApp({
                           void handleSendEmailCode();
                         }}
                       >
-                        <Text style={styles.loginSecondaryButtonText}>Send a new code</Text>
+                        <Text style={styles.loginSecondaryButtonText}>{t("login.sendNewCode")}</Text>
                       </Pressable>
                     ) : null}
                     <Pressable
@@ -9409,7 +9541,7 @@ function PrivyWalletApp({
                       }}
                     >
                       <Text style={styles.loginTertiaryButtonText}>
-                        {emailCodeSent ? "Use a different email or sign-in option" : "Other sign-in options"}
+                        {emailCodeSent ? t("login.differentEmail") : t("login.otherOptions")}
                       </Text>
                     </Pressable>
                   </>
@@ -9417,7 +9549,7 @@ function PrivyWalletApp({
                   <>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Continue with Google"
+                      accessibilityLabel={t("login.google")}
                       style={[
                         styles.loginOptionButton,
                         styles.loginOptionButtonLight,
@@ -9433,14 +9565,14 @@ function PrivyWalletApp({
                           <Ionicons name="logo-google" size={20} color={palette.text} />
                         </View>
                         <Text style={styles.loginOptionButtonText}>
-                          {oauthLoading ? "Connecting..." : "Continue with Google"}
+                          {oauthLoading ? t("login.connecting") : t("login.google")}
                         </Text>
                         <View style={styles.loginOptionIconSlot} />
                       </View>
                     </Pressable>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Continue with Email"
+                      accessibilityLabel={t("login.email")}
                       style={[
                         styles.loginOptionButton,
                         styles.loginOptionButtonOutline,
@@ -9457,13 +9589,13 @@ function PrivyWalletApp({
                         <View style={styles.loginOptionIconSlot}>
                           <Ionicons name="mail-outline" size={20} color={palette.primaryStrong} />
                         </View>
-                        <Text style={styles.loginOptionOutlineText}>Continue with Email</Text>
+                        <Text style={styles.loginOptionOutlineText}>{t("login.email")}</Text>
                         <View style={styles.loginOptionIconSlot} />
                       </View>
                     </Pressable>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Continue with Apple"
+                      accessibilityLabel={t("login.apple")}
                       style={[
                         styles.loginOptionButton,
                         styles.loginOptionButtonDark,
@@ -9479,7 +9611,7 @@ function PrivyWalletApp({
                           <Ionicons name="logo-apple" size={20} color={palette.white} />
                         </View>
                         <Text style={styles.loginOptionButtonTextDark}>
-                          {oauthLoading ? "Connecting..." : "Continue with Apple"}
+                          {oauthLoading ? t("login.connecting") : t("login.apple")}
                         </Text>
                         <View style={styles.loginOptionIconSlot} />
                       </View>
@@ -9493,7 +9625,7 @@ function PrivyWalletApp({
                       void Linking.openURL(buildPublicPolicyURL(PRIVACY_POLICY_PATH, clientConfig));
                     }}
                   >
-                    <Text style={styles.loginPolicyLinkText}>Privacy Policy</Text>
+                    <Text style={styles.loginPolicyLinkText}>{t("login.privacyPolicy")}</Text>
                   </Pressable>
                   <Text style={styles.loginPolicyLinkDivider}>•</Text>
                   <Pressable
@@ -9502,16 +9634,14 @@ function PrivyWalletApp({
                       void Linking.openURL(buildPublicPolicyURL(EMAIL_OPT_IN_POLICY_PATH, clientConfig));
                     }}
                   >
-                    <Text style={styles.loginPolicyLinkText}>Email Opt-In Policy</Text>
+                    <Text style={styles.loginPolicyLinkText}>{t("login.emailOptInPolicy")}</Text>
                   </Pressable>
                 </View>
                 {runtime.error ? (
                   runtimeOffline ? (
                     <View style={styles.loginConnectionStateCard}>
-                      <Text style={styles.connectionStateTitle}>No Connection</Text>
-                      <Text style={styles.connectionStateBody}>
-                        The app needs an internet connection before we can finish loading your account.
-                      </Text>
+                      <Text style={styles.connectionStateTitle}>{t("login.noConnectionTitle")}</Text>
+                      <Text style={styles.connectionStateBody}>{t("login.noConnectionBody")}</Text>
                     </View>
                   ) : (
                     <Text style={styles.errorText}>{runtime.error}</Text>
@@ -9594,7 +9724,7 @@ function DeletedAccountScreen({
     [palette, shadows, isDark],
   );
   const deleteDateLabel =
-    formatDeletionDateLabel(status.deleteDate) || "the current 30-day window";
+    formatDeletionDateLabel(status.deleteDate) || t("app.theCurrent30DayWindow");
   const busy = action !== "idle";
 
   return (
@@ -9602,18 +9732,15 @@ function DeletedAccountScreen({
       <View style={styles.loginWrap}>
         <Text style={styles.loginBrand}>SFLUV</Text>
         <Text style={styles.loginTitle}>
-          This account has been recently deleted. Do you want to re-activate it?
+          {t("app.thisAccountHasBeenRecently")}
         </Text>
         <Text style={styles.loginBody}>
-          The account is scheduled for permanent deletion on {deleteDateLabel}.
-          If you reactivate it now, your profile and wallets will become active
-          again.
+          {t("app.scheduledForDeletionOn", { date: deleteDateLabel })}
         </Text>
         {status.status === "ready_for_manual_purge" ? (
           <View style={styles.deletedAccountNotice}>
             <Text style={styles.deletedAccountNoticeText}>
-              This account is already at the end of its deletion window. If
-              reactivation fails, it may need manual recovery.
+              {t("app.endOfDeletionWindow")}
             </Text>
           </View>
         ) : null}
@@ -9623,7 +9750,7 @@ function DeletedAccountScreen({
           onPress={onReactivate}
         >
           <Text style={styles.loginButtonText}>
-            {action === "reactivating" ? "Re-activating..." : "Yes, re-activate it"}
+            {action === "reactivating" ? t("app.reActivating") : t("app.yesReActivateIt")}
           </Text>
         </Pressable>
         <Pressable
@@ -9632,7 +9759,7 @@ function DeletedAccountScreen({
           onPress={onReturnToLogin}
         >
           <Text style={styles.loginSecondaryButtonText}>
-            {action === "returning" ? "Returning..." : "No, take me back"}
+            {action === "returning" ? t("app.returning") : t("app.noTakeMeBack")}
           </Text>
         </Pressable>
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -9671,10 +9798,9 @@ function PolicyAcceptanceScreen({
       >
         <View style={styles.loginWrap}>
           <Text style={styles.loginBrand}>SFLUV</Text>
-          <Text style={styles.loginTitle}>Accept the Privacy Policy to keep using SFLUV.</Text>
+          <Text style={styles.loginTitle}>{t("app.acceptThePrivacyPolicyTo")}</Text>
           <Text style={styles.loginBody}>
-            Review the Privacy Policy and choose whether to receive SFLUV email updates. The
-            privacy-policy checkbox is required to continue.
+            {t("app.reviewPrivacyPolicyBody")}
           </Text>
 
           <View style={styles.policyCard}>
@@ -9696,7 +9822,7 @@ function PolicyAcceptanceScreen({
                 ) : null}
               </View>
               <Text style={styles.policyCheckboxText}>
-                I have read and accept the Privacy Policy.
+                {t("app.iHaveReadAndAccept")}
               </Text>
             </Pressable>
 
@@ -9707,7 +9833,7 @@ function PolicyAcceptanceScreen({
                   void Linking.openURL(buildPublicPolicyURL(PRIVACY_POLICY_PATH, clientConfig));
                 }}
               >
-                <Text style={styles.policyInlineLink}>Open Privacy Policy</Text>
+                <Text style={styles.policyInlineLink}>{t("app.openPrivacyPolicy")}</Text>
               </Pressable>
             </View>
 
@@ -9729,7 +9855,7 @@ function PolicyAcceptanceScreen({
                 ) : null}
               </View>
               <Text style={styles.policyCheckboxText}>
-                I want to receive SFLUV emails in line with the Email Opt-In Policy.
+                {t("app.iWantToReceiveSfluv")}
               </Text>
             </Pressable>
 
@@ -9740,13 +9866,13 @@ function PolicyAcceptanceScreen({
                   void Linking.openURL(buildPublicPolicyURL(EMAIL_OPT_IN_POLICY_PATH, clientConfig));
                 }}
               >
-                <Text style={styles.policyInlineLink}>Open Email Opt-In Policy</Text>
+                <Text style={styles.policyInlineLink}>{t("app.openEmailOptInPolicy")}</Text>
               </Pressable>
             </View>
           </View>
 
           <Text style={styles.loginBody}>
-            Email opt-in is optional, and you can unsubscribe later at any time.
+            {t("app.emailOptInIsOptional")}
           </Text>
 
           <Pressable
@@ -9758,7 +9884,7 @@ function PolicyAcceptanceScreen({
             onPress={() => onAccept(mailingListOptIn)}
           >
             <Text style={styles.loginButtonText}>
-              {action === "submitting" ? "Saving..." : "Continue"}
+              {action === "submitting" ? t("app.saving") : t("app.continue")}
             </Text>
           </Pressable>
           <Pressable
@@ -9767,7 +9893,7 @@ function PolicyAcceptanceScreen({
             onPress={onReturnToLogin}
           >
             <Text style={styles.loginSecondaryButtonText}>
-              {action === "returning" ? "Logging out..." : "Log out"}
+              {action === "returning" ? t("app.loggingOut") : t("app.logOut2")}
             </Text>
           </Pressable>
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -9783,8 +9909,8 @@ function MissingPrivyConfigScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.centerState}>
-        <Text style={styles.errorText}>Privy configuration is required for this build.</Text>
-        <Text style={styles.stateText}>Set `EXPO_PUBLIC_PRIVY_APP_ID` and `EXPO_PUBLIC_PRIVY_CLIENT_ID` to run the app.</Text>
+        <Text style={styles.errorText}>{t("app.privyConfigurationIsRequiredFor")}</Text>
+        <Text style={styles.stateText}>{t("app.setExpoPublicPrivyApp")}</Text>
       </View>
     </SafeAreaView>
   );
@@ -9816,7 +9942,7 @@ function CompatibilityGateScreen({
               void Linking.openURL(updateUrl);
             }}
           >
-            <Text style={styles.loginButtonText}>Update App</Text>
+            <Text style={styles.loginButtonText}>{t("app.updateApp")}</Text>
           </Pressable>
         ) : null}
       </View>
@@ -9871,10 +9997,10 @@ function StaleSettingsBanner({ onRetry }: { onRetry: () => void }) {
       >
         <Ionicons name="cloud-offline-outline" size={14} color={palette.textMuted} />
         <Text style={{ flex: 1, fontSize: 12, color: palette.textMuted }}>
-          Running on saved settings — we could not reach SFLUV.
+          {t("app.runningOnSavedSettingsWe")}
         </Text>
         <Pressable onPress={onRetry} accessibilityRole="button" hitSlop={8}>
-          <Text style={{ fontSize: 12, fontWeight: "700", color: palette.primaryStrong }}>Retry</Text>
+          <Text style={{ fontSize: 12, fontWeight: "700", color: palette.primaryStrong }}>{t("common.retry")}</Text>
         </Pressable>
       </View>
     </SafeAreaView>
@@ -9904,7 +10030,7 @@ function BootSkeleton({
       <View
         style={{ flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg }}
         accessibilityRole="progressbar"
-        accessibilityLabel="Loading SFLUV"
+        accessibilityLabel={t("app.loadingSfluv")}
       >
         <View
           style={{
@@ -9958,16 +10084,16 @@ function blockedCompatibilityState(
   if (version.status === "maintenance" || version.maintenance) {
     return {
       status: "blocked",
-      title: "SFLUV is temporarily unavailable",
-      message: version.message || "SFLUV is temporarily unavailable while maintenance is in progress.",
+      title: t("app.sfluvIsTemporarilyUnavailable"),
+      message: version.message || t("app.sfluvIsTemporarilyUnavailableWhile"),
     };
   }
 
   if (version.forceUpdate || version.status === "update_required" || version.status === "unsupported_platform") {
     return {
       status: "blocked",
-      title: version.status === "unsupported_platform" ? "Unsupported App" : "Update Required",
-      message: version.message || "An SFLUV Wallet update is required.",
+      title: version.status === "unsupported_platform" ? t("app.unsupportedApp") : t("app.updateRequired"),
+      message: version.message || t("app.anSfluvWalletUpdateIs"),
       updateUrl: version.updateUrl || undefined,
     };
   }
@@ -9977,8 +10103,55 @@ function blockedCompatibilityState(
   return null;
 }
 
+/**
+ * Covers the app while it restarts to switch between left-to-right and
+ * right-to-left (Arabic), so the moment before the restart shows a calm screen
+ * instead of a layout in the middle of changing.
+ */
+function DirectionSwitchCover() {
+  const switching = useDirectionSwitching();
+  const { palette } = useAppTheme();
+  // The native screen shown during the restart itself, in these same colours,
+  // so the cover, that screen and the cover again read as one.
+  useEffect(() => {
+    setReloadScreenColors({ background: palette.background, spinner: palette.primaryStrong });
+  }, [palette.background, palette.primaryStrong]);
+  if (!switching) {
+    return null;
+  }
+  // Said in the language being left and the one being switched to, so it reads
+  // whichever one the person knows.
+  const lines = directionSwitchLanguages().map((language) =>
+    t("direction.translating", { lng: language }),
+  );
+  return (
+    <View
+      pointerEvents="auto"
+      style={[
+        StyleSheet.absoluteFill,
+        { backgroundColor: palette.background, alignItems: "center", justifyContent: "center", gap: 14 },
+      ]}
+    >
+      <ThemedActivityIndicator size="small" color={palette.primaryStrong} />
+      <View style={{ alignItems: "center", gap: 4 }}>
+        {[...new Set(lines)].map((line) => (
+          <Text key={line} style={{ color: palette.textMuted, fontSize: 15, fontWeight: "600" }}>
+            {line}
+          </Text>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function App() {
   const [preferences, setPreferences, preferencesLoaded] = useStoredPreferences();
+  const appLanguage = useAppLanguage();
+  // The push's Reply / Open chat labels are the system's, set when the actions
+  // are registered: again on every language change, so they follow it.
+  useEffect(() => {
+    void registerChatNotificationActions();
+  }, [appLanguage]);
   const [compatibility, setCompatibility] = useState<CompatibilityState>({ status: "loading" });
   const compatibilityClientRef = useRef<AppBackendClient | null>(null);
   if (compatibilityClientRef.current === null) {
@@ -10060,10 +10233,10 @@ function App() {
         }
         return {
           status: "blocked",
-          title: "Unable to Start SFLUV",
+          title: t("app.unableToStartSfluv"),
           message:
             (error as Error)?.message ||
-            "SFLUV could not load compatibility settings. Please try again.",
+            t("app.sfluvCouldNotLoadCompatibility"),
         };
       });
     } finally {
@@ -10150,8 +10323,8 @@ function App() {
       ) : compatibility.status === "loading" ? (
         <CompatibilityGateScreen
           loading
-          title="Starting SFLUV"
-          message="Checking app compatibility..."
+          title={t("app.startingSfluv2")}
+          message={t("app.checkingAppCompatibility")}
         />
       ) : compatibility.status === "blocked" ? (
         <CompatibilityGateScreen
@@ -10174,7 +10347,10 @@ function App() {
             },
           }}
         >
+          {/* Keyed on the language so every screen redraws in it when it changes.
+              Inside PrivyProvider, so the sign-in session is kept. */}
           <PrivyWalletApp
+            key={appLanguage}
             clientConfig={readyConfig}
             preferences={preferences}
             preferencesLoaded={preferencesLoaded}
@@ -10188,6 +10364,7 @@ function App() {
         ) : null}
         </View>
       ) : null}
+      <DirectionSwitchCover />
     </AppThemeProvider>
     </KeyboardProvider>
   );

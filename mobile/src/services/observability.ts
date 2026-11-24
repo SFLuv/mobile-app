@@ -372,6 +372,41 @@ export function reportRequestFailure(record: RequestRecord & { detail?: string }
   });
 }
 
+/**
+ * Reports a sign-in that ended on the "No connection" / "Something went
+ * wrong" screen. That screen is the first thing a new user can hit, and a
+ * timeout or a request with no answer sends nothing on its own, so without
+ * this the failure is invisible. Grouped by step and kind, so "smart wallet
+ * timed out" and "profile had no network" are separate issues; the trail shows
+ * which request was slow.
+ */
+export function reportSignInFailure(
+  error: unknown,
+  details: { step: string; offline: boolean; elapsedMs: number },
+): void {
+  if (!enabled()) {
+    return;
+  }
+  const kind = details.offline ? "offline" : "error";
+  if (!shouldSend(`sign-in|${details.step}|${kind}`)) {
+    return;
+  }
+  Sentry.withScope((scope) => {
+    scope.setLevel("error");
+    scope.setFingerprint(["sign-in-failure", details.step, kind]);
+    scope.setTag("sign_in.step", details.step);
+    scope.setTag("sign_in.offline", String(details.offline));
+    scope.setContext("sign_in", {
+      step: details.step,
+      offline: details.offline,
+      elapsed_ms: Math.round(details.elapsedMs),
+      error_name: (error as Error)?.name,
+      message: redact((error as Error)?.message ?? String(error)).slice(0, 500),
+    });
+    Sentry.captureMessage(`Sign-in failed at ${details.step}${details.offline ? " (offline)" : ""}`);
+  });
+}
+
 // ── Steps and stuck screens ──────────────────────────────────────────────────
 
 /**

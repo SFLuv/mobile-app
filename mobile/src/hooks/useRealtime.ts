@@ -20,10 +20,13 @@ import {
 export function useRealtime({
   baseURL,
   getToken,
+  getInstallationId,
   enabled,
 }: {
   baseURL: string;
   getToken: () => Promise<string | null>;
+  /** This install's id, as its push subscription has it. See RealtimeClient. */
+  getInstallationId?: () => Promise<string | null>;
   /**
    * False while nobody is signed in, or before the backend is known. The socket
    * is torn down rather than paused: there is nothing to receive and the token
@@ -37,9 +40,16 @@ export function useRealtime({
   // so the token getter is held in a ref the client reads through.
   const tokenRef = useRef(getToken);
   tokenRef.current = getToken;
+  const installationRef = useRef(getInstallationId);
+  installationRef.current = getInstallationId;
 
   const client = useMemo(
-    () => new RealtimeClient(baseURL, () => tokenRef.current()),
+    () =>
+      new RealtimeClient(
+        baseURL,
+        () => tokenRef.current(),
+        async () => (installationRef.current ? installationRef.current() : null),
+      ),
     [baseURL],
   );
 

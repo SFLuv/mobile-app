@@ -192,6 +192,9 @@ const baseConfig = (config: ConfigContext["config"]): ExpoConfig => ({
       "expo-camera",
       {
         cameraPermission: "SFLuv uses your camera to scan payment, reward, and contact QR codes.",
+        // The camera only scans and takes photos; with no text here the plugin
+        // adds a vague microphone prompt Apple can reject.
+        microphonePermission: false,
         recordAudioAndroid: false,
       },
     ],
@@ -200,17 +203,33 @@ const baseConfig = (config: ConfigContext["config"]): ExpoConfig => ({
       "expo-location",
       {
         locationWhenInUsePermission: "SFLuv uses your location to show nearby merchants and your position on the merchant map.",
+        // Only while the app is open. Without these the plugin declares
+        // always-on location with placeholder text.
+        locationAlwaysAndWhenInUsePermission: false,
+        locationAlwaysPermission: false,
       },
     ],
     [
       "expo-image-picker",
       {
         microphonePermission: false,
-        photosPermission: "SFLuv lets you choose workflow photos to submit for improver tasks.",
+        photosPermission:
+          "SFLuv lets you choose photos to send in chats, post on the Bulletin, use as your profile picture, or submit for improver tasks.",
+      },
+    ],
+    // Listed for their iOS prompt text; both would otherwise add the plugin's
+    // placeholder ("Allow SFLuv to ...").
+    [
+      "expo-media-library",
+      {
+        photosPermission:
+          "SFLuv lets you choose photos to send in chats, post on the Bulletin, use as your profile picture, or submit for improver tasks.",
+        savePhotosPermission: "SFLuv saves the photos you choose from your chats to your photo library.",
       },
     ],
     "expo-notifications",
-    "expo-secure-store",
+    // Nothing asks for Face ID, so no Face ID prompt text is declared.
+    ["expo-secure-store", { faceIDPermission: false }],
     "expo-updates",
     "expo-web-browser",
     // Builds targets/* into the iOS project — the Notification Service and

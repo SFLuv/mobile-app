@@ -1,4 +1,5 @@
 import type { AppNotificationItem } from "../types/notifications";
+import { t } from "../i18n";
 
 /** A website support request, as read off its alert. */
 export type SupportRequestDetails = {
@@ -43,7 +44,7 @@ export function supportRequestDetails(item: AppNotificationItem): SupportRequest
 
   return {
     reference,
-    subject: subject && subject !== "(no subject)" ? subject : "No subject",
+    subject: subject && subject !== "(no subject)" ? subject : t("utils.supportRequests.noSubject"),
     name,
     email: data.email?.trim() || email,
     category: data.category?.trim() || "",
