@@ -9,7 +9,7 @@
 			<key>UNNotificationExtensionCategory</key>
 			<string>chat_message</string>
 			<key>UNNotificationExtensionInitialContentSizeRatio</key>
-			<real>0.6</real>
+			<real>1.1</real>
 			<key>UNNotificationExtensionDefaultContentHidden</key>
 			<true/>
 			<key>UNNotificationExtensionUserInteractionEnabled</key>

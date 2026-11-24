@@ -41,6 +41,13 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
   private var threadURL: URL?
   private var isGroup = false
   private var bubbles: [Bubble] = []
+  /// The thread's history has been drawn (or given up on). Until then the
+  /// push's own message waits, briefly, so the sheet is drawn once with the
+  /// conversation rather than once alone and again a moment later, larger.
+  private var firstDrawDone = false
+  /// How long the first draw waits for the history before showing the push's
+  /// own message alone.
+  private static let historyWait: TimeInterval = 0.75
   /// Ids for replies not yet confirmed, below zero so they never meet a real one.
   private var nextPendingId: Int64 = -1
 
@@ -96,9 +103,26 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
     }
     if messageId == 0 || !bubbles.contains(where: { $0.id == messageId }) {
       bubbles.append(Bubble(id: messageId, mine: false, sender: isGroup ? senderName : nil, text: line, system: false, pending: false))
-      render()
+      // Drawn now only if there is no history coming, or it has already been
+      // drawn (a second push arriving while this one is open).
+      if firstDrawDone || threadURL == nil {
+        firstDrawDone = true
+        render()
+      }
+    }
+    if threadURL != nil && !firstDrawDone {
+      DispatchQueue.main.asyncAfter(deadline: .now() + Self.historyWait) { [weak self] in
+        self?.drawFirstIfWaiting()
+      }
     }
     loadHistory()
+  }
+
+  /// The history did not arrive in time (or failed): show what there is.
+  private func drawFirstIfWaiting() {
+    guard !firstDrawDone else { return }
+    firstDrawDone = true
+    render()
   }
 
   private func loadHistory() {
@@ -114,6 +138,7 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
         let messages = page["messages"] as? [[String: Any]]
       else {
         Self.log.notice("thread history refused: status \(status, privacy: .public)")
+        DispatchQueue.main.async { self?.drawFirstIfWaiting() }
         return
       }
       let loaded = messages.compactMap(Self.bubble(from:)).suffix(Self.maxBubbles)
@@ -122,6 +147,7 @@ class NotificationViewController: UIViewController, UNNotificationContentExtensi
         // Replies still on their way are kept under what the server returned.
         let pending = self.bubbles.filter { $0.pending }
         self.bubbles = Array(loaded) + pending
+        self.firstDrawDone = true
         self.render()
       }
     }.resume()
