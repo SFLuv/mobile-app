@@ -809,7 +809,7 @@ function ConversationFiles({
               style={styles.fileRow}
               onPress={() => setPreview(item)}
               accessibilityRole="button"
-              accessibilityLabel={`${typeInfo.label}: ${displayFileName(item.file_name) || "file"}`}
+              accessibilityLabel={`${typeInfo.label}: ${displayFileName(item.file_name) || t("utils.attachmentFiles.file")}`}
             >
               <View style={styles.fileIcon}>
                 <Ionicons
@@ -820,7 +820,8 @@ function ConversationFiles({
               </View>
               <View style={styles.memberBody}>
                 <Text style={styles.memberName} numberOfLines={1}>
-                  {displayFileName(item.file_name) || (item.kind === "image" ? "Photo" : "File")}
+                  {displayFileName(item.file_name) ||
+                    (item.kind === "image" ? t("utils.attachmentFiles.photo") : t("utils.attachmentFiles.file"))}
                 </Text>
                 <Text style={styles.memberMeta} numberOfLines={1}>
                   {[
