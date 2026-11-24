@@ -40,6 +40,7 @@ import * as Crypto from "expo-crypto";
 import * as Device from "expo-device";
 import * as Linking from "expo-linking";
 import * as Notifications from "expo-notifications";
+import * as TaskManager from "expo-task-manager";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import * as SecureStore from "expo-secure-store";
 import { ethers } from "ethers";
@@ -174,6 +175,9 @@ import {
   NotificationTarget,
   targetFromData,
   dismissConversationFromTray,
+  dismissTeamNotificationFromTray,
+  dismissSettledTeamNotifications,
+  dismissalFromPayload,
 } from "./src/services/notificationInbox";
 import { AppPreferences, defaultAppPreferences } from "./src/types/preferences";
 import { buildUniversalAddContactLink } from "./src/utils/universalLinks";
@@ -609,6 +613,30 @@ Notifications.setNotificationHandler({
 
 // The Reply action on chat pushes — see notificationReplies.ts.
 void registerChatNotificationActions();
+
+/**
+ * A team notification handled by somebody else is cleared from this phone's
+ * notification centre too, even with the app closed.
+ *
+ * The backend sends every recipient a silent push when one is handled
+ * (push_badge.go, syncBadgeDismissing), which wakes the app in the background
+ * to run this task. iOS rations silent pushes, so this is best effort; the app
+ * also reconciles the tray against the live list whenever it comes forward.
+ */
+const BACKGROUND_NOTIFICATION_TASK = "sfluv-background-notification";
+TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => {
+  if (error) {
+    return;
+  }
+  const dismissal = dismissalFromPayload(data);
+  if (dismissal) {
+    await dismissTeamNotificationFromTray(dismissal.alertKey, dismissal.internalId);
+  }
+});
+void Notifications.registerTaskAsync(BACKGROUND_NOTIFICATION_TASK).catch(() => {
+  // Not available in Expo Go or on a build without the background mode; the
+  // foreground paths still clear the tray.
+});
 
 function blankRuntime(loading = false): RuntimeState {
   return { loading, service: null, discovery: null, error: null, loadingMessage: null };
@@ -4621,6 +4649,40 @@ function WalletAppShellContent({
     return () => subscription.remove();
   }, [appUser, backendClient, refreshMessagesUnread]);
 
+  // A silent "this was handled" push that lands while the app is open. The
+  // background task covers a closed app; in the foreground it does not run.
+  useEffect(() => {
+    const subscription = Notifications.addNotificationReceivedListener((notification) => {
+      const dismissal = dismissalFromPayload(notification.request.content.data);
+      if (!dismissal) {
+        return;
+      }
+      if (dismissal.internalId) {
+        dismissBanner(`internal:${dismissal.internalId}`);
+      }
+      void dismissTeamNotificationFromTray(dismissal.alertKey, dismissal.internalId);
+      void refreshNotificationFeed({ silent: true });
+    });
+    return () => subscription.remove();
+  }, [dismissBanner, refreshNotificationFeed]);
+
+  // Each time the list is fetched, the tray is held to it: a team notification
+  // in the tray that is no longer live was handled while its silent push was
+  // lost (iOS rations them), and goes. Ten seconds of margin, so one that
+  // arrived while the list was loading is not mistaken for handled.
+  useEffect(() => {
+    if (!notificationFeed) {
+      return;
+    }
+    const live = new Set<number>();
+    for (const item of notificationFeed.active) {
+      if (item.internal && !item.internal.resolved) {
+        live.add(item.internal.id);
+      }
+    }
+    void dismissSettledTeamNotifications(live, Date.now() - 10_000);
+  }, [notificationFeed]);
+
   // ── In-app banners ────────────────────────────────────────────────────────
   //
   // The backend suppresses a push for any device holding a live socket and
@@ -4725,6 +4787,19 @@ function WalletAppShellContent({
         return;
       }
 
+      if (event.kind === "notification.resolved") {
+        // Somebody handled a team notification this person also got: gone
+        // from the list, any banner showing it, and the phone's tray, now.
+        const resolved = event.data as { internal_id?: number; alert_key?: string } | undefined;
+        const internalId = resolved?.internal_id ? String(resolved.internal_id) : "";
+        if (internalId) {
+          dismissBanner(`internal:${internalId}`);
+        }
+        void refreshNotificationFeed({ silent: true });
+        void dismissTeamNotificationFromTray(resolved?.alert_key ?? "", internalId);
+        return;
+      }
+
       if (event.kind === "notification") {
         const payload = event.data as
           | { title?: string; body?: string; data?: Record<string, string> }
@@ -4732,16 +4807,32 @@ function WalletAppShellContent({
         if (!payload?.title && !payload?.body) {
           return;
         }
+        // The list and its count catch up whether or not a banner is drawn.
+        void refreshNotificationFeed({ silent: true });
         const target = targetFromData(payload?.data);
-        // Not Date.now(). An id minted from the clock is unique by
-        // construction, which defeats the dedupe below it — the same
-        // notification arriving twice looked like two notifications. These
-        // events carry no server id, so the id is the content, bucketed by the
-        // minute: a re-send lands in the same bucket and is dropped, while the
-        // same text genuinely sent again later still gets its banner.
+        // Already where it points: the list it lands in is on screen.
+        if (tab === "notifications") {
+          return;
+        }
+        if (target.kind === "conversation" && chatRoute?.conversationId === target.conversationId) {
+          return;
+        }
+        // Keyed on the server's own id where the event carries one, so the
+        // banner can be taken down again when the notification is handled.
+        // Otherwise not Date.now(): an id minted from the clock is unique by
+        // construction, which defeats the dedupe below it. The id is then the
+        // content, bucketed by the minute: a re-send lands in the same bucket
+        // and is dropped, while the same text genuinely sent again later still
+        // gets its banner.
         const bucket = Math.floor(Date.now() / 60_000);
+        const internalId = payload?.data?.internal_id;
+        const notificationId = payload?.data?.notification_id;
         showBanner({
-          id: `notification:${bucket}:${payload?.title ?? ""}:${payload?.body ?? ""}`,
+          id: internalId
+            ? `internal:${internalId}`
+            : notificationId
+              ? `notification:${notificationId}`
+              : `notification:${bucket}:${payload?.title ?? ""}:${payload?.body ?? ""}`,
           title: payload?.title || "SFLuv",
           body: payload?.body || "",
           icon: "notifications",

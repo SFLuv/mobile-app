@@ -2000,6 +2000,7 @@ function mapInternalNotification(input: unknown): AppInternalNotification | null
     setLabel: asString(record.set_label),
     topic: asString(record.topic),
     topicLabel: asString(record.topic_label),
+    subtitle: asString(record.subtitle),
     alertKey: asString(record.alert_key),
     fields: mapNotificationFields(record.fields),
     urgent: record.urgent === true,

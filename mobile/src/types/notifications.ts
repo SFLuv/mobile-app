@@ -45,6 +45,13 @@ export type AppInternalNotification = {
    */
   topic: string;
   topicLabel: string;
+  /**
+   * Who or what it is about, in a few words: a requester's email, a name. The
+   * list shows the topic and this line only; the title, body and fields wait
+   * for a tap. Empty from a backend older than this, which falls back to the
+   * title.
+   */
+  subtitle: string;
   alertKey: string;
   fields: AppNotificationField[];
   urgent: boolean;

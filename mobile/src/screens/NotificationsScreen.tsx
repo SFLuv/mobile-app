@@ -12,6 +12,7 @@ import {
 import { Text } from "../components/AppText";
 import { Ionicons } from "@expo/vector-icons";
 
+import { NotificationDetailModal } from "../components/NotificationDetailModal";
 import { SupportRequestModal } from "../components/SupportRequestModal";
 import { ThemedActivityIndicator } from "../components/ThemedActivityIndicator";
 import { Palette, getShadows, radii, spacing, useAppTheme } from "../theme";
@@ -294,6 +295,16 @@ export function NotificationsScreen({
     return out;
   }, [active, history, feed?.nextCursor, activeTab]);
 
+  // A team notification other than a support request opens its own sheet:
+  // the card says what it is about and who, the sheet says the rest.
+  const [openDetailId, setOpenDetailId] = useState<number | null>(null);
+  const openDetailItem = useMemo(() => {
+    if (openDetailId === null || !feed) {
+      return null;
+    }
+    return [...feed.active, ...feed.history].find((item) => item.id === openDetailId) ?? null;
+  }, [feed, openDetailId]);
+
   const openSupportItem = useMemo(() => {
     if (openSupportId === null || !feed) {
       return null;
@@ -327,9 +338,16 @@ export function NotificationsScreen({
       // the screen has marked it seen; otherwise it reappeared as a dead copy
       // of itself after coming back from where it led.
       const routable = internal === null && (!item.seen || row.fresh);
-      // A support request opens its own sheet: the card is a summary, and the
-      // reply needs the full message, the address and the ticket number.
-      const opensDetail = Boolean(support);
+      // A team notification opens its details: the card is only what it is
+      // about and who, with its buttons. A support request has a sheet of its
+      // own, built for answering one.
+      const opensDetail = Boolean(support) || internal !== null;
+      const heading = internal
+        ? internal.topicLabel || internal.setLabel || internal.set || item.title
+        : item.title;
+      const subtitle = internal
+        ? internal.subtitle || (support ? support.name || support.email : "") || item.title
+        : item.body;
 
       return (
         <View
@@ -340,69 +358,52 @@ export function NotificationsScreen({
           ]}
         >
           <Pressable
-            // An ordinary notification is a destination; an alert is read in
-            // place. Tapping an alert used to navigate somewhere unrelated,
-            // which is how a merchant approval ended up opening the wallet.
             disabled={!routable && !opensDetail}
-            onPress={() => (opensDetail ? setOpenSupportId(item.id) : onOpen(item))}
+            onPress={() => {
+              if (support) {
+                setOpenSupportId(item.id);
+              } else if (internal) {
+                setOpenDetailId(item.id);
+              } else {
+                onOpen(item);
+              }
+            }}
             accessibilityRole={routable || opensDetail ? "button" : undefined}
-            accessibilityLabel={item.body ? `${item.title}. ${item.body}` : item.title}
+            accessibilityLabel={subtitle ? `${heading}. ${subtitle}` : heading}
+            accessibilityHint={opensDetail ? t("notifications.tapForDetails") : routable ? t("notifications.tapToOpen") : undefined}
           >
             <View style={styles.cardHead}>
+              {internal ? (
+                <Ionicons
+                  name={internal.urgent && !resolved ? "alert-circle" : "notifications-outline"}
+                  size={16}
+                  color={internal.urgent && !resolved ? palette.danger : palette.textMuted}
+                />
+              ) : null}
               <View style={styles.cardHeadCopy}>
-                {internal ? (
-                  <View style={styles.setRow}>
-                    <Ionicons
-                      name={internal.urgent && !resolved ? "alert-circle" : "notifications-outline"}
-                      size={12}
-                      color={internal.urgent && !resolved ? palette.danger : palette.textMuted}
-                    />
-                    <Text style={styles.setLabel}>{internal.topicLabel || internal.setLabel || internal.set}</Text>
-                  </View>
-                ) : null}
-                <Text style={styles.cardTitle}>{support ? support.subject : item.title}</Text>
-                {support ? (
-                  <Text style={styles.supportMeta} numberOfLines={1}>
-                    {[support.name || support.email, support.reference].filter(Boolean).join(" · ")}
+                <Text style={styles.cardTitle} numberOfLines={1}>
+                  {heading}
+                </Text>
+                {subtitle ? (
+                  <Text style={styles.cardSubtitle} numberOfLines={1}>
+                    {subtitle}
                   </Text>
                 ) : null}
               </View>
               <Text style={styles.cardTime}>{relativeTime(item.createdAt)}</Text>
+              {routable || opensDetail ? (
+                <Ionicons name={dirIcon("chevron-forward")} size={14} color={palette.textMuted} />
+              ) : null}
             </View>
 
-            {item.body ? (
-              <Text style={styles.cardBody} numberOfLines={support ? 3 : undefined}>
-                {item.body}
-              </Text>
-            ) : null}
-
-            {!support && internal && internal.fields.length > 0 ? (
-              <View style={styles.fields}>
-                {internal.fields.map((field) => (
-                  <View key={`${field.label}:${field.value}`} style={styles.fieldRow}>
-                    <Text style={styles.fieldLabel}>{field.label}</Text>
-                    <Text style={styles.fieldValue} selectable>
-                      {field.value}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            ) : null}
-
-            {/* The record of how it ended. This is the reason resolved alerts
-                are kept rather than deleted: "who approved this" is the
-                question the history gets asked. */}
+            {/* How it ended, in history: "who approved this" is the question
+                the history gets asked. */}
             {resolved && internal?.outcome ? (
               <View style={styles.outcome}>
                 <Ionicons name="checkmark-circle-outline" size={13} color={palette.textMuted} />
-                <Text style={styles.outcomeText}>{internal.outcome}</Text>
-              </View>
-            ) : null}
-
-            {routable || opensDetail ? (
-              <View style={styles.openHint}>
-                <Text style={styles.openHintText}>{opensDetail ? t("notifications.tapForDetails") : t("notifications.tapToOpen")}</Text>
-                <Ionicons name={dirIcon("chevron-forward")} size={13} color={palette.textMuted} />
+                <Text style={styles.outcomeText} numberOfLines={1}>
+                  {internal.outcome}
+                </Text>
               </View>
             ) : null}
           </Pressable>
@@ -534,6 +535,21 @@ export function NotificationsScreen({
           onEndReachedThreshold={0.5}
         />
       )}
+
+      <NotificationDetailModal
+        item={openDetailItem}
+        busyActionId={
+          openDetailItem && busyAction.startsWith(`${openDetailItem.id}:`)
+            ? busyAction.slice(`${openDetailItem.id}:`.length)
+            : ""
+        }
+        onAction={(action) => {
+          if (openDetailItem) {
+            void runAction(openDetailItem, action);
+          }
+        }}
+        onClose={() => setOpenDetailId(null)}
+      />
 
       <SupportRequestModal
         visible={Boolean(openSupportItem && openSupport)}
@@ -679,62 +695,25 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>) 
     },
     cardHead: {
       flexDirection: "row",
-      alignItems: "flex-start",
+      alignItems: "center",
       gap: spacing.sm,
     },
     cardHeadCopy: {
       flex: 1,
-    },
-    setRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 4,
-      marginBottom: 2,
-    },
-    setLabel: {
-      fontSize: 11,
-      fontWeight: "600",
-      letterSpacing: 0.3,
-      textTransform: "uppercase",
-      color: palette.textMuted,
     },
     cardTitle: {
       fontSize: 15,
       fontWeight: "700",
       color: palette.text,
     },
-    supportMeta: {
-      fontSize: 12,
+    cardSubtitle: {
+      fontSize: 13,
       color: palette.textMuted,
       marginTop: 2,
     },
     cardTime: {
       fontSize: 11,
       color: palette.textMuted,
-    },
-    cardBody: {
-      fontSize: 13,
-      lineHeight: 19,
-      color: palette.textMuted,
-      marginTop: 4,
-    },
-    fields: {
-      marginTop: spacing.sm,
-      gap: 4,
-    },
-    fieldRow: {
-      flexDirection: "row",
-      gap: spacing.sm,
-    },
-    fieldLabel: {
-      width: 96,
-      fontSize: 12,
-      color: palette.textMuted,
-    },
-    fieldValue: {
-      flex: 1,
-      fontSize: 12,
-      color: palette.text,
     },
     outcome: {
       flexDirection: "row",
@@ -745,16 +724,6 @@ const createStyles = (palette: Palette, shadows: ReturnType<typeof getShadows>) 
     outcomeText: {
       fontSize: 12,
       fontStyle: "italic",
-      color: palette.textMuted,
-    },
-    openHint: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 2,
-      marginTop: spacing.sm,
-    },
-    openHintText: {
-      fontSize: 12,
       color: palette.textMuted,
     },
     actions: {

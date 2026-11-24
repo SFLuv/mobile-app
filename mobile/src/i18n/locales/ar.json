@@ -1531,6 +1531,11 @@
     "w9EscrowCard": {},
     "w9TierModal": {
       "ofThreshold": "من {{amount}} {{tokenSymbol}}"
+    },
+    "notificationDetail": {
+      "notification": "إشعار",
+      "close": "إغلاق",
+      "message": "الرسالة"
     }
   },
   "app": {

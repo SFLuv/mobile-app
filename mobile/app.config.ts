@@ -227,7 +227,10 @@ const baseConfig = (config: ConfigContext["config"]): ExpoConfig => ({
         savePhotosPermission: "SFLuv saves the photos you choose from your chats to your photo library.",
       },
     ],
-    "expo-notifications",
+    // Background remote notifications wake the app for the silent push that
+    // clears a handled team notification from the tray (iOS: the
+    // remote-notification background mode).
+    ["expo-notifications", { enableBackgroundRemoteNotifications: true }],
     // Nothing asks for Face ID, so no Face ID prompt text is declared.
     ["expo-secure-store", { faceIDPermission: false }],
     "expo-updates",

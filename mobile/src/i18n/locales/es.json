@@ -1456,6 +1456,11 @@
     "w9EscrowCard": {},
     "w9TierModal": {
       "ofThreshold": "de {{amount}} {{tokenSymbol}}"
+    },
+    "notificationDetail": {
+      "notification": "Notificación",
+      "close": "Cerrar",
+      "message": "Mensaje"
     }
   },
   "app": {
