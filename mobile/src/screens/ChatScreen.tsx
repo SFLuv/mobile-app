@@ -891,9 +891,17 @@ export function ChatScreen({
     setPendingJump(null);
     setHighlightedId(pendingJump);
     requestAnimationFrame(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true }));
+  }, [pendingJump, rows]);
+
+  // The highlight fades on its own. Its own effect: in the one above, clearing
+  // pendingJump re-runs it and the cleanup would cancel this timer every time.
+  useEffect(() => {
+    if (highlightedId === null) {
+      return;
+    }
     const timer = setTimeout(() => setHighlightedId(null), 2200);
     return () => clearTimeout(timer);
-  }, [pendingJump, rows]);
+  }, [highlightedId]);
 
   // ── @-suggestions ─────────────────────────────────────────────────────────
 
